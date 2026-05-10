@@ -39,7 +39,12 @@ class Notification(models.Model):
         on_delete=models.CASCADE,
         related_name='notifications'
     )
-    type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='system', db_index=True)
+    # Was named ``type`` historically — renamed to ``notification_type``
+    # because ``type`` shadows the Python builtin and was already
+    # inconsistent with the frontend, which always called it
+    # ``notification_type``. Underlying column rename is handled by
+    # the accompanying migration.
+    notification_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='system', db_index=True)
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='normal', db_index=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='unread', db_index=True)
     
@@ -62,7 +67,7 @@ class Notification(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['user', 'status', '-created_at']),
-            models.Index(fields=['type', 'priority']),
+            models.Index(fields=['notification_type', 'priority']),
             models.Index(fields=['created_at']),
         ]
     
@@ -110,7 +115,24 @@ class NotificationPreferences(models.Model):
     quiet_hours_enabled = models.BooleanField(default=False)
     quiet_hours_start = models.TimeField(null=True, blank=True, help_text="e.g., 22:00")
     quiet_hours_end = models.TimeField(null=True, blank=True, help_text="e.g., 08:00")
-    
+
+    # Frontend alerter toggles. ``desktop_alerts_enabled`` controls
+    # whether incoming notifications surface as toast pop-ins;
+    # ``sound_enabled`` controls the audible chime; ``sound_urgent_only``
+    # narrows the chime to ``urgent`` priority only (for users who want
+    # toasts everywhere but ambient silence otherwise).
+    desktop_alerts_enabled = models.BooleanField(default=True)
+    sound_enabled = models.BooleanField(default=True)
+    sound_urgent_only = models.BooleanField(default=False)
+
+    # Auto-archive: read notifications older than this many days are
+    # archived by the ``cleanup_notifications`` management command (or
+    # the self-trigger on first list-fetch each day). 0 disables it.
+    auto_archive_days = models.PositiveIntegerField(
+        default=30,
+        help_text="Auto-archive read notifications after this many days. 0 = never.",
+    )
+
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:

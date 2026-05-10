@@ -417,12 +417,17 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
             request=self.request,
             )
 
-        # Notify Radiology (doctor -> radiology)
+        # Notify Radiology (doctor -> radiology). STAT orders escalate
+        # the notification priority so the bell + toast + sound matches
+        # the clinical urgency.
         try:
-            from notifications.services import NotificationService
+            from notifications.services import NotificationService, priority_from_lab_or_radiology
 
             patient_name = order.patient.get_full_name()
-            title = "New radiology order"
+            order_priority = getattr(order, 'priority', 'routine')
+            notif_priority = priority_from_lab_or_radiology(order_priority)
+            stat_prefix = "STAT — " if notif_priority == 'urgent' else ''
+            title = f"{stat_prefix}New radiology order"
             if order.source_type == 'external_manual':
                 clinic_name = order.external_clinic.name if order.external_clinic else 'external clinic'
                 message = f"External radiology request {order.order_id} for {patient_name} from {clinic_name} is ready for Radiology."
@@ -434,7 +439,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
                 title=title,
                 message=message,
                 notification_type='radiology_result',
-                priority='normal',
+                priority=notif_priority,
                 action_url="/radiology/orders",
                 object_type='radiology_order',
                 object_id=str(order.id),

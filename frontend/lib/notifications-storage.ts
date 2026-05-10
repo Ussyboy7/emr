@@ -1,15 +1,30 @@
 /**
  * Frontend API client for notifications.
+ *
+ * Naming: the canonical field name is ``notification_type`` (matching
+ * the backend model field + DRF serializer output after the
+ * notifications.0003 rename migration). Older code used
+ * ``notificationType`` (camelCase) or ``type`` — those are tolerated as
+ * fallbacks in ``toUiNotification`` for one release window, then will
+ * be removed.
  */
 
 import { apiFetch, hasTokens } from './api-client';
-import { logError, logDebug, logInfo } from './client-logger';
+import { logError, logDebug } from './client-logger';
 
 export interface Notification {
   id: string;
   title: string;
   message: string;
-  notificationType: 'workflow' | 'lab_result' | 'radiology_result' | 'prescription' | 'appointment' | 'system' | 'alert' | 'reminder';
+  notification_type:
+    | 'workflow'
+    | 'lab_result'
+    | 'radiology_result'
+    | 'prescription'
+    | 'appointment'
+    | 'system'
+    | 'alert'
+    | 'reminder';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   status: 'unread' | 'read' | 'archived';
   actionUrl?: string;
@@ -21,64 +36,84 @@ export interface Notification {
 }
 
 export interface NotificationPreferences {
-  id: string;
-  user: string;
-  inAppEnabled: boolean;
-  inAppUrgentOnly: boolean;
-  emailEnabled: boolean;
-  emailUrgentOnly: boolean;
-  emailDigest: boolean;
-  emailDigestTime?: string;
-  moduleDms: boolean;
-  moduleWorkflow: boolean;
-  moduleSystem: boolean;
-  priorityLow: boolean;
-  priorityNormal: boolean;
-  priorityHigh: boolean;
-  soundEnabled?: boolean;
-  priorityUrgent: boolean;
-  typeWorkflow: boolean;
-  typeDocument: boolean;
-  typeSystem: boolean;
-  typeAlert: boolean;
-  typeReminder: boolean;
-  quietHoursEnabled: boolean;
-  quietHoursStart?: string;
-  quietHoursEnd?: string;
-  autoArchiveDays: number;
-  createdAt: string;
-  updatedAt: string;
+  id: number | string;
+  user: number | string;
+  // Channel toggles (match backend model field names exactly).
+  in_app_enabled: boolean;
+  email_enabled: boolean;
+  sms_enabled: boolean;
+  // Module filters.
+  lab_results_enabled: boolean;
+  radiology_results_enabled: boolean;
+  prescriptions_enabled: boolean;
+  appointments_enabled: boolean;
+  system_alerts_enabled: boolean;
+  // Priority filters.
+  low_priority_enabled: boolean;
+  normal_priority_enabled: boolean;
+  high_priority_enabled: boolean;
+  urgent_priority_enabled: boolean;
+  // Quiet hours.
+  quiet_hours_enabled: boolean;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  // Frontend alerter toggles (see backend ``NotificationPreferences``
+  // for semantics). Defaults are ``true``, ``true``, ``false``.
+  desktop_alerts_enabled: boolean;
+  sound_enabled: boolean;
+  sound_urgent_only: boolean;
+  // Auto-archive read notifications after this many days. 0 disables.
+  auto_archive_days: number;
+  updated_at: string;
 }
 
 export interface CreateNotificationPayload {
   title: string;
   message: string;
-  notificationType?: Notification['notificationType'];
+  notification_type?: Notification['notification_type'];
   priority?: Notification['priority'];
   actionUrl?: string;
   objectType?: string;
   objectId?: string;
 }
 
+/**
+ * Window event broadcast whenever the user mutates their inbox locally
+ * (mark-read / mark-all-read / archive). The bell listens for this to
+ * refresh its badge without waiting for the next poll/WS tick.
+ */
+export const NOTIFICATIONS_CHANGED_EVENT = 'notifications:changed';
+
+const broadcastChanged = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT));
+  }
+};
+
 const toUiNotification = (raw: Record<string, unknown>): Notification | null => {
   if (!raw || typeof raw !== 'object') return null;
 
-  const rawAny = raw as any;
-  const createdAt = rawAny.created_at ?? rawAny.createdAt ?? new Date().toISOString();
+  const r = raw as Record<string, unknown>;
+  const createdAt = (r.created_at as string) ?? (r.createdAt as string) ?? new Date().toISOString();
+  const notificationType =
+    (r.notification_type as Notification['notification_type']) ??
+    (r.notificationType as Notification['notification_type']) ??
+    (r.type as Notification['notification_type']) ??
+    'system';
 
   return {
-    id: String(rawAny.id ?? ''),
-    title: String(rawAny.title ?? ''),
-    message: String(rawAny.message ?? ''),
-    notificationType: (rawAny.type ?? rawAny.notificationType ?? 'system') as Notification['notificationType'],
-    priority: (rawAny.priority ?? 'normal') as Notification['priority'],
-    status: (rawAny.status ?? 'unread') as Notification['status'],
-    actionUrl: rawAny.action_url ?? rawAny.actionUrl ?? undefined,
-    readAt: rawAny.read_at ?? rawAny.readAt ?? undefined,
+    id: String(r.id ?? ''),
+    title: String(r.title ?? ''),
+    message: String(r.message ?? ''),
+    notification_type: notificationType,
+    priority: (r.priority as Notification['priority']) ?? 'normal',
+    status: (r.status as Notification['status']) ?? 'unread',
+    actionUrl: (r.action_url as string) ?? (r.actionUrl as string) ?? undefined,
+    readAt: (r.read_at as string) ?? (r.readAt as string) ?? undefined,
     createdAt: String(createdAt),
-    metadata: rawAny.metadata ?? undefined,
-    objectType: rawAny.object_type ?? undefined,
-    objectId: rawAny.object_id ? String(rawAny.object_id) : undefined,
+    metadata: (r.metadata as Record<string, unknown>) ?? undefined,
+    objectType: (r.object_type as string) ?? undefined,
+    objectId: r.object_id != null ? String(r.object_id) : undefined,
   };
 };
 
@@ -87,33 +122,38 @@ const toUiNotification = (raw: Record<string, unknown>): Notification | null => 
  */
 export const getNotifications = async (params?: {
   status?: string;
-  notificationType?: string;
+  notification_type?: string;
   priority?: string;
 }): Promise<Notification[]> => {
   if (!hasTokens()) return [];
 
   const queryParams = new URLSearchParams();
   if (params?.status) queryParams.append('status', params.status);
-  if (params?.notificationType) queryParams.append('notification_type', params.notificationType);
+  if (params?.notification_type) queryParams.append('notification_type', params.notification_type);
   if (params?.priority) queryParams.append('priority', params.priority);
 
   const query = queryParams.toString();
-  // The router registers 'notifications' under api/notifications/, and the viewset is also 'notifications'
-  // So the full path is /api/notifications/notifications/
-  // apiFetch adds /api/v1/ prefix, so we need /notifications/notifications/
   const url = `/notifications/notifications/${query ? `?${query}` : ''}`;
-  logInfo('[notifications-storage] Fetching notifications from:', url);
   try {
-    const response = await apiFetch<any>(url);
-    // Security: Removed console.log to prevent notification response data exposure
-    
-    // Handle paginated response (DRF returns {count, next, previous, results: [...]})
-    if (response && typeof response === 'object' && 'results' in response && Array.isArray(response.results)) {
-      return (response.results as any[]).map(toUiNotification).filter((n): n is Notification => Boolean(n));
+    const response = await apiFetch<unknown>(url);
+
+    // DRF paginated shape: {count, next, previous, results: [...]}.
+    if (
+      response &&
+      typeof response === 'object' &&
+      'results' in response &&
+      Array.isArray((response as { results: unknown[] }).results)
+    ) {
+      return ((response as { results: Record<string, unknown>[] }).results)
+        .map(toUiNotification)
+        .filter((n): n is Notification => Boolean(n));
     }
-    
-    // Handle direct array response (fallback)
-    return Array.isArray(response) ? response.map(toUiNotification).filter((n): n is Notification => Boolean(n)) : [];
+
+    return Array.isArray(response)
+      ? (response as Record<string, unknown>[])
+          .map(toUiNotification)
+          .filter((n): n is Notification => Boolean(n))
+      : [];
   } catch (error) {
     logError('[notifications-storage] Error fetching notifications:', error);
     throw error;
@@ -121,12 +161,13 @@ export const getNotifications = async (params?: {
 };
 
 /**
- * Get unread notification count.
+ * Get unread notification count (cached for ~20s to absorb double-mounts
+ * and rapid re-renders). Mutation helpers below invalidate the cache so
+ * the bell badge updates instantly.
  */
 let unreadCountInFlight: Promise<number> | null = null;
 let unreadCountLastValue: number | null = null;
 let unreadCountLastFetchedAt = 0;
-// Cache for 20s — well within the 30s poll interval, eliminates strict-mode double-mount duplicates.
 const UNREAD_COUNT_CACHE_TTL_MS = 20_000;
 
 export const getUnreadNotificationCount = async (): Promise<number> => {
@@ -151,8 +192,11 @@ export const getUnreadNotificationCount = async (): Promise<number> => {
     return count;
   } catch (error: unknown) {
     if (process.env.NODE_ENV === 'development') {
-      const errorObj = error as any;
-      logDebug('[notifications-storage] Error fetching unread count (silently handled):', errorObj?.message || error);
+      const errorObj = error as { message?: string };
+      logDebug(
+        '[notifications-storage] Error fetching unread count (silently handled):',
+        errorObj?.message || error,
+      );
     }
     return 0;
   } finally {
@@ -175,6 +219,8 @@ export const markNotificationAsRead = async (notificationId: string): Promise<vo
   await apiFetch(`/notifications/notifications/${notificationId}/mark_read/`, {
     method: 'POST',
   });
+  invalidateUnreadCountCache();
+  broadcastChanged();
 };
 
 /**
@@ -186,6 +232,8 @@ export const markNotificationAsArchived = async (notificationId: string): Promis
   await apiFetch(`/notifications/notifications/${notificationId}/archive/`, {
     method: 'POST',
   });
+  invalidateUnreadCountCache();
+  broadcastChanged();
 };
 
 /**
@@ -194,10 +242,12 @@ export const markNotificationAsArchived = async (notificationId: string): Promis
 export const markAllNotificationsAsRead = async (): Promise<number> => {
   if (!hasTokens()) throw new Error('Authentication required');
 
-  const response = await apiFetch<{ message?: string }>('/notifications/notifications/mark_all_read/', {
-    method: 'POST',
-  });
-  // Backend returns: {"message": "X notifications marked as read"}
+  const response = await apiFetch<{ message?: string }>(
+    '/notifications/notifications/mark_all_read/',
+    { method: 'POST' },
+  );
+  invalidateUnreadCountCache();
+  broadcastChanged();
   const msg = response?.message || '';
   const match = msg.match(/(\d+)/);
   return match ? Number(match[1]) : 0;
@@ -210,26 +260,43 @@ export const getNotificationPreferences = async (): Promise<NotificationPreferen
   if (!hasTokens()) return null;
 
   try {
-    const response = await apiFetch<NotificationPreferences>('/notifications/preferences/');
-    return response;
-  } catch (error) {
-    // Preferences might not exist yet, return null
+    // The viewset's ``get_object`` is the get-or-create endpoint; list
+    // returns the user's single row.
+    const response = await apiFetch<{ results?: NotificationPreferences[] } | NotificationPreferences[]>(
+      '/notifications/preferences/',
+    );
+    if (Array.isArray(response)) {
+      return response[0] ?? null;
+    }
+    if (response && 'results' in response && Array.isArray(response.results)) {
+      return response.results[0] ?? null;
+    }
+    return (response as NotificationPreferences) ?? null;
+  } catch {
     return null;
   }
 };
 
 /**
- * Update notification preferences.
+ * Update notification preferences. Accepts a partial — the backend
+ * upserts on the current user, so PATCH on the singleton is sufficient.
  */
 export const updateNotificationPreferences = async (
-  preferences: Partial<NotificationPreferences>
+  preferences: Partial<NotificationPreferences> & { id?: number | string },
 ): Promise<NotificationPreferences> => {
   if (!hasTokens()) throw new Error('Authentication required');
 
-  const response = await apiFetch<NotificationPreferences>('/notifications/preferences/', {
-    method: 'PUT',
+  const id = preferences.id;
+  const url = id
+    ? `/notifications/preferences/${id}/`
+    : '/notifications/preferences/';
+  const response = await apiFetch<NotificationPreferences>(url, {
+    method: 'PATCH',
     body: JSON.stringify(preferences),
   });
+  // Lets the alerter re-read its toggles without waiting for the next
+  // dialog open.
+  broadcastChanged();
   return response;
 };
 
@@ -237,11 +304,11 @@ export const updateNotificationPreferences = async (
  * Create a notification (admin/superuser only typically).
  */
 export const createNotification = async (
-  payload: CreateNotificationPayload
+  payload: CreateNotificationPayload,
 ): Promise<Notification> => {
   if (!hasTokens()) throw new Error('Authentication required');
 
-  const response = await apiFetch<any>('/notifications/notifications/', {
+  const response = await apiFetch<Record<string, unknown>>('/notifications/notifications/', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -252,4 +319,5 @@ export const createNotification = async (
   return mapped;
 };
 
-export const normalizeNotificationFromWs = (raw: Record<string, unknown>): Notification | null => toUiNotification(raw as any);
+export const normalizeNotificationFromWs = (raw: Record<string, unknown>): Notification | null =>
+  toUiNotification(raw);

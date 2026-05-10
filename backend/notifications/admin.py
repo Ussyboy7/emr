@@ -7,8 +7,8 @@ from .models import Notification, NotificationPreferences
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
-    list_display = ['title', 'user', 'type', 'priority', 'status', 'created_at']
-    list_filter = ['type', 'priority', 'status', 'created_at']
+    list_display = ['title', 'user', 'notification_type', 'priority', 'status', 'created_at']
+    list_filter = ['notification_type', 'priority', 'status', 'created_at']
     search_fields = ['title', 'message', 'user__username']
     readonly_fields = ['created_at', 'read_at']
 

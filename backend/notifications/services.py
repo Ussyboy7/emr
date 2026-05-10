@@ -13,6 +13,34 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
+# Map upstream order-priority taxonomies into notification priorities.
+# Each producer module has its own priority vocabulary; centralizing the
+# mapping here keeps "urgent really means urgent" consistent across the
+# bell, toasts, and alerter sound.
+_LAB_RAD_TO_NOTIFICATION = {
+    'stat': 'urgent',
+    'urgent': 'high',
+    'routine': 'normal',
+}
+
+_NURSING_TO_NOTIFICATION = {
+    'urgent': 'urgent',
+    'high': 'high',
+    'medium': 'normal',
+    'low': 'low',
+}
+
+
+def priority_from_lab_or_radiology(order_priority: str) -> str:
+    """Map LabOrder/RadiologyOrder priority → notification priority."""
+    return _LAB_RAD_TO_NOTIFICATION.get((order_priority or '').lower(), 'normal')
+
+
+def priority_from_nursing_order(order_priority: str) -> str:
+    """Map NursingOrder priority → notification priority."""
+    return _NURSING_TO_NOTIFICATION.get((order_priority or '').lower(), 'normal')
+
+
 class NotificationService:
     """Service for managing notifications."""
     
@@ -123,7 +151,7 @@ class NotificationService:
                     user=user,
                     title=title,
                     message=message,
-                    type=notification_type,
+                    notification_type=notification_type,
                     priority=priority,
                     action_url=action_url,
                     object_type=object_type,

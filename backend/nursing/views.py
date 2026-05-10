@@ -55,12 +55,15 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
             title = "New nursing task"
             message = f"Nursing order {order.order_id} for {patient_name} has been created."
 
+            from notifications.services import priority_from_nursing_order
+            notif_priority = priority_from_nursing_order(getattr(order, 'priority', 'medium'))
+            urgent_prefix = "URGENT — " if notif_priority == 'urgent' else ''
             NotificationService.notify_role(
                 role_name='Nursing Officer',
-                title=title,
+                title=f"{urgent_prefix}{title}",
                 message=message,
                 notification_type='workflow',
-                priority='normal',
+                priority=notif_priority,
                 action_url="/nursing/procedures",
                 object_type='nursing_order',
                 object_id=str(order.id),

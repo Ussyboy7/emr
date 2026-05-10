@@ -513,12 +513,14 @@ class VisitViewSet(viewsets.ModelViewSet):
                 title = "Patient sent to Nursing"
                 message = f"{patient_name} ({visit.visit_id}) has been sent to Nursing for vitals."
 
+                # Patient is now in the nursing pool waiting on vitals
+                # — the nurse on duty should know promptly.
                 NotificationService.notify_role(
                     role_name='Nursing Officer',
                     title=title,
                     message=message,
                     notification_type='workflow',
-                    priority='normal',
+                    priority='high',
                     action_url='/nursing/pool-queue',
                     object_type='visit',
                     object_id=str(visit.id),

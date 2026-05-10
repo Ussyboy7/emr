@@ -318,12 +318,17 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             # Audit logging must never block order creation
             pass
 
-        # Notify Laboratory (doctor -> laboratory)
+        # Notify Laboratory (doctor -> laboratory). STAT orders escalate
+        # the notification priority so the bell + toast + sound matches
+        # the clinical urgency, instead of every order looking the same.
         try:
-            from notifications.services import NotificationService
+            from notifications.services import NotificationService, priority_from_lab_or_radiology
 
             patient_name = order.patient.get_full_name()
-            title = "New lab order"
+            order_priority = getattr(order, 'priority', 'routine')
+            notif_priority = priority_from_lab_or_radiology(order_priority)
+            stat_prefix = "STAT — " if notif_priority == 'urgent' else ''
+            title = f"{stat_prefix}New lab order"
             if order.source_type == 'external_manual':
                 clinic_name = order.external_clinic.name if order.external_clinic else 'external clinic'
                 message = f"External lab request {order.order_id} for {patient_name} from {clinic_name} is ready for Laboratory."
@@ -335,7 +340,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                 title=title,
                 message=message,
                 notification_type='lab_result',
-                priority='normal',
+                priority=notif_priority,
                 action_url="/laboratory/orders",
                 object_type='lab_order',
                 object_id=str(order.id),

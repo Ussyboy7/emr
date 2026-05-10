@@ -23,7 +23,7 @@ export default function NotificationsPage() {
             <CardDescription>Open, mark as read, or archive notifications.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <NotificationList />
+            <NotificationList embedded={false} pollingEnabled />
           </CardContent>
         </Card>
       </div>

@@ -47,12 +47,14 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         patient_user = getattr(appointment.patient, "user", None)
         if patient_user is not None:
             try:
+                # Future appointment confirmation — informational, not
+                # something that needs to chime in the user's ear.
                 NotificationService.create_notification(
                     user=patient_user,
                     title="Appointment Scheduled",
                     message=f"Your appointment is scheduled for {appointment.appointment_date} at {appointment.appointment_time}",
                     notification_type="appointment",
-                    priority="normal",
+                    priority="low",
                     object_type="appointment",
                     object_id=str(appointment.id),
                 )
