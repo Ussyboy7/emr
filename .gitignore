@@ -31,6 +31,8 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
+backend/.venv/
 ENV/
 env.bak/
 venv.bak/
@@ -61,3 +63,6 @@ ssl/
 *.key
 *.pem
 !*.pub.pem
+
+# Local-only PDF design previews (Phase 1 PDF house style)
+_pdf_previews/

@@ -14,6 +14,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from io import BytesIO
 import json
+import re
 
 # PDF generation
 from reportlab.lib import colors
@@ -22,12 +23,21 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
-from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabTestResultAttachment, LabResult
+from .models import (
+    LabTemplate,
+    LabPartner,
+    LabOrder,
+    LabTest,
+    LabTestResultAttachment,
+    LabReferralDispatch,
+    LabResult,
+)
 from .serializers import (
     LabTemplateSerializer,
     LabPartnerSerializer,
     LabOrderSerializer,
     LabTestSerializer,
+    LabReferralDispatchSerializer,
     LabResultSerializer,
     OTHER_TEMPLATE_CODES,
 )
@@ -552,7 +562,270 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             return Response(LabTestSerializer(test).data)
         except LabTest.DoesNotExist:
             return Response({'error': 'Test not found'}, status=status.HTTP_404_NOT_FOUND)
-    
+
+    # ------------------------------------------------------------------
+    # Outsourced dispatch (Phase 2)
+    # ------------------------------------------------------------------
+
+    @action(detail=True, methods=['get'], url_path='dispatches')
+    def list_dispatches(self, request, pk=None):
+        """List every LabReferralDispatch ever issued for this order (most recent first)."""
+        order = self.get_object()
+        dispatches = order.dispatches.all().prefetch_related('tests')
+        return Response(LabReferralDispatchSerializer(dispatches, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='dispatch_outsourced')
+    def dispatch_outsourced(self, request, pk=None):
+        """
+        Send a batch of tests in this order to one external lab partner.
+
+        body: {
+          test_ids: number[]                 # tests in this order to dispatch
+          partner_id?: number                # preferred — FK to LabPartner
+          partner_name?: string              # required when partner_id is missing
+                                             # (ad-hoc 'Other' partner)
+          notes?: string                     # optional dispatch-level notes
+          supersede_dispatch_id?: number     # if re-routing, mark old dispatch superseded
+        }
+        """
+        order = self.get_object()
+
+        test_ids = request.data.get('test_ids') or []
+        if not isinstance(test_ids, list) or not test_ids:
+            return Response(
+                {'error': 'test_ids must be a non-empty list'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        partner_id = request.data.get('partner_id')
+        partner_name_raw = (request.data.get('partner_name') or '').strip()
+        notes = (request.data.get('notes') or '').strip()
+        supersede_id = request.data.get('supersede_dispatch_id')
+
+        partner = None
+        partner_name = ''
+        if partner_id:
+            try:
+                partner = LabPartner.objects.get(id=partner_id, is_active=True)
+                partner_name = partner.name
+            except LabPartner.DoesNotExist:
+                return Response(
+                    {'error': 'Lab partner not found or inactive'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif partner_name_raw:
+            partner_name = partner_name_raw
+        else:
+            return Response(
+                {'error': 'Either partner_id or partner_name is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Resolve the tests; refuse to dispatch tests from another order.
+        tests = list(order.tests.filter(id__in=test_ids))
+        missing = set(test_ids) - {t.id for t in tests}
+        if missing:
+            return Response(
+                {'error': f'Some tests are not part of this order: {sorted(missing)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Tests must be at or before "processing" — refuse to dispatch verified
+        # / rejected / results-ready tests (those need a different workflow).
+        non_dispatchable = [t for t in tests if t.status in ('rejected', 'verified', 'results_ready')]
+        if non_dispatchable:
+            return Response(
+                {
+                    'error': (
+                        'These tests can no longer be dispatched: '
+                        + ', '.join(f'{t.code} ({t.status})' for t in non_dispatchable)
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Optionally mark a prior dispatch as superseded (when re-routing).
+        prior = None
+        if supersede_id:
+            try:
+                prior = order.dispatches.get(id=supersede_id, status='issued')
+            except LabReferralDispatch.DoesNotExist:
+                return Response(
+                    {'error': 'Prior dispatch not found or not currently issued'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Create the new dispatch.
+        partner_address_snapshot = ''
+        if partner:
+            partner_address_snapshot = (partner.address or '').strip()
+
+        dispatch = LabReferralDispatch.objects.create(
+            order=order,
+            partner=partner,
+            partner_name=partner_name,
+            partner_address_snapshot=partner_address_snapshot,
+            notes=notes,
+            issued_by=request.user,
+        )
+        dispatch.tests.set(tests)
+
+        # Flip each test to processing/outsourced.
+        for test in tests:
+            test.processing_method = 'outsourced'
+            test.outsourced_lab = partner_name
+            test.status = 'processing'
+            test.processed_by = request.user
+            test.processed_at = timezone.now()
+            test.save()
+
+        if prior:
+            prior.status = 'superseded'
+            prior.superseded_by = dispatch
+            prior.save(update_fields=['status', 'superseded_by'])
+
+        AuditService.log_activity(
+            user=request.user,
+            action='create',
+            object_type='lab_referral_dispatch',
+            object_id=str(dispatch.id),
+            module='laboratory',
+            object_repr=dispatch.dispatch_id,
+            description=(
+                f'Dispatched {len(tests)} test(s) from {order.order_id} '
+                f'to {partner_name}'
+            ),
+            new_values={
+                'dispatch_id': dispatch.dispatch_id,
+                'partner_name': partner_name,
+                'test_codes': [t.code for t in tests],
+            },
+            metadata={'order_id': order.order_id, 'supersedes': prior.dispatch_id if prior else None},
+            request=request,
+        )
+
+        return Response(
+            LabReferralDispatchSerializer(dispatch).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='dispatches/(?P<dispatch_id>[^/.]+)/cancel')
+    def cancel_dispatch(self, request, pk=None, dispatch_id=None):
+        """
+        Cancel a still-issued dispatch (e.g. wrong partner, withdrew sample).
+
+        Each test on the dispatch is reverted to ``sample_collected`` and its
+        outsourcing fields cleared (`processing_method`, `outsourced_lab`,
+        `processed_by`, `processed_at`). That puts the tests back in the
+        eligible pool so a fresh dispatch can be issued without a separate
+        manual reset. Tests already past ``processing`` (results submitted /
+        verified) are left alone — those need clinical review.
+        """
+        order = self.get_object()
+        try:
+            dispatch = order.dispatches.get(id=dispatch_id)
+        except LabReferralDispatch.DoesNotExist:
+            return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if dispatch.status != 'issued':
+            return Response(
+                {'error': f'Dispatch is already {dispatch.status}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = (request.data.get('reason') or '').strip()
+
+        reverted_test_codes: list[str] = []
+        skipped_test_codes: list[str] = []
+        for test in dispatch.tests.all():
+            # Only revert tests that are still in the outsourced 'processing'
+            # bucket. If results were already entered or verified, untangling
+            # them requires the verification UI, not a cancel button.
+            if test.status == 'processing':
+                test.status = 'sample_collected'
+                test.processing_method = ''
+                test.outsourced_lab = ''
+                test.processed_by = None
+                test.processed_at = None
+                test.save(update_fields=[
+                    'status', 'processing_method', 'outsourced_lab',
+                    'processed_by', 'processed_at',
+                ])
+                reverted_test_codes.append(test.code)
+            else:
+                skipped_test_codes.append(f'{test.code} ({test.status})')
+
+        dispatch.status = 'cancelled'
+        dispatch.cancellation_reason = reason
+        dispatch.cancelled_at = timezone.now()
+        dispatch.cancelled_by = request.user
+        dispatch.save(update_fields=['status', 'cancellation_reason', 'cancelled_at', 'cancelled_by'])
+
+        AuditService.log_activity(
+            user=request.user,
+            action='update',
+            object_type='lab_referral_dispatch',
+            object_id=str(dispatch.id),
+            module='laboratory',
+            object_repr=dispatch.dispatch_id,
+            description=(
+                f'Cancelled dispatch {dispatch.dispatch_id}'
+                + (f' (reverted {len(reverted_test_codes)} test(s))' if reverted_test_codes else '')
+            ),
+            new_values={
+                'status': 'cancelled',
+                'cancellation_reason': reason,
+                'reverted_tests': reverted_test_codes,
+                'skipped_tests': skipped_test_codes,
+            },
+            metadata={'order_id': order.order_id},
+            request=request,
+        )
+
+        return Response(LabReferralDispatchSerializer(dispatch).data)
+
+    @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_id>[^/.]+)/referral_letter')
+    def dispatch_referral_letter(self, request, pk=None, dispatch_id=None):
+        """Download the referral letter PDF for a specific dispatch."""
+        order = self.get_object()
+        try:
+            dispatch = order.dispatches.get(id=dispatch_id)
+        except LabReferralDispatch.DoesNotExist:
+            return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .dispatch_pdfs import build_referral_letter_pdf
+
+        pdf_bytes = build_referral_letter_pdf(dispatch)
+        if not dispatch.referral_letter_printed_at:
+            dispatch.referral_letter_printed_at = timezone.now()
+            dispatch.save(update_fields=['referral_letter_printed_at'])
+
+        filename = f"referral_{dispatch.dispatch_id}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_id>[^/.]+)/responsibility_form')
+    def dispatch_responsibility_form(self, request, pk=None, dispatch_id=None):
+        """Download the financial-responsibility form PDF for a specific dispatch."""
+        order = self.get_object()
+        try:
+            dispatch = order.dispatches.get(id=dispatch_id)
+        except LabReferralDispatch.DoesNotExist:
+            return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .dispatch_pdfs import build_responsibility_form_pdf
+
+        pdf_bytes = build_responsibility_form_pdf(dispatch)
+        if not dispatch.responsibility_form_printed_at:
+            dispatch.responsibility_form_printed_at = timezone.now()
+            dispatch.save(update_fields=['responsibility_form_printed_at'])
+
+        filename = f"responsibility_{dispatch.dispatch_id}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
     @action(detail=True, methods=['post'])
     def submit_results(self, request, pk=None):
         """Submit results for a test."""
@@ -902,13 +1175,17 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
     
     @action(detail=True, methods=['get'])
     def download_report(self, request, pk=None):
-        """Download lab result as PDF report."""
+        """Download lab result as PDF report (uses standardized NPA PDF house style)."""
         # Do not rely on list filters (status/date/search) for detail download.
         # Some frontend callers pass LabResult.id while others pass LabTest.id.
         base_qs = LabResult.objects.select_related(
             'test',
             'order',
             'patient',
+            # Pull principal_staff so Dept./P.N. fallbacks for dependents
+            # don't trigger a second query inside `_division_line` /
+            # `_personal_number_line`.
+            'patient__principal_staff',
             'order__doctor',
             'test__template',
             'test__processed_by',
@@ -918,44 +1195,19 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         if result is None:
             result = get_object_or_404(base_qs, pk=pk)
 
-        # Create PDF buffer
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-
-        # Styles aligned with the in-app report dialog.
-        title_style = ParagraphStyle(
-            'LabReportTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=6,
-            alignment=1,
-            textColor=colors.black,
+        from common.pdf import (
+            NPADocument,
+            patient_info_block,
+            request_line,
+            centered_section_title,
+            data_table,
+            signature_line,
+            italic_paragraph,
+            body_paragraph,
+            section_heading,
         )
-        subtitle_style = ParagraphStyle(
-            'LabReportSubtitle',
-            parent=styles['Heading3'],
-            fontSize=11,
-            spaceAfter=16,
-            alignment=1,
-            textColor=colors.grey,
-        )
-        section_style = ParagraphStyle(
-            'LabReportSection',
-            parent=styles['Heading2'],
-            fontSize=13,
-            spaceAfter=8,
-            textColor=colors.black,
-        )
-        normal_style = ParagraphStyle(
-            'LabReportNormal',
-            parent=styles['Normal'],
-            fontSize=10,
-            leading=13,
-            spaceAfter=4,
-        )
-
-        story = []
+        from reportlab.lib.units import inch
+        from reportlab.platypus import Spacer
 
         def _fmt_dt(value):
             if not value:
@@ -968,45 +1220,119 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
                 except Exception:
                     return 'N/A'
 
-        # Header (matches report dialog wording)
-        story.append(Paragraph("LABORATORY REPORT", title_style))
-        story.append(Paragraph("Nigerian Ports Authority Medical Services", subtitle_style))
-        story.append(Spacer(1, 10))
+        def _normalize_key(s):
+            return ' '.join(str(s or '').split()).strip().lower()
 
-        patient_age = getattr(result.patient, 'age', None)
-        age_gender = f"{patient_age} years / {result.patient.gender}" if patient_age else f"N/A / {result.patient.gender or 'N/A'}"
-        doctor_name = result.order.doctor.get_full_name() if result.order and result.order.doctor else 'N/A'
-        clinic_name = getattr(getattr(result, 'order', None), 'clinic', None) or 'N/A'
+        def _fmt_reference_range(meta):
+            if not meta:
+                return ''
+            rng = meta.get('range')
+            if isinstance(rng, str) and rng.strip():
+                return rng.strip()
+            min_v = meta.get('min', meta.get('normalRangeMin'))
+            max_v = meta.get('max', meta.get('normalRangeMax'))
+            if min_v not in (None, '') and max_v not in (None, ''):
+                return f"{min_v}-{max_v}"
+            return ''
 
-        details_rows = [
-            ['Patient Name', result.patient.get_full_name()],
-            ['Age / Gender', age_gender],
-            ['Ordering Doctor', doctor_name],
-            ['Order ID', result.order.order_id if result.order else 'N/A'],
-            ['Test Name', f"{result.test.name} ({result.test.code})"],
-            ['Clinic', clinic_name],
-        ]
-        details_table = Table(details_rows, colWidths=[2.2 * inch, 3.8 * inch])
-        details_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(details_table)
-        story.append(Spacer(1, 12))
+        def _classify(value, meta):
+            """Mirrors classifyValue in template-utils.ts (parseFloat semantics)."""
+            if value is None:
+                return 'Normal'
+            value_str = str(value).strip()
+            if not value_str:
+                return 'Normal'
+            data_type = (meta or {}).get('dataType')
+            if isinstance(data_type, str) and data_type.lower() == 'text':
+                return 'Normal'
+            m = re.match(r'\s*([+-]?\d+(\.\d+)?|\.\d+)', value_str)
+            if not m:
+                return 'Normal'
+            try:
+                num = float(m.group(1))
+            except Exception:
+                return 'Normal'
 
-        # Test results block
-        story.append(Paragraph("Test Results", section_style))
-        story.append(Paragraph(result.overall_status.title() if result.overall_status else 'Normal', normal_style))
+            def _num(x):
+                try:
+                    if x in (None, ''):
+                        return None
+                    return float(x)
+                except Exception:
+                    return None
 
-        results_rows = [['Parameter', 'Result', 'Status']]
+            crit_min = _num((meta or {}).get('critical_min', (meta or {}).get('criticalMin')))
+            crit_max = _num((meta or {}).get('critical_max', (meta or {}).get('criticalMax')))
+            min_v = _num((meta or {}).get('min', (meta or {}).get('normalRangeMin')))
+            max_v = _num((meta or {}).get('max', (meta or {}).get('normalRangeMax')))
+
+            if (crit_min is not None and num < crit_min) or (crit_max is not None and num > crit_max):
+                return 'Critical'
+            if (min_v is not None and num < min_v) or (max_v is not None and num > max_v):
+                return 'Abnormal'
+            return 'Normal'
+
+        def _flag_letter(value, meta):
+            """Return clinical flag (H/L/HH/LL) using value vs. (critical) range."""
+            if value is None or meta is None:
+                return ''
+            value_str = str(value).strip()
+            if not value_str:
+                return ''
+            m = re.match(r'\s*([+-]?\d+(\.\d+)?|\.\d+)', value_str)
+            if not m:
+                return ''
+            try:
+                num = float(m.group(1))
+            except Exception:
+                return ''
+
+            def _num(x):
+                try:
+                    if x in (None, ''):
+                        return None
+                    return float(x)
+                except Exception:
+                    return None
+
+            crit_min = _num((meta or {}).get('critical_min', (meta or {}).get('criticalMin')))
+            crit_max = _num((meta or {}).get('critical_max', (meta or {}).get('criticalMax')))
+            min_v = _num((meta or {}).get('min', (meta or {}).get('normalRangeMin')))
+            max_v = _num((meta or {}).get('max', (meta or {}).get('normalRangeMax')))
+
+            if crit_max is not None and num > crit_max:
+                return 'HH'
+            if crit_min is not None and num < crit_min:
+                return 'LL'
+            if max_v is not None and num > max_v:
+                return 'H'
+            if min_v is not None and num < min_v:
+                return 'L'
+            return ''
+
+        # Resolve template metadata so we can populate Unit / Reference Range
+        # consistently with the frontend's lib/laboratory/template-utils.ts.
+        template_normal_range = {}
+        try:
+            if result.test and result.test.template and isinstance(result.test.template.normal_range, dict):
+                template_normal_range = result.test.template.normal_range
+        except Exception:
+            template_normal_range = {}
+
+        analyte_meta_by_key = {
+            _normalize_key(k): v
+            for k, v in template_normal_range.items()
+            if isinstance(k, str) and not k.startswith('_') and isinstance(v, dict)
+        }
+
+        def _meta_for(parameter_name):
+            return analyte_meta_by_key.get(_normalize_key(parameter_name))
+
+        # Build the result-rows + per-row status + flag-letter lists.
+        result_rows = []
+        row_statuses = []
+        row_flags = []
+
         if result.test.results and isinstance(result.test.results, dict):
             for param, param_data in result.test.results.items():
                 if param == 'custom_results' and isinstance(param_data, list):
@@ -1017,415 +1343,225 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
                         value = row.get('value', '')
                         if value is None:
                             value = ''
+                        unit = str(row.get('unit') or '')
+                        ref_range = str(row.get('reference_range') or '')
                         status = str(row.get('status') or 'normal').title()
-                        results_rows.append([name, str(value), status])
+                        if status not in ('Normal', 'Abnormal', 'Critical'):
+                            status = 'Normal'
+                        result_rows.append(
+                            [name, str(value), unit, ref_range, status if status != 'Normal' else '']
+                        )
+                        row_statuses.append(status)
+                        row_flags.append('')  # custom rows don't carry numeric ranges
                     continue
+                meta = _meta_for(param)
                 if isinstance(param_data, dict):
-                    results_rows.append([
-                        str(param),
-                        str(param_data.get('value', '')),
-                        str(param_data.get('status', 'normal')).title(),
-                    ])
+                    value = param_data.get('value', '')
+                    unit = str(param_data.get('unit') or (meta or {}).get('unit') or '')
+                    ref_range = str(param_data.get('reference_range') or _fmt_reference_range(meta))
+                    raw_status = str(param_data.get('status') or '').strip().title()
+                    if raw_status in ('Normal', 'Abnormal', 'Critical'):
+                        status = raw_status
+                    else:
+                        status = _classify(value, meta)
                 else:
-                    results_rows.append([str(param), str(param_data), ''])
-        if len(results_rows) == 1:
-            results_rows.append(['Result', 'N/A', ''])
+                    value = param_data
+                    unit = str((meta or {}).get('unit') or '')
+                    ref_range = _fmt_reference_range(meta)
+                    status = _classify(value, meta)
+                result_rows.append([
+                    str(param),
+                    '' if value is None else str(value),
+                    unit,
+                    ref_range,
+                    status if status != 'Normal' else '',
+                ])
+                row_statuses.append(status)
+                row_flags.append(_flag_letter(value, meta))
 
-        results_table = Table(results_rows, colWidths=[2.5 * inch, 2.0 * inch, 1.5 * inch])
-        results_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('LEFTPADDING', (0, 0), (-1, -1), 6),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
-        story.append(results_table)
-        story.append(Spacer(1, 14))
+        if not result_rows:
+            result_rows.append(['Result', 'N/A', '', '', ''])
+            row_statuses.append('Normal')
+            row_flags.append('')
 
-        # Timing Information
+        # Patient + order metadata
+        patient_age = getattr(result.patient, 'age', None)
+        age_str = f"{patient_age} YEARS" if patient_age else "—"
+        gender = (result.patient.gender or '').upper() or "—"
+        patient_id_display = getattr(result.patient, 'patient_id', '') or "—"
+
+        doctor_name = (
+            result.order.doctor.get_full_name()
+            if result.order and result.order.doctor else '—'
+        )
+        clinic_name = (
+            getattr(getattr(result, 'order', None), 'clinic', None) or '—'
+        )
+
+        # Timing — use short dates (DD.MM.YYYY) like the paper template.
+        def _fmt_short(value):
+            if not value:
+                return '—'
+            try:
+                return timezone.localtime(value).strftime('%d.%m.%Y')
+            except Exception:
+                try:
+                    return value.strftime('%d.%m.%Y')
+                except Exception:
+                    return '—'
+
         ordered_at = None
         try:
             ordered_at = getattr(getattr(result, 'order', None), 'ordered_at', None)
         except Exception:
             ordered_at = None
-        if not ordered_at:
-            try:
-                ordered_at = getattr(getattr(getattr(result, 'test', None), 'order', None), 'ordered_at', None)
-            except Exception:
-                ordered_at = None
 
         processed_at = getattr(result.test, 'processed_at', None)
         verified_at = getattr(result.test, 'verified_at', None)
-        turnaround_text = 'N/A'
-        if processed_at and verified_at:
-            delta = verified_at - processed_at
-            mins = int(delta.total_seconds() // 60)
-            turnaround_text = '< 1 min' if mins <= 0 else f'{mins} min'
+        sample_collected_at = getattr(result.test, 'collected_at', None)
 
-        timing_rows = [
-            ['Ordered', _fmt_dt(ordered_at)],
-            ['Completed', _fmt_dt(processed_at)],
-            ['Verified', _fmt_dt(verified_at)],
-            ['Turnaround Time', turnaround_text],
-            ['Performed By', result.test.processed_by.get_full_name() if result.test.processed_by else 'N/A'],
-            ['Verified By', result.test.verified_by.get_full_name() if result.test.verified_by else 'Unknown'],
+        # Specimen / sample type from template (defaults to 'BLOOD' for haematology)
+        specimen = (
+            getattr(result.test, 'sample_type', '') or
+            getattr(getattr(result.test, 'template', None), 'sample_type', '') or
+            '—'
+        ).upper()
+
+        # Dept. = patient's NPA division (shared helper falls back to the
+        # principal staff member's division for dependents). Same logic the
+        # dispatch referral / responsibility PDFs use, so all lab paperwork
+        # agrees on what "Dept." means.
+        from .dispatch_pdfs import _division_line, _personal_number_line
+        patient_department = _division_line(result.patient)
+
+        clinical_diagnosis = (
+            getattr(getattr(result, 'order', None), 'clinical_notes', None) or
+            getattr(getattr(result, 'order', None), 'clinical_summary', None) or
+            'ROUTINE'
+        )
+        if isinstance(clinical_diagnosis, str):
+            clinical_diagnosis = clinical_diagnosis.upper()
+
+        lab_no = (
+            getattr(result.test, 'lab_number', None) or
+            (getattr(result.order, 'lab_number', None) if result.order else None) or
+            (result.order.order_id if result.order else f'LR-{result.id}')
+        )
+
+        p_no = _personal_number_line(result.patient)
+
+        # Section title under the patient block reflects the test category
+        # (HAEMATOLOGY / CHEMISTRY / SEROLOGY / etc.). Default to a generic label.
+        category_raw = (
+            getattr(getattr(result.test, 'template', None), 'category', None) or
+            getattr(result.test, 'category', None) or
+            'LABORATORY'
+        )
+        category_titles = {
+            'haematology': 'HAEMATOLOGY REPORT',
+            'hematology':  'HAEMATOLOGY REPORT',
+            'chemistry':   'CLINICAL CHEMISTRY REPORT',
+            'serology':    'SEROLOGY REPORT',
+            'microbiology':'MICROBIOLOGY REPORT',
+            'urinalysis':  'URINALYSIS REPORT',
+            'parasitology':'PARASITOLOGY REPORT',
+            'immunology':  'IMMUNOLOGY REPORT',
+        }
+        section_title_text = category_titles.get(
+            str(category_raw).strip().lower(), 'LABORATORY REPORT'
+        )
+
+        # Build the document
+        buffer = BytesIO()
+        doc = NPADocument(
+            buffer,
+            department="MEDICAL LABORATORY SCIENCE DEPARTMENT",
+            document_title=section_title_text,
+        )
+
+        # Build the data-table rows. The third column (between Results and
+        # Units) is reserved for an optional "% differential" used by FBC-style
+        # reports to mirror the paper template's PARAMETER | RESULTS | (% diff)
+        # | UNITS | REF | FLAGS layout. We don't yet store the differential
+        # separately, so it's left blank — but the column is allocated so future
+        # results can populate it without changing the layout.
+        table_rows = []
+        for raw_row in result_rows:
+            param, value, unit, ref, _ = raw_row
+            table_rows.append([param, value, '', unit, ref, ''])
+
+        story = [
+            patient_info_block(
+                left=[
+                    ("Name", result.patient.get_full_name()),
+                    ("Age", age_str),
+                    ("Specimen", specimen),
+                    ("Dept.", patient_department),
+                    ("Clinical Diagnosis", clinical_diagnosis),
+                ],
+                middle=[
+                    ("Sex", gender),
+                    ("Collection Date", _fmt_short(sample_collected_at or ordered_at)),
+                    ("Report Date", _fmt_short(verified_at or processed_at)),
+                ],
+                right=[
+                    ("Doctor", doctor_name),
+                    ("Lab. No.", lab_no),
+                    ("Clinic", clinic_name),
+                    ("P/No.", p_no),
+                ],
+                width=doc.usable_width,
+            ),
+            request_line("Request(s)", f"{result.test.name} ({result.test.code})", width=doc.usable_width),
+            Spacer(1, 8),
+            centered_section_title(section_title_text),
+            data_table(
+                ['PARAMETER', 'RESULTS', '', 'UNITS', 'REF. VALUES', 'FLAGS'],
+                table_rows,
+                col_widths=[1.7 * inch, 0.9 * inch, 0.7 * inch, 0.9 * inch, 1.4 * inch, 0.6 * inch],
+                row_statuses=row_statuses,
+                row_flags=row_flags,
+                italic_col=0,
+                flag_col=5,
+            ),
         ]
-        timing_table = Table(timing_rows, colWidths=[2.2 * inch, 3.8 * inch])
-        timing_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(timing_table)
-        story.append(Spacer(1, 15))
 
-        # Notes
         if result.test.verification_notes:
-            story.append(Paragraph("Verification Notes", section_style))
-            story.append(Paragraph(result.test.verification_notes, normal_style))
-            story.append(Spacer(1, 10))
+            story += [
+                Spacer(1, 8),
+                section_heading("Verification Notes"),
+                body_paragraph(result.test.verification_notes),
+            ]
 
-        # Footer
-        story.append(Spacer(1, 16))
-        story.append(Paragraph("This report was generated electronically and is valid without signature.", styles['Italic']))
-        story.append(Paragraph(f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Italic']))
+        story += [
+            Spacer(1, 10),
+            signature_line(
+                "Med. Lab. Scientist  ·  "
+                + (result.test.processed_by.get_full_name() if result.test.processed_by else "")
+            ),
+        ]
 
-        # Build PDF
-        doc.build(story)
+        if result.test.verified_by:
+            story += [
+                signature_line(
+                    "Verified by  ·  " + result.test.verified_by.get_full_name()
+                ),
+            ]
 
-        # Return PDF response
+        story += [
+            Spacer(1, 8),
+            italic_paragraph(
+                "This report was generated electronically and is valid without signature."
+            ),
+        ]
+
+        document_serial = (
+            f"LR-{lab_no}" if lab_no and not str(lab_no).startswith('LR-') else str(lab_no)
+        )
+        doc.build(story, document_serial=document_serial)
+
         buffer.seek(0)
         filename = f"lab_result_{result.patient.patient_id}_{result.test.code}_{result.id}.pdf"
-
-        response = HttpResponse(buffer, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
-        return response
-
-    @action(detail=True, methods=['get'])
-    def referral_letter(self, request, pk=None):
-        """Generate referral letter PDF for outsourced lab tests."""
-        result = self.get_object()
-
-        # Only generate for outsourced tests
-        if result.test.processing_method != 'outsourced':
-            return Response(
-                {'error': 'Referral letters are only available for outsourced lab tests'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Create PDF buffer
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-
-        # Styles
-        title_style = ParagraphStyle(
-            'Title',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=6,
-            alignment=1,
-            textColor=colors.black,
-        )
-        subtitle_style = ParagraphStyle(
-            'Subtitle',
-            parent=styles['Heading3'],
-            fontSize=11,
-            spaceAfter=16,
-            alignment=1,
-            textColor=colors.grey,
-        )
-        section_style = ParagraphStyle(
-            'Section',
-            parent=styles['Heading2'],
-            fontSize=13,
-            spaceAfter=8,
-            textColor=colors.black,
-        )
-        normal_style = ParagraphStyle(
-            'Normal',
-            parent=styles['Normal'],
-            fontSize=10,
-            leading=13,
-            spaceAfter=4,
-        )
-        label_style = ParagraphStyle(
-            'Label',
-            parent=styles['Normal'],
-            fontSize=10,
-            fontName='Helvetica-Bold',
-        )
-
-        story = []
-
-        # Header
-        story.append(Paragraph("LABORATORY REFERRAL LETTER", title_style))
-        story.append(Paragraph("Nigerian Ports Authority Medical Services", subtitle_style))
-        story.append(Spacer(1, 10))
-
-        # Date and Order ID
-        ordered_at = getattr(result.order, 'ordered_at', None)
-        if ordered_at:
-            date_str = timezone.localtime(ordered_at).strftime('%B %d, %Y')
-        else:
-            date_str = 'N/A'
-
-        details_rows = [
-            ['Date', date_str],
-            ['Order ID', result.order.order_id if result.order else 'N/A'],
-            ['Lab Test', f"{result.test.name} ({result.test.code})"],
-        ]
-        details_table = Table(details_rows, colWidths=[2.2 * inch, 3.8 * inch])
-        details_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(details_table)
-        story.append(Spacer(1, 12))
-
-        # To: Lab Partner
-        story.append(Paragraph("To:", label_style))
-        story.append(Paragraph(result.test.outsourced_lab or 'External Laboratory', normal_style))
-        story.append(Spacer(1, 12))
-
-        # Patient Information
-        story.append(Paragraph("Patient Information", section_style))
-
-        patient_age = getattr(result.patient, 'age', None)
-        age_gender = f"{patient_age} years / {result.patient.gender}" if patient_age else f"N/A / {result.patient.gender or 'N/A'}"
-        doctor_name = result.order.doctor.get_full_name() if result.order and result.order.doctor else 'N/A'
-
-        patient_rows = [
-            ['Patient Name', result.patient.get_full_name()],
-            ['Age / Gender', age_gender],
-            ['Ordering Doctor', doctor_name],
-        ]
-        patient_table = Table(patient_rows, colWidths=[2.2 * inch, 3.8 * inch])
-        patient_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(patient_table)
-        story.append(Spacer(1, 14))
-
-        # Test Details
-        story.append(Paragraph("Test Details", section_style))
-        story.append(Paragraph(f"Please perform the following laboratory test: {result.test.name} ({result.test.code})", normal_style))
-
-        if result.test.template and result.test.template.description:
-            story.append(Paragraph(f"Description: {result.test.template.description}", normal_style))
-
-        if result.order and result.order.clinical_notes:
-            story.append(Spacer(1, 10))
-            story.append(Paragraph("Clinical Notes:", label_style))
-            story.append(Paragraph(result.order.clinical_notes, normal_style))
-
-        story.append(Spacer(1, 15))
-
-        # Footer
-        story.append(Spacer(1, 16))
-        story.append(Paragraph("This referral letter was generated electronically and is valid for laboratory testing.", styles['Italic']))
-        story.append(Paragraph(f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Italic']))
-
-        # Build PDF
-        doc.build(story)
-
-        # Return PDF response
-        buffer.seek(0)
-        filename = f"referral_letter_{result.patient.patient_id}_{result.test.code}_{result.id}.pdf"
-
-        response = HttpResponse(buffer, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
-        return response
-
-    @action(detail=True, methods=['get'])
-    def test_order(self, request, pk=None):
-        """Generate test order PDF for outsourced lab tests."""
-        result = self.get_object()
-
-        # Only generate for outsourced tests
-        if result.test.processing_method != 'outsourced':
-            return Response(
-                {'error': 'Test orders are only available for outsourced lab tests'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Create PDF buffer
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-
-        # Styles
-        title_style = ParagraphStyle(
-            'Title',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=6,
-            alignment=1,
-            textColor=colors.black,
-        )
-        subtitle_style = ParagraphStyle(
-            'Subtitle',
-            parent=styles['Heading3'],
-            fontSize=11,
-            spaceAfter=16,
-            alignment=1,
-            textColor=colors.grey,
-        )
-        section_style = ParagraphStyle(
-            'Section',
-            parent=styles['Heading2'],
-            fontSize=13,
-            spaceAfter=8,
-            textColor=colors.black,
-        )
-        normal_style = ParagraphStyle(
-            'Normal',
-            parent=styles['Normal'],
-            fontSize=10,
-            leading=13,
-            spaceAfter=4,
-        )
-        label_style = ParagraphStyle(
-            'Label',
-            parent=styles['Normal'],
-            fontSize=10,
-            fontName='Helvetica-Bold',
-        )
-
-        story = []
-
-        # Header
-        story.append(Paragraph("LABORATORY TEST ORDER", title_style))
-        story.append(Paragraph("Nigerian Ports Authority Medical Services", subtitle_style))
-        story.append(Spacer(1, 10))
-
-        # Date and Order ID
-        ordered_at = getattr(result.order, 'ordered_at', None)
-        if ordered_at:
-            date_str = timezone.localtime(ordered_at).strftime('%B %d, %Y')
-        else:
-            date_str = 'N/A'
-
-        details_rows = [
-            ['Date', date_str],
-            ['Order ID', result.order.order_id if result.order else 'N/A'],
-            ['Lab Test', f"{result.test.name} ({result.test.code})"],
-            ['Lab Partner', result.test.outsourced_lab or 'External Laboratory'],
-        ]
-        details_table = Table(details_rows, colWidths=[2.2 * inch, 3.8 * inch])
-        details_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
-            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(details_table)
-        story.append(Spacer(1, 12))
-
-        # Patient Information
-        story.append(Paragraph("Patient Information", section_style))
-
-        patient_age = getattr(result.patient, 'age', None)
-        age_gender = f"{patient_age} years / {result.patient.gender}" if patient_age else f"N/A / {result.patient.gender or 'N/A'}"
-        doctor_name = result.order.doctor.get_full_name() if result.order and result.order.doctor else 'N/A'
-
-        patient_rows = [
-            ['Patient Name', result.patient.get_full_name()],
-            ['Patient ID', result.patient.patient_id or 'N/A'],
-            ['Age / Gender', age_gender],
-            ['Ordering Doctor', doctor_name],
-        ]
-        patient_table = Table(patient_rows, colWidths=[2.2 * inch, 3.8 * inch])
-        patient_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(patient_table)
-        story.append(Spacer(1, 14))
-
-        # Test Requirements
-        story.append(Paragraph("Test Requirements", section_style))
-
-        requirements = []
-
-        if result.test.template:
-            if result.test.template.sample_type:
-                requirements.append(f"Sample Type: {result.test.template.sample_type}")
-            if result.test.template.collection_instructions:
-                requirements.append(f"Collection: {result.test.template.collection_instructions}")
-            if result.test.template.processing_instructions:
-                requirements.append(f"Processing: {result.test.template.processing_instructions}")
-
-        if requirements:
-            for req in requirements:
-                story.append(Paragraph(req, normal_style))
-        else:
-            story.append(Paragraph("Please follow standard laboratory protocols for this test.", normal_style))
-
-        if result.order and result.order.clinical_notes:
-            story.append(Spacer(1, 10))
-            story.append(Paragraph("Clinical Notes:", label_style))
-            story.append(Paragraph(result.order.clinical_notes, normal_style))
-
-        story.append(Spacer(1, 15))
-
-        # Instructions for Lab
-        story.append(Paragraph("Instructions for Laboratory", section_style))
-        story.append(Paragraph("Please perform the requested test according to your standard procedures.", normal_style))
-        story.append(Paragraph("Report results back to Nigerian Ports Authority Medical Services.", normal_style))
-        story.append(Paragraph(f"Priority: {result.order.priority.title() if result.order and result.order.priority else 'Normal'}", normal_style))
-
-        story.append(Spacer(1, 15))
-
-        # Footer
-        story.append(Spacer(1, 16))
-        story.append(Paragraph("This test order was generated electronically and is valid for laboratory testing.", styles['Italic']))
-        story.append(Paragraph(f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Italic']))
-
-        # Build PDF
-        doc.build(story)
-
-        # Return PDF response
-        buffer.seek(0)
-        filename = f"test_order_{result.patient.patient_id}_{result.test.code}_{result.id}.pdf"
 
         response = HttpResponse(buffer, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'

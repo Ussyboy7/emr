@@ -18,7 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
-import { adminService, labService, patientService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner, type Clinic, type Patient } from '@/lib/services';
+import { adminService, labService, patientService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner, type LabReferralDispatch, type Clinic, type Patient } from '@/lib/services';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
@@ -28,7 +28,8 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
-  ClipboardList, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle, Plus
+  ClipboardList, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle, Plus, Pencil,
+  Send, Printer, FileSignature, Mail, History, Hash
 } from 'lucide-react';
 
 // ==========================================
@@ -267,473 +268,6 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
   };
 };
 
-// Test templates for result entry
-const testTemplates: Record<string, { name: string; fields: { name: string; unit: string; normalRange: string; }[] }> = {
-  CBC: {
-    name: 'Complete Blood Count',
-    fields: [
-      { name: 'WBC', unit: '×10³/μL', normalRange: '4.0-11.0' },
-      { name: 'RBC', unit: '×10⁶/μL', normalRange: '4.2-5.4' },
-      { name: 'Hemoglobin', unit: 'g/dL', normalRange: '13.5-17.5' },
-      { name: 'Hematocrit', unit: '%', normalRange: '40-50' },
-      { name: 'Platelets', unit: '×10³/μL', normalRange: '150-400' },
-    ]
-  },
-  ESR: {
-    name: 'Erythrocyte Sedimentation Rate',
-    fields: [
-      { name: 'ESR', unit: 'mm/hr', normalRange: '0-30' },
-    ]
-  },
-  RETIC: {
-    name: 'Reticulocyte Count',
-    fields: [
-      { name: 'Reticulocyte Count', unit: '%', normalRange: '0.5-2.5' },
-      { name: 'Absolute Reticulocyte Count', unit: '×10⁶/μL', normalRange: '25-85' },
-    ]
-  },
-  PLATELET: {
-    name: 'Platelet Count',
-    fields: [
-      { name: 'Platelets', unit: '×10³/μL', normalRange: '150-450' },
-    ]
-  },
-  COAG: {
-    name: 'Coagulation Profile',
-    fields: [
-      { name: 'PT', unit: 'seconds', normalRange: '11-13' },
-      { name: 'INR', unit: '', normalRange: '0.8-1.1' },
-      { name: 'PTT', unit: 'seconds', normalRange: '25-35' },
-      { name: 'Fibrinogen', unit: 'mg/dL', normalRange: '200-400' },
-    ]
-  },
-  BT_CT: {
-    name: 'Bleeding Time & Clotting Time',
-    fields: [
-      { name: 'Bleeding Time', unit: 'minutes', normalRange: '2-7' },
-      { name: 'Clotting Time', unit: 'minutes', normalRange: '5-15' },
-    ]
-  },
-  FBS: {
-    name: 'Fasting Blood Sugar',
-    fields: [
-      { name: 'Glucose', unit: 'mg/dL', normalRange: '70-100' },
-    ]
-  },
-  RBS: {
-    name: 'Random Blood Sugar',
-    fields: [
-      { name: 'Glucose', unit: 'mg/dL', normalRange: '70-140' },
-    ]
-  },
-  PPBS: {
-    name: 'Post Prandial Blood Sugar',
-    fields: [
-      { name: 'Glucose', unit: 'mg/dL', normalRange: '<140' },
-    ]
-  },
-  HBA1C: {
-    name: 'Glycosylated Hemoglobin (HbA1c)',
-    fields: [
-      { name: 'HbA1c', unit: '%', normalRange: '<5.7' },
-    ]
-  },
-  LIP: {
-    name: 'Lipid Profile',
-    fields: [
-      { name: 'Total Cholesterol', unit: 'mg/dL', normalRange: '<200' },
-      { name: 'LDL', unit: 'mg/dL', normalRange: '<100' },
-      { name: 'HDL', unit: 'mg/dL', normalRange: '>40' },
-      { name: 'Triglycerides', unit: 'mg/dL', normalRange: '<150' },
-    ]
-  },
-  LFT: {
-    name: 'Liver Function Test',
-    fields: [
-      { name: 'ALT', unit: 'U/L', normalRange: '7-56' },
-      { name: 'AST', unit: 'U/L', normalRange: '10-40' },
-      { name: 'ALP', unit: 'U/L', normalRange: '44-147' },
-      { name: 'Bilirubin (Total)', unit: 'mg/dL', normalRange: '0.1-1.2' },
-      { name: 'Albumin', unit: 'g/dL', normalRange: '3.5-5.0' },
-    ]
-  },
-  CRP: {
-    name: 'C-Reactive Protein',
-    fields: [
-      { name: 'CRP', unit: 'mg/L', normalRange: '<10' },
-    ]
-  },
-  RA_FACTOR: {
-    name: 'Rheumatoid Factor',
-    fields: [
-      { name: 'Rheumatoid Factor', unit: 'IU/mL', normalRange: '<15' },
-    ]
-  },
-  TFT: {
-    name: 'Thyroid Function Test',
-    fields: [
-      { name: 'TSH', unit: 'μIU/mL', normalRange: '0.4-4.0' },
-      { name: 'T3', unit: 'ng/dL', normalRange: '60-181' },
-      { name: 'T4', unit: 'μg/dL', normalRange: '4.5-11.2' },
-      { name: 'Free T3', unit: 'pg/mL', normalRange: '2.0-4.4' },
-      { name: 'Free T4', unit: 'ng/dL', normalRange: '0.93-1.7' },
-    ]
-  },
-  TSH: {
-    name: 'Thyroid Stimulating Hormone',
-    fields: [
-      { name: 'TSH', unit: 'μIU/mL', normalRange: '0.4-4.0' },
-    ]
-  },
-  T3_T4: {
-    name: 'T3 & T4',
-    fields: [
-      { name: 'T3', unit: 'ng/dL', normalRange: '60-181' },
-      { name: 'T4', unit: 'μg/dL', normalRange: '4.5-11.2' },
-      { name: 'Free T3', unit: 'pg/mL', normalRange: '2.0-4.4' },
-      { name: 'Free T4', unit: 'ng/dL', normalRange: '0.93-1.7' },
-    ]
-  },
-  RFT: {
-    name: 'Renal Function Test',
-    fields: [
-      { name: 'Creatinine', unit: 'mg/dL', normalRange: '0.7-1.3' },
-      { name: 'BUN', unit: 'mg/dL', normalRange: '7-20' },
-      { name: 'eGFR', unit: 'mL/min', normalRange: '>90' },
-    ]
-  },
-  ELEC: {
-    name: 'Serum Electrolytes',
-    fields: [
-      { name: 'Sodium', unit: 'mmol/L', normalRange: '135-145' },
-      { name: 'Potassium', unit: 'mmol/L', normalRange: '3.5-5.0' },
-      { name: 'Chloride', unit: 'mmol/L', normalRange: '98-107' },
-      { name: 'Bicarbonate', unit: 'mmol/L', normalRange: '22-29' },
-    ]
-  },
-  PSA: {
-    name: 'Prostate Specific Antigen',
-    fields: [
-      { name: 'PSA', unit: 'ng/mL', normalRange: '<4.0' },
-    ]
-  },
-  CA125: {
-    name: 'CA-125 (Ovarian Cancer Marker)',
-    fields: [
-      { name: 'CA-125', unit: 'U/mL', normalRange: '<35' },
-    ]
-  },
-  CEA: {
-    name: 'Carcinoembryonic Antigen',
-    fields: [
-      { name: 'CEA', unit: 'ng/mL', normalRange: '<2.5' },
-    ]
-  },
-  AFP: {
-    name: 'Alpha Fetoprotein',
-    fields: [
-      { name: 'AFP', unit: 'ng/mL', normalRange: '<10' },
-    ]
-  },
-  MP: {
-    name: 'Malaria Parasite',
-    fields: [
-      { name: 'Result', unit: '', normalRange: 'Negative' },
-      { name: 'Parasite Count', unit: '/μL', normalRange: '0' },
-      { name: 'Species', unit: '', normalRange: 'N/A' },
-    ]
-  },
-  URINE_CS: {
-    name: 'Urine Culture & Sensitivity',
-    fields: [
-      { name: 'Organism', unit: '', normalRange: 'No growth' },
-      { name: 'Colony Count', unit: 'CFU/mL', normalRange: '<10,000' },
-    ]
-  },
-  BLOOD_CS: {
-    name: 'Blood Culture & Sensitivity',
-    fields: [
-      { name: 'Organism', unit: '', normalRange: 'No growth' },
-      { name: 'Time to Positivity', unit: 'hours', normalRange: 'N/A' },
-    ]
-  },
-  STOOL_CS: {
-    name: 'Stool Culture & Sensitivity',
-    fields: [
-      { name: 'Organism', unit: '', normalRange: 'No pathogen' },
-    ]
-  },
-  THROAT_SWAB: {
-    name: 'Throat Swab Culture',
-    fields: [
-      { name: 'Organism', unit: '', normalRange: 'Normal flora' },
-    ]
-  },
-  WOUND_SWAB: {
-    name: 'Wound Swab Culture',
-    fields: [
-      { name: 'Organism', unit: '', normalRange: 'No growth' },
-    ]
-  },
-    VAGINAL_SWAB: {
-    name: 'Vaginal Swab Culture',
-    fields: [
-      { name: 'Organism', unit: '', normalRange: 'Normal flora' },
-    ]
-  },
-  URINARY_SWAB: {
-    name: 'Urinary Culture',
-    fields: [
-      { name: 'Organism', unit: '', normalRange: 'No growth' },
-    ]
-  },
-  SPUTUM_AFB: {
-    name: 'Sputum Acid Fast Bacilli',
-    fields: [
-      { name: 'AFB', unit: '', normalRange: 'Negative' },
-      { name: 'ZN Stain', unit: '', normalRange: 'Negative' },
-    ]
-  },
-  STOOL_MICRO: {
-    name: 'Stool Microscopy',
-    fields: [
-      { name: 'Ova', unit: '', normalRange: '' },
-      { name: 'Cysts', unit: '', normalRange: '' },
-      { name: 'Trophozoites', unit: '', normalRange: '' },
-    ]
-  },
-  BLOOD_FILM: {
-    name: 'Blood Film for Malaria Parasite',
-    fields: [
-      { name: 'Malaria Parasite', unit: '', normalRange: '' },
-      { name: 'Parasitemia', unit: '%', normalRange: '0' },
-    ]
-  },
-  UA: {
-    name: 'Urinalysis',
-    fields: [
-      { name: 'Appearance', unit: '', normalRange: 'Clear' },
-      { name: 'pH', unit: '', normalRange: '4.5-8.0' },
-      { name: 'Specific Gravity', unit: '', normalRange: '1.005-1.030' },
-      { name: 'Protein', unit: '', normalRange: 'Negative' },
-      { name: 'Glucose', unit: '', normalRange: 'Negative' },
-      { name: 'WBC', unit: '/hpf', normalRange: '0-5' },
-      { name: 'RBC', unit: '/hpf', normalRange: '0-2' },
-    ]
-  },
-  URINE_RE: {
-    name: 'Urine Routine Examination',
-    fields: [
-      { name: 'Color', unit: '', normalRange: 'Pale yellow' },
-      { name: 'Appearance', unit: '', normalRange: 'Clear' },
-      { name: 'pH', unit: '', normalRange: '4.5-8.0' },
-      { name: 'Specific Gravity', unit: '', normalRange: '1.005-1.030' },
-      { name: 'Protein', unit: '', normalRange: 'Negative' },
-      { name: 'Glucose', unit: '', normalRange: 'Negative' },
-      { name: 'Ketones', unit: '', normalRange: 'Negative' },
-      { name: 'Blood', unit: '', normalRange: 'Negative' },
-    ]
-  },
-  URINE_MICRO: {
-    name: 'Urine Microscopy',
-    fields: [
-      { name: 'WBC', unit: '/hpf', normalRange: '0-5' },
-      { name: 'RBC', unit: '/hpf', normalRange: '0-2' },
-      { name: 'Epithelial Cells', unit: '/hpf', normalRange: '0-5' },
-      { name: 'Casts', unit: '/hpf', normalRange: '0-2' },
-      { name: 'Crystals', unit: '', normalRange: 'None' },
-      { name: 'Bacteria', unit: '', normalRange: 'None' },
-    ]
-  },
-  '24HR_PROTEIN': {
-    name: '24 Hour Urinary Protein',
-    fields: [
-      { name: 'Result', unit: 'mg/day', normalRange: '<150' },
-    ]
-  },
-  HIV: {
-    name: 'HIV Antibody Test',
-    fields: [
-      { name: 'HIV Antibody', unit: '', normalRange: 'Negative' },
-    ]
-  },
-  VDRL: {
-    name: 'VDRL Test for Syphilis',
-    fields: [
-      { name: 'VDRL', unit: '', normalRange: 'Negative' },
-    ]
-  },
-  HBSAG: {
-    name: 'Hepatitis B Surface Antigen',
-    fields: [
-      { name: 'HBsAg', unit: '', normalRange: 'Negative' },
-    ]
-  },
-  ANTI_HCV: {
-    name: 'Anti-HCV (Hepatitis C)',
-    fields: [
-      { name: 'Anti-HCV', unit: '', normalRange: 'Negative' },
-    ]
-  },
-  WIDAL: {
-    name: 'Widal Test',
-    fields: [
-      { name: 'S. Typhi O', unit: '', normalRange: '<1:80' },
-      { name: 'S. Typhi H', unit: '', normalRange: '<1:160' },
-      { name: 'S. Paratyphi AH', unit: '', normalRange: '<1:80' },
-      { name: 'S. Paratyphi BH', unit: '', normalRange: '<1:80' },
-    ]
-  },
-  SEMEN_ANALYSIS: {
-    name: 'Semen Analysis',
-    fields: [
-      { name: 'Volume', unit: 'mL', normalRange: '2-5' },
-      { name: 'Count', unit: 'million/mL', normalRange: '15-200' },
-      { name: 'Motility', unit: '%', normalRange: '>50' },
-      { name: 'Morphology', unit: '%', normalRange: '>30' },
-      { name: 'pH', unit: '', normalRange: '7.2-8.0' },
-    ]
-  },
-  PAP_SMEAR: {
-    name: 'Pap Smear',
-    fields: [
-      { name: 'Result', unit: '', normalRange: 'Negative for malignancy' },
-    ]
-  },
-  BONE_MARROW: {
-    name: 'Bone Marrow Aspiration',
-    fields: [
-      { name: 'Cellularity', unit: '', normalRange: 'Normal' },
-      { name: 'Myeloid:Erythroid Ratio', unit: '', normalRange: '2-4:1' },
-      { name: 'Megakaryocytes', unit: '', normalRange: 'Present' },
-    ]
-  },
-  CSF_ANALYSIS: {
-    name: 'CSF Analysis',
-    fields: [
-      { name: 'Appearance', unit: '', normalRange: 'Clear' },
-      { name: 'Protein', unit: 'mg/dL', normalRange: '15-45' },
-      { name: 'Glucose', unit: 'mg/dL', normalRange: '40-80' },
-      { name: 'WBC', unit: '/μL', normalRange: '0-5' },
-    ]
-  },
-  PLEURAL_FLUID: {
-    name: 'Pleural Fluid Analysis',
-    fields: [
-      { name: 'Appearance', unit: '', normalRange: 'Clear' },
-      { name: 'Protein', unit: 'g/dL', normalRange: '<3.0' },
-      { name: 'Glucose', unit: 'mg/dL', normalRange: 'Similar to serum' },
-      { name: 'WBC', unit: '/μL', normalRange: '<1000' },
-    ]
-  },
-  ASCITIC_FLUID: {
-    name: 'Ascitic Fluid Analysis',
-    fields: [
-      { name: 'Appearance', unit: '', normalRange: 'Clear' },
-      { name: 'Protein', unit: 'g/dL', normalRange: '<2.5' },
-      { name: 'SAAG', unit: 'g/dL', normalRange: '>1.1' },
-      { name: 'WBC', unit: '/μL', normalRange: '<500' },
-    ]
-  },
-  SYNOVIAL_FLUID: {
-    name: 'Synovial Fluid Analysis',
-    fields: [
-      { name: 'Appearance', unit: '', normalRange: 'Clear' },
-      { name: 'WBC', unit: '/μL', normalRange: '<200' },
-      { name: 'PMN', unit: '%', normalRange: '<25' },
-      { name: 'Glucose', unit: 'mg/dL', normalRange: 'Similar to serum' },
-    ]
-  },
-  FSH_LH: {
-    name: 'FSH & LH',
-    fields: [
-      { name: 'FSH', unit: 'mIU/mL', normalRange: 'Follicular: 2.5-10.2' },
-      { name: 'LH', unit: 'mIU/mL', normalRange: 'Follicular: 1.9-12.5' },
-    ]
-  },
-  PROLACTIN: {
-    name: 'Prolactin',
-    fields: [
-      { name: 'Prolactin', unit: 'ng/mL', normalRange: '4.0-15.2' },
-    ]
-  },
-  TESTOSTERONE: {
-    name: 'Testosterone',
-    fields: [
-      { name: 'Testosterone', unit: 'ng/dL', normalRange: 'Male: 270-1070' },
-    ]
-  },
-  ESTRADIOL: {
-    name: 'Estradiol',
-    fields: [
-      { name: 'Estradiol', unit: 'pg/mL', normalRange: 'Follicular: 30-100' },
-    ]
-  },
-  PROGESTERONE: {
-    name: 'Progesterone',
-    fields: [
-      { name: 'Progesterone', unit: 'ng/mL', normalRange: 'Follicular: <1.5' },
-    ]
-  },
-  CORTISOL: {
-    name: 'Cortisol',
-    fields: [
-      { name: 'Cortisol (8 AM)', unit: 'μg/dL', normalRange: '5-25' },
-    ]
-  },
-  DHEA_S: {
-    name: 'DHEA-S',
-    fields: [
-      { name: 'DHEA-S', unit: 'μg/dL', normalRange: 'Male: 160-449' },
-    ]
-  },
-  VITAMIN_D: {
-    name: 'Vitamin D (25-OH)',
-    fields: [
-      { name: '25-OH Vitamin D', unit: 'ng/mL', normalRange: '30-100' },
-    ]
-  },
-  VITAMIN_B12: {
-    name: 'Vitamin B12',
-    fields: [
-      { name: 'Vitamin B12', unit: 'pg/mL', normalRange: '200-900' },
-    ]
-  },
-  FOLIC_ACID: {
-    name: 'Folic Acid',
-    fields: [
-      { name: 'Folic Acid', unit: 'ng/mL', normalRange: '>4.0' },
-    ]
-  },
-  IRON_PROFILE: {
-    name: 'Iron Profile',
-    fields: [
-      { name: 'Iron', unit: 'μg/dL', normalRange: 'Male: 65-175' },
-      { name: 'TIBC', unit: 'μg/dL', normalRange: '250-450' },
-      { name: 'Ferritin', unit: 'ng/mL', normalRange: '30-300' },
-      { name: 'Transferrin Saturation', unit: '%', normalRange: '20-50' },
-    ]
-  },
-  CALCIUM: {
-    name: 'Calcium',
-    fields: [
-      { name: 'Calcium', unit: 'mg/dL', normalRange: '8.5-10.5' },
-    ]
-  },
-  MAGNESIUM: {
-    name: 'Magnesium',
-    fields: [
-      { name: 'Magnesium', unit: 'mg/dL', normalRange: '1.7-2.2' },
-    ]
-  },
-  PHOSPHORUS: {
-    name: 'Phosphorus',
-    fields: [
-      { name: 'Phosphorus', unit: 'mg/dL', normalRange: '2.5-4.5' },
-    ]
-  },
-};
-
 // Collection methods by sample type
 const collectionMethods: Record<string, { name: string; icon: string; description: string }[]> = {
   'Blood': [
@@ -842,10 +376,13 @@ export default function LabOrdersPage() {
   
   // Add Lab Partner dialog states
   const [isAddPartnerDialogOpen, setIsAddPartnerDialogOpen] = useState(false);
+  const [editingPartnerId, setEditingPartnerId] = useState<number | null>(null);
   const [newPartnerName, setNewPartnerName] = useState('');
   const [newPartnerCode, setNewPartnerCode] = useState('');
   const [newPartnerEmail, setNewPartnerEmail] = useState('');
   const [newPartnerPhone, setNewPartnerPhone] = useState('');
+  const [newPartnerAddress, setNewPartnerAddress] = useState('');
+  const [newPartnerContactTitle, setNewPartnerContactTitle] = useState('The Medical Director');
   const [isSubmittingPartner, setIsSubmittingPartner] = useState(false);
 
   // Manage Lab Partners dialog states
@@ -853,6 +390,40 @@ export default function LabOrdersPage() {
   const [deletingPartnerId, setDeletingPartnerId] = useState<number | null>(null);
   const [deleteConfirmPartnerId, setDeleteConfirmPartnerId] = useState<number | null>(null);
   const [deleteConfirmPartnerName, setDeleteConfirmPartnerName] = useState<string>('');
+
+  // ----------------------------------------------------------------------
+  // Send to External Lab — order-level outsourced dispatch
+  // ----------------------------------------------------------------------
+  // Two-stage dialog: stage 1 picks tests + partner + notes; stage 2 swaps
+  // to a confirmation panel that prints the standardised Referral Letter
+  // and Responsibility Form before the user clicks Done.
+  const [isDispatchDialogOpen, setIsDispatchDialogOpen] = useState(false);
+  const [dispatchSelectedTestIds, setDispatchSelectedTestIds] = useState<string[]>([]);
+  const [dispatchPartnerId, setDispatchPartnerId] = useState<string>(''); // Select needs string
+  const [dispatchNotes, setDispatchNotes] = useState('');
+  const [isCreatingDispatch, setIsCreatingDispatch] = useState(false);
+
+  // Stage 2 — confirmation panel for the dispatch we just issued (or are reprinting)
+  const [confirmedDispatch, setConfirmedDispatch] = useState<LabReferralDispatch | null>(null);
+  const [referralLetterPrinted, setReferralLetterPrinted] = useState(false);
+  const [responsibilityFormPrinted, setResponsibilityFormPrinted] = useState(false);
+  const [isPrintingReferral, setIsPrintingReferral] = useState(false);
+  const [isPrintingResponsibility, setIsPrintingResponsibility] = useState(false);
+
+  // Dispatch history shown inside the order detail dialog
+  const [orderDispatches, setOrderDispatches] = useState<LabReferralDispatch[]>([]);
+  const [loadingOrderDispatches, setLoadingOrderDispatches] = useState(false);
+  const [cancellingDispatchId, setCancellingDispatchId] = useState<number | null>(null);
+
+  // Done-without-printing nudge — shown when the user clicks Done in the
+  // post-dispatch confirmation panel without opening either PDF.
+  const [skipPrintConfirmOpen, setSkipPrintConfirmOpen] = useState(false);
+
+  // Cancel-dispatch flow: which dispatch is being cancelled + the reason
+  // typed into the AlertDialog. Replaces the old `window.prompt` so the user
+  // gets a real Textarea and a clear explanation of side effects.
+  const [cancelDispatchTarget, setCancelDispatchTarget] = useState<LabReferralDispatch | null>(null);
+  const [cancelDispatchReason, setCancelDispatchReason] = useState('');
   
   const [resultEntryMode, setResultEntryMode] = useState<'values' | 'upload'>('values');
   const [resultValues, setResultValues] = useState<Record<string, string>>({});
@@ -924,15 +495,34 @@ export default function LabOrdersPage() {
     };
   }, [selectedOrder]);
 
-  // Resolve template for result entry:
-  //   1) test-specific `template_normal_range` (best: always matches backend)
-  //   2) templates list from API (/laboratory/templates)
-  //   3) legacy hardcoded fallback (no min/max, so no classification)
-  const getTemplateForTest = (test: LabTest): { name: string; fields: TemplateField[] } | undefined => {
-    const fromTest = buildEntryTemplate(test.code, test.templateNormalRange);
-    if (fromTest) return fromTest;
-    return apiTemplatesByCode[test.code] || testTemplates[test.code];
+  // Resolve a Test Template for result entry. The DB is the single source
+  // of truth — there is no in-code catalog to fall back to. Sources, in
+  // order of trust:
+  //   1) `snapshot` — `template_normal_range` pinned on the test row at
+  //                   order time. Audit-stable; always matches what the
+  //                   doctor saw.
+  //   2) `api`      — current `LabTemplate` rows from the DB
+  //                   (`/laboratory/templates/`), edited under
+  //                   Laboratory → Test Templates.
+  //   3) `none`     — no template configured. The UI shows an explicit
+  //                   "Add this template" warning and falls back to a
+  //                   single free-text "Result Value" field so techs can
+  //                   record something rather than be blocked.
+  type TemplateSource = 'snapshot' | 'api' | 'none';
+  type TemplateLookup = {
+    template: { name: string; fields: TemplateField[] } | undefined;
+    source: TemplateSource;
   };
+  const resolveTemplateForTest = (test: LabTest): TemplateLookup => {
+    const fromTest = buildEntryTemplate(test.code, test.templateNormalRange);
+    if (fromTest) return { template: fromTest, source: 'snapshot' };
+    const fromApi = apiTemplatesByCode[test.code];
+    if (fromApi) return { template: fromApi, source: 'api' };
+    return { template: undefined, source: 'none' };
+  };
+  // Backwards-compatible: callers that only need the template stay unchanged.
+  const getTemplateForTest = (test: LabTest): { name: string; fields: TemplateField[] } | undefined =>
+    resolveTemplateForTest(test).template;
 
   // Calculate order progress percentage
   const getOrderProgress = (tests: LabTest[]) => {
@@ -1282,7 +872,12 @@ export default function LabOrdersPage() {
       }
       setApiTemplatesByCode(prev => ({ ...prev, ...next }));
     } catch (e) {
-      console.warn('Could not load lab templates for result entry, using fallbacks:', e);
+      // Templates from /laboratory/templates are the canonical source for
+      // result-entry parameters. If this load fails, the result-entry UI
+      // still renders using `template_normal_range` snapshots pinned on the
+      // test rows at order time. Tests without a snapshot fall back to a
+      // free-text Result Value field with a "no template configured" warning.
+      console.warn('Could not load lab templates for result entry:', e);
     }
   }, []);
 
@@ -1449,45 +1044,32 @@ export default function LabOrdersPage() {
     }
   };
 
-  // Start processing for a single test
-  const resolvedOutsourcedLabName = (): string => {
-    if (processingMethod !== 'Outsourced') return '';
-    if (selectedOutsourcedLab === OUTSOURCED_LAB_OTHER) return customOutsourcedLab.trim();
-    return selectedOutsourcedLab.trim();
-  };
-
+  /**
+   * Start in-house processing for a single test. Outsourcing is handled
+   * separately by the order-level "Send to External Lab" dispatch flow,
+   * so this handler always sends `in_house` to the backend.
+   */
   const handleStartProcessing = async () => {
     if (!selectedOrder || !selectedTest) return;
-    const outsourcedName = resolvedOutsourcedLabName();
-    if (processingMethod === 'Outsourced' && !outsourcedName) {
-      toast.error('Please select a lab partner or enter a lab name');
-      return;
-    }
     setIsSubmitting(true);
 
     try {
-      const updatedTest = await labService.processTest(
+      await labService.processTest(
         parseInt(selectedOrder.id),
         parseInt(selectedTest.id),
-        transformToBackendProcessingMethod(processingMethod) as 'in_house' | 'outsourced',
-        processingMethod === 'Outsourced' ? outsourcedName : undefined
+        'in_house'
       );
 
-      toast.success(`${selectedTest.name} sent for ${processingMethod.toLowerCase()} processing`);
-      
-      // Reload orders to get updated data
+      toast.success(`${selectedTest.name} sent for in-house processing`);
+
       await loadOrders();
-      
-      // Update selectedOrder if dialog is still open
+
       if (isViewDialogOpen) {
         const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
         setSelectedOrder(transformOrder(updatedOrder));
       }
 
       setIsProcessDialogOpen(false);
-      setProcessingMethod('In-house');
-      setSelectedOutsourcedLab('');
-      setCustomOutsourcedLab('');
     } catch (err: any) {
       let errorMessage = 'Failed to start processing. Please try again.';
       if (err.message) {
@@ -1506,6 +1088,231 @@ export default function LabOrdersPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // ----------------------------------------------------------------------
+  // Send to External Lab — dispatch flow
+  // ----------------------------------------------------------------------
+
+  /** Tests that are eligible to be sent out to a partner: collected but not
+   *  yet processed/rejected/verified, and not already on an issued dispatch. */
+  const dispatchEligibleTests = useMemo(() => {
+    if (!selectedOrder) return [] as LabTest[];
+    const onActiveDispatch = new Set<number>();
+    for (const d of orderDispatches) {
+      if (d.status !== 'issued') continue;
+      for (const t of d.tests) onActiveDispatch.add(t.id);
+    }
+    return selectedOrder.tests.filter(
+      (t) =>
+        t.status === LAB_TEST_STATUS.SAMPLE_COLLECTED &&
+        !onActiveDispatch.has(parseInt(t.id))
+    );
+  }, [selectedOrder, orderDispatches]);
+
+  const loadOrderDispatches = useCallback(async (orderId: number) => {
+    setLoadingOrderDispatches(true);
+    try {
+      const dispatches = await labService.getOrderDispatches(orderId);
+      setOrderDispatches(dispatches);
+    } catch (e: any) {
+      console.error('getOrderDispatches failed', e);
+      // 404 likely means migrations haven't run yet — keep the rest of the page usable.
+      if (e?.status !== 404) {
+        toast.error(e?.message || 'Could not load dispatch history');
+      }
+      setOrderDispatches([]);
+    } finally {
+      setLoadingOrderDispatches(false);
+    }
+  }, []);
+
+  /**
+   * Open the order-level dispatch dialog. By default every eligible test is
+   * pre-selected (typical "send the whole batch" flow). Pass a `prefocusTestId`
+   * when arriving from the per-test Process dialog so we only pre-select that
+   * one test — the user can still tick others to batch them in.
+   */
+  const openDispatchDialog = async (prefocusTestId?: string) => {
+    if (!selectedOrder) return;
+    setIsDispatchDialogOpen(true);
+    setConfirmedDispatch(null);
+    setReferralLetterPrinted(false);
+    setResponsibilityFormPrinted(false);
+    setDispatchSelectedTestIds(
+      prefocusTestId
+        ? [prefocusTestId]
+        : dispatchEligibleTests.map((t) => t.id)
+    );
+    setDispatchPartnerId('');
+    setDispatchNotes('');
+    if (labPartners.length === 0) await loadLabPartners();
+  };
+
+  /**
+   * Bridge from the per-test Process dialog when the user picks "Outsourced".
+   * Closes the per-test dialog and opens the order-level dispatch dialog with
+   * the clicked test pre-selected.
+   */
+  const handleContinueToDispatch = () => {
+    if (!selectedTest) return;
+    const testId = selectedTest.id;
+    setIsProcessDialogOpen(false);
+    // Defer so the close animation completes before the next dialog mounts.
+    setTimeout(() => openDispatchDialog(testId), 50);
+  };
+
+  const toggleDispatchTest = (testId: string) => {
+    setDispatchSelectedTestIds((prev) =>
+      prev.includes(testId) ? prev.filter((x) => x !== testId) : [...prev, testId]
+    );
+  };
+
+  const handleCreateDispatch = async () => {
+    if (!selectedOrder) return;
+    if (dispatchSelectedTestIds.length === 0) {
+      toast.error('Pick at least one test to send out');
+      return;
+    }
+    if (!dispatchPartnerId) {
+      toast.error('Choose the lab partner this batch is going to');
+      return;
+    }
+
+    setIsCreatingDispatch(true);
+    try {
+      const dispatch = await labService.dispatchOutsourced(parseInt(selectedOrder.id), {
+        partner_id: parseInt(dispatchPartnerId),
+        test_ids: dispatchSelectedTestIds.map((id) => parseInt(id)),
+        notes: dispatchNotes.trim() || undefined,
+      });
+
+      toast.success(`Dispatch ${dispatch.dispatch_id} issued to ${dispatch.partner_name}`);
+
+      setConfirmedDispatch(dispatch);
+      setReferralLetterPrinted(false);
+      setResponsibilityFormPrinted(false);
+
+      // Refresh order + dispatch history so the order detail UI mirrors the new state.
+      await loadOrders();
+      const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+      setSelectedOrder(transformOrder(updatedOrder));
+      await loadOrderDispatches(parseInt(selectedOrder.id));
+    } catch (err: any) {
+      console.error('dispatchOutsourced failed', err);
+      const msg = err?.apiMessage || err?.message || 'Failed to create dispatch';
+      toast.error(msg);
+    } finally {
+      setIsCreatingDispatch(false);
+    }
+  };
+
+  /**
+   * Open a dispatch PDF in a new tab (same blob → object URL pattern used
+   * for the Lab Report download). The backend stamps the printed-at field
+   * each time the URL is hit, so reprinting just refreshes that timestamp.
+   */
+  const openDispatchPdf = async (
+    kind: 'referral' | 'responsibility',
+    dispatch: LabReferralDispatch
+  ) => {
+    if (!selectedOrder) return;
+
+    const setBusy = kind === 'referral' ? setIsPrintingReferral : setIsPrintingResponsibility;
+    setBusy(true);
+    let objectUrl: string | null = null;
+    try {
+      const blob =
+        kind === 'referral'
+          ? await labService.fetchReferralLetterPdf(parseInt(selectedOrder.id), dispatch.id)
+          : await labService.fetchResponsibilityFormPdf(parseInt(selectedOrder.id), dispatch.id);
+      objectUrl = URL.createObjectURL(blob);
+
+      const win = window.open(objectUrl, '_blank');
+      if (!win) {
+        toast.error('Pop-ups blocked. Allow pop-ups to view the PDF.');
+        return;
+      }
+
+      if (kind === 'referral') setReferralLetterPrinted(true);
+      else setResponsibilityFormPrinted(true);
+
+      // Refresh history so the printed-at timestamp shows up in the table.
+      await loadOrderDispatches(parseInt(selectedOrder.id));
+    } catch (err: any) {
+      console.error('openDispatchPdf failed', err);
+      toast.error(err?.apiMessage || err?.message || 'Failed to open PDF');
+    } finally {
+      setBusy(false);
+      // Keep the object URL alive for ~1 minute so the new tab can render
+      // it before we revoke. Browsers usually cache the blob anyway.
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl!), 60_000);
+    }
+  };
+
+  /** Close the dispatch dialog. If neither doc was opened, route through the
+   *  AlertDialog nudge instead of dismissing immediately. */
+  const handleDoneDispatch = () => {
+    if (!confirmedDispatch) {
+      setIsDispatchDialogOpen(false);
+      return;
+    }
+    if (!referralLetterPrinted && !responsibilityFormPrinted) {
+      setSkipPrintConfirmOpen(true);
+      return;
+    }
+    setIsDispatchDialogOpen(false);
+    setConfirmedDispatch(null);
+  };
+
+  /** Confirmed close from the "Done without printing" AlertDialog. */
+  const confirmDoneSkipPrint = () => {
+    setSkipPrintConfirmOpen(false);
+    setIsDispatchDialogOpen(false);
+    setConfirmedDispatch(null);
+  };
+
+  /** Open the AlertDialog that confirms cancellation of a dispatch and
+   *  collects an optional reason. The actual cancel call lives in
+   *  `confirmCancelDispatch` so the AlertDialog can remain a pure UI shell. */
+  const handleCancelDispatch = (dispatch: LabReferralDispatch) => {
+    setCancelDispatchTarget(dispatch);
+    setCancelDispatchReason('');
+  };
+
+  const confirmCancelDispatch = async () => {
+    if (!selectedOrder || !cancelDispatchTarget) return;
+    const dispatch = cancelDispatchTarget;
+    setCancellingDispatchId(dispatch.id);
+    try {
+      await labService.cancelDispatch(
+        parseInt(selectedOrder.id),
+        dispatch.id,
+        cancelDispatchReason.trim() || undefined,
+      );
+      toast.success(`Dispatch ${dispatch.dispatch_id} cancelled`);
+      await loadOrders();
+      const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+      setSelectedOrder(transformOrder(updatedOrder));
+      await loadOrderDispatches(parseInt(selectedOrder.id));
+      setCancelDispatchTarget(null);
+      setCancelDispatchReason('');
+    } catch (err: any) {
+      console.error('cancelDispatch failed', err);
+      toast.error(err?.apiMessage || err?.message || 'Failed to cancel dispatch');
+    } finally {
+      setCancellingDispatchId(null);
+    }
+  };
+
+  /** Reopen the post-dispatch print panel for an existing dispatch (used by
+   *  the Dispatches history). Lets the user reprint paperwork without
+   *  creating a new dispatch. */
+  const openExistingDispatchPanel = (dispatch: LabReferralDispatch) => {
+    setConfirmedDispatch(dispatch);
+    setReferralLetterPrinted(!!dispatch.referral_letter_printed_at);
+    setResponsibilityFormPrinted(!!dispatch.responsibility_form_printed_at);
+    setIsDispatchDialogOpen(true);
   };
 
   // Submit results for a single test
@@ -1622,7 +1429,13 @@ export default function LabOrdersPage() {
     }
   };
 
-  const openViewDialog = (order: LabOrder) => { setSelectedOrder(order); setIsViewDialogOpen(true); };
+  const openViewDialog = (order: LabOrder) => {
+    setSelectedOrder(order);
+    setIsViewDialogOpen(true);
+    setOrderDispatches([]);
+    // Fire-and-forget — failures are toasted by loadOrderDispatches itself.
+    void loadOrderDispatches(parseInt(order.id));
+  };
   
   const openCollectDialog = (test: LabTest) => {
     setSelectedTest(test);
@@ -1635,16 +1448,15 @@ export default function LabOrdersPage() {
     setIsCollectDialogOpen(true);
   };
   
-  const openProcessDialog = async (test: LabTest) => {
-    setSelectedTest(test);
-    setProcessingMethod('In-house');
-    setSelectedOutsourcedLab('');
-    setCustomOutsourcedLab('');
-    setIsProcessDialogOpen(true);
+  /** Fetch the active lab-partner list. Used by the per-test process dialog,
+   *  the order-level dispatch dialog, and the manage-partners modal. */
+  const loadLabPartners = useCallback(async (): Promise<LabPartner[]> => {
     setLoadingLabPartners(true);
     try {
       const res = await labService.getLabPartners({ page_size: 200 });
-      setLabPartners(res.results || []);
+      const partners = res.results || [];
+      setLabPartners(partners);
+      return partners;
     } catch (e: any) {
       console.error('getLabPartners failed', e?.status, e?.body, e);
       const hint =
@@ -1653,45 +1465,98 @@ export default function LabOrdersPage() {
           : e?.apiMessage || e?.message || 'Request failed';
       toast.error(`Could not load lab partners (${hint}). Use “Other” to type a name.`);
       setLabPartners([]);
+      return [];
     } finally {
       setLoadingLabPartners(false);
     }
+  }, []);
+
+  const openProcessDialog = async (test: LabTest) => {
+    setSelectedTest(test);
+    // Per-test "Start Processing" is in-house only now. Outsourced batches
+    // go through the order-level Send to External Lab dialog.
+    setProcessingMethod('In-house');
+    setSelectedOutsourcedLab('');
+    setCustomOutsourcedLab('');
+    setIsProcessDialogOpen(true);
   };
 
-  const handleAddPartner = async () => {
+  const resetPartnerForm = () => {
+    setEditingPartnerId(null);
+    setNewPartnerName('');
+    setNewPartnerCode('');
+    setNewPartnerEmail('');
+    setNewPartnerPhone('');
+    setNewPartnerAddress('');
+    setNewPartnerContactTitle('The Medical Director');
+  };
+
+  const openEditPartnerDialog = (partner: LabPartner) => {
+    setEditingPartnerId(partner.id);
+    setNewPartnerName(partner.name || '');
+    setNewPartnerCode(partner.code || '');
+    setNewPartnerEmail(partner.email || '');
+    setNewPartnerPhone(partner.phone || '');
+    setNewPartnerAddress(partner.address || '');
+    setNewPartnerContactTitle(partner.contact_person_title || 'The Medical Director');
+    setIsAddPartnerDialogOpen(true);
+  };
+
+  const handleSubmitPartner = async () => {
     if (!newPartnerName.trim()) {
       toast.error('Partner name is required');
       return;
     }
 
+    const isEdit = editingPartnerId !== null;
+    const payload = {
+      name: newPartnerName.trim(),
+      code: newPartnerCode.trim(),
+      email: newPartnerEmail.trim(),
+      phone: newPartnerPhone.trim(),
+      address: newPartnerAddress.trim(),
+      contact_person_title: newPartnerContactTitle.trim(),
+    };
+
     setIsSubmittingPartner(true);
     try {
-      const newPartner = await labService.createLabPartner({
-        name: newPartnerName.trim(),
-        code: newPartnerCode.trim() || undefined,
-        email: newPartnerEmail.trim() || undefined,
-        phone: newPartnerPhone.trim() || undefined,
-        is_active: true,
-      });
+      const saved = isEdit
+        ? await labService.updateLabPartner(editingPartnerId!, payload)
+        : await labService.createLabPartner({ ...payload, is_active: true });
 
-      // Add to the list
-      setLabPartners((prev) => [...prev, newPartner]);
+      setLabPartners((prev) =>
+        isEdit
+          ? prev.map((p) => (p.id === saved.id ? saved : p))
+          : [...prev, saved]
+      );
 
-      // Reset form and close dialog
-      setNewPartnerName('');
-      setNewPartnerCode('');
-      setNewPartnerEmail('');
-      setNewPartnerPhone('');
+      // If the renamed partner was the currently selected outsourced lab, sync the label.
+      if (isEdit && selectedOutsourcedLab && selectedOutsourcedLab !== saved.name) {
+        const editedPartner = labPartners.find((p) => p.id === saved.id);
+        if (editedPartner && editedPartner.name === selectedOutsourcedLab) {
+          setSelectedOutsourcedLab(saved.name);
+        }
+      }
+
+      resetPartnerForm();
       setIsAddPartnerDialogOpen(false);
 
-      // Select the new partner
-      setSelectedOutsourcedLab(newPartner.name);
-      setCustomOutsourcedLab('');
+      if (!isEdit) {
+        // Per-test dialog (legacy state — kept for compatibility) and the new
+        // order-level dispatch dialog both auto-select the brand-new partner.
+        setSelectedOutsourcedLab(saved.name);
+        setCustomOutsourcedLab('');
+        if (isDispatchDialogOpen) setDispatchPartnerId(String(saved.id));
+      }
 
-      toast.success(`Lab partner "${newPartner.name}" added successfully`);
+      toast.success(
+        isEdit
+          ? `Lab partner "${saved.name}" updated`
+          : `Lab partner "${saved.name}" added successfully`
+      );
     } catch (err: any) {
-      console.error('Failed to add lab partner:', err);
-      const msg = err?.message || 'Failed to add lab partner. Please try again.';
+      console.error('Failed to save lab partner:', err);
+      const msg = err?.message || 'Failed to save lab partner. Please try again.';
       toast.error(msg);
     } finally {
       setIsSubmittingPartner(false);
@@ -2530,7 +2395,27 @@ export default function LabOrdersPage() {
                 
                 {/* Individual Tests - With Actions */}
                 <div className="space-y-3">
-                  <p className="text-sm font-medium">Tests ({selectedOrder.tests.length})</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">Tests ({selectedOrder.tests.length})</p>
+                    {/* Only surface the order-level batch button when there's
+                        a real batch opportunity (>= 2 eligible tests). For a
+                        single test, the per-test "Start Processing" → Outsourced
+                        flow already routes to the same dispatch dialog. */}
+                    {dispatchEligibleTests.length >= 2 && (
+                      <Button
+                        size="sm"
+                        onClick={() => openDispatchDialog()}
+                        className="h-8 px-3 bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
+                        title="Batch-send collected samples to an external lab partner"
+                      >
+                        <Send className="h-3.5 w-3.5 mr-1.5" />
+                        Send to External Lab
+                        <Badge variant="outline" className="ml-2 bg-white/20 text-white border-white/30 text-[10px] px-1.5">
+                          {dispatchEligibleTests.length} ready
+                        </Badge>
+                      </Button>
+                    )}
+                  </div>
                   {selectedOrder.tests.map(test => (
                     <div key={test.id} className="p-3 rounded-lg border space-y-2">
                       <div className="flex items-center justify-between">
@@ -2707,6 +2592,126 @@ export default function LabOrdersPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* Dispatches History — every batch send-out for this order */}
+                {(orderDispatches.length > 0 || loadingOrderDispatches) && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <History className="h-4 w-4 text-indigo-500" />
+                      <p className="text-sm font-medium">Dispatches</p>
+                      {loadingOrderDispatches && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                    </div>
+                    <div className="space-y-2">
+                      {orderDispatches.map((d) => {
+                        const issuedDate = d.issued_at ? new Date(d.issued_at) : null;
+                        const isActive = d.status === 'issued';
+                        return (
+                          <div
+                            key={d.id}
+                            className={`p-3 rounded-lg border space-y-2 ${
+                              isActive
+                                ? 'border-indigo-200 bg-indigo-50/40 dark:border-indigo-900/40 dark:bg-indigo-900/10'
+                                : 'border-muted bg-muted/30'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-wrap text-xs">
+                                <span className="inline-flex items-center gap-1 font-mono font-medium text-indigo-700 dark:text-indigo-400">
+                                  <Hash className="h-3 w-3" />{d.dispatch_id}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    d.status === 'issued'
+                                      ? 'bg-indigo-500/10 text-indigo-600 text-[10px]'
+                                      : d.status === 'cancelled'
+                                      ? 'bg-rose-500/10 text-rose-600 text-[10px]'
+                                      : 'bg-amber-500/10 text-amber-600 text-[10px]'
+                                  }
+                                >
+                                  {d.status}
+                                </Badge>
+                                <span className="text-muted-foreground">→</span>
+                                <span className="font-medium">{d.partner_name}</span>
+                                <span className="text-muted-foreground">
+                                  • {d.tests.length} test{d.tests.length === 1 ? '' : 's'}
+                                </span>
+                                {issuedDate && (
+                                  <span className="text-muted-foreground">
+                                    • {issuedDate.toLocaleDateString()} {formatTime(d.issued_at)}
+                                    {d.issued_by_name ? ` by ${d.issued_by_name}` : ''}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => openExistingDispatchPanel(d)}
+                                  title="Reprint referral letter / responsibility form"
+                                >
+                                  <Printer className="h-3 w-3 mr-1" />
+                                  Reprint
+                                </Button>
+                                {isActive && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                                    onClick={() => handleCancelDispatch(d)}
+                                    disabled={cancellingDispatchId === d.id}
+                                    title="Cancel this dispatch and revert tests to Sample Collected"
+                                  >
+                                    {cancellingDispatchId === d.id ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <X className="h-3 w-3 mr-1" />
+                                    )}
+                                    Cancel
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {d.tests.map((t) => (
+                                <Badge
+                                  key={t.id}
+                                  variant="outline"
+                                  className="text-[10px] bg-background"
+                                  title={`Code ${t.code} • Status: ${t.status}`}
+                                >
+                                  {t.name}
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+                              <span className="inline-flex items-center gap-1">
+                                <Mail className="h-3 w-3" />
+                                Referral letter:{' '}
+                                {d.referral_letter_printed_at
+                                  ? `printed ${formatTime(d.referral_letter_printed_at)}`
+                                  : 'not printed'}
+                              </span>
+                              <span className="inline-flex items-center gap-1">
+                                <FileSignature className="h-3 w-3" />
+                                Responsibility form:{' '}
+                                {d.responsibility_form_printed_at
+                                  ? `printed ${formatTime(d.responsibility_form_printed_at)}`
+                                  : 'not printed'}
+                              </span>
+                              {d.cancellation_reason && (
+                                <span className="text-rose-600">Reason: {d.cancellation_reason}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <DialogFooter>
@@ -2904,30 +2909,34 @@ export default function LabOrdersPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Start Processing Dialog */}
+        {/* Start Processing Dialog.
+            Two-card chooser: In-house finishes inline; Outsourced bridges to
+            the order-level Send to External Lab dialog (where the user picks
+            a partner and prints the standardised paperwork). */}
         <Dialog
           open={isProcessDialogOpen}
-          onOpenChange={(open) => {
-            setIsProcessDialogOpen(open);
-            if (!open) {
-              setSelectedOutsourcedLab('');
-              setCustomOutsourcedLab('');
-            }
-          }}
+          onOpenChange={setIsProcessDialogOpen}
         >
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Play className="h-5 w-5 text-blue-500" />Process Test</DialogTitle>
-              <DialogDescription>Choose processing method for {selectedTest?.name}</DialogDescription>
+              <DialogTitle className="flex items-center gap-2">
+                <Play className="h-5 w-5 text-blue-500" />Process Test
+              </DialogTitle>
+              <DialogDescription>
+                Choose processing method for {selectedTest?.name}
+              </DialogDescription>
             </DialogHeader>
             {selectedOrder && selectedTest && (
               <div className="space-y-4 py-4">
-                <div className="p-4 rounded-lg bg-muted/50 space-y-2">
+                <div className="p-4 rounded-lg bg-muted/50 space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Patient:</span><span className="font-medium">{selectedOrder.patient.name}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Test:</span><span className="font-medium">{selectedTest.name}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Collected By:</span><span className="font-medium">{selectedTest.collectedBy}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Sample:</span><span className="font-medium">{selectedTest.sampleType}</span></div>
+                  {selectedTest.collectedBy && (
+                    <div className="flex justify-between"><span className="text-muted-foreground">Collected by:</span><span className="font-medium">{selectedTest.collectedBy}</span></div>
+                  )}
                 </div>
-                
+
                 <div className="space-y-3">
                   <Label>Processing Method *</Label>
                   <div className="grid grid-cols-2 gap-3">
@@ -2935,8 +2944,8 @@ export default function LabOrdersPage() {
                       type="button"
                       onClick={() => setProcessingMethod('In-house')}
                       className={`p-4 rounded-lg border-2 text-left transition-all ${
-                        processingMethod === 'In-house' 
-                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' 
+                        processingMethod === 'In-house'
+                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
                           : 'border-muted hover:border-emerald-300'
                       }`}
                     >
@@ -2948,8 +2957,8 @@ export default function LabOrdersPage() {
                       type="button"
                       onClick={() => setProcessingMethod('Outsourced')}
                       className={`p-4 rounded-lg border-2 text-left transition-all ${
-                        processingMethod === 'Outsourced' 
-                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' 
+                        processingMethod === 'Outsourced'
+                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
                           : 'border-muted hover:border-indigo-300'
                       }`}
                     >
@@ -2958,138 +2967,634 @@ export default function LabOrdersPage() {
                       <p className="text-xs text-muted-foreground">Send to external lab</p>
                     </button>
                   </div>
-                </div>
 
-                {processingMethod === 'Outsourced' && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Select Lab Partner *</Label>
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setIsManagePartnersDialogOpen(true)}
-                          className="text-xs h-auto p-1"
-                        >
-                          ⚙️ Manage
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setIsAddPartnerDialogOpen(true)}
-                          className="text-xs h-auto p-1"
-                        >
-                          + Add Partner
-                        </Button>
-                      </div>
+                  {processingMethod === 'Outsourced' && (
+                    <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 dark:border-indigo-900/40 dark:bg-indigo-900/10 p-3 text-xs text-indigo-800 dark:text-indigo-300 flex gap-2">
+                      <Send className="h-4 w-4 mt-0.5 shrink-0" />
+                      <p>
+                        Next step: pick the lab partner, batch with any other
+                        outsourced tests on this order, and print the
+                        Referral Letter and Responsibility Form. We'll generate
+                        a serial (LBR-YYYY-NNNNNN) for the dispatch.
+                      </p>
                     </div>
-                    <Select
-                      value={selectedOutsourcedLab}
-                      onValueChange={(v) => {
-                        setSelectedOutsourcedLab(v);
-                        if (v !== OUTSOURCED_LAB_OTHER) setCustomOutsourcedLab('');
-                      }}
-                      disabled={loadingLabPartners}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={loadingLabPartners ? 'Loading partners…' : 'Choose a lab partner…'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {labPartners.map((p) => (
-                          <SelectItem key={p.id} value={p.name}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                        <SelectItem value={OUTSOURCED_LAB_OTHER}>Other (type name below)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {selectedOutsourcedLab === OUTSOURCED_LAB_OTHER && (
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">External lab name</Label>
-                        <Input
-                          value={customOutsourcedLab}
-                          onChange={(e) => setCustomOutsourcedLab(e.target.value)}
-                          placeholder="e.g. City Diagnostics Ltd"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsProcessDialogOpen(false)}>Cancel</Button>
-              <Button 
-                onClick={handleStartProcessing} 
-                disabled={isSubmitting || (processingMethod === 'Outsourced' && !resolvedOutsourcedLabName())} 
-                className="bg-blue-500 hover:bg-blue-600"
+              {processingMethod === 'Outsourced' ? (
+                <Button
+                  onClick={handleContinueToDispatch}
+                  className="bg-indigo-500 hover:bg-indigo-600"
+                >
+                  <Send className="h-4 w-4 mr-2" />
+                  Continue to dispatch
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleStartProcessing}
+                  disabled={isSubmitting}
+                  className="bg-blue-500 hover:bg-blue-600"
+                >
+                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+                  Start Processing
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Send to External Lab — order-level batch dispatch.
+            Two stages: stage 1 picks tests + partner + notes; once the
+            dispatch is created we swap to stage 2 — a confirmation panel
+            with Print Referral Letter / Print Responsibility Form. */}
+        <Dialog
+          open={isDispatchDialogOpen}
+          onOpenChange={(open) => {
+            setIsDispatchDialogOpen(open);
+            if (!open) {
+              setConfirmedDispatch(null);
+              setReferralLetterPrinted(false);
+              setResponsibilityFormPrinted(false);
+            }
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
+            {confirmedDispatch ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                    Dispatch Issued
+                  </DialogTitle>
+                  <DialogDescription>
+                    Print the paperwork that travels with the samples. Both
+                    documents are stamped with dispatch{' '}
+                    <span className="font-mono font-medium">{confirmedDispatch.dispatch_id}</span>.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2">
+                  <div className="p-4 rounded-lg border border-indigo-200 bg-indigo-50/40 dark:border-indigo-900/40 dark:bg-indigo-900/10 space-y-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Hash className="h-4 w-4 text-indigo-600" />
+                      <span className="font-mono font-medium text-indigo-700 dark:text-indigo-400">
+                        {confirmedDispatch.dispatch_id}
+                      </span>
+                      <span className="text-muted-foreground">→</span>
+                      <span className="font-medium">{confirmedDispatch.partner_name}</span>
+                      <Badge variant="outline" className="bg-background text-[10px]">
+                        {confirmedDispatch.tests.length} test{confirmedDispatch.tests.length === 1 ? '' : 's'}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {confirmedDispatch.tests.map((t) => (
+                        <Badge key={t.id} variant="outline" className="text-[10px] bg-background">
+                          {t.name}
+                        </Badge>
+                      ))}
+                    </div>
+                    {confirmedDispatch.notes && (
+                      <p className="text-xs text-muted-foreground">Notes: {confirmedDispatch.notes}</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => openDispatchPdf('referral', confirmedDispatch)}
+                      disabled={isPrintingReferral}
+                      className={`p-4 rounded-lg border-2 text-left transition-all ${
+                        referralLetterPrinted
+                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                          : 'border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10'
+                      } ${isPrintingReferral ? 'opacity-60 cursor-wait' : ''}`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        {isPrintingReferral ? (
+                          <Loader2 className="h-5 w-5 text-indigo-600 animate-spin" />
+                        ) : (
+                          <Mail className={`h-5 w-5 ${referralLetterPrinted ? 'text-emerald-600' : 'text-indigo-600'}`} />
+                        )}
+                        <p className="font-medium">Referral Letter</p>
+                        {referralLetterPrinted && (
+                          <CheckCircle2 className="h-4 w-4 text-emerald-600 ml-auto" />
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Letter to <span className="font-medium">{confirmedDispatch.partner_name}</span>{' '}
+                        listing the requested tests.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openDispatchPdf('responsibility', confirmedDispatch)}
+                      disabled={isPrintingResponsibility}
+                      className={`p-4 rounded-lg border-2 text-left transition-all ${
+                        responsibilityFormPrinted
+                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                          : 'border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10'
+                      } ${isPrintingResponsibility ? 'opacity-60 cursor-wait' : ''}`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        {isPrintingResponsibility ? (
+                          <Loader2 className="h-5 w-5 text-indigo-600 animate-spin" />
+                        ) : (
+                          <FileSignature className={`h-5 w-5 ${responsibilityFormPrinted ? 'text-emerald-600' : 'text-indigo-600'}`} />
+                        )}
+                        <p className="font-medium">Responsibility Form</p>
+                        {responsibilityFormPrinted && (
+                          <CheckCircle2 className="h-4 w-4 text-emerald-600 ml-auto" />
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Patient acknowledgement & financial responsibility for the outsourced workup.
+                      </p>
+                    </button>
+                  </div>
+
+                  {!referralLetterPrinted && !responsibilityFormPrinted && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-900/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                      <p>
+                        You can reprint these later from the Dispatches list on the order detail. The
+                        dispatch is already saved with serial{' '}
+                        <span className="font-mono font-medium">{confirmedDispatch.dispatch_id}</span>.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button onClick={handleDoneDispatch} className="bg-emerald-500 hover:bg-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                    Done
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Send className="h-5 w-5 text-indigo-500" />
+                    Send to External Lab
+                  </DialogTitle>
+                  <DialogDescription>
+                    Issue a referral dispatch for one or more collected samples. We'll
+                    generate a serial (LBR-YYYY-NNNNNN) and the standardised paperwork.
+                  </DialogDescription>
+                </DialogHeader>
+
+                {selectedOrder && (
+                  <div className="space-y-4 py-2">
+                    <div className="p-3 rounded-lg bg-muted/50 text-sm space-y-1">
+                      <div className="flex flex-wrap justify-between gap-2">
+                        <span><span className="text-muted-foreground">Patient:</span> <span className="font-medium">{selectedOrder.patient.name}</span></span>
+                        <span><span className="text-muted-foreground">Order:</span> <span className="font-mono font-medium">{selectedOrder.orderId}</span></span>
+                      </div>
+                      {selectedOrder.lab_number && (
+                        <div className="text-xs text-muted-foreground">Lab ID: <span className="font-mono text-blue-600">{selectedOrder.lab_number}</span></div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label>Tests to send out *</Label>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDispatchSelectedTestIds(dispatchEligibleTests.map((t) => t.id))}
+                            className="text-xs h-auto p-1"
+                            disabled={dispatchEligibleTests.length === 0 || dispatchSelectedTestIds.length === dispatchEligibleTests.length}
+                          >
+                            Select all
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDispatchSelectedTestIds([])}
+                            className="text-xs h-auto p-1"
+                            disabled={dispatchSelectedTestIds.length === 0}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                      </div>
+
+                      {dispatchEligibleTests.length === 0 ? (
+                        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground text-center">
+                          No collected samples are waiting for processing. Collect samples first
+                          (or cancel an existing dispatch) to send out a new batch.
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border max-h-56 overflow-y-auto divide-y">
+                          {dispatchEligibleTests.map((t) => {
+                            const checked = dispatchSelectedTestIds.includes(t.id);
+                            return (
+                              <label
+                                key={t.id}
+                                className={`flex items-center gap-3 p-2.5 cursor-pointer hover:bg-muted/50 ${
+                                  checked ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : ''
+                                }`}
+                              >
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={() => toggleDispatchTest(t.id)}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-medium">{t.name}</span>
+                                    <Badge variant="outline" className="text-[10px]">{t.code}</Badge>
+                                    <Badge variant="outline" className={`text-[10px] ${getSampleTypeBadge(t.sampleType)}`}>
+                                      {t.sampleType}
+                                    </Badge>
+                                  </div>
+                                  {t.lab_number && (
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      Lab ID: <span className="font-mono">{t.lab_number}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        {dispatchSelectedTestIds.length} of {dispatchEligibleTests.length} selected
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label>Lab partner *</Label>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsManagePartnersDialogOpen(true)}
+                            className="text-xs h-auto p-1"
+                          >
+                            ⚙️ Manage
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsAddPartnerDialogOpen(true)}
+                            className="text-xs h-auto p-1"
+                          >
+                            <Plus className="h-3 w-3 mr-0.5" />Add
+                          </Button>
+                        </div>
+                      </div>
+                      <Select
+                        value={dispatchPartnerId}
+                        onValueChange={setDispatchPartnerId}
+                        disabled={loadingLabPartners}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={loadingLabPartners ? 'Loading partners…' : 'Choose a lab partner…'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {labPartners.length === 0 && !loadingLabPartners && (
+                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                              No partners yet — click <span className="font-medium">+ Add</span> to create one.
+                            </div>
+                          )}
+                          {labPartners.map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              <div className="flex flex-col">
+                                <span className="font-medium">{p.name}</span>
+                                {p.address && (
+                                  <span className="text-[11px] text-muted-foreground line-clamp-1">
+                                    {p.address.split('\n')[0]}
+                                  </span>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {dispatchPartnerId && (() => {
+                        const partner = labPartners.find((p) => String(p.id) === dispatchPartnerId);
+                        if (!partner) return null;
+                        const hasAddress = !!(partner.address || '').trim();
+                        // Address present → show preview block. Empty → amber
+                        // warning with a one-click shortcut into the partner edit
+                        // dialog so the postal lines actually print on the
+                        // referral letter / responsibility form.
+                        if (hasAddress) {
+                          return (
+                            <div className="rounded-lg border bg-muted/30 p-2 text-xs text-muted-foreground whitespace-pre-line">
+                              <span className="font-medium text-foreground block mb-0.5">
+                                {partner.contact_person_title || 'The Medical Director'}
+                              </span>
+                              {partner.address}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-900/10 p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                            <div className="flex-1 space-y-1">
+                              <p>
+                                <span className="font-medium">{partner.name}</span> has no postal
+                                address saved. Letters will print without it — the partner won't
+                                see the addressee block.
+                              </p>
+                              <button
+                                type="button"
+                                className="font-medium underline hover:text-amber-900 dark:hover:text-amber-200"
+                                onClick={() => openEditPartnerDialog(partner)}
+                              >
+                                Edit partner →
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label htmlFor="dispatch-notes">Notes (optional)</Label>
+                      <Textarea
+                        id="dispatch-notes"
+                        value={dispatchNotes}
+                        onChange={(e) => setDispatchNotes(e.target.value)}
+                        placeholder="Anything the receiving lab should know — special handling, urgency, contact, etc."
+                        className="min-h-[4.5rem] text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsDispatchDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleCreateDispatch}
+                    disabled={
+                      isCreatingDispatch ||
+                      dispatchSelectedTestIds.length === 0 ||
+                      !dispatchPartnerId
+                    }
+                    className="bg-indigo-500 hover:bg-indigo-600"
+                  >
+                    {isCreatingDispatch ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4 mr-2" />
+                    )}
+                    Issue Dispatch
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Done-without-printing nudge — shown when the user closes the
+            confirmation panel without opening either PDF. We use a regular
+            Dialog (not AlertDialog) to match the existing delete-partner
+            pattern, which avoids Radix body-pointer-events races when the
+            modal stacks on top of the parent Dispatch Dialog. */}
+        <Dialog
+          open={skipPrintConfirmOpen}
+          onOpenChange={(open) => {
+            if (!open) setSkipPrintConfirmOpen(false);
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[440px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                Close without printing the paperwork?
+              </DialogTitle>
+              <DialogDescription className="space-y-2">
+                <span className="block">
+                  You haven't opened the <span className="font-medium">Referral Letter</span>{' '}
+                  or the <span className="font-medium">Responsibility Form</span> yet
+                  {confirmedDispatch && (
+                    <>
+                      {' '}for{' '}
+                      <span className="font-mono font-medium">{confirmedDispatch.dispatch_id}</span>
+                    </>
+                  )}
+                  .
+                </span>
+                <span className="block">
+                  The dispatch is already saved on the server — you can reprint either document
+                  any time from the <span className="font-medium">Dispatches</span> list on this
+                  order. The samples won't move forward without that paperwork though, so don't
+                  forget to print before sending them out.
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSkipPrintConfirmOpen(false)}>
+                Stay & Print
+              </Button>
+              <Button
+                onClick={confirmDoneSkipPrint}
+                className="bg-amber-500 hover:bg-amber-600 focus:ring-amber-500"
               >
-                {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-                Start Processing
+                Close anyway
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Add Lab Partner Dialog */}
-        <Dialog open={isAddPartnerDialogOpen} onOpenChange={setIsAddPartnerDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[400px]">
+        {/* Cancel-dispatch confirmation — collects an optional reason and
+            spells out the side-effect (tests revert to Sample Collected so
+            a fresh dispatch can be issued). Same Dialog (not AlertDialog)
+            choice as above — see comment on the print nudge for context. */}
+        <Dialog
+          open={cancelDispatchTarget !== null}
+          onOpenChange={(open) => {
+            // Block dismiss while the API call is in flight so the spinner
+            // stays visible. Otherwise reset target + reason on close.
+            if (!open && cancellingDispatchId === null) {
+              setCancelDispatchTarget(null);
+              setCancelDispatchReason('');
+            }
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[480px]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5 text-emerald-500" />
-                Add Lab Partner
+                <X className="h-5 w-5 text-rose-500" />
+                Cancel dispatch{cancelDispatchTarget ? ` ${cancelDispatchTarget.dispatch_id}` : ''}?
+              </DialogTitle>
+              <DialogDescription className="space-y-2">
+                <span className="block">
+                  This dispatch was issued to{' '}
+                  <span className="font-medium">
+                    {cancelDispatchTarget?.partner_name || 'the external lab'}
+                  </span>{' '}
+                  with {cancelDispatchTarget?.tests.length ?? 0}{' '}
+                  test{(cancelDispatchTarget?.tests.length ?? 0) === 1 ? '' : 's'}.
+                </span>
+                <span className="block">
+                  Each test still in <span className="font-medium">processing</span> will be
+                  reverted to <span className="font-medium">Sample Collected</span>. You can then
+                  issue a fresh dispatch (to the same or a different partner) without any
+                  manual reset. Tests with results already entered are left as-is.
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-1 pt-1">
+              <Label htmlFor="cancel-dispatch-reason" className="text-xs text-muted-foreground">
+                Reason (optional, recorded on audit log)
+              </Label>
+              <Textarea
+                id="cancel-dispatch-reason"
+                value={cancelDispatchReason}
+                onChange={(e) => setCancelDispatchReason(e.target.value)}
+                placeholder="e.g. Wrong partner selected; sample to be re-routed."
+                className="min-h-[4rem] text-sm"
+                disabled={cancellingDispatchId !== null}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCancelDispatchTarget(null);
+                  setCancelDispatchReason('');
+                }}
+                disabled={cancellingDispatchId !== null}
+              >
+                Keep dispatch
+              </Button>
+              <Button
+                onClick={() => void confirmCancelDispatch()}
+                disabled={cancellingDispatchId !== null}
+                className="bg-rose-600 hover:bg-rose-700 focus:ring-rose-500"
+              >
+                {cancellingDispatchId !== null ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Cancelling…
+                  </>
+                ) : (
+                  <>
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel dispatch
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add / Edit Lab Partner Dialog */}
+        <Dialog
+          open={isAddPartnerDialogOpen}
+          onOpenChange={(open) => {
+            setIsAddPartnerDialogOpen(open);
+            if (!open) resetPartnerForm();
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                {editingPartnerId !== null ? (
+                  <Pencil className="h-5 w-5 text-blue-500" />
+                ) : (
+                  <Plus className="h-5 w-5 text-emerald-500" />
+                )}
+                {editingPartnerId !== null ? 'Edit Lab Partner' : 'Add Lab Partner'}
               </DialogTitle>
               <DialogDescription>
-                Add a new external laboratory as an outsourced partner for test processing.
+                {editingPartnerId !== null
+                  ? 'Update partner details. The address and addressee role are printed on referral letters and responsibility forms.'
+                  : 'Add a new external laboratory as an outsourced partner for test processing. The address and addressee role are printed on referral letters and responsibility forms.'}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-2">
-              <div className="space-y-1">
-                <Label htmlFor="partner-name">Partner Name *</Label>
-                <Input
-                  id="partner-name"
-                  value={newPartnerName}
-                  onChange={(e) => setNewPartnerName(e.target.value)}
-                  placeholder="e.g. Clinix Healthcare"
-                  disabled={isSubmittingPartner}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="partner-name">Partner Name *</Label>
+                  <Input
+                    id="partner-name"
+                    value={newPartnerName}
+                    onChange={(e) => setNewPartnerName(e.target.value)}
+                    placeholder="e.g. Clinix Healthcare"
+                    disabled={isSubmittingPartner}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="partner-code">Code (optional)</Label>
+                  <Input
+                    id="partner-code"
+                    value={newPartnerCode}
+                    onChange={(e) => setNewPartnerCode(e.target.value)}
+                    placeholder="e.g. CLINIX"
+                    disabled={isSubmittingPartner}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="partner-contact-title">Addressee Role</Label>
+                  <Input
+                    id="partner-contact-title"
+                    value={newPartnerContactTitle}
+                    onChange={(e) => setNewPartnerContactTitle(e.target.value)}
+                    placeholder="e.g. The Chief Executive Officer"
+                    disabled={isSubmittingPartner}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="partner-email">Email (optional)</Label>
+                  <Input
+                    id="partner-email"
+                    type="email"
+                    value={newPartnerEmail}
+                    onChange={(e) => setNewPartnerEmail(e.target.value)}
+                    placeholder="e.g. contact@clinix.healthcare"
+                    disabled={isSubmittingPartner}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="partner-phone">Phone (optional)</Label>
+                  <Input
+                    id="partner-phone"
+                    value={newPartnerPhone}
+                    onChange={(e) => setNewPartnerPhone(e.target.value)}
+                    placeholder="e.g. +234-1-234-5678"
+                    disabled={isSubmittingPartner}
+                  />
+                </div>
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="partner-code">Code (optional)</Label>
-                <Input
-                  id="partner-code"
-                  value={newPartnerCode}
-                  onChange={(e) => setNewPartnerCode(e.target.value)}
-                  placeholder="e.g. CLINIX"
+                <Label htmlFor="partner-address">Postal Address</Label>
+                <Textarea
+                  id="partner-address"
+                  value={newPartnerAddress}
+                  onChange={(e) => setNewPartnerAddress(e.target.value)}
+                  placeholder={'e.g.\nPlot B, Block XII, Alhaji Adejumo Avenue,\n(beside Total Filling Station),\nOff Oshodi Gbagada Expressway,\nAnthony, Lagos.'}
+                  className="min-h-[6rem] text-sm"
                   disabled={isSubmittingPartner}
                 />
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="partner-email">Email (optional)</Label>
-                <Input
-                  id="partner-email"
-                  type="email"
-                  value={newPartnerEmail}
-                  onChange={(e) => setNewPartnerEmail(e.target.value)}
-                  placeholder="e.g. contact@clinix.healthcare"
-                  disabled={isSubmittingPartner}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="partner-phone">Phone (optional)</Label>
-                <Input
-                  id="partner-phone"
-                  value={newPartnerPhone}
-                  onChange={(e) => setNewPartnerPhone(e.target.value)}
-                  placeholder="e.g. +1-800-CLINIX"
-                  disabled={isSubmittingPartner}
-                />
+                <p className="text-xs text-muted-foreground">
+                  One line per row. Used on referral letters and responsibility forms.
+                </p>
               </div>
             </div>
 
@@ -3102,14 +3607,23 @@ export default function LabOrdersPage() {
                 Cancel
               </Button>
               <Button
-                onClick={handleAddPartner}
+                onClick={handleSubmitPartner}
                 disabled={isSubmittingPartner || !newPartnerName.trim()}
-                className="bg-emerald-600 hover:bg-emerald-700"
+                className={
+                  editingPartnerId !== null
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }
               >
                 {isSubmittingPartner ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Adding...
+                    {editingPartnerId !== null ? 'Saving...' : 'Adding...'}
+                  </>
+                ) : editingPartnerId !== null ? (
+                  <>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Save Changes
                   </>
                 ) : (
                   <>
@@ -3123,7 +3637,17 @@ export default function LabOrdersPage() {
         </Dialog>
 
         {/* Manage Lab Partners Dialog */}
-        <Dialog open={isManagePartnersDialogOpen} onOpenChange={setIsManagePartnersDialogOpen}>
+        <Dialog
+          open={isManagePartnersDialogOpen}
+          onOpenChange={(open) => {
+            setIsManagePartnersDialogOpen(open);
+            // Lazily load partners the first time it's opened so the list
+            // works even if the user never went through the dispatch flow.
+            if (open && labPartners.length === 0 && !loadingLabPartners) {
+              void loadLabPartners();
+            }
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -3144,10 +3668,20 @@ export default function LabOrdersPage() {
               ) : (
                 labPartners.map((partner) => (
                   <div key={partner.id} className="flex items-start justify-between p-3 rounded-lg border">
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 space-y-0.5">
                       <p className="font-medium text-sm">{partner.name}</p>
                       {partner.code && (
                         <p className="text-xs text-muted-foreground">Code: {partner.code}</p>
+                      )}
+                      {partner.contact_person_title && (
+                        <p className="text-xs text-muted-foreground">
+                          Addressee: {partner.contact_person_title}
+                        </p>
+                      )}
+                      {partner.address && (
+                        <p className="text-xs text-muted-foreground whitespace-pre-line">
+                          {partner.address}
+                        </p>
                       )}
                       {partner.email && (
                         <p className="text-xs text-muted-foreground">📧 {partner.email}</p>
@@ -3156,19 +3690,32 @@ export default function LabOrdersPage() {
                         <p className="text-xs text-muted-foreground">📞 {partner.phone}</p>
                       )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeletePartner(partner.id, partner.name)}
-                      disabled={deletingPartnerId === partner.id}
-                      className="ml-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-                    >
-                      {deletingPartnerId === partner.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <X className="h-4 w-4" />
-                      )}
-                    </Button>
+                    <div className="ml-2 flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditPartnerDialog(partner)}
+                        disabled={deletingPartnerId === partner.id}
+                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-8 px-2"
+                        title={`Edit ${partner.name}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeletePartner(partner.id, partner.name)}
+                        disabled={deletingPartnerId === partner.id}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 px-2"
+                        title={`Delete ${partner.name}`}
+                      >
+                        {deletingPartnerId === partner.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <X className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 ))
               )}
@@ -3451,6 +3998,14 @@ export default function LabOrdersPage() {
                         if (!tpl) {
                           return (
                             <div className="space-y-2">
+                              <div className="rounded-md border border-amber-300 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                                <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                                <div>
+                                  <span className="font-medium">No Test Template configured for </span>
+                                  <code className="font-mono">{selectedTest.code}</code>
+                                  <span>. Reference ranges and abnormal-flagging are unavailable. Ask the lab admin to add this template under <span className="font-medium">Laboratory → Test Templates</span>.</span>
+                                </div>
+                              </div>
                               <Label>Result Value</Label>
                               <Input
                                 value={resultValues['Result'] || ''}
@@ -3461,57 +4016,67 @@ export default function LabOrdersPage() {
                           );
                         }
 
-                        // Stable 4-column grid (parameter | value | unit | normal range).
+                        // Stable 4-column grid (parameter | result | unit | reference range)
+                        // matches the Lab Report dialog so users see the same column structure
+                        // when entering results and when reviewing them later.
                         // The warning row spans all 4 columns so neighbouring rows don't shift
                         // when a value trips Abnormal/Critical.
                         return (
-                          <div className="grid grid-cols-[minmax(10rem,14rem)_7rem_5rem_1fr] gap-x-3 gap-y-2 items-center">
-                            {tpl.fields.map((field) => {
-                              const value = resultValues[field.name] || '';
-                              const status = classifyValue(value, field);
-                              return (
-                                <Fragment key={field.name}>
-                                  <Label className="text-sm">{field.name}</Label>
-                                  <Input
-                                    value={value}
-                                    onChange={(e) =>
-                                      setResultValues((prev) => ({
-                                        ...prev,
-                                        [field.name]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder="Value"
-                                    className={
-                                      status === 'Critical'
-                                        ? 'border-red-500 focus:border-red-500'
-                                        : status === 'Abnormal'
-                                          ? 'border-amber-500 focus:border-amber-500'
-                                          : ''
-                                    }
-                                  />
-                                  <span className="text-sm text-muted-foreground truncate">
-                                    {field.unit}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground truncate">
-                                    {field.normalRange ? `Normal: ${field.normalRange}` : ''}
-                                  </span>
-                                  {status !== 'Normal' && (
-                                    <div
-                                      className={`col-span-4 text-xs flex items-center gap-1 -mt-1 ${
+                          <div>
+                            <div className="grid grid-cols-[minmax(10rem,14rem)_7rem_5rem_1fr] gap-x-3 border-b pb-2 mb-3 text-sm font-medium text-muted-foreground">
+                              <span>Parameter</span>
+                              <span>Result</span>
+                              <span>Unit</span>
+                              <span>Reference Range</span>
+                            </div>
+                            <div className="grid grid-cols-[minmax(10rem,14rem)_7rem_5rem_1fr] gap-x-3 gap-y-2 items-center">
+                              {tpl.fields.map((field) => {
+                                const value = resultValues[field.name] || '';
+                                const status = classifyValue(value, field);
+                                return (
+                                  <Fragment key={field.name}>
+                                    <Label className="text-sm">{field.name}</Label>
+                                    <Input
+                                      value={value}
+                                      onChange={(e) =>
+                                        setResultValues((prev) => ({
+                                          ...prev,
+                                          [field.name]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Value"
+                                      className={
                                         status === 'Critical'
-                                          ? 'text-red-600 dark:text-red-400'
-                                          : 'text-amber-600 dark:text-amber-400'
-                                      }`}
-                                    >
-                                      <AlertTriangle className="h-3 w-3" />
-                                      {status === 'Critical'
-                                        ? 'Critical value! Please verify and confirm.'
-                                        : 'Abnormal value — outside normal range.'}
-                                    </div>
-                                  )}
-                                </Fragment>
-                              );
-                            })}
+                                          ? 'border-red-500 focus:border-red-500'
+                                          : status === 'Abnormal'
+                                            ? 'border-amber-500 focus:border-amber-500'
+                                            : ''
+                                      }
+                                    />
+                                    <span className="text-sm text-muted-foreground truncate">
+                                      {field.unit}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground truncate">
+                                      {field.normalRange ? `Normal: ${field.normalRange}` : ''}
+                                    </span>
+                                    {status !== 'Normal' && (
+                                      <div
+                                        className={`col-span-4 text-xs flex items-center gap-1 -mt-1 ${
+                                          status === 'Critical'
+                                            ? 'text-red-600 dark:text-red-400'
+                                            : 'text-amber-600 dark:text-amber-400'
+                                        }`}
+                                      >
+                                        <AlertTriangle className="h-3 w-3" />
+                                        {status === 'Critical'
+                                          ? 'Critical value! Please verify and confirm.'
+                                          : 'Abnormal value — outside normal range.'}
+                                      </div>
+                                    )}
+                                  </Fragment>
+                                );
+                              })}
+                            </div>
                           </div>
                         );
                       })()}

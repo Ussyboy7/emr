@@ -58,6 +58,22 @@ class LabPartner(models.Model):
     )
     phone = models.CharField(max_length=50, blank=True)
     email = models.EmailField(blank=True)
+    address = models.TextField(
+        blank=True,
+        help_text=(
+            "Multi-line postal address printed on referral letters and "
+            "responsibility forms (e.g. street, area, city)."
+        ),
+    )
+    contact_person_title = models.CharField(
+        max_length=100,
+        blank=True,
+        default="The Medical Director",
+        help_text=(
+            "Addressee role used in the 'To:' block on letters "
+            "(e.g. 'The Medical Director', 'The Chief Executive Officer')."
+        ),
+    )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     sort_order = models.PositiveSmallIntegerField(default=0)
@@ -280,6 +296,138 @@ class LabTestResultAttachment(models.Model):
 
     def __str__(self):
         return f"{self.row_name or self.row_id} attachment for {self.test}"
+
+
+class LabReferralDispatch(models.Model):
+    """
+    One outbound batch send-out from a `LabOrder` to a single external `LabPartner`.
+
+    A dispatch records "we sent these specific tests from this order to this
+    partner on this date, and printed/emailed these documents". It is the
+    long-lived audit trail for outsourced lab work — created at the moment a
+    lab tech selects "Outsourced" for one or more tests in an order, before
+    results come back.
+
+    Lifecycle:
+      issued       Default state. Sample/docs sent, results pending.
+      cancelled    Withdrawn before results came back; tests stay in their
+                   prior status so a fresh dispatch can be issued.
+      superseded   Replaced by another dispatch (e.g. partner changed). The
+                   replacement is in `superseded_by`.
+
+    A single order can have many dispatches across time (different partners,
+    re-routes after cancellation, etc.) — see `LabOrder.dispatches`.
+    """
+
+    STATUS_CHOICES = [
+        ('issued', 'Issued'),
+        ('cancelled', 'Cancelled'),
+        ('superseded', 'Superseded'),
+    ]
+
+    # Serial in the LBR-YYYY-NNNNNN format (matches consultation REF-YYYY-NNNNNN).
+    dispatch_id = models.CharField(max_length=50, unique=True, db_index=True)
+
+    order = models.ForeignKey(
+        LabOrder,
+        on_delete=models.CASCADE,
+        related_name='dispatches',
+    )
+
+    partner = models.ForeignKey(
+        LabPartner,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='dispatches',
+        help_text="External lab the tests were sent to. May be null for ad-hoc 'Other' partners.",
+    )
+    # Snapshot — preserved even if `partner` is later renamed or removed,
+    # and used when the user typed an 'Other' partner name.
+    partner_name = models.CharField(max_length=200)
+    # Postal address copied from `LabPartner.address` at dispatch time so PDFs
+    # always print what was current when the referral was issued (and still
+    # work if the FK row is later edited or removed).
+    partner_address_snapshot = models.TextField(blank=True)
+
+    tests = models.ManyToManyField(
+        LabTest,
+        related_name='dispatches',
+        help_text="Tests included in this dispatch.",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='issued',
+        db_index=True,
+    )
+    superseded_by = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='supersedes',
+    )
+    cancellation_reason = models.TextField(blank=True)
+
+    notes = models.TextField(blank=True)
+
+    issued_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='issued_lab_dispatches',
+    )
+    issued_at = models.DateTimeField(auto_now_add=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cancelled_lab_dispatches',
+    )
+
+    # Print/download tracking — drives the "did you print the docs?" nudge in
+    # the dispatch confirmation panel.
+    referral_letter_printed_at = models.DateTimeField(null=True, blank=True)
+    responsibility_form_printed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'lab_referral_dispatches'
+        ordering = ['-issued_at']
+        indexes = [
+            models.Index(fields=['order', '-issued_at']),
+            models.Index(fields=['status']),
+        ]
+        verbose_name = "Lab referral dispatch"
+        verbose_name_plural = "Lab referral dispatches"
+
+    def __str__(self):
+        return f"{self.dispatch_id} → {self.partner_name}"
+
+    def save(self, *args, **kwargs):
+        """Auto-generate dispatch_id (LBR-YYYY-NNNNNN) on first save."""
+        if not self.dispatch_id:
+            from datetime import datetime as _dt
+            year = _dt.now().year
+            last = (
+                LabReferralDispatch.objects
+                .filter(dispatch_id__startswith=f'LBR-{year}-')
+                .order_by('-dispatch_id')
+                .first()
+            )
+            if last:
+                try:
+                    last_num = int(last.dispatch_id.split('-')[-1])
+                    new_num = last_num + 1
+                except (ValueError, IndexError):
+                    new_num = 1
+            else:
+                new_num = 1
+            self.dispatch_id = f'LBR-{year}-{new_num:06d}'
+        super().save(*args, **kwargs)
 
 
 class LabResult(models.Model):

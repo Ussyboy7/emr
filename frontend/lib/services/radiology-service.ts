@@ -166,11 +166,51 @@ export interface ImagingPartner {
   code?: string;
   phone?: string;
   email?: string;
+  /** Multi-line postal address printed on referral letters / responsibility forms. */
+  address?: string;
+  /** Addressee role for letter "To:" block (default "The Medical Director"). */
+  contact_person_title?: string;
   notes?: string;
   is_active: boolean;
   sort_order: number;
   created_at?: string;
   updated_at?: string;
+}
+
+/**
+ * One outbound batch send-out from a `RadiologyOrder` to a single external
+ * `ImagingPartner` (mirrors `LabReferralDispatch`). Created by
+ * `dispatchOutsourced`; drives the post-dispatch print panel and the
+ * Dispatches history shown on the order detail dialog.
+ */
+export interface RadiologyReferralDispatch {
+  id: number;
+  dispatch_id: string;
+  order: number;
+  partner_id: number | null;
+  partner_name: string;
+  partner_address_snapshot?: string;
+  studies: {
+    id: number;
+    procedure: string;
+    modality?: string;
+    body_part?: string;
+    status: string;
+    processing_method?: 'in_house' | 'outsourced' | null;
+  }[];
+  status: 'issued' | 'cancelled' | 'superseded';
+  superseded_by: number | null;
+  superseded_by_dispatch_id: string | null;
+  cancellation_reason: string;
+  notes: string;
+  issued_by: number | null;
+  issued_by_name: string | null;
+  issued_at: string;
+  cancelled_by: number | null;
+  cancelled_by_name: string | null;
+  cancelled_at: string | null;
+  referral_letter_printed_at: string | null;
+  responsibility_form_printed_at: string | null;
 }
 
 class RadiologyService {
@@ -678,6 +718,69 @@ class RadiologyService {
     return apiFetch<void>(`/radiology/imaging-partners/${id}/`, {
       method: 'DELETE',
     });
+  }
+
+  /**
+   * Create a new outsourced dispatch for one or more studies on an order. The
+   * backend serialises a `RAD-YYYY-NNNNNN` slip and flips each study's status
+   * to `processing` with `processing_method=outsourced`.
+   */
+  async dispatchOutsourced(
+    orderId: number,
+    payload: { partner_id: number; study_ids: number[]; notes?: string; supersede_dispatch_id?: number }
+  ): Promise<RadiologyReferralDispatch> {
+    return apiFetch<RadiologyReferralDispatch>(
+      `/radiology/orders/${orderId}/dispatch_outsourced/`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  /** List every dispatch ever issued for an order (newest first). */
+  async getOrderDispatches(orderId: number): Promise<RadiologyReferralDispatch[]> {
+    const response = await apiFetch<RadiologyReferralDispatch[] | { results: RadiologyReferralDispatch[] }>(
+      `/radiology/orders/${orderId}/dispatches/`
+    );
+    return Array.isArray(response) ? response : response?.results ?? [];
+  }
+
+  /** Cancel an issued dispatch (e.g. wrong partner, wrong studies). */
+  async cancelDispatch(
+    orderId: number,
+    dispatchId: number,
+    reason?: string
+  ): Promise<RadiologyReferralDispatch> {
+    return apiFetch<RadiologyReferralDispatch>(
+      `/radiology/orders/${orderId}/dispatches/${dispatchId}/cancel/`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason || '' }),
+      }
+    );
+  }
+
+  /**
+   * Fetch the standardised Referral Letter PDF for a dispatch as a Blob and
+   * stamp `referral_letter_printed_at` on the server.
+   */
+  async fetchReferralLetterPdf(orderId: number, dispatchId: number): Promise<Blob> {
+    return apiFetch<Blob>(
+      `/radiology/orders/${orderId}/dispatches/${dispatchId}/referral_letter/`,
+      { responseType: 'blob' }
+    );
+  }
+
+  /**
+   * Fetch the standardised Responsibility Form PDF for a dispatch as a Blob
+   * and stamp `responsibility_form_printed_at` on the server.
+   */
+  async fetchResponsibilityFormPdf(orderId: number, dispatchId: number): Promise<Blob> {
+    return apiFetch<Blob>(
+      `/radiology/orders/${orderId}/dispatches/${dispatchId}/responsibility_form/`,
+      { responseType: 'blob' }
+    );
   }
 }
 

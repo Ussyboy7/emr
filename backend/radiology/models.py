@@ -20,6 +20,22 @@ class ImagingPartner(models.Model):
     )
     phone = models.CharField(max_length=50, blank=True)
     email = models.EmailField(blank=True)
+    address = models.TextField(
+        blank=True,
+        help_text=(
+            "Multi-line postal address printed on referral letters and "
+            "responsibility forms (e.g. street, area, city)."
+        ),
+    )
+    contact_person_title = models.CharField(
+        max_length=100,
+        blank=True,
+        default="The Medical Director",
+        help_text=(
+            "Addressee role used in the 'To:' block on letters "
+            "(e.g. 'The Medical Director', 'The Chief Executive Officer')."
+        ),
+    )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     sort_order = models.PositiveSmallIntegerField(default=0)
@@ -333,3 +349,136 @@ class RadiologyReport(models.Model):
     
     def __str__(self):
         return f"Report for {self.study.procedure} - {self.patient.get_full_name()}"
+
+
+class RadiologyReferralDispatch(models.Model):
+    """
+    One outbound batch send-out from a `RadiologyOrder` to a single external `ImagingPartner`.
+
+    A dispatch records "we sent these specific studies from this order to this
+    imaging center on this date, and printed/emailed these documents". It is
+    the long-lived audit trail for outsourced radiology work — created at the
+    moment a radiographer selects "Outsourced" for one or more studies in an
+    order, before films/reports come back.
+
+    Lifecycle mirrors `laboratory.LabReferralDispatch`:
+      issued       Default state. Patient/films/docs sent, results pending.
+      cancelled    Withdrawn before results came back; studies stay in their
+                   prior status so a fresh dispatch can be issued.
+      superseded   Replaced by another dispatch (e.g. partner changed). The
+                   replacement is in `superseded_by`.
+
+    A single order can have many dispatches across time (different partners,
+    re-routes after cancellation, etc.) — see `RadiologyOrder.dispatches`.
+    """
+
+    STATUS_CHOICES = [
+        ('issued', 'Issued'),
+        ('cancelled', 'Cancelled'),
+        ('superseded', 'Superseded'),
+    ]
+
+    # Serial in the RAD-YYYY-NNNNNN format (parallel to lab's LBR-YYYY-NNNNNN
+    # and consultation's REF-YYYY-NNNNNN).
+    dispatch_id = models.CharField(max_length=50, unique=True, db_index=True)
+
+    order = models.ForeignKey(
+        RadiologyOrder,
+        on_delete=models.CASCADE,
+        related_name='dispatches',
+    )
+
+    partner = models.ForeignKey(
+        ImagingPartner,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='dispatches',
+        help_text="External imaging center the studies were sent to. May be null for ad-hoc 'Other' partners.",
+    )
+    # Snapshot — preserved even if `partner` is later renamed or removed,
+    # and used when the user typed an 'Other' partner name.
+    partner_name = models.CharField(max_length=200)
+    # Postal address copied from `ImagingPartner.address` at dispatch time so
+    # PDFs always print what was current when the referral was issued (and
+    # still work if the FK row is later edited or removed).
+    partner_address_snapshot = models.TextField(blank=True)
+
+    studies = models.ManyToManyField(
+        RadiologyStudy,
+        related_name='dispatches',
+        help_text="Studies included in this dispatch.",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='issued',
+        db_index=True,
+    )
+    superseded_by = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='supersedes',
+    )
+    cancellation_reason = models.TextField(blank=True)
+
+    notes = models.TextField(blank=True)
+
+    issued_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='issued_radiology_dispatches',
+    )
+    issued_at = models.DateTimeField(auto_now_add=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cancelled_radiology_dispatches',
+    )
+
+    # Print/download tracking — drives the "did you print the docs?" nudge in
+    # the dispatch confirmation panel.
+    referral_letter_printed_at = models.DateTimeField(null=True, blank=True)
+    responsibility_form_printed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'radiology_referral_dispatches'
+        ordering = ['-issued_at']
+        indexes = [
+            models.Index(fields=['order', '-issued_at']),
+            models.Index(fields=['status']),
+        ]
+        verbose_name = "Radiology referral dispatch"
+        verbose_name_plural = "Radiology referral dispatches"
+
+    def __str__(self):
+        return f"{self.dispatch_id} → {self.partner_name}"
+
+    def save(self, *args, **kwargs):
+        """Auto-generate dispatch_id (RAD-YYYY-NNNNNN) on first save."""
+        if not self.dispatch_id:
+            from datetime import datetime as _dt
+            year = _dt.now().year
+            last = (
+                RadiologyReferralDispatch.objects
+                .filter(dispatch_id__startswith=f'RAD-{year}-')
+                .order_by('-dispatch_id')
+                .first()
+            )
+            if last:
+                try:
+                    last_num = int(last.dispatch_id.split('-')[-1])
+                    new_num = last_num + 1
+                except (ValueError, IndexError):
+                    new_num = 1
+            else:
+                new_num = 1
+            self.dispatch_id = f'RAD-{year}-{new_num:06d}'
+        super().save(*args, **kwargs)

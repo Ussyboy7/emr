@@ -2,7 +2,15 @@
 Serializers for the Wards app.
 """
 from rest_framework import serializers
-from .models import Ward, Bed, PatientAdmission, WardAssignment, AdmissionObservationVital, AdmissionTreatmentRow
+from .models import (
+    Ward,
+    Bed,
+    PatientAdmission,
+    WardAssignment,
+    AdmissionObservationVital,
+    AdmissionTreatmentRow,
+    AdmissionEscort,
+)
 
 
 class WardSerializer(serializers.ModelSerializer):
@@ -34,6 +42,93 @@ class BedSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+class AdmissionEscortSerializer(serializers.ModelSerializer):
+    """Serializer for AdmissionEscort — embedded under PatientAdmission and
+    also exposed at its own endpoint so the nurse can confirm arrival /
+    handover later."""
+
+    primary_nurse_name = serializers.CharField(source='primary_nurse.get_full_name', read_only=True, allow_null=True)
+    additional_nurse_names = serializers.SerializerMethodField()
+    arrival_confirmed_by_name = serializers.CharField(
+        source='arrival_confirmed_by.get_full_name', read_only=True, allow_null=True,
+    )
+    facility_name = serializers.CharField(source='facility.name', read_only=True, allow_null=True)
+    referral_id_display = serializers.CharField(source='referral.referral_id', read_only=True, allow_null=True)
+    referral_status = serializers.CharField(source='referral.status', read_only=True, allow_null=True)
+    referral_urgency = serializers.CharField(source='referral.urgency', read_only=True, allow_null=True)
+    # Full referral fields — exposed so the doctor's "Edit referral" dialog
+    # can pre-fill without a second round-trip to the consultation app.
+    referral_specialty = serializers.CharField(source='referral.specialty', read_only=True, allow_null=True)
+    referral_reason = serializers.CharField(source='referral.reason', read_only=True, allow_null=True)
+    referral_clinical_summary = serializers.CharField(source='referral.clinical_summary', read_only=True, allow_null=True)
+    referral_facility_type = serializers.CharField(source='referral.facility_type', read_only=True, allow_null=True)
+    referral_facility_partner = serializers.IntegerField(source='referral.facility_partner_id', read_only=True, allow_null=True)
+    referral_contact_person = serializers.CharField(source='referral.contact_person', read_only=True, allow_null=True)
+    referral_contact_phone = serializers.CharField(source='referral.contact_phone', read_only=True, allow_null=True)
+    referral_contact_email = serializers.CharField(source='referral.contact_email', read_only=True, allow_null=True)
+    referral_notes = serializers.CharField(source='referral.notes', read_only=True, allow_null=True)
+    is_arrival_confirmed = serializers.SerializerMethodField()
+    # Patient/admission context — needed in the nurse "leaving with us" queue
+    # and the arrival-confirmation dialog where the escort is detached from
+    # any visible admission row.
+    patient_name = serializers.CharField(source='admission.patient.get_full_name', read_only=True)
+    admission_display_id = serializers.CharField(source='admission.admission_id', read_only=True)
+    ward_name = serializers.CharField(source='admission.ward.name', read_only=True)
+
+    class Meta:
+        model = AdmissionEscort
+        fields = [
+            'id',
+            'admission',
+            'admission_display_id',
+            'patient_name',
+            'ward_name',
+            'referral',
+            'referral_id_display',
+            'referral_status',
+            'referral_urgency',
+            'referral_specialty',
+            'referral_reason',
+            'referral_clinical_summary',
+            'referral_facility_type',
+            'referral_facility_partner',
+            'referral_contact_person',
+            'referral_contact_phone',
+            'referral_contact_email',
+            'referral_notes',
+            'facility',
+            'facility_name',
+            'facility_name_snapshot',
+            'primary_nurse',
+            'primary_nurse_name',
+            'additional_nurses',
+            'additional_nurse_names',
+            'transport_mode',
+            'departure_at',
+            'handover_summary',
+            'arrival_confirmed_at',
+            'arrival_confirmed_by',
+            'arrival_confirmed_by_name',
+            'arrival_notes',
+            'arrival_call_outcome',
+            'is_arrival_confirmed',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'created_at',
+            'updated_at',
+            'arrival_confirmed_at',
+            'arrival_confirmed_by',
+        ]
+
+    def get_additional_nurse_names(self, obj):
+        return [u.get_full_name() for u in obj.additional_nurses.all()]
+
+    def get_is_arrival_confirmed(self, obj):
+        return obj.arrival_confirmed_at is not None
+
+
 class PatientAdmissionSerializer(serializers.ModelSerializer):
     """Serializer for PatientAdmission model."""
 
@@ -42,8 +137,10 @@ class PatientAdmissionSerializer(serializers.ModelSerializer):
     bed_number = serializers.CharField(source='bed.bed_number', read_only=True, allow_null=True)
     admitting_doctor_name = serializers.CharField(source='admitting_doctor.get_full_name', read_only=True, allow_null=True)
     discharge_doctor_name = serializers.CharField(source='discharge_doctor.get_full_name', read_only=True, allow_null=True)
+    confirmed_by_nurse_name = serializers.CharField(source='confirmed_by_nurse.get_full_name', read_only=True, allow_null=True)
     length_of_stay = serializers.ReadOnlyField()
     is_active = serializers.ReadOnlyField()
+    escort = AdmissionEscortSerializer(read_only=True)
 
     class Meta:
         model = PatientAdmission

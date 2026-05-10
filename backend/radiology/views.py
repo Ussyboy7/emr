@@ -13,16 +13,26 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db.models import Count, Q
+from django.http import HttpResponse
 
 from laboratory.pagination import FlexiblePageNumberPagination
 
-from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyStudyReportAttachment, RadiologyReport, ImagingPartner
+from .models import (
+    RadiologyTemplate,
+    RadiologyOrder,
+    RadiologyStudy,
+    RadiologyStudyReportAttachment,
+    RadiologyReport,
+    ImagingPartner,
+    RadiologyReferralDispatch,
+)
 from .serializers import (
     RadiologyTemplateSerializer,
     RadiologyOrderSerializer,
     RadiologyStudySerializer,
     RadiologyReportSerializer,
     ImagingPartnerSerializer,
+    RadiologyReferralDispatchSerializer,
 )
 from audit.services import AuditService
 
@@ -588,6 +598,267 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
             return Response(RadiologyStudySerializer(study).data)
         except RadiologyStudy.DoesNotExist:
             return Response({'error': 'Study not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # ------------------------------------------------------------------
+    # Outsourced dispatch — mirrors `LabOrderViewSet` dispatch actions.
+    # ------------------------------------------------------------------
+
+    @action(detail=True, methods=['get'], url_path='dispatches')
+    def list_dispatches(self, request, pk=None):
+        """List every RadiologyReferralDispatch ever issued for this order (most recent first)."""
+        order = self.get_object()
+        dispatches = order.dispatches.all().prefetch_related('studies')
+        return Response(RadiologyReferralDispatchSerializer(dispatches, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='dispatch_outsourced')
+    def dispatch_outsourced(self, request, pk=None):
+        """
+        Send a batch of studies in this order to one external imaging partner.
+
+        body: {
+          study_ids: number[]                # studies in this order to dispatch
+          partner_id?: number                # preferred — FK to ImagingPartner
+          partner_name?: string              # required when partner_id is missing
+                                             # (ad-hoc 'Other' partner)
+          notes?: string                     # optional dispatch-level notes
+          supersede_dispatch_id?: number     # if re-routing, mark old dispatch superseded
+        }
+        """
+        order = self.get_object()
+
+        study_ids = request.data.get('study_ids') or []
+        if not isinstance(study_ids, list) or not study_ids:
+            return Response(
+                {'error': 'study_ids must be a non-empty list'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        partner_id = request.data.get('partner_id')
+        partner_name_raw = (request.data.get('partner_name') or '').strip()
+        notes = (request.data.get('notes') or '').strip()
+        supersede_id = request.data.get('supersede_dispatch_id')
+
+        partner = None
+        partner_name = ''
+        if partner_id:
+            try:
+                partner = ImagingPartner.objects.get(id=partner_id, is_active=True)
+                partner_name = partner.name
+            except ImagingPartner.DoesNotExist:
+                return Response(
+                    {'error': 'Imaging partner not found or inactive'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif partner_name_raw:
+            partner_name = partner_name_raw
+        else:
+            return Response(
+                {'error': 'Either partner_id or partner_name is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Resolve the studies; refuse to dispatch studies from another order.
+        studies = list(order.studies.filter(id__in=study_ids))
+        missing = set(study_ids) - {s.id for s in studies}
+        if missing:
+            return Response(
+                {'error': f'Some studies are not part of this order: {sorted(missing)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Studies must be at or before "processing" — refuse to dispatch
+        # studies that already have a report or have been verified (those need
+        # a different workflow).
+        non_dispatchable = [s for s in studies if s.status in ('reported', 'verified')]
+        if non_dispatchable:
+            return Response(
+                {
+                    'error': (
+                        'These studies can no longer be dispatched: '
+                        + ', '.join(f'{s.procedure} ({s.status})' for s in non_dispatchable)
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Optionally mark a prior dispatch as superseded (when re-routing).
+        prior = None
+        if supersede_id:
+            try:
+                prior = order.dispatches.get(id=supersede_id, status='issued')
+            except RadiologyReferralDispatch.DoesNotExist:
+                return Response(
+                    {'error': 'Prior dispatch not found or not currently issued'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Create the new dispatch.
+        partner_address_snapshot = ''
+        if partner:
+            partner_address_snapshot = (partner.address or '').strip()
+
+        dispatch = RadiologyReferralDispatch.objects.create(
+            order=order,
+            partner=partner,
+            partner_name=partner_name,
+            partner_address_snapshot=partner_address_snapshot,
+            notes=notes,
+            issued_by=request.user,
+        )
+        dispatch.studies.set(studies)
+
+        # Flip each study to processing/outsourced and stamp the partner name
+        # onto the existing free-text `outsourced_facility` field for parity
+        # with the lab pattern (LabTest.outsourced_lab works the same way).
+        for study in studies:
+            study.processing_method = 'outsourced'
+            study.outsourced_facility = partner_name
+            study.status = 'processing'
+            study.save(update_fields=['processing_method', 'outsourced_facility', 'status', 'updated_at'])
+
+        if prior:
+            prior.status = 'superseded'
+            prior.superseded_by = dispatch
+            prior.save(update_fields=['status', 'superseded_by'])
+
+        AuditService.log_activity(
+            user=request.user,
+            action='create',
+            object_type='radiology_referral_dispatch',
+            object_id=str(dispatch.id),
+            module='radiology',
+            object_repr=dispatch.dispatch_id,
+            description=(
+                f'Dispatched {len(studies)} study(ies) from {order.order_id} '
+                f'to {partner_name}'
+            ),
+            new_values={
+                'dispatch_id': dispatch.dispatch_id,
+                'partner_name': partner_name,
+                'study_procedures': [s.procedure for s in studies],
+            },
+            metadata={'order_id': order.order_id, 'supersedes': prior.dispatch_id if prior else None},
+            request=request,
+        )
+
+        return Response(
+            RadiologyReferralDispatchSerializer(dispatch).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='dispatches/(?P<dispatch_pk>[^/.]+)/cancel')
+    def cancel_dispatch(self, request, pk=None, dispatch_pk=None):
+        """
+        Cancel a still-issued dispatch (e.g. wrong partner, withdrew request).
+
+        Each study on the dispatch is reverted to ``pending`` and its
+        outsourcing fields cleared (`processing_method`, `outsourced_facility`).
+        That puts the studies back in the eligible pool so a fresh dispatch
+        can be issued without a separate manual reset. Studies already past
+        ``processing`` (reports submitted / verified) are left alone — those
+        need radiologist review.
+        """
+        order = self.get_object()
+        try:
+            dispatch = order.dispatches.get(id=dispatch_pk)
+        except RadiologyReferralDispatch.DoesNotExist:
+            return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if dispatch.status != 'issued':
+            return Response(
+                {'error': f'Dispatch is already {dispatch.status}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = (request.data.get('reason') or '').strip()
+
+        reverted_procedures: list[str] = []
+        skipped_procedures: list[str] = []
+        for study in dispatch.studies.all():
+            # Only revert studies that are still in the outsourced 'processing'
+            # bucket. If a report has been submitted or verified, untangling
+            # it requires the verification UI, not a cancel button.
+            if study.status == 'processing':
+                study.status = 'pending'
+                study.processing_method = None
+                study.outsourced_facility = ''
+                study.save(update_fields=[
+                    'status', 'processing_method', 'outsourced_facility', 'updated_at',
+                ])
+                reverted_procedures.append(study.procedure)
+            else:
+                skipped_procedures.append(f'{study.procedure} ({study.status})')
+
+        dispatch.status = 'cancelled'
+        dispatch.cancellation_reason = reason
+        dispatch.cancelled_at = timezone.now()
+        dispatch.cancelled_by = request.user
+        dispatch.save(update_fields=['status', 'cancellation_reason', 'cancelled_at', 'cancelled_by'])
+
+        AuditService.log_activity(
+            user=request.user,
+            action='update',
+            object_type='radiology_referral_dispatch',
+            object_id=str(dispatch.id),
+            module='radiology',
+            object_repr=dispatch.dispatch_id,
+            description=(
+                f'Cancelled dispatch {dispatch.dispatch_id}'
+                + (f' (reverted {len(reverted_procedures)} study(ies))' if reverted_procedures else '')
+            ),
+            new_values={
+                'status': 'cancelled',
+                'cancellation_reason': reason,
+                'reverted_studies': reverted_procedures,
+                'skipped_studies': skipped_procedures,
+            },
+            metadata={'order_id': order.order_id},
+            request=request,
+        )
+
+        return Response(RadiologyReferralDispatchSerializer(dispatch).data)
+
+    @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_pk>[^/.]+)/referral_letter')
+    def dispatch_referral_letter(self, request, pk=None, dispatch_pk=None):
+        """Download the referral letter PDF for a specific dispatch."""
+        order = self.get_object()
+        try:
+            dispatch = order.dispatches.get(id=dispatch_pk)
+        except RadiologyReferralDispatch.DoesNotExist:
+            return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .dispatch_pdfs import build_referral_letter_pdf
+
+        pdf_bytes = build_referral_letter_pdf(dispatch)
+        if not dispatch.referral_letter_printed_at:
+            dispatch.referral_letter_printed_at = timezone.now()
+            dispatch.save(update_fields=['referral_letter_printed_at'])
+
+        filename = f"radiology_referral_{dispatch.dispatch_id}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_pk>[^/.]+)/responsibility_form')
+    def dispatch_responsibility_form(self, request, pk=None, dispatch_pk=None):
+        """Download the financial-responsibility form PDF for a specific dispatch."""
+        order = self.get_object()
+        try:
+            dispatch = order.dispatches.get(id=dispatch_pk)
+        except RadiologyReferralDispatch.DoesNotExist:
+            return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .dispatch_pdfs import build_responsibility_form_pdf
+
+        pdf_bytes = build_responsibility_form_pdf(dispatch)
+        if not dispatch.responsibility_form_printed_at:
+            dispatch.responsibility_form_printed_at = timezone.now()
+            dispatch.save(update_fields=['responsibility_form_printed_at'])
+
+        filename = f"radiology_responsibility_{dispatch.dispatch_id}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 class RadiologyStudyViewSet(viewsets.ModelViewSet):

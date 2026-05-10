@@ -65,7 +65,6 @@ import {
   IV_FLUIDS,
   RADIOLOGY_PROCEDURES,
   REFERRAL_SPECIALTIES,
-  REFERRAL_FACILITIES,
   REFERRAL_REASONS
 } from '@/lib/constants/medical-data';
 import { getOrganizationHeader, getOrganizationServicesHeader } from '@/lib/constants/organization';
@@ -80,6 +79,7 @@ import {
   type PresentingComplaintCategory,
 } from '@/lib/constants/presenting-complaints';
 import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
+import { FacilityPartnerSelect } from '@/components/referrals/FacilityPartnerSelect';
 import {
   transformApiRowToCompletedTest,
   type CompletedTest as CompletedLabReportTest,
@@ -388,8 +388,10 @@ const woundLocations = WOUND_LOCATIONS;
 const ivFluids = IV_FLUIDS;
 
 // Referral data
+// `referralFacilities` (REFERRAL_FACILITIES) is no longer used — the in-room
+// referral picker now reads its options from the `ReferralFacility` catalog
+// API via <FacilityPartnerSelect />.
 const referralSpecialties = REFERRAL_SPECIALTIES;
-const referralFacilities = REFERRAL_FACILITIES;
 const referralReasons = REFERRAL_REASONS;
 
 // ICD-10 Codes are now loaded from API
@@ -782,7 +784,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [newReferral, setNewReferral] = useState({
     specialty: "",
     facility: "",
-    facilityType: "",
+    facilityType: "" as "" | "internal" | "external" | "specialist",
+    facility_partner: null as number | null,
     reason: "",
     priority: "Routine",
     clinicalSummary: "",
@@ -1338,21 +1341,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [leftWorkflowReason, setLeftWorkflowReason] = useState('Patient left before being seen');
   const [leftWorkflowTarget, setLeftWorkflowTarget] = useState<{ kind: 'queue'; patient: Patient } | { kind: 'session' } | null>(null);
   
-  // Function to load wards for nursing order form
+  // Function to load wards for nursing order form.
+  // No invented data: if the wards endpoint fails the dropdown stays empty so
+  // a clinician cannot pick a ward that doesn't actually exist (admit orders
+  // would otherwise reference ghost ward IDs).
   const loadWards = async () => {
     try {
       const wardsResponse = await wardService.getWards({ status: 'active' });
       setWards(wardsResponse.results || []);
     } catch (error) {
       console.error('Failed to load wards:', error);
-      // Fallback to hardcoded wards if API fails
-      setWards([
-        { id: 8, ward_code: 'FEMALE-MED', name: 'Female Medical Ward', total_beds: 5, available_beds: 3 },
-        { id: 9, ward_code: 'MALE-MED', name: 'Male Medical Ward', total_beds: 5, available_beds: 2 },
-        { id: 10, ward_code: 'SURGICAL', name: 'Surgical Ward', total_beds: 10, available_beds: 7 },
-        { id: 11, ward_code: 'PEDIATRIC', name: 'Pediatric Ward', total_beds: 8, available_beds: 5 },
-        { id: 12, ward_code: 'MATERNITY', name: 'Maternity Ward', total_beds: 6, available_beds: 3 },
-      ]);
+      setWards([]);
+      toast.error('Could not load wards. Try again or contact admin.');
     }
   };
 
@@ -4292,20 +4292,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         'Emergency': 'emergency',
       };
       
-      const facilityTypeMap: Record<string, 'internal' | 'external' | 'specialist'> = {
-        'Internal': 'internal',
-        'External': 'external',
-        'Specialist': 'specialist',
-      };
-      
-      // Create referral in backend
+      const apiFacilityType: 'internal' | 'external' | 'specialist' =
+        newReferral.facilityType || 'internal';
+
+      // Display label only — local UI rows kept the original Title-case for badges.
+      const displayFacilityType =
+        apiFacilityType.charAt(0).toUpperCase() + apiFacilityType.slice(1);
+
       const createdReferral = await referralService.createReferral({
         patient: numericPatientId,
         visit: numericVisitId || undefined,
         session: sessionId,
         specialty: newReferral.specialty,
         facility: newReferral.facility,
-        facility_type: facilityTypeMap[newReferral.facilityType] || 'internal',
+        facility_partner: newReferral.facility_partner,
+        facility_type: apiFacilityType,
         reason: newReferral.reason,
         clinical_summary: newReferral.clinicalSummary || undefined,
         urgency: newReferral.priority === 'STAT' ? 'emergency' : newReferral.priority.toLowerCase() as 'urgent' | 'routine' | 'emergency',
@@ -4318,7 +4319,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         backendId: createdReferral.id,
         specialty: newReferral.specialty,
         facility: newReferral.facility,
-        facilityType: newReferral.facilityType,
+        facilityType: displayFacilityType,
         reason: newReferral.reason,
         urgency: (newReferral.priority === 'STAT' ? 'Emergency' : newReferral.priority) as 'Routine' | 'Urgent' | 'Emergency',
         clinicalSummary: newReferral.clinicalSummary,
@@ -4326,7 +4327,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         contactPhone: newReferral.contactPhone || undefined,
         status: 'Draft'
       }]);
-      setNewReferral({ specialty: "", facility: "", facilityType: "", reason: "", priority: "Routine", clinicalSummary: "", contactPerson: "", contactPhone: "" });
+      setNewReferral({ specialty: "", facility: "", facilityType: "", facility_partner: null, reason: "", priority: "Routine", clinicalSummary: "", contactPerson: "", contactPhone: "" });
       setShowAddReferral(false);
       toast.success(
         "Referral created as draft. Open Referrals & forms to print, issue a responsibility form, then submit to Medical Records for acknowledgement."
@@ -8441,28 +8442,36 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {/* Facility Selection */}
               <div className="space-y-2">
                 <Label>Referral Facility *</Label>
-                <Select 
-                  value={newReferral.facility} 
-                  onValueChange={(v) => {
-                    const fac = referralFacilities.find(f => f.name === v);
-                    setNewReferral({ ...newReferral, facility: v, facilityType: fac?.type || "" });
+                <FacilityPartnerSelect
+                  showLabel={false}
+                  value={{
+                    partnerId: newReferral.facility_partner,
+                    facility: newReferral.facility,
+                    facility_type: newReferral.facilityType || 'internal',
                   }}
-                >
-                  <SelectTrigger><SelectValue placeholder="Select facility" /></SelectTrigger>
-                  <SelectContent className="max-h-[250px]">
-                    <SelectItem disabled value="internal-header" className="font-bold text-xs text-muted-foreground">── INTERNAL (NPA) ──</SelectItem>
-                    {referralFacilities.filter(f => f.type === 'Internal').map(fac => (
-                      <SelectItem key={fac.name} value={fac.name}>{fac.name}</SelectItem>
-                    ))}
-                    <SelectItem disabled value="external-header" className="font-bold text-xs text-muted-foreground">── EXTERNAL ──</SelectItem>
-                    {referralFacilities.filter(f => f.type === 'External').map(fac => (
-                      <SelectItem key={fac.name} value={fac.name}>{fac.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onChange={(next) =>
+                    setNewReferral({
+                      ...newReferral,
+                      facility: next.facility,
+                      facility_partner: next.partnerId,
+                      facilityType: next.facility_type,
+                    })
+                  }
+                />
                 {newReferral.facilityType && (
-                  <Badge variant="outline" className={newReferral.facilityType === 'External' ? 'bg-orange-100 text-orange-800' : 'bg-teal-100 text-teal-800'}>
-                    {newReferral.facilityType} Referral
+                  <Badge
+                    variant="outline"
+                    className={
+                      newReferral.facilityType === 'external'
+                        ? 'bg-orange-100 text-orange-800'
+                        : newReferral.facilityType === 'specialist'
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'bg-teal-100 text-teal-800'
+                    }
+                  >
+                    {newReferral.facilityType.charAt(0).toUpperCase() +
+                      newReferral.facilityType.slice(1)}{' '}
+                    Referral
                   </Badge>
                 )}
               </div>

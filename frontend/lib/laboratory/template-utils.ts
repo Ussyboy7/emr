@@ -148,8 +148,11 @@ export const classifyValue = (
   if (!valueStr) return 'Normal';
   if (field.dataType && field.dataType.toLowerCase() === 'text') return 'Normal';
 
-  const numValue = Number(valueStr);
-  if (Number.isNaN(numValue)) return 'Normal';
+  // Use parseFloat (not Number) so trailing units/text like "140 mg/dL", "7.8 mmol/L"
+  // still classify against the numeric portion. Number() would silently return NaN
+  // and fall through to "Normal", masking out-of-range values when users append units.
+  const numValue = parseFloat(valueStr);
+  if (!Number.isFinite(numValue)) return 'Normal';
 
   if (
     (field.criticalMin !== undefined && numValue < field.criticalMin) ||

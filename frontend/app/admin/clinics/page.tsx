@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,14 @@ import {
   Building2, Search, Plus, Edit, Trash2, Eye, Users, MapPin,
   Stethoscope, CheckCircle2, XCircle, AlertTriangle, Activity, DoorOpen, Loader2
 } from "lucide-react";
+import {
+  ReferralFacilitiesManager,
+  type ReferralFacilitiesManagerHandle,
+} from "@/components/referrals/ReferralFacilitiesManager";
+import {
+  WardsAdminManager,
+  type WardsAdminManagerHandle,
+} from "@/components/admin/WardsAdminManager";
 
 interface Clinic {
   id: string;
@@ -52,8 +60,42 @@ interface Department {
   isActive: boolean;
 }
 
+interface SystemRoleRow {
+  id: number;
+  name: string;
+  is_active: boolean;
+}
+
+/**
+ * System Roles whose users should NOT be counted as "clinical staff" on the
+ * Facilities & Departments KPI. Everything else in the active catalog is
+ * treated as clinical (Medical Doctor, Nursing Officer, Cardiologist,
+ * Ophthalmologist, …) — including new specialties added later via Roles
+ * Management → System Roles. Add to this set if you ever introduce
+ * additional non-clinical roles (e.g. "IT Support").
+ */
+const NON_CLINICAL_SYSTEM_ROLE_NAMES = new Set<string>([
+  "System Administrator",
+  "Admin Staff",
+]);
+
+/** Tolerate either a paginated response or a bare array, never invent data. */
+function parseSystemRolesResponse(raw: unknown): SystemRoleRow[] {
+  if (Array.isArray(raw)) return raw as SystemRoleRow[];
+  if (
+    raw &&
+    typeof raw === "object" &&
+    Array.isArray((raw as { results?: unknown }).results)
+  ) {
+    return (raw as { results: SystemRoleRow[] }).results;
+  }
+  return [];
+}
+
 export default function ClinicDepartmentPage() {
-  const [activeTab, setActiveTab] = useState<'facilities' | 'departments' | 'visit_types'>('facilities');
+  const [activeTab, setActiveTab] = useState<'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards'>('facilities');
+  const referralFacilitiesRef = useRef<ReferralFacilitiesManagerHandle>(null);
+  const wardsAdminRef = useRef<WardsAdminManagerHandle>(null);
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +128,13 @@ export default function ClinicDepartmentPage() {
   const [deptForm, setDeptForm] = useState<Partial<Department>>({ code: '', name: '', description: '', clinic: '', head: '', isActive: true });
   const [availableUsers, setAvailableUsers] = useState<any[]>([]);
 
+  // Live "clinical" system-role catalog. Sourced from /accounts/system-roles/
+  // so adding a new specialty (e.g. Cardiologist, Ophthalmologist) under
+  // Roles Management → System Roles automatically participates in the
+  // "Staff (sum)" KPI and per-facility staff counts. Any future is_clinical
+  // flag on the SystemRole model can drop in here without touching callers.
+  const [clinicalSystemRoleNames, setClinicalSystemRoleNames] = useState<Set<string>>(new Set());
+
   const [visitTypesList, setVisitTypesList] = useState<OutpatientClinicType[]>([]);
   const [loadingVisitTypes, setLoadingVisitTypes] = useState(false);
   const [allOutpatientTypes, setAllOutpatientTypes] = useState<OutpatientClinicType[]>([]);
@@ -110,7 +159,10 @@ export default function ClinicDepartmentPage() {
     }
   };
 
-  const loadData = async (users: any[] = []) => {
+  const loadData = async (
+    users: any[] = [],
+    clinicalRoles: Set<string> = clinicalSystemRoleNames,
+  ) => {
     try {
       setLoading(true);
       setError(null);
@@ -129,10 +181,11 @@ export default function ClinicDepartmentPage() {
         }),
       ]);
 
-      // Calculate clinical staff count (same for all facilities since they're physical sites)
-      const clinicalRoles = ['Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'Physiotherapist'];
-      const clinicalStaffCount = users.filter(user =>
-        user.is_active && clinicalRoles.includes(user.system_role)
+      // Calculate clinical staff count (same for all facilities since they're
+      // physical sites). `clinicalRoles` is sourced from the live System Roles
+      // catalog (see effect above), so new clinical specialties auto-count.
+      const clinicalStaffCount = users.filter((user) =>
+        user.is_active && clinicalRoles.has(user.system_role),
       ).length;
 
       // Transform clinics - use calculated staff count since assignments were removed
@@ -212,20 +265,40 @@ export default function ClinicDepartmentPage() {
 
   useEffect(() => {
     const loadAllData = async () => {
-      // Load users first
+      // Fetch users + system-roles catalog in parallel so the "clinical"
+      // filter is ready before loadData computes per-facility staff counts.
       let users: any[] = [];
+      let clinical: Set<string> = clinicalSystemRoleNames;
       try {
-        const usersResponse = await adminService.getUsers({ page_size: 1000 });
+        const [usersResponse, systemRolesRaw] = await Promise.all([
+          adminService.getUsers({ page_size: 1000 }),
+          adminService.getSystemRoles().catch((err) => {
+            console.error('Error loading system roles:', err);
+            return null;
+          }),
+        ]);
         users = usersResponse.results || [];
         setAvailableUsers(users);
+
+        if (systemRolesRaw) {
+          const rows = parseSystemRolesResponse(systemRolesRaw);
+          clinical = new Set(
+            rows
+              .filter((r) => r.is_active && !NON_CLINICAL_SYSTEM_ROLE_NAMES.has(r.name))
+              .map((r) => r.name),
+          );
+          setClinicalSystemRoleNames(clinical);
+        }
       } catch (err: any) {
         console.error('Error loading users:', err);
       }
 
-      // Then load departments/facilities with users data for staff count calculations
-      await loadData(users);
+      // Then load departments/facilities with users data for staff count calculations.
+      await loadData(users, clinical);
     };
     loadAllData();
+    // clinicalSystemRoleNames intentionally omitted: we read & set it inside.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, itemsPerPage, searchQuery, statusFilter]);
 
   useEffect(() => {
@@ -323,10 +396,11 @@ export default function ClinicDepartmentPage() {
       };
     }
 
-    // Calculate total staff as count of all active users with clinical roles
-    const clinicalRoles = ['Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'Physiotherapist'];
-    const totalStaffCalculated = availableUsers.filter(user =>
-      user.is_active && clinicalRoles.includes(user.system_role)
+    // Total clinical staff = active users whose system_role is in the live
+    // catalog and not flagged non-clinical. New System Roles (e.g.
+    // Cardiologist, Ophthalmologist) auto-roll into this count.
+    const totalStaffCalculated = availableUsers.filter((user) =>
+      user.is_active && clinicalSystemRoleNames.has(user.system_role),
     ).length;
 
     return {
@@ -336,7 +410,7 @@ export default function ClinicDepartmentPage() {
       totalStaff: totalStaffCalculated,
       totalRooms: kpiStats.total_rooms,
     };
-  }, [kpiStats, availableUsers]);
+  }, [kpiStats, availableUsers, clinicalSystemRoleNames]);
 
   const resetClinicForm = () => {
     setClinicForm({ code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true });
@@ -787,12 +861,22 @@ export default function ClinicDepartmentPage() {
             onClick={() => {
               if (activeTab === 'facilities') openCreateClinic();
               else if (activeTab === 'departments') openCreateDept();
-              else openCreateVisitType();
+              else if (activeTab === 'visit_types') openCreateVisitType();
+              else if (activeTab === 'wards') wardsAdminRef.current?.openCreate();
+              else referralFacilitiesRef.current?.openCreate();
             }}
             className="bg-teal-600 hover:bg-teal-700 text-white"
           >
             <Plus className="h-4 w-4 mr-2" />
-            Add {activeTab === 'facilities' ? 'Facility' : activeTab === 'departments' ? 'Department' : 'Visit clinic'}
+            Add {activeTab === 'facilities'
+              ? 'Facility'
+              : activeTab === 'departments'
+                ? 'Department'
+                : activeTab === 'visit_types'
+                  ? 'Visit clinic'
+                  : activeTab === 'wards'
+                    ? 'Ward'
+                    : 'Referral facility'}
           </Button>
         </div>
 
@@ -815,35 +899,39 @@ export default function ClinicDepartmentPage() {
           <Card className="border-l-4 border-l-amber-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Rooms</p><p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.totalRooms}</p></div><DoorOpen className="h-8 w-8 text-amber-500 opacity-50" /></div></CardContent></Card>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'facilities' | 'departments' | 'visit_types')}>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards')}>
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="facilities">Facilities</TabsTrigger>
             <TabsTrigger value="departments">Departments</TabsTrigger>
             <TabsTrigger value="visit_types">Visit clinics (OPD)</TabsTrigger>
+            <TabsTrigger value="wards">Wards (inpatient)</TabsTrigger>
+            <TabsTrigger value="referral_facilities">Referral facilities</TabsTrigger>
           </TabsList>
 
-          <Card className="mt-4">
-            <CardContent className="p-4">
-              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
-                <div className="relative flex-1 min-w-[min(100%,16rem)]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+          {activeTab !== 'referral_facilities' && activeTab !== 'wards' && (
+            <Card className="mt-4">
+              <CardContent className="p-4">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+                  <div className="relative flex-1 min-w-[min(100%,16rem)]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-[130px]">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All status</SelectItem>
+                        <SelectItem value="Active">Active</SelectItem>
+                        <SelectItem value="Inactive">Inactive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[130px]">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All status</SelectItem>
-                      <SelectItem value="Active">Active</SelectItem>
-                      <SelectItem value="Inactive">Inactive</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           <TabsContent value="facilities">
             {loading ? (
@@ -1040,6 +1128,17 @@ export default function ClinicDepartmentPage() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="wards" className="mt-4">
+            <WardsAdminManager ref={wardsAdminRef} showHeader={false} />
+          </TabsContent>
+
+          <TabsContent value="referral_facilities">
+            <ReferralFacilitiesManager
+              ref={referralFacilitiesRef}
+              showHeader={false}
+            />
           </TabsContent>
         </Tabs>
 

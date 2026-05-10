@@ -228,17 +228,87 @@ class ConsultationQueue(models.Model):
         return f"{self.room.name} - {self.patient.get_full_name()}"
 
 
+FACILITY_TYPE_CHOICES = [
+    ('internal', 'Internal - Same Facility'),
+    ('external', 'External - Other Facility'),
+    ('specialist', 'Specialist Clinic'),
+]
+
+
+class ReferralFacility(models.Model):
+    """
+    Catalog of partner / receiving facilities a patient can be referred to.
+
+    Mirrors ``laboratory.LabPartner``: a small managed list, surfaced as a
+    typeahead in the referral creation form. Each ``Referral`` snapshots
+    ``name`` and ``address`` onto its own row at issue time so the printed
+    responsibility form keeps showing what was current when the form was
+    issued, even if the catalog row is later renamed or deleted.
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Optional short code (e.g. for reports / search).",
+    )
+    facility_type = models.CharField(
+        max_length=20,
+        choices=FACILITY_TYPE_CHOICES,
+        default='external',
+    )
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    address = models.TextField(
+        blank=True,
+        help_text=(
+            "Multi-line postal address printed on referral letters and "
+            "responsibility forms (e.g. street, area, city)."
+        ),
+    )
+    contact_person_title = models.CharField(
+        max_length=100,
+        blank=True,
+        default="The Medical Director",
+        help_text=(
+            "Addressee role used in the 'To:' block on letters "
+            "(e.g. 'The Medical Director', 'The Chief Executive Officer')."
+        ),
+    )
+    specialties = models.TextField(
+        blank=True,
+        help_text=(
+            "Optional comma-separated list of specialties this facility "
+            "accepts (used to prefilter the referral typeahead)."
+        ),
+    )
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'referral_facilities'
+        ordering = ['sort_order', 'name']
+        verbose_name = 'Referral facility'
+        verbose_name_plural = 'Referral facilities'
+
+    def __str__(self):
+        return self.name
+
+
 class Referral(models.Model):
     """
     Patient referrals to other specialties or facilities.
     """
-    
+
     URGENCY_CHOICES = [
         ('routine', 'Routine'),
         ('urgent', 'Urgent'),
         ('emergency', 'Emergency'),
     ]
-    
+
     STATUS_CHOICES = [
         ('draft', 'Draft'),
         ('submitted_to_records', 'Submitted to Records'),
@@ -248,21 +318,45 @@ class Referral(models.Model):
         ('closed', 'Closed'),
         ('cancelled', 'Cancelled'),
     ]
-    
-    FACILITY_TYPE_CHOICES = [
-        ('internal', 'Internal - Same Facility'),
-        ('external', 'External - Other Facility'),
-        ('specialist', 'Specialist Clinic'),
-    ]
-    
+
+    # Re-exposed at class level (module-level constant is the canonical source)
+    # so legacy ``Referral.FACILITY_TYPE_CHOICES`` lookups keep working.
+    FACILITY_TYPE_CHOICES = FACILITY_TYPE_CHOICES
+
     referral_id = models.CharField(max_length=50, unique=True, db_index=True)
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='referrals')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
     session = models.ForeignKey(ConsultationSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
-    
+
     referred_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='referrals_made')
     specialty = models.CharField(max_length=100, help_text="Target specialty or department")
-    facility = models.CharField(max_length=200, help_text="Target facility or clinic name")
+    facility_partner = models.ForeignKey(
+        ReferralFacility,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='referrals',
+        help_text=(
+            "Catalog row for the receiving facility. May be null when the "
+            "user typed a one-off facility name."
+        ),
+    )
+    facility = models.CharField(
+        max_length=200,
+        help_text=(
+            "Receiving facility name. Snapshot copied from "
+            "``facility_partner.name`` on save when a partner is selected; "
+            "free-typed for one-off referrals."
+        ),
+    )
+    facility_address_snapshot = models.TextField(
+        blank=True,
+        help_text=(
+            "Postal address copied from ``facility_partner.address`` at issue "
+            "time so PDFs always print what was current when the referral "
+            "was made."
+        ),
+    )
     facility_type = models.CharField(max_length=20, choices=FACILITY_TYPE_CHOICES, default='internal')
     
     reason = models.TextField(help_text="Reason for referral")
@@ -297,16 +391,13 @@ class Referral(models.Model):
     
     def save(self, *args, **kwargs):
         if not self.referral_id:
-            # Generate referral_id: REF-YYYY-NNNNNN
             from datetime import datetime
             year = datetime.now().year
-            # Get the last referral for this year
             last_referral = Referral.objects.filter(
                 referral_id__startswith=f'REF-{year}-'
             ).order_by('-referral_id').first()
-            
+
             if last_referral:
-                # Extract the number part and increment
                 try:
                     last_num = int(last_referral.referral_id.split('-')[-1])
                     new_num = last_num + 1
@@ -314,9 +405,22 @@ class Referral(models.Model):
                     new_num = 1
             else:
                 new_num = 1
-            
+
             self.referral_id = f'REF-{year}-{new_num:06d}'
-        
+
+        # Snapshot the partner's name + address so the printed PDF stays
+        # accurate even if the facility row is later renamed or deleted.
+        # Address is only copied the first time (preserves any hand-edits
+        # on the snapshot afterwards). Name is copied when blank or still
+        # equal to the partner's current name.
+        if self.facility_partner_id:
+            partner = self.facility_partner
+            if partner is not None:
+                if not (self.facility or '').strip():
+                    self.facility = partner.name
+                if not (self.facility_address_snapshot or '').strip():
+                    self.facility_address_snapshot = partner.address or ''
+
         super().save(*args, **kwargs)
     
     def __str__(self):

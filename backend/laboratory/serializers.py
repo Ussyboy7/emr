@@ -3,7 +3,15 @@ Serializers for the Laboratory app.
 """
 from rest_framework import serializers
 import re
-from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabTestResultAttachment, LabResult
+from .models import (
+    LabTemplate,
+    LabPartner,
+    LabOrder,
+    LabTest,
+    LabTestResultAttachment,
+    LabReferralDispatch,
+    LabResult,
+)
 
 
 OTHER_TEMPLATE_CODES = {'OTHER', 'OTHERS'}
@@ -48,6 +56,8 @@ class LabPartnerSerializer(serializers.ModelSerializer):
             "code",
             "phone",
             "email",
+            "address",
+            "contact_person_title",
             "notes",
             "is_active",
             "sort_order",
@@ -461,6 +471,58 @@ class LabOrderSerializer(serializers.ModelSerializer):
         model = LabOrder
         fields = '__all__'
         read_only_fields = ['order_id', 'ordered_at', 'created_at']
+
+
+class LabReferralDispatchSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for LabReferralDispatch. Embeds enough about the
+    target tests + partner that the frontend can render the confirmation
+    panel and reissue menu without an extra round-trip.
+    """
+
+    partner_id = serializers.PrimaryKeyRelatedField(
+        source='partner', read_only=True, allow_null=True,
+    )
+    issued_by_name = serializers.SerializerMethodField()
+    cancelled_by_name = serializers.SerializerMethodField()
+    superseded_by_dispatch_id = serializers.CharField(
+        source='superseded_by.dispatch_id', read_only=True, default=None,
+    )
+    tests = serializers.SerializerMethodField()
+
+    def get_issued_by_name(self, obj):
+        u = getattr(obj, 'issued_by', None)
+        return u.get_full_name() if u else None
+
+    def get_cancelled_by_name(self, obj):
+        u = getattr(obj, 'cancelled_by', None)
+        return u.get_full_name() if u else None
+
+    def get_tests(self, obj):
+        return [
+            {
+                'id': t.id,
+                'name': t.name,
+                'code': t.code,
+                'sample_type': t.sample_type,
+                'status': t.status,
+                'lab_number': t.lab_number,
+            }
+            for t in obj.tests.all()
+        ]
+
+    class Meta:
+        model = LabReferralDispatch
+        fields = [
+            'id', 'dispatch_id', 'order', 'partner_id', 'partner_name',
+            'partner_address_snapshot',
+            'tests', 'status', 'superseded_by', 'superseded_by_dispatch_id',
+            'cancellation_reason', 'notes',
+            'issued_by', 'issued_by_name', 'issued_at',
+            'cancelled_by', 'cancelled_by_name', 'cancelled_at',
+            'referral_letter_printed_at', 'responsibility_form_printed_at',
+        ]
+        read_only_fields = fields  # writes go through dedicated endpoints
 
 
 class LabResultSerializer(serializers.ModelSerializer):

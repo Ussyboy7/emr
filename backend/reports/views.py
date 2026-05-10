@@ -1923,6 +1923,165 @@ class GOPAttendanceReportView(views.APIView):
         })
 
 
+class EscortLogReportView(views.APIView):
+    """
+    Escort Log — every patient that physically left the ward with a nurse
+    accompanying them to an external facility.
+
+    Source of truth is :class:`wards.models.AdmissionEscort` (created during
+    discharge initiation when the doctor flags the discharge as a transfer
+    and the nurse confirms departure). Each row is one escort log entry and
+    carries its referral, transport, primary nurse, additional nurses, and
+    arrival confirmation outcome.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.utils.dateparse import parse_date
+        from wards.models import AdmissionEscort
+
+        year = request.query_params.get('year')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        status_filter = (request.query_params.get('status') or '').lower()
+        outcome_filter = (request.query_params.get('outcome') or '').lower()
+
+        parsed_start_date = parse_date(start_date_str) if start_date_str else None
+        parsed_end_date = parse_date(end_date_str) if end_date_str else None
+
+        try:
+            year_int = int(year) if year else timezone.now().year
+        except (ValueError, TypeError):
+            year_int = timezone.now().year
+
+        # Period scope — by departure timestamp, falling back to created_at
+        # for stub escorts that haven't been signed out yet (the doctor
+        # initiated the referral but the nurse hasn't completed discharge).
+        escorts = AdmissionEscort.objects.select_related(
+            'admission', 'admission__patient', 'admission__ward',
+            'referral', 'facility', 'primary_nurse',
+            'arrival_confirmed_by', 'created_by',
+        ).prefetch_related('additional_nurses')
+
+        if parsed_start_date and parsed_end_date:
+            escorts = escorts.filter(
+                Q(departure_at__date__gte=parsed_start_date, departure_at__date__lte=parsed_end_date)
+                | Q(departure_at__isnull=True, created_at__date__gte=parsed_start_date,
+                    created_at__date__lte=parsed_end_date)
+            )
+        else:
+            escorts = escorts.filter(
+                Q(departure_at__year=year_int)
+                | Q(departure_at__isnull=True, created_at__year=year_int)
+            )
+
+        # status: pending = not yet arrival-confirmed; confirmed = arrival logged.
+        if status_filter == 'pending':
+            escorts = escorts.filter(arrival_confirmed_at__isnull=True)
+        elif status_filter == 'confirmed':
+            escorts = escorts.filter(arrival_confirmed_at__isnull=False)
+
+        if outcome_filter:
+            escorts = escorts.filter(arrival_call_outcome=outcome_filter)
+
+        escorts = escorts.order_by('-departure_at', '-created_at')
+
+        # Summary metrics
+        total = escorts.count()
+        confirmed = escorts.filter(arrival_confirmed_at__isnull=False).count()
+        pending = total - confirmed
+        outcome_counts = {}
+        for row in escorts.values('arrival_call_outcome').annotate(c=Count('id')):
+            key = (row['arrival_call_outcome'] or 'unspecified') or 'unspecified'
+            outcome_counts[key] = row['c']
+
+        # Average time-to-arrival for confirmed escorts (departure → arrival).
+        avg_minutes_to_arrival = None
+        confirmed_with_times = escorts.filter(
+            arrival_confirmed_at__isnull=False,
+            departure_at__isnull=False,
+        )
+        if confirmed_with_times.exists():
+            diffs = []
+            for esc in confirmed_with_times.only('departure_at', 'arrival_confirmed_at')[:500]:
+                if esc.arrival_confirmed_at and esc.departure_at:
+                    delta = esc.arrival_confirmed_at - esc.departure_at
+                    secs = delta.total_seconds()
+                    if secs >= 0:
+                        diffs.append(secs / 60.0)
+            if diffs:
+                avg_minutes_to_arrival = round(sum(diffs) / len(diffs), 1)
+
+        # Pending > 24h since departure — escorts that should already have
+        # been called back. Surfaced separately so duty nurses can chase.
+        cutoff = timezone.now() - timedelta(hours=24)
+        overdue = escorts.filter(
+            arrival_confirmed_at__isnull=True,
+            departure_at__isnull=False,
+            departure_at__lte=cutoff,
+        ).count()
+
+        # Top facilities (where do we send patients most?)
+        facility_counts = list(
+            escorts.values('facility_name_snapshot')
+            .annotate(c=Count('id'))
+            .order_by('-c')[:10]
+        )
+        top_facilities = [
+            {'facility': (row['facility_name_snapshot'] or 'Unspecified'), 'count': row['c']}
+            for row in facility_counts
+        ]
+
+        # Detail rows (cap to 200 for the on-screen table; CSV export reads the same).
+        rows = []
+        for idx, esc in enumerate(escorts[:200], 1):
+            adm = esc.admission
+            patient = adm.patient if adm else None
+            primary_name = esc.primary_nurse.get_full_name() if esc.primary_nurse_id else ''
+            additional_names = ', '.join(
+                n.get_full_name() for n in esc.additional_nurses.all()
+            )
+            rows.append({
+                'sn': idx,
+                'escort_id': esc.id,
+                'patient_id': getattr(patient, 'patient_id', '') if patient else '',
+                'patient_name': patient.get_full_name() if patient else '',
+                'admission_id': adm.admission_id if adm else '',
+                'ward': adm.ward.name if adm and adm.ward_id else '',
+                'departure_at': esc.departure_at.isoformat() if esc.departure_at else None,
+                'facility': esc.facility_name_snapshot or (
+                    esc.facility.name if esc.facility_id else ''
+                ),
+                'transport_mode': esc.transport_mode or '',
+                'primary_nurse': primary_name,
+                'additional_nurses': additional_names,
+                'referral_id': esc.referral.referral_id if esc.referral_id else '',
+                'referral_status': esc.referral.status if esc.referral_id else '',
+                'urgency': esc.referral.urgency if esc.referral_id else '',
+                'handover_summary': esc.handover_summary or '',
+                'arrival_confirmed_at': esc.arrival_confirmed_at.isoformat() if esc.arrival_confirmed_at else None,
+                'arrival_outcome': esc.arrival_call_outcome or '',
+                'arrival_notes': esc.arrival_notes or '',
+                'arrival_confirmed_by': (
+                    esc.arrival_confirmed_by.get_full_name() if esc.arrival_confirmed_by_id else ''
+                ),
+            })
+
+        return Response({
+            'summary': {
+                'total': total,
+                'pending': pending,
+                'confirmed': confirmed,
+                'overdue_pending': overdue,
+                'avg_minutes_to_arrival': avg_minutes_to_arrival,
+                'outcome_counts': outcome_counts,
+            },
+            'top_facilities': top_facilities,
+            'data': rows,
+        })
+
+
 class WeekendCallDutyReportView(views.APIView):
     """Generate weekend call duty report."""
     

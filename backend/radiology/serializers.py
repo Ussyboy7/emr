@@ -3,7 +3,15 @@ Serializers for the Radiology app.
 """
 from rest_framework import serializers
 import re
-from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyStudyReportAttachment, RadiologyReport, ImagingPartner
+from .models import (
+    RadiologyTemplate,
+    RadiologyOrder,
+    RadiologyStudy,
+    RadiologyStudyReportAttachment,
+    RadiologyReport,
+    ImagingPartner,
+    RadiologyReferralDispatch,
+)
 
 
 OTHER_TEMPLATE_CODES = {'OTHER', 'OTHERS'}
@@ -27,12 +35,77 @@ def _split_requested_other_studies(notes):
 
 
 class ImagingPartnerSerializer(serializers.ModelSerializer):
-    """Serializer for ImagingPartner model."""
+    """External imaging center partners for outsourced study processing."""
 
     class Meta:
         model = ImagingPartner
-        fields = '__all__'
+        fields = [
+            'id',
+            'name',
+            'code',
+            'phone',
+            'email',
+            'address',
+            'contact_person_title',
+            'notes',
+            'is_active',
+            'sort_order',
+            'created_at',
+            'updated_at',
+        ]
         read_only_fields = ['created_at', 'updated_at']
+
+
+class RadiologyReferralDispatchSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for RadiologyReferralDispatch. Embeds enough about the
+    target studies + partner that the frontend can render the confirmation
+    panel and reissue menu without an extra round-trip.
+    """
+
+    partner_id = serializers.PrimaryKeyRelatedField(
+        source='partner', read_only=True, allow_null=True,
+    )
+    issued_by_name = serializers.SerializerMethodField()
+    cancelled_by_name = serializers.SerializerMethodField()
+    superseded_by_dispatch_id = serializers.CharField(
+        source='superseded_by.dispatch_id', read_only=True, default=None,
+    )
+    studies = serializers.SerializerMethodField()
+
+    def get_issued_by_name(self, obj):
+        u = getattr(obj, 'issued_by', None)
+        return u.get_full_name() if u else None
+
+    def get_cancelled_by_name(self, obj):
+        u = getattr(obj, 'cancelled_by', None)
+        return u.get_full_name() if u else None
+
+    def get_studies(self, obj):
+        return [
+            {
+                'id': s.id,
+                'procedure': s.procedure,
+                'modality': s.modality,
+                'body_part': s.body_part,
+                'status': s.status,
+                'processing_method': s.processing_method,
+            }
+            for s in obj.studies.all()
+        ]
+
+    class Meta:
+        model = RadiologyReferralDispatch
+        fields = [
+            'id', 'dispatch_id', 'order', 'partner_id', 'partner_name',
+            'partner_address_snapshot',
+            'studies', 'status', 'superseded_by', 'superseded_by_dispatch_id',
+            'cancellation_reason', 'notes',
+            'issued_by', 'issued_by_name', 'issued_at',
+            'cancelled_by', 'cancelled_by_name', 'cancelled_at',
+            'referral_letter_printed_at', 'responsibility_form_printed_at',
+        ]
+        read_only_fields = fields  # writes go through dedicated endpoints
 
 
 class RadiologyTemplateSerializer(serializers.ModelSerializer):

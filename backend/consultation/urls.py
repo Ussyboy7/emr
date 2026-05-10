@@ -8,6 +8,7 @@ from .views import (
     ConsultationSessionViewSet,
     ConsultationQueueViewSet,
     ReferralViewSet,
+    ReferralFacilityViewSet,
     ICD10CodeViewSet,
     DiagnosisViewSet,
     PresentingComplaintCategoryViewSet,
@@ -19,6 +20,7 @@ router.register(r'rooms', ConsultationRoomViewSet, basename='consultation-room')
 router.register(r'sessions', ConsultationSessionViewSet, basename='consultation-session')
 router.register(r'queue', ConsultationQueueViewSet, basename='consultation-queue')
 router.register(r'referrals', ReferralViewSet, basename='referral')
+router.register(r'referral-facilities', ReferralFacilityViewSet, basename='referral-facility')
 router.register(r'icd10-codes', ICD10CodeViewSet, basename='icd10-code')
 router.register(r'diagnoses', DiagnosisViewSet, basename='diagnosis')
 router.register(r'presenting-complaint-categories', PresentingComplaintCategoryViewSet, basename='presenting-complaint-category')

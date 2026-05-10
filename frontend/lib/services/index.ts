@@ -8,6 +8,7 @@ export type {
   LabTemplate,
   LabResult,
   LabPartner,
+  LabReferralDispatch,
   LabAnalyticsSummary,
 } from './lab-service';
 export type {
@@ -42,6 +43,8 @@ export type {
   RadiologyReport,
   RadiologyTemplate,
   RadiologyAnalyticsSummary,
+  ImagingPartner,
+  RadiologyReferralDispatch,
 } from './radiology-service';
 export type {
   ConsultationStats,

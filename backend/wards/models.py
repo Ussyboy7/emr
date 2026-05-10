@@ -233,6 +233,14 @@ class PatientAdmission(models.Model):
         ('deceased', 'Deceased'),
     ]
 
+    DISCHARGED_WITH_CHOICES = [
+        ('self', 'Self / unaccompanied'),
+        ('family', 'Family / next of kin'),
+        ('escort_to_external', 'Escorted to external facility'),
+        ('transferred', 'Transferred internally'),
+        ('mortuary', 'Mortuary'),
+    ]
+
     # Admission details
     admission_id = models.CharField(max_length=50, unique=True, db_index=True, blank=True)
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='admissions')
@@ -299,6 +307,50 @@ class PatientAdmission(models.Model):
         related_name='transfers_in'
     )
     transfer_reason = models.TextField(blank=True)
+
+    # Nurse-authored exit / sign-out (Step 2 of discharge). Captured by the
+    # nurse who confirms the patient has physically left the ward.
+    nurse_exit_summary = models.TextField(
+        blank=True,
+        help_text=(
+            "Nurse's exit observation summary recorded at sign-out: condition "
+            "at handoff, lines/drains removed, valuables returned, education "
+            "given, etc."
+        ),
+    )
+    discharged_with = models.CharField(
+        max_length=30,
+        choices=DISCHARGED_WITH_CHOICES,
+        blank=True,
+        help_text="Whom the patient leaves with at sign-out.",
+    )
+    companion_name = models.CharField(max_length=200, blank=True)
+    companion_relationship = models.CharField(max_length=100, blank=True)
+    companion_phone = models.CharField(max_length=50, blank=True)
+    physically_left_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp set when the nurse confirmed the patient left.",
+    )
+    confirmed_by_nurse = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='confirmed_discharges',
+        limit_choices_to={'system_role__in': ['Nurse', 'Nursing Officer', 'Midwife']},
+    )
+
+    # Snapshot of the discharge summary PDF, written once when the nurse
+    # confirms discharge so the audit copy is provably untouched. Live
+    # interim copies are rendered on every download instead.
+    summary_pdf_file = models.FileField(
+        upload_to='admission_summaries/',
+        blank=True,
+        null=True,
+        help_text='Locked summary PDF generated when discharge completes.',
+    )
+    summary_pdf_generated_at = models.DateTimeField(null=True, blank=True)
 
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
@@ -492,6 +544,117 @@ class AdmissionObservationVital(models.Model):
 
     def __str__(self):
         return f"Vitals {self.recorded_at} — admission {self.admission_id}"
+
+
+class AdmissionEscort(models.Model):
+    """
+    Escort assignment for a patient leaving the ward to an external facility.
+
+    Created when a doctor initiates discharge with an external referral and
+    completed by the nurse who physically accompanies the patient. Carries
+    its own audit trail (departure, transport, arrival/handover) so the
+    clinical event survives independently of the admission row.
+    """
+
+    TRANSPORT_CHOICES = [
+        ('hospital_ambulance', 'Hospital ambulance'),
+        ('private_vehicle', 'Private vehicle'),
+        ('family_vehicle', 'Family vehicle'),
+        ('partner_facility_transport', 'Receiving facility transport'),
+        ('other', 'Other'),
+    ]
+
+    admission = models.OneToOneField(
+        PatientAdmission,
+        on_delete=models.CASCADE,
+        related_name='escort',
+    )
+    referral = models.ForeignKey(
+        'consultation.Referral',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='admission_escorts',
+        help_text="Referral this escort fulfils (when destination is external).",
+    )
+    facility = models.ForeignKey(
+        'consultation.ReferralFacility',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='admission_escorts',
+    )
+    facility_name_snapshot = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Receiving facility name as it was when the escort was created.",
+    )
+
+    primary_nurse = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.PROTECT,
+        related_name='escorts_led',
+        limit_choices_to={'system_role__in': ['Nurse', 'Nursing Officer', 'Midwife']},
+        null=True,
+        blank=True,
+    )
+    additional_nurses = models.ManyToManyField(
+        'accounts.User',
+        blank=True,
+        related_name='escorts_assisted',
+        limit_choices_to={'system_role__in': ['Nurse', 'Nursing Officer', 'Midwife']},
+    )
+
+    transport_mode = models.CharField(
+        max_length=40,
+        choices=TRANSPORT_CHOICES,
+        blank=True,
+    )
+    departure_at = models.DateTimeField(null=True, blank=True)
+    handover_summary = models.TextField(
+        blank=True,
+        help_text="What was communicated to the receiving nurse at handover.",
+    )
+
+    arrival_confirmed_at = models.DateTimeField(null=True, blank=True)
+    arrival_confirmed_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='escorts_arrival_confirmed',
+    )
+    arrival_notes = models.TextField(
+        blank=True,
+        help_text="Phone-call back details: time, name of receiving nurse, etc.",
+    )
+    arrival_call_outcome = models.CharField(
+        max_length=20,
+        blank=True,
+        choices=[
+            ('answered', 'Answered'),
+            ('voicemail', 'Voicemail / no answer'),
+            ('handover_in_person', 'Handover in person'),
+        ],
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_admission_escorts',
+    )
+
+    class Meta:
+        db_table = 'admission_escorts'
+        ordering = ['-created_at']
+        verbose_name = 'Admission escort'
+        verbose_name_plural = 'Admission escorts'
+
+    def __str__(self):
+        return f"Escort for admission {self.admission_id}"
 
 
 class AdmissionTreatmentRow(models.Model):

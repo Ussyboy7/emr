@@ -34,7 +34,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/nursing/patient-vitals", name: "Patient Vitals", description: "Record patient vital signs", module: "Nursing" },
   { id: "/nursing/procedures", name: "Procedures", description: "Manage nursing procedures", module: "Nursing" },
   { id: "/nursing/procedures/history", name: "Procedures History", description: "View procedures history", module: "Nursing" },
-  { id: "/nursing/wards", name: "Ward Management", description: "Manage wards and beds", module: "Nursing" },
+  { id: "/nursing/wards", name: "Ward Care", description: "Record observations, execute doctor orders, and manage bed assignments", module: "Nursing" },
   { id: "/nursing/inventory", name: "Ward Stock", description: "Manage ward inventory", module: "Nursing" },
   { id: "/nursing/requests", name: "Drug Requests", description: "Request drugs from pharmacy", module: "Nursing" },
   { id: "/nursing/analytics", name: "Analytics", description: "Nursing pool analytics", module: "Nursing" },

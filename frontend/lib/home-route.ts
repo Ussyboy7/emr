@@ -1,22 +1,48 @@
 import type { User } from "@/lib/npa-structure";
+import { ALL_PAGE_PERMISSIONS } from "@/lib/page-permissions";
 
 type ModuleRoute = {
   basePath: string;
   dashboardPath: string;
 };
 
-// Order matters: used to pick a default "home" when a user has multiple module accesses.
-export const MODULE_ROUTE_PRIORITY: ModuleRoute[] = [
-  { basePath: "/medical-records", dashboardPath: "/medical-records" },
-  { basePath: "/nursing", dashboardPath: "/nursing" },
-  { basePath: "/consultation", dashboardPath: "/consultation" },
-  { basePath: "/laboratory", dashboardPath: "/laboratory" },
-  { basePath: "/pharmacy", dashboardPath: "/pharmacy" },
-  { basePath: "/radiology", dashboardPath: "/radiology" },
-  { basePath: "/physiotherapy", dashboardPath: "/physiotherapy" },
-  { basePath: "/analytics", dashboardPath: "/analytics" },
-  { basePath: "/admin", dashboardPath: "/admin" },
-];
+// Modules that are not standalone landing pages (no dashboard for users to "go to").
+// Filter them out so users with only these pages don't get auto-routed to e.g. /notifications.
+const NON_LANDING_MODULES = new Set(["Overview", "User"]);
+
+/**
+ * Module priority list, derived once from `ALL_PAGE_PERMISSIONS`.
+ *
+ * Source of truth: the page catalog. Modules appear here in the same order
+ * they appear in `ALL_PAGE_PERMISSIONS`, and each module's dashboard is the
+ * shortest path in its group (e.g. `/eyecare` for "Eye Clinic"). That means
+ * adding a new module to the catalog automatically:
+ *   - shows up in the home-route resolver,
+ *   - participates in middleware redirects,
+ *   - is reachable from the Permissions tab,
+ * with **zero** secondary code edits — the Eye Clinic miss that locked
+ * j.jackson out is no longer possible.
+ */
+export const MODULE_ROUTE_PRIORITY: ModuleRoute[] = (() => {
+  const seen = new Set<string>();
+  const ordered: ModuleRoute[] = [];
+  for (const page of ALL_PAGE_PERMISSIONS) {
+    if (NON_LANDING_MODULES.has(page.module)) continue;
+    if (seen.has(page.module)) continue;
+    seen.add(page.module);
+
+    const modulePages = ALL_PAGE_PERMISSIONS.filter(
+      (p) => p.module === page.module,
+    );
+    // Module "dashboard" / base path = shortest catalog id in the group
+    // (e.g. `/eyecare` beats `/eyecare/orders`).
+    const dashboard = modulePages.reduce((shortest, candidate) =>
+      candidate.id.length < shortest.id.length ? candidate : shortest,
+    );
+    ordered.push({ basePath: dashboard.id, dashboardPath: dashboard.id });
+  }
+  return ordered;
+})();
 
 export function isPathAllowedByPages(pathname: string, allowedPages: string[]): boolean {
   if (!pathname || pathname === "/") return false;

@@ -104,6 +104,7 @@ const menuSections: MenuSection[] = [
       { label: "Manage Visits", href: "/medical-records/visits", icon: Calendar },
       { label: "Appointments", href: "/medical-records/appointments", icon: CalendarDays },
       { label: "Manage Dependents", href: "/medical-records/dependents", icon: UsersRound },
+      { label: "Referrals", href: "/medical-records/referrals", icon: ArrowRight },
       { label: "Reports", href: "/medical-records/reports", icon: FolderOpen },
     ],
   },
@@ -120,9 +121,10 @@ const menuSections: MenuSection[] = [
       { label: "Patient Vitals", href: "/nursing/patient-vitals", icon: Activity },
       { label: "Procedures", href: "/nursing/procedures", icon: Syringe },
       { label: "Procedures History", href: "/nursing/procedures/history", icon: ClipboardList },
-      { label: "Ward Management", href: "/nursing/wards", icon: Building2 },
+      { label: "Ward Care", href: "/nursing/wards", icon: Building2 },
       { label: "Analytics", href: "/nursing/analytics", icon: BarChart3 },
-
+      { label: "Inventory", href: "/nursing/inventory", icon: Users },
+      { label: "Requests", href: "/nursing/requests", icon: Users },
     ],
   },
   {

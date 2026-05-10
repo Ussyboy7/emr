@@ -34,6 +34,7 @@ import {
   ChevronRight,
   Search,
   Loader2,
+  MapPin,
   X,
 } from "lucide-react";
 
@@ -139,6 +140,16 @@ const statisticalReports: StatisticalReportTile[] = [
     borderAccent: "border-l-cyan-500",
     iconWrap: "bg-cyan-500/10",
     iconClass: "text-cyan-500",
+  },
+  {
+    id: "escort-log",
+    title: "Escort Log",
+    description: "Patients escorted to external facilities, with arrival confirmation and handover trail",
+    icon: MapPin,
+    href: "/medical-records/reports/escort-log",
+    borderAccent: "border-l-rose-500",
+    iconWrap: "bg-rose-500/10",
+    iconClass: "text-rose-500",
   },
   {
     id: "disease-pattern",

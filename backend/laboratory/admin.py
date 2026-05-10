@@ -2,15 +2,26 @@
 Admin configuration for the Laboratory app.
 """
 from django.contrib import admin
-from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabResult
+from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabReferralDispatch, LabResult
 
 
 @admin.register(LabPartner)
 class LabPartnerAdmin(admin.ModelAdmin):
     list_display = ["name", "code", "is_active", "sort_order", "phone", "updated_at"]
     list_filter = ["is_active"]
-    search_fields = ["name", "code", "email"]
+    search_fields = ["name", "code", "email", "address"]
     ordering = ["sort_order", "name"]
+    fieldsets = (
+        (None, {
+            "fields": ("name", "code", "is_active", "sort_order"),
+        }),
+        ("Contact", {
+            "fields": ("phone", "email", "contact_person_title", "address"),
+        }),
+        ("Other", {
+            "fields": ("notes",),
+        }),
+    )
 
 
 @admin.register(LabTemplate)
@@ -39,4 +50,42 @@ class LabResultAdmin(admin.ModelAdmin):
     list_display = ['test', 'patient', 'overall_status', 'priority', 'created_at']
     list_filter = ['overall_status', 'priority']
     search_fields = ['patient__surname', 'patient__first_name', 'test__name']
+
+
+@admin.register(LabReferralDispatch)
+class LabReferralDispatchAdmin(admin.ModelAdmin):
+    list_display = [
+        'dispatch_id', 'order', 'partner_name', 'status',
+        'issued_by', 'issued_at',
+        'referral_letter_printed_at', 'responsibility_form_printed_at',
+    ]
+    list_filter = ['status', 'partner', 'issued_at']
+    search_fields = [
+        'dispatch_id', 'order__order_id', 'partner_name',
+        'order__patient__surname', 'order__patient__first_name',
+    ]
+    readonly_fields = [
+        'dispatch_id', 'issued_at', 'cancelled_at',
+        'referral_letter_printed_at', 'responsibility_form_printed_at',
+        'partner_address_snapshot',
+    ]
+    raw_id_fields = ['order', 'partner', 'tests', 'issued_by', 'cancelled_by']
+    fieldsets = (
+        (None, {
+            'fields': (
+                'dispatch_id', 'order', 'partner', 'partner_name',
+                'partner_address_snapshot', 'tests', 'notes',
+            ),
+        }),
+        ('Lifecycle', {
+            'fields': ('status', 'superseded_by', 'cancellation_reason'),
+        }),
+        ('Audit', {
+            'fields': (
+                'issued_by', 'issued_at',
+                'cancelled_by', 'cancelled_at',
+                'referral_letter_printed_at', 'responsibility_form_printed_at',
+            ),
+        }),
+    )
 

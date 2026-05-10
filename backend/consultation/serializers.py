@@ -7,6 +7,7 @@ from .models import (
     ConsultationSession,
     ConsultationQueue,
     Referral,
+    ReferralFacility,
     ResponsibilityFormIssuance,
     Diagnosis,
     ICD10Code,
@@ -187,6 +188,46 @@ class ConsultationQueueByVisitSerializer(serializers.ModelSerializer):
         fields = ['visit', 'room_name', 'queued_at']
 
 
+class ReferralFacilitySerializer(serializers.ModelSerializer):
+    """Catalog of partner / receiving facilities for referrals."""
+
+    class Meta:
+        model = ReferralFacility
+        fields = [
+            'id',
+            'name',
+            'code',
+            'facility_type',
+            'phone',
+            'email',
+            'address',
+            'contact_person_title',
+            'specialties',
+            'notes',
+            'is_active',
+            'sort_order',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ReferralFacilityMiniSerializer(serializers.ModelSerializer):
+    """Compact embed used inside ``ReferralSerializer.facility_partner``."""
+
+    class Meta:
+        model = ReferralFacility
+        fields = [
+            'id',
+            'name',
+            'code',
+            'facility_type',
+            'address',
+            'contact_person_title',
+            'is_active',
+        ]
+
+
 class ReferralSerializer(serializers.ModelSerializer):
     """Serializer for Referral model."""
 
@@ -195,6 +236,7 @@ class ReferralSerializer(serializers.ModelSerializer):
     referral_letter_acknowledged_by_name = serializers.SerializerMethodField()
     responsibility_forms_count = serializers.IntegerField(source='responsibility_forms.count', read_only=True)
     latest_responsibility_form = serializers.SerializerMethodField()
+    facility_partner_detail = ReferralFacilityMiniSerializer(source='facility_partner', read_only=True)
 
     class Meta:
         model = Referral

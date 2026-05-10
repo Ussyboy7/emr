@@ -20,6 +20,7 @@ from .views import (
     DiseasePatternReportView,
     GOPAttendanceReportView,
     WeekendCallDutyReportView,
+    EscortLogReportView,
 )
 
 urlpatterns = [
@@ -40,5 +41,6 @@ urlpatterns = [
     path('reports/disease-pattern/', DiseasePatternReportView.as_view(), name='disease-pattern-report'),
     path('reports/gop-attendance/', GOPAttendanceReportView.as_view(), name='gop-attendance-report'),
     path('reports/weekend-duty/', WeekendCallDutyReportView.as_view(), name='weekend-duty-report'),
+    path('reports/escort-log/', EscortLogReportView.as_view(), name='escort-log-report'),
 ]
 

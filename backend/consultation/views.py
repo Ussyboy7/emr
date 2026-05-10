@@ -2,8 +2,10 @@
 Views for the Consultation app.
 """
 import logging
+from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
+from django.http import Http404, HttpResponse
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,6 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from laboratory.pagination import FlexiblePageNumberPagination
 
 logger = logging.getLogger(__name__)
@@ -20,6 +23,8 @@ from .models import (
     ConsultationSession,
     ConsultationQueue,
     Referral,
+    ReferralFacility,
+    ResponsibilityFormIssuance,
     Diagnosis,
     ICD10Code,
     PresentingComplaintCategory,
@@ -31,6 +36,8 @@ from .serializers import (
     ConsultationQueueSerializer,
     ConsultationQueueByVisitSerializer,
     ReferralSerializer,
+    ReferralFacilitySerializer,
+    ResponsibilityFormIssuanceSerializer,
     DiagnosisSerializer,
     ICD10CodeSerializer,
     PresentingComplaintCategorySerializer,
@@ -38,6 +45,23 @@ from .serializers import (
 )
 from audit.services import AuditService
 from patients.workflow import close_visit_workflow
+
+
+class ReferralFacilityViewSet(viewsets.ModelViewSet):
+    """CRUD for the referral-facility catalog (typeahead + Django admin)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = ReferralFacilitySerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["is_active", "facility_type"]
+    search_fields = ["name", "code", "email", "address", "specialties"]
+    ordering_fields = ["sort_order", "name", "created_at"]
+    ordering = ["sort_order", "name"]
+    # Small catalog: return a plain JSON array (avoids pagination quirks).
+    pagination_class = None
+
+    def get_queryset(self):
+        return ReferralFacility.objects.all()
 
 
 class ConsultationRoomViewSet(viewsets.ModelViewSet):
@@ -949,62 +973,565 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
 
 class ReferralViewSet(viewsets.ModelViewSet):
     """ViewSet for managing referrals."""
-    
+
     permission_classes = [IsAuthenticated]
     serializer_class = ReferralSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'visit', 'session', 'referred_by', 'specialty', 'facility', 'status', 'urgency']
-    search_fields = ['referral_id', 'specialty', 'facility', 'reason', 'clinical_summary']
-    ordering_fields = ['referred_at', 'urgency']
-    ordering = ['-referred_at']
-    
+    filterset_fields = [
+        "patient",
+        "visit",
+        "session",
+        "referred_by",
+        "specialty",
+        "facility",
+        "status",
+        "urgency",
+    ]
+    search_fields = ["referral_id", "specialty", "facility", "reason", "clinical_summary"]
+    ordering_fields = ["referred_at", "urgency"]
+    ordering = ["-referred_at"]
+
     def get_queryset(self):
-        return Referral.objects.all().select_related('patient', 'visit', 'session', 'referred_by', 'created_by')
-    
+        qs = (
+            Referral.objects.all()
+            .select_related(
+                "patient",
+                "visit",
+                "session",
+                "referred_by",
+                "created_by",
+                "referral_letter_acknowledged_by",
+            )
+            .prefetch_related(
+                "responsibility_forms",
+                "patient__principal_staff",
+            )
+        )
+
+        qp = self.request.query_params
+        if qp.get("exclude_draft", "").lower() in ("1", "true", "yes"):
+            qs = qs.exclude(status="draft")
+
+        exclude_status = qp.get("exclude_status")
+        if exclude_status:
+            for raw in exclude_status.split(","):
+                st = raw.strip()
+                if st:
+                    qs = qs.exclude(status=st)
+
+        date = qp.get("date")
+        start_date = qp.get("start_date")
+        end_date = qp.get("end_date")
+        if date:
+            qs = qs.filter(referred_at__date=date)
+        elif start_date:
+            qs = qs.filter(referred_at__date__gte=start_date)
+            if end_date:
+                qs = qs.filter(referred_at__date__lte=end_date)
+        elif end_date:
+            qs = qs.filter(referred_at__date__lte=end_date)
+
+        return qs
+
     def perform_create(self, serializer):
         """Create referral and log audit."""
-        referral = serializer.save(created_by=self.request.user, referred_by=self.request.user)
+        referral = serializer.save(
+            created_by=self.request.user, referred_by=self.request.user
+        )
         AuditService.log_activity(
             user=self.request.user,
-            action='create',
-            object_type='referral',
+            action="create",
+            object_type="referral",
             object_id=str(referral.id),
-            module='consultation',
-            object_repr=f'Referral {referral.referral_id}',
-            description=f'Created referral {referral.referral_id} to {referral.specialty} at {referral.facility}',
-            new_values={'referral_id': referral.referral_id, 'specialty': referral.specialty, 'facility': referral.facility, 'urgency': referral.urgency},
+            module="consultation",
+            object_repr=f"Referral {referral.referral_id}",
+            description=(
+                f"Created referral {referral.referral_id} to {referral.specialty} "
+                f"at {referral.facility}"
+            ),
+            new_values={
+                "referral_id": referral.referral_id,
+                "specialty": referral.specialty,
+                "facility": referral.facility,
+                "facility_type": referral.facility_type,
+                "facility_partner_id": referral.facility_partner_id,
+                "facility_address_snapshot": referral.facility_address_snapshot,
+                "urgency": referral.urgency,
+            },
             request=self.request,
         )
 
-    @action(detail=True, methods=['post'])
-    def acknowledge_responsibility_form(self, request, pk=None):
-        """Acknowledge responsibility for referral letter."""
+    @staticmethod
+    def _ranges_overlap(a_start, a_end, b_start, b_end):
+        return not (a_end < b_start or a_start > b_end)
+
+    def _overlaps_active_window(self, referral, valid_from, valid_to, today):
+        """True if [valid_from, valid_to] overlaps any still-current active form."""
+        for f in referral.responsibility_forms.filter(status="active"):
+            if f.valid_to < today:
+                continue
+            if self._ranges_overlap(
+                valid_from, valid_to, f.valid_from, f.valid_to
+            ):
+                return True
+        return False
+
+    @action(detail=True, methods=["get", "post"])
+    def forms(self, request, pk=None):
+        """List or create responsibility form issuances for this referral."""
         referral = self.get_object()
 
-        # Update acknowledgment fields
-        referral.referral_letter_acknowledged_at = timezone.now()
-        referral.referral_letter_acknowledged_by = request.user
-        referral.save(update_fields=['referral_letter_acknowledged_at', 'referral_letter_acknowledged_by'])
+        if request.method == "GET":
+            qs = referral.responsibility_forms.all().order_by(
+                "sequence_number", "id"
+            )
+            return Response(
+                ResponsibilityFormIssuanceSerializer(qs, many=True).data
+            )
 
-        # Log audit activity
+        # POST — issue a new form
+        valid_from_raw = request.data.get("valid_from")
+        valid_to_raw = request.data.get("valid_to")
+        notes = str(request.data.get("notes") or "").strip()
+        override_active = str(
+            request.data.get("override_active") or ""
+        ).lower() in ("1", "true", "yes")
+        override_reason = str(request.data.get("override_reason") or "").strip()
+
+        vf = parse_date(str(valid_from_raw)) if valid_from_raw else None
+        vt = parse_date(str(valid_to_raw)) if valid_to_raw else None
+        if not vf or not vt:
+            return Response(
+                {"detail": "valid_from and valid_to are required (YYYY-MM-DD)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if vf > vt:
+            return Response(
+                {"detail": "valid_from must be on or before valid_to."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        today = timezone.localdate()
+        if self._overlaps_active_window(referral, vf, vt, today):
+            if not override_active or not override_reason:
+                return Response(
+                    {
+                        "detail": (
+                            "These dates overlap a current active responsibility "
+                            "form. Send override_active=true and override_reason."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        max_seq = referral.responsibility_forms.aggregate(m=Max("sequence_number"))[
+            "m"
+        ]
+        next_seq = (max_seq or 0) + 1
+
+        doc = request.FILES.get("document_file")
+
+        try:
+            with transaction.atomic():
+                issuance = ResponsibilityFormIssuance.objects.create(
+                    referral=referral,
+                    sequence_number=next_seq,
+                    valid_from=vf,
+                    valid_to=vt,
+                    status="active",
+                    hospital_name_snapshot=(referral.facility or "")[:200],
+                    notes=notes,
+                    issued_by=request.user,
+                    document_file=doc if doc else None,
+                )
+        except IntegrityError:
+            return Response(
+                {"detail": "Could not allocate sequence number — retry."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Auto-generate the printable PDF unless the user uploaded their
+        # own scan. Stored on document_file so re-prints are byte-identical
+        # forever and audit can replay exactly what the hospital received.
+        if not doc:
+            try:
+                from .pdfs import build_responsibility_form_pdf
+
+                pdf_bytes = build_responsibility_form_pdf(referral, issuance)
+                fname = (
+                    f"responsibility_form_{referral.referral_id}_"
+                    f"{issuance.sequence_number:03d}.pdf"
+                )
+                issuance.document_file.save(
+                    fname, ContentFile(pdf_bytes), save=True
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to auto-generate responsibility form PDF for "
+                    "issuance %s on referral %s",
+                    issuance.id,
+                    referral.referral_id,
+                )
+
         AuditService.log_activity(
             user=request.user,
-            action='acknowledge',
-            object_type='referral',
-            object_id=str(referral.id),
-            module='consultation',
-            object_repr=f'Referral {referral.referral_id}',
-            description=f'Acknowledged responsibility for referral letter {referral.referral_id}',
+            action="create",
+            object_type="responsibility_form_issuance",
+            object_id=str(issuance.id),
+            module="consultation",
+            object_repr=str(issuance),
+            description=(
+                f"Issued responsibility form #{issuance.sequence_number} "
+                f"for referral {referral.referral_id}"
+            ),
             new_values={
-                'referral_letter_acknowledged_at': referral.referral_letter_acknowledged_at,
-                'referral_letter_acknowledged_by': request.user.get_full_name(),
+                "sequence_number": issuance.sequence_number,
+                "valid_from": str(vf),
+                "valid_to": str(vt),
             },
             request=request,
         )
 
-        # Return updated referral data
-        serializer = self.get_serializer(referral)
-        return Response(serializer.data)
+        return Response(
+            ResponsibilityFormIssuanceSerializer(issuance).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path=r"forms/(?P<form_pk>[^/.]+)/pdf",
+    )
+    def form_pdf(self, request, pk=None, form_pk=None):
+        """
+        Stream the responsibility-form PDF for a specific issuance.
+
+        Lazy-migration aware: if the issuance was created before the
+        auto-generate code shipped, render on the fly and persist the
+        bytes onto ``document_file`` so the next request is a direct
+        file read.
+        """
+        referral = self.get_object()
+        try:
+            form_pk_int = int(form_pk)
+        except (TypeError, ValueError):
+            raise Http404("Invalid form id.")
+
+        try:
+            issuance = ResponsibilityFormIssuance.objects.get(
+                pk=form_pk_int, referral=referral
+            )
+        except ResponsibilityFormIssuance.DoesNotExist:
+            raise Http404("Form not found for this referral.")
+
+        pdf_bytes: bytes | None = None
+        if issuance.document_file:
+            try:
+                with issuance.document_file.open("rb") as fh:
+                    pdf_bytes = fh.read()
+            except (FileNotFoundError, OSError):
+                pdf_bytes = None
+
+        if pdf_bytes is None:
+            from .pdfs import build_responsibility_form_pdf
+
+            pdf_bytes = build_responsibility_form_pdf(referral, issuance)
+            try:
+                fname = (
+                    f"responsibility_form_{referral.referral_id}_"
+                    f"{issuance.sequence_number:03d}.pdf"
+                )
+                issuance.document_file.save(
+                    fname, ContentFile(pdf_bytes), save=True
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to persist responsibility form PDF for issuance %s",
+                    issuance.id,
+                )
+
+        filename = (
+            f"responsibility_form_{referral.referral_id}_"
+            f"{issuance.sequence_number:03d}.pdf"
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=["post"])
+    def submit_to_records(self, request, pk=None):
+        """Move a draft referral into the Medical Records queue."""
+        referral = self.get_object()
+        if referral.status != "draft":
+            return Response(
+                {"detail": "Only draft referrals can be submitted to Medical Records."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        referral.status = "submitted_to_records"
+        referral.submitted_at = timezone.now()
+        referral.save(update_fields=["status", "submitted_at"])
+
+        AuditService.log_activity(
+            user=request.user,
+            action="update",
+            object_type="referral",
+            object_id=str(referral.id),
+            module="consultation",
+            object_repr=f"Referral {referral.referral_id}",
+            description=f"Submitted referral {referral.referral_id} to Medical Records",
+            new_values={"status": referral.status},
+            request=request,
+        )
+
+        return Response(ReferralSerializer(referral).data)
+
+    @action(detail=True, methods=["post"])
+    def close_referral(self, request, pk=None):
+        """Close a referral file after Records acknowledgement."""
+        referral = self.get_object()
+        if referral.status not in ("approved_for_forms", "scheduled"):
+            return Response(
+                {
+                    "detail": (
+                        "Referral can only be closed once it is Records acknowledged."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        referral.status = "closed"
+        referral.closed_at = timezone.now()
+        referral.save(update_fields=["status", "closed_at"])
+
+        AuditService.log_activity(
+            user=request.user,
+            action="update",
+            object_type="referral",
+            object_id=str(referral.id),
+            module="consultation",
+            object_repr=f"Referral {referral.referral_id}",
+            description=f"Closed referral {referral.referral_id}",
+            new_values={"status": "closed"},
+            request=request,
+        )
+
+        return Response(ReferralSerializer(referral).data)
+
+    @action(detail=True, methods=["post"])
+    def approve_for_forms(self, request, pk=None):
+        """Medical Records: approve referral letter so Consultation may issue forms."""
+        referral = self.get_object()
+        if referral.status != "records_review":
+            return Response(
+                {
+                    "detail": (
+                        "Only referrals in Records Review can be approved for forms."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        now = timezone.now()
+        referral.status = "approved_for_forms"
+        referral.approved_at = now
+        update_fields = ["status", "approved_at"]
+        if not referral.reviewed_at:
+            referral.reviewed_at = now
+            update_fields.append("reviewed_at")
+        referral.save(update_fields=update_fields)
+
+        AuditService.log_activity(
+            user=request.user,
+            action="update",
+            object_type="referral",
+            object_id=str(referral.id),
+            module="consultation",
+            object_repr=f"Referral {referral.referral_id}",
+            description=(
+                f"Approved referral {referral.referral_id} for responsibility forms"
+            ),
+            new_values={"status": referral.status},
+            request=request,
+        )
+
+        return Response(ReferralSerializer(referral).data)
+
+    @action(detail=True, methods=["post"])
+    def return_for_correction(self, request, pk=None):
+        """Medical Records: return referral to author for edits."""
+        referral = self.get_object()
+        if referral.status not in ("submitted_to_records", "records_review"):
+            return Response(
+                {
+                    "detail": (
+                        "Only queued referrals can be returned for correction."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        notes = str(request.data.get("notes") or "").strip()
+        referral.status = "returned_for_correction"
+        stamp = timezone.now().strftime("%Y-%m-%d %H:%M")
+        block = (
+            f"\n\n[Returned for correction — {stamp}]\n{notes}"
+            if notes
+            else f"\n\n[Returned for correction — {stamp}]"
+        )
+        referral.notes = (referral.notes or "") + block
+        referral.save(update_fields=["status", "notes"])
+
+        AuditService.log_activity(
+            user=request.user,
+            action="update",
+            object_type="referral",
+            object_id=str(referral.id),
+            module="consultation",
+            object_repr=f"Referral {referral.referral_id}",
+            description=f"Returned referral {referral.referral_id} for correction",
+            new_values={"status": referral.status},
+            request=request,
+        )
+
+        return Response(ReferralSerializer(referral).data)
+
+    @action(detail=True, methods=["post"])
+    def update_form_status(self, request, pk=None):
+        """Update responsibility-form issuance status (active / expired / revoked / used)."""
+        referral = self.get_object()
+        form_id = request.data.get("form_id")
+        new_status = request.data.get("status")
+        if form_id in (None, "") or new_status in (None, ""):
+            return Response(
+                {"detail": "form_id and status are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            form_pk = int(form_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "form_id must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        allowed = {c[0] for c in ResponsibilityFormIssuance.STATUS_CHOICES}
+        if new_status not in allowed:
+            return Response(
+                {"detail": f"Invalid status. Allowed: {sorted(allowed)}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            form = ResponsibilityFormIssuance.objects.get(pk=form_pk, referral=referral)
+        except ResponsibilityFormIssuance.DoesNotExist:
+            return Response(
+                {"detail": "Form not found for this referral."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        old = form.status
+        form.status = new_status
+        form.save(update_fields=["status", "updated_at"])
+
+        AuditService.log_activity(
+            user=request.user,
+            action="update",
+            object_type="responsibility_form_issuance",
+            object_id=str(form.id),
+            module="consultation",
+            object_repr=str(form),
+            description=(
+                f"Updated responsibility form #{form.sequence_number} status "
+                f"for referral {referral.referral_id}: {old} → {new_status}"
+            ),
+            new_values={"status": new_status},
+            request=request,
+        )
+
+        return Response(ResponsibilityFormIssuanceSerializer(form).data)
+
+    @action(detail=True, methods=["post"])
+    def acknowledge_responsibility_form(self, request, pk=None):
+        """
+        Medical Records: stamp a printed responsibility-form slip.
+
+        Expects JSON body: {"form_id": <pk>}
+        When every issuance on the referral has been stamped, the referral
+        becomes Records acknowledged (``approved_for_forms``).
+        """
+        referral = self.get_object()
+        form_id = request.data.get("form_id")
+        if form_id in (None, ""):
+            return Response(
+                {"detail": "form_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            form_pk = int(form_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "form_id must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not ResponsibilityFormIssuance.objects.filter(
+            pk=form_pk, referral_id=referral.pk
+        ).exists():
+            return Response(
+                {"detail": "Form not found for this referral."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        with transaction.atomic():
+            ref = Referral.objects.select_for_update().get(pk=referral.pk)
+            form = ResponsibilityFormIssuance.objects.select_for_update().get(
+                pk=form_pk,
+                referral=ref,
+            )
+            if not form.records_acknowledged_at:
+                form.records_acknowledged_at = timezone.now()
+                form.records_acknowledged_by = request.user
+                form.save(
+                    update_fields=[
+                        "records_acknowledged_at",
+                        "records_acknowledged_by",
+                        "updated_at",
+                    ]
+                )
+
+            unstamped_exists = ref.responsibility_forms.filter(
+                records_acknowledged_at__isnull=True
+            ).exists()
+
+            should_promote = (
+                not unstamped_exists
+                and ref.responsibility_forms.exists()
+                and ref.status
+                in ("submitted_to_records", "records_review")
+            )
+
+            if should_promote:
+                ref.status = "approved_for_forms"
+                update_fields = ["status"]
+                if not ref.approved_at:
+                    ref.approved_at = timezone.now()
+                    update_fields.append("approved_at")
+                ref.save(update_fields=update_fields)
+
+        form.refresh_from_db()
+
+        AuditService.log_activity(
+            user=request.user,
+            action="acknowledge",
+            object_type="responsibility_form_issuance",
+            object_id=str(form.id),
+            module="consultation",
+            object_repr=str(form),
+            description=(
+                f"Medical Records stamped responsibility form #{form.sequence_number} "
+                f"for referral {referral.referral_id}"
+            ),
+            new_values={"records_acknowledged_at": str(form.records_acknowledged_at)},
+            request=request,
+        )
+
+        return Response(ResponsibilityFormIssuanceSerializer(form).data)
 
 
 class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):

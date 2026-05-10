@@ -85,6 +85,41 @@ export interface CustomLabResultRow {
   notes: string;
 }
 
+/**
+ * One outbound batch send-out from a `LabOrder` to a single external `LabPartner`.
+ * Created by `dispatchOutsourced`; drives the post-dispatch print panel and the
+ * Dispatches history shown on the order detail dialog.
+ */
+export interface LabReferralDispatch {
+  id: number;
+  dispatch_id: string;
+  order: number;
+  partner_id: number | null;
+  partner_name: string;
+  partner_address_snapshot?: string;
+  tests: {
+    id: number;
+    name: string;
+    code: string;
+    sample_type: string;
+    status: string;
+    lab_number?: string | null;
+  }[];
+  status: 'issued' | 'cancelled' | 'superseded';
+  superseded_by: number | null;
+  superseded_by_dispatch_id: string | null;
+  cancellation_reason: string;
+  notes: string;
+  issued_by: number | null;
+  issued_by_name: string | null;
+  issued_at: string;
+  cancelled_by: number | null;
+  cancelled_by_name: string | null;
+  cancelled_at: string | null;
+  referral_letter_printed_at: string | null;
+  responsibility_form_printed_at: string | null;
+}
+
 /** External / outsourced lab partners (managed in Django admin or via API). */
 export interface LabPartner {
   id: number;
@@ -92,6 +127,10 @@ export interface LabPartner {
   code?: string;
   phone?: string;
   email?: string;
+  /** Multi-line postal address printed on referral letters / responsibility forms. */
+  address?: string;
+  /** Addressee role for letter "To:" block (default "The Medical Director"). */
+  contact_person_title?: string;
   notes?: string;
   is_active: boolean;
   sort_order: number;
@@ -362,6 +401,69 @@ class LabService {
         outsourced_lab: outsourcedLab || '',
       }),
     });
+  }
+
+  /**
+   * Create a new outsourced dispatch for one or more tests on an order. The
+   * backend serialises a `LBR-YYYY-NNNNNN` slip and flips each test's status
+   * to `processing` with `processing_method=outsourced`.
+   */
+  async dispatchOutsourced(
+    orderId: number,
+    payload: { partner_id: number; test_ids: number[]; notes?: string }
+  ): Promise<LabReferralDispatch> {
+    return apiFetch<LabReferralDispatch>(
+      `/laboratory/orders/${orderId}/dispatch_outsourced/`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  /** List every dispatch ever issued for an order (newest first). */
+  async getOrderDispatches(orderId: number): Promise<LabReferralDispatch[]> {
+    const response = await apiFetch<LabReferralDispatch[] | { results: LabReferralDispatch[] }>(
+      `/laboratory/orders/${orderId}/dispatches/`
+    );
+    return Array.isArray(response) ? response : response?.results ?? [];
+  }
+
+  /** Cancel an issued dispatch (e.g. wrong partner, wrong tests). */
+  async cancelDispatch(
+    orderId: number,
+    dispatchId: number,
+    reason?: string
+  ): Promise<LabReferralDispatch> {
+    return apiFetch<LabReferralDispatch>(
+      `/laboratory/orders/${orderId}/dispatches/${dispatchId}/cancel/`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason || '' }),
+      }
+    );
+  }
+
+  /**
+   * Fetch the standardised Referral Letter PDF for a dispatch as a Blob and
+   * stamp `referral_letter_printed_at` on the server.
+   */
+  async fetchReferralLetterPdf(orderId: number, dispatchId: number): Promise<Blob> {
+    return apiFetch<Blob>(
+      `/laboratory/orders/${orderId}/dispatches/${dispatchId}/referral_letter/`,
+      { responseType: 'blob' }
+    );
+  }
+
+  /**
+   * Fetch the standardised Responsibility Form PDF for a dispatch as a Blob
+   * and stamp `responsibility_form_printed_at` on the server.
+   */
+  async fetchResponsibilityFormPdf(orderId: number, dispatchId: number): Promise<Blob> {
+    return apiFetch<Blob>(
+      `/laboratory/orders/${orderId}/dispatches/${dispatchId}/responsibility_form/`,
+      { responseType: 'blob' }
+    );
   }
 
   /**

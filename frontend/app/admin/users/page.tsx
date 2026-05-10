@@ -65,6 +65,19 @@ interface SystemRole {
   updated_at?: string;
 }
 
+/** Normalize `/accounts/system-roles/` responses — always use API rows only (no hardcoded lists). */
+function parseSystemRolesResponse(raw: unknown): SystemRole[] {
+  if (Array.isArray(raw)) return raw as SystemRole[];
+  if (
+    raw &&
+    typeof raw === "object" &&
+    Array.isArray((raw as { results?: unknown }).results)
+  ) {
+    return (raw as { results: SystemRole[] }).results;
+  }
+  return [];
+}
+
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
   firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, restrictedPages: [],
@@ -113,36 +126,21 @@ export default function UserManagementPage() {
     }
   }, []);
 
-  const loadSystemRoles = useCallback(async () => {
+  /** Single source of truth for professional identities — one GET, both dropdown + admin table. */
+  const refreshSystemRolesCatalog = useCallback(async () => {
     try {
-      const systemRolesResponse = await adminService.getSystemRoles();
-      // Handle paginated response format
-      let rolesArray = [];
-      if (Array.isArray(systemRolesResponse)) {
-        rolesArray = systemRolesResponse;
-      } else if (systemRolesResponse && Array.isArray(systemRolesResponse.results)) {
-        rolesArray = systemRolesResponse.results;
-      } else {
-        throw new Error('Invalid response format');
-      }
-      // Filter to active roles and map to the expected format
-      const activeRoles = rolesArray.filter(role => role.is_active);
-      setSystemRoles(['All Roles', ...activeRoles.map(role => role.name)]);
-    } catch (err: any) {
-      console.error('Error loading system roles:', err);
-      // Fallback to basic roles if API fails
-      setSystemRoles(['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Optamologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff']);
-    }
-  }, []);
-
-  const loadAllSystemRoles = useCallback(async () => {
-    try {
-      const response = await adminService.getSystemRoles();
-      if (response.results) {
-        setAllSystemRoles(response.results);
-      }
-    } catch (err: any) {
-      console.error('Error loading system roles:', err);
+      const raw = await adminService.getSystemRoles();
+      const rolesArray = parseSystemRolesResponse(raw as unknown);
+      setAllSystemRoles(rolesArray);
+      const activeNames = rolesArray.filter((r) => r.is_active).map((r) => r.name);
+      setSystemRoles(["All Roles", ...activeNames]);
+    } catch (err: unknown) {
+      console.error("Error loading system roles:", err);
+      setAllSystemRoles([]);
+      setSystemRoles(["All Roles"]);
+      toast.error(
+        err instanceof Error ? err.message : "Could not load professional identities from the server.",
+      );
     }
   }, []);
 
@@ -155,8 +153,7 @@ export default function UserManagementPage() {
       toast.success('System role created successfully');
       setSystemRoleDialogOpen(false);
       setSystemRoleForm({ name: '', description: '', is_active: true });
-      loadAllSystemRoles();
-      loadSystemRoles(); // Refresh the dropdown
+      void refreshSystemRolesCatalog();
     } catch (err: any) {
       toast.error(err.message || 'Failed to create system role');
     }
@@ -173,8 +170,7 @@ export default function UserManagementPage() {
       setSystemRoleDialogOpen(false);
       setEditingSystemRole(null);
       setSystemRoleForm({ name: '', description: '', is_active: true });
-      loadAllSystemRoles();
-      loadSystemRoles(); // Refresh the dropdown
+      void refreshSystemRolesCatalog();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update system role');
     }
@@ -187,8 +183,7 @@ export default function UserManagementPage() {
         method: 'DELETE',
       });
       toast.success('System role deleted successfully');
-      loadAllSystemRoles();
-      loadSystemRoles(); // Refresh the dropdown
+      void refreshSystemRolesCatalog();
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete system role');
     }
@@ -212,9 +207,8 @@ export default function UserManagementPage() {
   // Load roles and system roles from API
   useEffect(() => {
     loadRoles();
-    loadSystemRoles();
-    loadAllSystemRoles();
-  }, [loadRoles, loadSystemRoles, loadAllSystemRoles]);
+    void refreshSystemRolesCatalog();
+  }, [loadRoles, refreshSystemRolesCatalog]);
 
   // Use a ref to track current page to avoid dependency loops
   const currentPageRef = useRef(currentPage);

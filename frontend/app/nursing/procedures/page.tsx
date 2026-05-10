@@ -365,15 +365,14 @@ export default function ProceduresQueuePage() {
             setWards(wardsResponse.results || []);
           })
           .catch((wardError) => {
-            console.warn('Could not load wards, using fallback:', wardError);
-            // Fallback wards if API fails
-            setWards([
-              { id: 8, ward_code: 'FEMALE-MED', name: 'Female Medical Ward', total_beds: 5, available_beds: 3 },
-              { id: 9, ward_code: 'MALE-MED', name: 'Male Medical Ward', total_beds: 5, available_beds: 2 },
-              { id: 10, ward_code: 'SURGICAL', name: 'Surgical Ward', total_beds: 10, available_beds: 7 },
-              { id: 11, ward_code: 'PEDIATRIC', name: 'Pediatric Ward', total_beds: 8, available_beds: 5 },
-              { id: 12, ward_code: 'MATERNITY', name: 'Maternity Ward', total_beds: 6, available_beds: 3 },
-            ]);
+            // No invented data: surface the failure instead of silently
+            // populating the picker with ghost wards that don't exist on
+            // the server. The admin user is expected to fix the API
+            // (auth, network, missing data) rather than carry on with
+            // hard-coded ids that may collide with real ward records.
+            console.error('Failed to load wards:', wardError);
+            toast.error('Could not load wards. The ward picker will be empty until the wards API is reachable.');
+            setWards([]);
           });
 
         // Load wards and queue concurrently to reduce first-render latency.

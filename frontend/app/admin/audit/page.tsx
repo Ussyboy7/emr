@@ -78,8 +78,11 @@ export default function AuditTrailPage() {
         setModules(Array.from(uniqueModules).sort());
       } catch (err) {
         console.error('Failed to load modules:', err);
-        // Fallback to default modules
-        setModules(['All Modules', 'Authentication', 'Medical Records', 'Consultation', 'Nursing', 'Laboratory', 'Pharmacy', 'Radiology', 'Administration', 'Reports', 'System']);
+        // No invented data: leave the picker with just "All Modules" so the
+        // admin sees an honest empty state rather than ghost options that
+        // never match a real audit log.
+        setModules(['All Modules']);
+        toast.error('Could not load audit module list from the server.');
       }
     };
     loadModules();

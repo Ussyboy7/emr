@@ -1,4 +1,4 @@
-import type { Referral, ResponsibilityFormIssuance } from "@/lib/services/referral-service";
+import { referralService, type Referral, type ResponsibilityFormIssuance } from "@/lib/services/referral-service";
 
 export interface ReferralWithPatient extends Referral {
   patient_name?: string;
@@ -162,89 +162,6 @@ export function buildReferralLetterHtml(referral: ReferralWithPatient) {
 </html>`;
 }
 
-export function buildResponsibilityFormHtml(referral: ReferralWithPatient, form?: ResponsibilityFormIssuance) {
-  const dateVal = form?.issue_date || referral.referred_at;
-  const d = new Date(dateVal);
-  const monthValue = Number.isNaN(d.getTime())
-    ? ""
-    : d.toLocaleString(undefined, { month: "long", year: "numeric" });
-  const dateStr = formatPrintDate(dateVal);
-  const patientName = escapeHtml(referral.patient_name || "________________________");
-  const facility = escapeHtml(referral.facility || "________________________");
-  const { pn, dept } = formatPatientPnDeptForPrint(referral);
-  const doctor = escapeHtml(referral.referred_by_name || "________________________");
-  const validRange = form
-    ? `${escapeHtml(formatPrintDate(form.valid_from))} - ${escapeHtml(formatPrintDate(form.valid_to))}`
-    : "";
-
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Responsibility Form - ${escapeHtml(referral.referral_id)}</title>
-  <style>
-    @page { size: A4; margin: 16mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 14px; line-height: 1.35; }
-    .center { text-align: center; }
-    .title { font-weight: 700; }
-    .row { margin-top: 8px; }
-    .line { border-bottom: 1px dotted #555; min-width: 140px; display: inline-block; padding: 0 4px; }
-    .block { margin-top: 14px; }
-    .slip { border-top: 1px dashed #444; margin-top: 18px; padding-top: 16px; }
-    .sig-row { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 22px; }
-    .sig { border-top: 1px solid #222; margin-top: 30px; padding-top: 4px; font-size: 12px; min-height: 36px; }
-    .small { font-size: 12px; }
-  </style>
-</head>
-<body>
-  <div class="center">
-    <div class="title">NIGERIAN PORTS AUTHORITY</div>
-    <div class="title">MEDICAL DEPARTMENT</div>
-    <div class="title">RESPONSIBILITY FORM</div>
-  </div>
-
-  <div class="row"><strong>Date:</strong> <span class="line">${escapeHtml(dateStr)}</span></div>
-  <div class="row"><strong>Month of:</strong> <span class="line">${escapeHtml(monthValue)}</span></div>
-  ${validRange ? `<div class="row small"><strong>Validity:</strong> ${validRange}</div>` : ""}
-
-  <div class="block">
-    <div>To: The Medical Director</div>
-    <div>${facility}</div>
-  </div>
-
-  <div class="block">
-    <div><strong>NAME:</strong> <span class="line">${patientName}</span> (P.N. <span class="line">${pn}</span>) DEPT. <span class="line">${dept}</span></div>
-  </div>
-
-  <div class="block">
-    <div>I certify that the above named who is now referred for treatment at the hospital is a bona fide Pensioner/Employee/Spouse/Dependant of the Nigerian Ports Authority.</div>
-    <div class="row">The Nigerian Ports Authority hereby accepts responsibility for payment of the hospital bill on his/her behalf.</div>
-  </div>
-
-  <div class="sig-row">
-    <div>
-      <div class="sig">Doctor-in-charge<br/>For: Managing Director NPA.<br/>Name: ${doctor}</div>
-    </div>
-    <div>
-      <div class="sig">Doctor In-Charge<br/>For The Medical Director</div>
-    </div>
-  </div>
-
-  <div class="slip">
-    <div class="small">This portion should be detached and returned to the General Manager, Medical Services.</div>
-    <div class="row"><strong>NAME:</strong> <span class="line">${patientName}</span> (P.N. <span class="line">${pn}</span>) DEPT. <span class="line">${dept}</span></div>
-    <div class="small row">No bill will be certified for payment without this slip.</div>
-    <div class="sig-row">
-      <div><div class="sig">Doctor's Name/Signature/Date</div></div>
-      <div><div class="sig">Receiving Doctor's Name/Signature/Date</div></div>
-    </div>
-    <div class="block small">Doctor's Remarks:</div>
-    <div style="height:80px; border-bottom:1px dotted #555;"></div>
-  </div>
-</body>
-</html>`;
-}
-
 /** Returns false if pop-up was blocked. */
 export function openPrintWindow(title: string, html: string): boolean {
   const popup = window.open("", "_blank", "width=900,height=1000");
@@ -262,6 +179,34 @@ export function printReferralLetter(referral: ReferralWithPatient) {
   return openPrintWindow(`Referral Letter - ${referral.referral_id}`, buildReferralLetterHtml(referral));
 }
 
-export function printResponsibilityForm(referral: ReferralWithPatient, form?: ResponsibilityFormIssuance) {
-  return openPrintWindow(`Responsibility Form - ${referral.referral_id}`, buildResponsibilityFormHtml(referral, form));
+/**
+ * Open the responsibility form PDF in a new tab. The backend renders an
+ * NPA-letterhead PDF using the issuance's frozen snapshots, so the printed
+ * output is a faithful, audit-stable copy of what was issued.
+ *
+ * The PDF is fetched as a Blob through `apiFetch` (which attaches the JWT)
+ * and surfaced as a `blob:` URL — opening the raw API URL fails with 401
+ * because browsers don't send Bearer tokens on a plain `window.open`.
+ *
+ * Resolves to `false` when the popup is blocked, the user isn't auth'd, or
+ * the request fails. Object URLs are revoked after 60 s so memory stays
+ * bounded; that's well past the time it takes a tab to render the PDF.
+ */
+export async function printResponsibilityForm(
+  referral: ReferralWithPatient,
+  form: ResponsibilityFormIssuance,
+): Promise<boolean> {
+  if (!form?.id) return false;
+  let objectUrl: string | null = null;
+  try {
+    const blob = await referralService.fetchResponsibilityFormPdf(referral.id, form.id);
+    objectUrl = URL.createObjectURL(blob);
+    const win = window.open(objectUrl, "_blank", "noopener,noreferrer");
+    if (!win) return false;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl!), 60_000);
+  }
 }

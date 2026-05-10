@@ -7,9 +7,29 @@ from .models import (
     ConsultationSession,
     ConsultationQueue,
     Referral,
+    ReferralFacility,
     PresentingComplaintCategory,
     PresentingComplaint,
 )
+
+
+@admin.register(ReferralFacility)
+class ReferralFacilityAdmin(admin.ModelAdmin):
+    list_display = ["name", "code", "facility_type", "is_active", "sort_order", "phone", "updated_at"]
+    list_filter = ["is_active", "facility_type"]
+    search_fields = ["name", "code", "email", "address", "specialties"]
+    ordering = ["sort_order", "name"]
+    fieldsets = (
+        (None, {
+            "fields": ("name", "code", "facility_type", "is_active", "sort_order"),
+        }),
+        ("Contact", {
+            "fields": ("phone", "email", "contact_person_title", "address"),
+        }),
+        ("Other", {
+            "fields": ("specialties", "notes"),
+        }),
+    )
 
 
 @admin.register(ConsultationRoom)

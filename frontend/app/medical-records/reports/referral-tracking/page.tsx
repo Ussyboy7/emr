@@ -7,12 +7,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  ArrowRight, Printer, TrendingUp, Users, Calendar, Activity, FileText
+import {
+  FileSpreadsheet,
+  RefreshCw,
+  ArrowLeft,
+  ArrowRight,
+  Printer,
+  TrendingUp,
+  Users,
+  Calendar,
+  Activity,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { referralStatusLabel } from "@/lib/referrals/referral-helpers";
 import Link from "next/link";
 
 interface ReferralSummary {
@@ -121,7 +130,7 @@ export default function ReferralTrackingReport() {
       referrals.forEach((r, idx) => {
         const patientName = [r.patient__first_name, r.patient__surname].filter(Boolean).join(" ");
         lines.push(
-          `${idx + 1},${r.patient__patient_id},${patientName},${r.status},${r.facility_type},${r.specialty || ""},${r.facility || ""},${r.referred_at || ""}`
+          `${idx + 1},${r.patient__patient_id},${patientName},${referralStatusLabel(r.status)},${r.facility_type},${r.specialty || ""},${r.facility || ""},${r.referred_at || ""}`
         );
       });
     }
@@ -398,7 +407,7 @@ export default function ReferralTrackingReport() {
                         <tr key={`${r.referral_id}-${idx}`} className="border-b border-border hover:bg-muted/30 transition-colors">
                           <td className="p-3 text-foreground">{idx + 1}</td>
                           <td className="p-3 font-medium text-foreground">{patientName}</td>
-                          <td className="p-3 text-foreground">{r.status}</td>
+                          <td className="p-3 text-foreground">{referralStatusLabel(r.status)}</td>
                           <td className="p-3 text-foreground">{r.specialty || "-"}</td>
                           <td className="p-3 text-foreground">{facilityDisplay}</td>
                           <td className="p-3 text-foreground">{referredAt}</td>

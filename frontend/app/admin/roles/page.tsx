@@ -26,6 +26,7 @@ import {
   UserCog
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import { PermissionsCatalogTab } from "@/components/admin/PermissionsCatalogTab";
 
 interface Role {
   id: string;
@@ -404,10 +405,14 @@ export default function RolesPermissionsPage() {
 
         {/* Main Content Tabs */}
         <Tabs defaultValue="access-roles" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="access-roles" className="flex items-center gap-2">
               <Shield className="h-4 w-4" />
               Access Roles
+            </TabsTrigger>
+            <TabsTrigger value="permissions" className="flex items-center gap-2">
+              <Key className="h-4 w-4" />
+              Permissions
             </TabsTrigger>
             <TabsTrigger value="system-roles" className="flex items-center gap-2">
               <UserCog className="h-4 w-4" />
@@ -417,6 +422,43 @@ export default function RolesPermissionsPage() {
 
           {/* Access Roles Tab */}
           <TabsContent value="access-roles" className="space-y-4 mt-6">
+            {/* Trap-detector: any active role granting zero pages locks its
+                users out of the EMR with the "Access not configured" screen.
+                Surface them here with a one-click jump to Edit so admins
+                catch the silent misconfiguration immediately. */}
+            {(() => {
+              const empty = roles.filter(r => r.isActive && r.permissions.length === 0);
+              if (empty.length === 0) return null;
+              return (
+                <Card className="border-l-4 border-l-amber-500 bg-amber-50/40 dark:bg-amber-950/10">
+                  <CardContent className="p-4 flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                        {empty.length} active role{empty.length === 1 ? '' : 's'} grant no pages
+                      </p>
+                      <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-0.5">
+                        Users assigned to {empty.length === 1 ? 'this role' : 'these roles'} land on "Access not configured" at sign-in. Add pages on the role's Pages tab.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {empty.map(r => (
+                          <Button
+                            key={r.id}
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100 border-amber-300 hover:bg-amber-200"
+                            onClick={() => openEdit(r)}
+                          >
+                            <Edit className="h-3 w-3 mr-1" />
+                            {r.name}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
             <Card>
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
@@ -497,7 +539,17 @@ export default function RolesPermissionsPage() {
                         <span>•</span>
                         <span className="flex items-center gap-1"><Users className="h-3 w-3" />{role.userCount} users</span>
                         <span>•</span>
-                        <span className="flex items-center gap-1"><Lock className="h-3 w-3" />{role.permissions.length} pages</span>
+                        {role.permissions.length === 0 && role.isActive ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 border-amber-400 bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100"
+                          >
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            No pages — add some
+                          </Badge>
+                        ) : (
+                          <span className="flex items-center gap-1"><Lock className="h-3 w-3" />{role.permissions.length} pages</span>
+                        )}
                         {Object.keys(permsByModule).length > 0 && (
                           <>
                             <span>•</span>
@@ -591,6 +643,11 @@ export default function RolesPermissionsPage() {
             </div>
           </CardContent>
         </Card>
+          </TabsContent>
+
+          {/* Permissions catalog tab */}
+          <TabsContent value="permissions" className="space-y-4 mt-6">
+            <PermissionsCatalogTab />
           </TabsContent>
         </Tabs>
 

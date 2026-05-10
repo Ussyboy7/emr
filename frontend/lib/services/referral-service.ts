@@ -3,6 +3,34 @@
  */
 import { apiFetch, buildQueryString } from '../api-client';
 
+export interface ReferralFacility {
+  id: number;
+  name: string;
+  code?: string;
+  facility_type: 'internal' | 'external' | 'specialist';
+  phone?: string;
+  email?: string;
+  address?: string;
+  contact_person_title?: string;
+  specialties?: string;
+  notes?: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** Compact embed used inside `Referral.facility_partner_detail`. */
+export interface ReferralFacilityMini {
+  id: number;
+  name: string;
+  code?: string;
+  facility_type: 'internal' | 'external' | 'specialist';
+  address?: string;
+  contact_person_title?: string;
+  is_active: boolean;
+}
+
 export interface Referral {
   id: number;
   referral_id: string;
@@ -18,7 +46,20 @@ export interface Referral {
   referred_by_name?: string;
   created_by?: number;
   specialty: string;
+  /**
+   * Facility name. When `facility_partner` is set, this is auto-snapshotted
+   * from the partner on save. Free-typed for one-off referrals.
+   */
   facility: string;
+  /** Catalog row chosen for the receiving facility (null for free-typed). */
+  facility_partner?: number | null;
+  /** Read-only embed for display (populated from `facility_partner`). */
+  facility_partner_detail?: ReferralFacilityMini | null;
+  /**
+   * Postal address frozen at save time so the printed responsibility form
+   * stays accurate even if the catalog row is renamed or deleted.
+   */
+  facility_address_snapshot?: string;
   facility_type: 'internal' | 'external' | 'specialist';
   reason: string;
   clinical_summary?: string;
@@ -223,6 +264,65 @@ class ReferralService {
       method: 'POST',
       body: JSON.stringify({ form_id: formId, status }),
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Referral facility catalog
+  // ------------------------------------------------------------------
+
+  /** Catalog of receiving hospitals / partner facilities. Returns a flat array
+   *  (the backend disables pagination on this endpoint).
+   *  Pass `is_active: null` to include inactive rows (admin views). */
+  async getReferralFacilities(params?: {
+    /** `true` (default): only active. `false`: only inactive. `null`: both. */
+    is_active?: boolean | null;
+    facility_type?: 'internal' | 'external' | 'specialist';
+    search?: string;
+    ordering?: string;
+  }): Promise<ReferralFacility[]> {
+    const { is_active = true, ...rest } = params || {};
+    const query = buildQueryString({
+      ordering: 'sort_order,name',
+      ...rest,
+      ...(is_active === null ? {} : { is_active }),
+    });
+    const path = `/consultation/referral-facilities/${query}`;
+    const raw = await apiFetch<ReferralFacility[] | { results?: ReferralFacility[] }>(path);
+    return Array.isArray(raw) ? raw : raw?.results ?? [];
+  }
+
+  async createReferralFacility(data: Partial<ReferralFacility>): Promise<ReferralFacility> {
+    return apiFetch<ReferralFacility>('/consultation/referral-facilities/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateReferralFacility(id: number, data: Partial<ReferralFacility>): Promise<ReferralFacility> {
+    return apiFetch<ReferralFacility>(`/consultation/referral-facilities/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteReferralFacility(id: number): Promise<void> {
+    return apiFetch<void>(`/consultation/referral-facilities/${id}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Fetch the responsibility-form PDF for a specific issuance as a Blob.
+   * Uses `apiFetch` so the JWT is attached — the raw URL won't work in a
+   * naked `window.open()` because Bearer tokens aren't sent by the browser.
+   * The backend serves the cached file (or generates + caches on first
+   * access).
+   */
+  async fetchResponsibilityFormPdf(referralId: number, formId: number): Promise<Blob> {
+    return apiFetch<Blob>(
+      `/consultation/referrals/${referralId}/forms/${formId}/pdf/`,
+      { responseType: 'blob' },
+    );
   }
 }
 

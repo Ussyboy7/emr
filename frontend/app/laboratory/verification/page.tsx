@@ -688,56 +688,6 @@ export default function ResultsVerificationPage() {
     }
   };
 
-  const downloadReferralLetter = async (result: LabResult) => {
-    try {
-      const blob = await apiFetch<Blob>(
-        `/laboratory/verification/${result.id}/referral_letter/`,
-        { responseType: 'blob' }
-      );
-      const filename = `referral_letter_${result.patient.id}_${result.testCode}_${result.id}.pdf`;
-
-      // Create and download the file
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success(`Downloaded referral letter for ${result.patient.name}`);
-    } catch (error) {
-      console.error('Error downloading referral letter:', error);
-      toast.error('Failed to download referral letter');
-    }
-  };
-
-  const downloadTestOrder = async (result: LabResult) => {
-    try {
-      const blob = await apiFetch<Blob>(
-        `/laboratory/verification/${result.id}/test_order/`,
-        { responseType: 'blob' }
-      );
-      const filename = `test_order_${result.patient.id}_${result.testCode}_${result.id}.pdf`;
-
-      // Create and download the file
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success(`Downloaded test order for ${result.patient.name}`);
-    } catch (error) {
-      console.error('Error downloading test order:', error);
-      toast.error('Failed to download test order');
-    }
-  };
-
   const toggleSelection = (id: string) => {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
@@ -1090,7 +1040,7 @@ export default function ResultsVerificationPage() {
 
         {/* Dialogs */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Result Details</DialogTitle>
               <DialogDescription>{selectedResult?.testName} - {selectedResult?.patient.name}</DialogDescription>
@@ -1207,26 +1157,6 @@ export default function ResultsVerificationPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
-              {selectedResult?.processing_method === 'outsourced' && (
-                <>
-                  <Button
-                    variant="outline"
-                    onClick={() => downloadReferralLetter(selectedResult)}
-                    disabled={!selectedResult}
-                  >
-                    <FileText className="h-4 w-4 mr-2" />
-                    Referral Letter
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => downloadTestOrder(selectedResult)}
-                    disabled={!selectedResult}
-                  >
-                    <FileText className="h-4 w-4 mr-2" />
-                    Test Order
-                  </Button>
-                </>
-              )}
               {isSelectedResultMutable && (
                 <>
                   <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openRejectDialog(selectedResult); }} className="text-rose-600">
