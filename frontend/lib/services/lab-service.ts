@@ -560,8 +560,8 @@ class LabService {
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabTemplate[]; count: number }> {
-    const query = params ? buildQueryString(params) : 'page_size=100';
-    const response = await apiFetch<{ results: LabTemplate[]; count: number }>(`/laboratory/templates/?${query}`);
+    const query = buildQueryString(params || { page_size: 100 });
+    const response = await apiFetch<{ results: LabTemplate[]; count: number }>(`/laboratory/templates/${query}`);
     return response;
   }
 

@@ -21,7 +21,7 @@ import {
 import Link from "next/link";
 import { apiFetch } from '@/lib/api-client';
 import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService } from '@/lib/services';
-import type { Diagnosis } from '@/lib/services/consultation-service';
+import type { Diagnosis, ICD10Code } from '@/lib/services/consultation-service';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -39,50 +39,8 @@ import { NursingOrderModal, type NursingOrderSubmitInput } from "@/components/co
 // NOTE: doctor name is now taken directly from the session serializer (doctor_name)
 // to avoid per-row API calls in large lists.
 
-// ICD-10 Codes for diagnosis
-const icd10Codes = [
-  // Infectious diseases
-  { code: 'A09', name: 'Infectious gastroenteritis and colitis', category: 'Infectious' },
-  { code: 'A15.0', name: 'Tuberculosis of lung', category: 'Infectious' },
-  { code: 'B20', name: 'Human immunodeficiency virus [HIV] disease', category: 'Infectious' },
-  { code: 'B50.9', name: 'Plasmodium falciparum malaria, unspecified', category: 'Infectious' },
-  { code: 'B54', name: 'Unspecified malaria', category: 'Infectious' },
-  { code: 'J00', name: 'Acute nasopharyngitis [common cold]', category: 'Respiratory' },
-  { code: 'J06.9', name: 'Acute upper respiratory infection, unspecified', category: 'Respiratory' },
-  { code: 'J18.9', name: 'Pneumonia, unspecified', category: 'Respiratory' },
-
-  // Endocrine, nutritional and metabolic diseases
-  { code: 'E10.9', name: 'Type 1 diabetes mellitus without complications', category: 'Endocrine' },
-  { code: 'E11.9', name: 'Type 2 diabetes mellitus without complications', category: 'Endocrine' },
-  { code: 'E66.9', name: 'Obesity, unspecified', category: 'Endocrine' },
-  { code: 'E78.5', name: 'Hyperlipidemia, unspecified', category: 'Endocrine' },
-
-  // Diseases of the circulatory system
-  { code: 'I10', name: 'Essential (primary) hypertension', category: 'Cardiovascular' },
-  { code: 'I20.9', name: 'Angina pectoris, unspecified', category: 'Cardiovascular' },
-  { code: 'I25.10', name: 'Atherosclerotic heart disease of native coronary artery without angina pectoris', category: 'Cardiovascular' },
-  { code: 'I48.91', name: 'Unspecified atrial fibrillation', category: 'Cardiovascular' },
-
-  // Diseases of the respiratory system
-  { code: 'J45.909', name: 'Unspecified asthma, uncomplicated', category: 'Respiratory' },
-  { code: 'J44.9', name: 'Chronic obstructive pulmonary disease, unspecified', category: 'Respiratory' },
-
-  // Symptoms, signs and abnormal clinical findings
-  { code: 'R50.9', name: 'Fever, unspecified', category: 'Symptoms' },
-  { code: 'R51', name: 'Headache', category: 'Symptoms' },
-  { code: 'R10.9', name: 'Unspecified abdominal pain', category: 'Symptoms' },
-  { code: 'R05', name: 'Cough', category: 'Symptoms' },
-  { code: 'R11.0', name: 'Nausea', category: 'Symptoms' },
-  { code: 'M54.5', name: 'Low back pain', category: 'Musculoskeletal' },
-
-  // Injury, poisoning and certain other consequences
-  { code: 'S09.90XA', name: 'Unspecified injury of head, initial encounter', category: 'Injury' },
-  { code: 'T14.90XA', name: 'Injury, unspecified, initial encounter', category: 'Injury' },
-
-  // External causes
-  { code: 'V89.9XXA', name: 'Person injured in unspecified motor-vehicle accident, initial encounter', category: 'External' },
-  { code: 'W19.XXXA', name: 'Unspecified fall, initial encounter', category: 'External' }
-];
+// ICD-10 diagnosis search in history should use the same backend source
+// as active consultation sessions (not a hardcoded subset).
 
 // Helper function to clean garbage text from clinical notes
 const cleanClinicalText = (text: string): string => {
@@ -256,6 +214,8 @@ export default function ConsultationHistoryPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddDiagnosisInEdit, setShowAddDiagnosisInEdit] = useState(false);
   const [diagnosisSearch, setDiagnosisSearch] = useState('');
+  const [icd10SearchResults, setIcd10SearchResults] = useState<ICD10Code[]>([]);
+  const [loadingIcd10Search, setLoadingIcd10Search] = useState(false);
   const [selectedDiagnosisType, setSelectedDiagnosisType] = useState<'Primary' | 'Secondary' | 'Differential'>('Primary');
   const [diagnosisNotes, setDiagnosisNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -299,6 +259,35 @@ export default function ConsultationHistoryPage() {
 
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
+
+  const searchICD10Codes = useCallback(async (searchTerm: string) => {
+    const q = searchTerm.trim();
+    if (!q) {
+      setIcd10SearchResults([]);
+      return;
+    }
+    try {
+      setLoadingIcd10Search(true);
+      const response = await consultationService.getICD10Codes({
+        search: q,
+        page_size: 20,
+      });
+      setIcd10SearchResults(response.results || []);
+    } catch (err) {
+      console.error('Failed to search ICD-10 codes:', err);
+      setIcd10SearchResults([]);
+    } finally {
+      setLoadingIcd10Search(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showAddDiagnosisInEdit) return;
+    const timeout = setTimeout(() => {
+      void searchICD10Codes(diagnosisSearch);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [diagnosisSearch, showAddDiagnosisInEdit, searchICD10Codes]);
 
   const buildDateParams = useCallback(() => {
     let date: string | undefined;
@@ -2072,7 +2061,14 @@ export default function ConsultationHistoryPage() {
         </Dialog>
 
         {/* Add Diagnosis Dialog in Edit Modal */}
-        <Dialog open={showAddDiagnosisInEdit} onOpenChange={(open) => { setShowAddDiagnosisInEdit(open); if (!open) { setDiagnosisSearch(""); setDiagnosisNotes(""); } }}>
+        <Dialog open={showAddDiagnosisInEdit} onOpenChange={(open) => {
+          setShowAddDiagnosisInEdit(open);
+          if (!open) {
+            setDiagnosisSearch("");
+            setDiagnosisNotes("");
+            setIcd10SearchResults([]);
+          }
+        }}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -2113,22 +2109,21 @@ export default function ConsultationHistoryPage() {
                   />
                   {diagnosisSearch && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto z-50">
-                      {icd10Codes
-                        .filter(dx =>
-                          dx.code.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                          dx.name.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                          dx.category.toLowerCase().includes(diagnosisSearch.toLowerCase())
-                        )
-                        .slice(0, 10)
-                        .map((dx) => (
+                      {loadingIcd10Search ? (
+                        <div className="p-4 text-center text-muted-foreground text-sm">
+                          <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                          Searching ICD-10 codes...
+                        </div>
+                      ) : (
+                        icd10SearchResults.map((dx) => (
                           <div
-                            key={dx.code}
+                            key={dx.id}
                             className="p-2 hover:bg-muted cursor-pointer border-b last:border-b-0"
                             onClick={() => {
                               const newDiagnosis = {
                                 id: `${dx.code}-${Date.now()}`,
                                 code: dx.code,
-                                name: dx.name,
+                                name: dx.description,
                                 type: selectedDiagnosisType,
                                 notes: diagnosisNotes
                               };
@@ -2139,24 +2134,22 @@ export default function ConsultationHistoryPage() {
                               setShowAddDiagnosisInEdit(false);
                               setDiagnosisSearch("");
                               setDiagnosisNotes("");
-                              toast.success(`Added: ${dx.code} - ${dx.name}`);
+                              setIcd10SearchResults([]);
+                              toast.success(`Added: ${dx.code} - ${dx.description}`);
                             }}
                           >
                             <div className="flex items-center justify-between">
                               <div>
                                 <div className="font-mono text-sm font-medium">{dx.code}</div>
-                                <div className="text-sm text-muted-foreground">{dx.name}</div>
+                                <div className="text-sm text-muted-foreground">{dx.description}</div>
                                 <div className="text-xs text-muted-foreground">{dx.category}</div>
                               </div>
                               <Plus className="h-4 w-4 text-muted-foreground" />
                             </div>
                           </div>
-                        ))}
-                      {icd10Codes.filter(dx =>
-                        dx.code.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                        dx.name.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                        dx.category.toLowerCase().includes(diagnosisSearch.toLowerCase())
-                      ).length === 0 && diagnosisSearch && (
+                        ))
+                      )}
+                      {!loadingIcd10Search && icd10SearchResults.length === 0 && diagnosisSearch && (
                         <div className="p-4 text-center text-muted-foreground text-sm">
                           No matching ICD-10 codes found
                         </div>
