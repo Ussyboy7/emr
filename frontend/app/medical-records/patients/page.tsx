@@ -17,7 +17,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { patientService, type Patient as ApiPatient } from '@/lib/services';
 import {
-  TITLES,
+  PATIENT_TITLE_OPTIONS,
+  normalizePatientTitleValue,
   MARITAL_STATUSES,
   RELIGIONS,
   NIGERIAN_TRIBES,
@@ -365,7 +366,8 @@ export default function PatientsListPage() {
       if (categoryFilter !== 'all') params.category = categoryFilter;
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (locationFilter !== 'all') params.location = locationFilter;
-      if (searchQuery) params.search = searchQuery;
+      const searchTerm = debouncedSearchQuery.trim();
+      if (searchTerm) params.search = searchTerm;
       
       const response = await patientService.getPatients(params);
       setTotalCount(response.count || response.results.length);
@@ -638,7 +640,7 @@ export default function PatientsListPage() {
       }
       
       // Normalize values to match dropdown options
-      const normalizedTitle = apiPatient.title ? apiPatient.title.toLowerCase() : '';
+      const normalizedTitle = normalizePatientTitleValue(apiPatient.title);
       const normalizedMaritalStatus = apiPatient.marital_status ? apiPatient.marital_status.toLowerCase() : '';
       const normalizedEmployeeType = apiPatient.employee_type ? apiPatient.employee_type.charAt(0).toUpperCase() + apiPatient.employee_type.slice(1).toLowerCase() : '';
       const normalizedNokRelationship = apiPatient.nok_relationship ? apiPatient.nok_relationship.charAt(0).toUpperCase() + apiPatient.nok_relationship.slice(1).toLowerCase() : '';
@@ -651,7 +653,9 @@ export default function PatientsListPage() {
       // Note: API returns snake_case (first_name, surname, etc.)
       const formData = {
         title: normalizedTitle,
-        personalNumber: (apiPatient.personal_number || '').trim(),
+        // Dependents: identity for ED-/RD- IDs comes from the principal's P.N. only — no separate P.N. in the UI.
+        personalNumber:
+          apiPatient.category === 'dependent' ? '' : (apiPatient.personal_number || '').trim(),
         gender: (normalizeGender(apiPatient.gender) || 'male') as 'male' | 'female',
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
@@ -803,9 +807,8 @@ export default function PatientsListPage() {
       // Optional fields use '' when cleared so PATCH actually clears the server values
       // (omitting a key leaves the previous value unchanged).
       const updateData: Partial<ApiPatient> = {
-        title: editForm.title.trim() ? editForm.title.toLowerCase().trim() : '',
+        title: normalizePatientTitleValue(editForm.title),
         gender: editForm.gender,
-        personal_number: editForm.personalNumber.trim(),
         first_name: first,
         surname: last,
         middle_name: editForm.middleName.trim(),
@@ -839,6 +842,11 @@ export default function PatientsListPage() {
         nok_phone: editForm.nokPhone.trim(),
         occupation: editForm.occupation.trim(),
       };
+
+      // Employee/retiree: editable staff P.N. Dependent: IDs come from principal only — do not PATCH personal_number.
+      if (cat !== 'Dependent') {
+        updateData.personal_number = editForm.personalNumber.trim();
+      }
 
       // Handle photo upload if a new photo was selected
       if (photoFile) {
@@ -1010,7 +1018,7 @@ export default function PatientsListPage() {
                   <div className="relative flex-1 min-w-[min(100%,16rem)]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input 
-                      placeholder="Search by name, patient ID, or phone..." 
+                      placeholder="Search by name, patient ID, or personal number…"
                       value={searchQuery} 
                       onChange={(e) => setSearchQuery(e.target.value)} 
                       className="pl-10" 
@@ -1395,7 +1403,7 @@ export default function PatientsListPage() {
                             />
                             <p className="text-xs text-muted-foreground">
                               {editPrincipalInfo?.fullName
-                                ? `Linked to ${editPrincipalInfo.fullName}. To change the principal, use Manage Dependents.`
+                                ? `Linked to ${editPrincipalInfo.fullName}. Dependent patient IDs (ED-/RD-) use this number; to change the link, use Manage Dependents.`
                                 : "Principal record not loaded or not linked."}
                             </p>
                           </div>
@@ -1408,7 +1416,11 @@ export default function PatientsListPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">None</SelectItem>
-                              {TITLES.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
+                              {PATIENT_TITLE_OPTIONS.map(({ value, label }) => (
+                                <SelectItem key={value} value={value}>
+                                  {label}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1441,19 +1453,6 @@ export default function PatientsListPage() {
                           </Select>
                         </div>
                       </div>
-                      {selectedPatient.category === "Dependent" && (
-                        <div className="space-y-2">
-                          <Label>Personal number (dependent)</Label>
-                          <Input
-                            value={editForm.personalNumber}
-                            onChange={(e) => setEditForm((prev) => ({ ...prev, personalNumber: e.target.value }))}
-                            placeholder="This dependent's P.N. from registration (not the principal's)"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            The principal's employee/retiree P.N. is shown above. This field is this patient's own personal number.
-                          </p>
-                        </div>
-                      )}
                       <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">
                           <Label>Religion</Label>

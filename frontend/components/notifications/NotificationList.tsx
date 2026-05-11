@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -151,6 +151,13 @@ export const NotificationList = ({
       setLoading(false);
     }
   }, []);
+
+  // Always do one fetch on mount/open so embedded bell mode still
+  // renders data when periodic polling is intentionally disabled
+  // (e.g. live WebSocket connection is active).
+  useEffect(() => {
+    void loadNotifications();
+  }, [loadNotifications]);
 
   usePolling(loadNotifications, NOTIFICATION_POLL_INTERVAL_MS, {
     enabled: pollingEnabled,

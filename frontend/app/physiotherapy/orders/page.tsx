@@ -171,13 +171,37 @@ export default function PhysioPoolQueuePage() {
         setError(null);
       }
 
-      const params: any = {
+      const params: Record<string, any> = {
         page: currentPage,
         page_size: itemsPerPage,
       };
-      // Note: searchQuery, dateFilter not yet implemented in backend
 
       if (searchQuery) params.search = searchQuery;
+
+      // Push status filter to backend so pagination reflects the correct total
+      if (activeTab !== 'all') params.status = activeTab;
+
+      // Push date filter to backend
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) params.ordered_at_after = dateRange.from;
+        if (dateRange.to) params.ordered_at_before = dateRange.to;
+      } else if (dateFilter !== 'all') {
+        const today = new Date();
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        if (dateFilter === 'today') {
+          params.ordered_at_after = fmt(today);
+          params.ordered_at_before = fmt(today);
+        } else if (dateFilter === 'week') {
+          const from = new Date(today);
+          from.setDate(from.getDate() - 7);
+          params.ordered_at_after = fmt(from);
+        } else if (dateFilter === 'month') {
+          const from = new Date(today);
+          from.setMonth(from.getMonth() - 1);
+          params.ordered_at_after = fmt(from);
+        }
+      }
 
       const response = await physioService.getOrders(params);
       setTotalCount(response.count);
@@ -195,7 +219,7 @@ export default function PhysioPoolQueuePage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, searchQuery, dateFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, activeTab, dateFilter, dateRange]);
 
   useEffect(() => {
     loadOrders();
@@ -534,66 +558,54 @@ export default function PhysioPoolQueuePage() {
     return `${days}d ago`;
   };
 
-  const getFilteredOrders = () => {
-    return orders.filter(order => {
-      const matchesSearch = order.patient_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.patient_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.diagnosis?.toLowerCase().includes(searchQuery.toLowerCase());
+  // Backend now handles status + date filtering; client only deduplicates the search
+  // against the already-paginated page (in case backend search is narrower).
+  const filteredOrders = useMemo(() => orders, [orders]);
 
-      // Date filter
-      if (dateFilter !== 'all') {
-        const orderedDate = new Date(order.ordered_at);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
-        if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          if (orderedDate < weekAgo) return false;
-        }
-        if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          if (orderedDate < monthAgo) return false;
-        }
-      }
-
-      if (dateRange.from || dateRange.to) {
-        const orderedDate = new Date(order.ordered_at);
-        if (Number.isNaN(orderedDate.getTime())) return false;
-        if (dateRange.from) {
-          const from = new Date(`${dateRange.from}T00:00:00`);
-          if (orderedDate < from) return false;
-        }
-        if (dateRange.to) {
-          const to = new Date(`${dateRange.to}T23:59:59.999`);
-          if (orderedDate > to) return false;
-        }
-      }
-
-      // Tab filtering
-      if (activeTab === 'all') return matchesSearch;
-      if (activeTab === 'pending') return matchesSearch && order.status === 'pending';
-      if (activeTab === 'in_progress') return matchesSearch && order.status === 'in_progress';
-      if (activeTab === 'cancelled') return matchesSearch && order.status === 'cancelled';
-      if (activeTab === 'completed') return matchesSearch && order.status === 'completed';
-      return matchesSearch;
-    });
-  };
-
-  const filteredOrders = getFilteredOrders();
   const activeUncompletedSession = useMemo(
     () => getLatestUncompletedSession(orderSessionsList),
     [orderSessionsList]
   );
 
-  const stats = useMemo(() => ({
-    pending: orders.filter(o => o.status === 'pending').length,
-    inProgress: orders.filter(o => o.status === 'in_progress').length,
-    cancelled: orders.filter(o => o.status === 'cancelled').length,
-    completed: orders.filter(o => o.status === 'completed').length,
-  }), [orders]);
+  // Stats: load separately so they reflect ALL records, not just the current page/tab.
+  const [stats, setStats] = useState({ pending: 0, inProgress: 0, cancelled: 0, completed: 0, scheduled: 0 });
+  useEffect(() => {
+    let cancelled = false;
+    const loadStats = async () => {
+      try {
+        const [p, s, ip, can, c] = await Promise.all([
+          physioService.getOrders({ status: 'pending', page_size: 1 }),
+          physioService.getOrders({ status: 'scheduled', page_size: 1 }),
+          physioService.getOrders({ status: 'in_progress', page_size: 1 }),
+          physioService.getOrders({ status: 'cancelled', page_size: 1 }),
+          physioService.getOrders({ status: 'completed', page_size: 1 }),
+        ]);
+        if (!cancelled) {
+          setStats({
+            pending: (p.count || 0) + (s.count || 0),
+            inProgress: ip.count || 0,
+            cancelled: can.count || 0,
+            completed: c.count || 0,
+            scheduled: s.count || 0,
+          });
+        }
+      } catch {
+        // best-effort; fall back to current page counts
+        if (!cancelled) {
+          setStats({
+            pending: orders.filter(o => o.status === 'pending' || o.status === 'scheduled').length,
+            inProgress: orders.filter(o => o.status === 'in_progress').length,
+            cancelled: orders.filter(o => o.status === 'cancelled').length,
+            completed: orders.filter(o => o.status === 'completed').length,
+            scheduled: orders.filter(o => o.status === 'scheduled').length,
+          });
+        }
+      }
+    };
+    void loadStats();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleStartSession = async () => {
     if (!selectedOrder) return;
@@ -707,42 +719,6 @@ export default function PhysioPoolQueuePage() {
       setIsStartSessionDialogOpen(false);
       setSelectedOrder(null);
       setCurrentSession(null);
-
-      // Reset session data
-      (setSessionData as any)({
-        presenting_complaint: '',
-        pain_level_before: null,
-        medical_history: '',
-        surgical_history: '',
-        medications: '',
-        allergies: '',
-        social_history: '',
-        previous_treatments: '',
-        posture_gait: '',
-        range_of_motion: '',
-        muscle_strength: '',
-        sensation: '',
-        reflexes: '',
-        balance_coordination: '',
-        special_tests: '',
-        functional_assessment: '',
-        assistive_devices: '',
-        functional_goals: '',
-        functional_limitations: '',
-        assessment_findings: '',
-        diagnosis_impression: '',
-        prognosis: '',
-        clinical_reasoning: '',
-        treatment_performed: '',
-        exercises_prescribed: [],
-        equipment_used: [],
-        patient_education: '',
-        next_session_plan: '',
-        session_notes: '',
-        progress_notes: '',
-        recommendations: [],
-        follow_up_instructions: ''
-      });
 
       // Reset session data
       (setSessionData as any)({
@@ -1073,8 +1049,9 @@ export default function PhysioPoolQueuePage() {
             <CardContent className="p-4">
               <div className="flex flex-col gap-4">
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                  <TabsList>
+                  <TabsList className="flex flex-wrap h-auto gap-1">
                     <TabsTrigger value="pending">Pending ({stats.pending})</TabsTrigger>
+                    <TabsTrigger value="scheduled">Scheduled ({stats.scheduled})</TabsTrigger>
                     <TabsTrigger value="in_progress">In Progress ({stats.inProgress})</TabsTrigger>
                     <TabsTrigger value="cancelled">Cancelled ({stats.cancelled})</TabsTrigger>
                     <TabsTrigger value="completed">Completed ({stats.completed})</TabsTrigger>
@@ -1142,11 +1119,11 @@ export default function PhysioPoolQueuePage() {
           </div>
 
           {/* Pagination */}
-          {filteredOrders.length > 0 && (
+          {totalCount > 0 && (
             <Card className="p-4">
               <StandardPagination
                 currentPage={currentPage}
-                totalItems={filteredOrders.length}
+                totalItems={totalCount}
                 itemsPerPage={itemsPerPage}
                 onPageChange={setCurrentPage}
                 onItemsPerPageChange={(newSize) => {

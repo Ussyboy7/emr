@@ -5,9 +5,11 @@ import logging
 from typing import Optional, List
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from django.contrib.auth import get_user_model
 from common.services import EmailService
 from .models import Notification, NotificationPreferences
+from .routing_matrix import get_department_hints_for_role
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -29,7 +31,6 @@ _NURSING_TO_NOTIFICATION = {
     'medium': 'normal',
     'low': 'low',
 }
-
 
 def priority_from_lab_or_radiology(order_priority: str) -> str:
     """Map LabOrder/RadiologyOrder priority → notification priority."""
@@ -200,12 +201,24 @@ class NotificationService:
         action_url: str = '',
         object_type: str = '',
         object_id: str = '',
+        clinic_id: Optional[int] = None,
+        department_id: Optional[int] = None,
     ) -> List[Notification]:
-        """Create notifications for all users with a specific role."""
+        """Create notifications for users with a specific role and scope."""
         notifications = []
         try:
-            # Get users by system_role (assuming User model has system_role field)
             users = User.objects.filter(system_role=role_name, is_active=True)
+            if clinic_id is not None:
+                users = users.filter(clinic_id=clinic_id)
+            if department_id is not None:
+                users = users.filter(department_id=department_id)
+            else:
+                hints = get_department_hints_for_role(role_name)
+                if hints:
+                    dept_q = Q()
+                    for hint in hints:
+                        dept_q |= Q(department__code__icontains=hint) | Q(department__name__icontains=hint)
+                    users = users.filter(dept_q)
             for user in users:
                 notification = NotificationService.create_notification(
                     user=user,
@@ -220,7 +233,13 @@ class NotificationService:
                 if notification:
                     notifications.append(notification)
             
-            logger.info(f"Created {len(notifications)} notifications for role {role_name}")
+            logger.info(
+                "Created %d notifications for role=%s clinic_id=%s department_id=%s",
+                len(notifications),
+                role_name,
+                clinic_id,
+                department_id,
+            )
         except Exception as e:
             logger.error(f"Error notifying role {role_name}: {str(e)}")
         

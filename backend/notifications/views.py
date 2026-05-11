@@ -7,6 +7,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from django.core.cache import cache
@@ -14,6 +15,14 @@ from django.utils import timezone
 
 from .models import Notification, NotificationPreferences
 from .serializers import NotificationSerializer, NotificationPreferencesSerializer
+from .permissions import CanManageNotificationRouting
+from .routing_matrix import (
+    clear_routing_matrix_override,
+    get_routing_matrix,
+    routing_matrix_has_override,
+    set_routing_matrix_override,
+    ROLE_DEPARTMENT_HINTS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,4 +143,57 @@ class NotificationPreferencesViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class NotificationRoutingMatrixView(APIView):
+    """
+    Admin: inspect and update the notification audience routing matrix.
+
+    GET returns defaults, optional cache overlay flag, and the effective
+    merged matrix used by ``notify_role``. PATCH stores a partial or full
+    overlay in cache; DELETE removes the overlay (file defaults only).
+    """
+
+    permission_classes = [CanManageNotificationRouting]
+
+    def get(self, request):
+        return Response(
+            {
+                "source": "override" if routing_matrix_has_override() else "default",
+                "defaults": dict(ROLE_DEPARTMENT_HINTS),
+                "matrix": get_routing_matrix(),
+                "description": (
+                    "When ``notify_role`` runs without an explicit department_id, "
+                    "recipients are filtered by system role plus these department "
+                    "code/name hints (and clinic_id when provided by the caller)."
+                ),
+            }
+        )
+
+    def patch(self, request):
+        body = request.data if isinstance(request.data, dict) else {}
+        matrix = body.get("matrix")
+        if matrix is None:
+            return Response(
+                {"detail": "Expected JSON body with a `matrix` object."},
+                status=400,
+            )
+        if not isinstance(matrix, dict):
+            return Response({"detail": "`matrix` must be an object."}, status=400)
+        effective = set_routing_matrix_override(matrix)
+        return Response(
+            {
+                "source": "override" if routing_matrix_has_override() else "default",
+                "matrix": effective,
+            }
+        )
+
+    def delete(self, request):
+        clear_routing_matrix_override()
+        return Response(
+            {
+                "source": "default",
+                "matrix": get_routing_matrix(),
+            }
+        )
 

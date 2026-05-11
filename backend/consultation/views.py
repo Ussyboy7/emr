@@ -857,6 +857,7 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                 action_url=f"/consultation/room/{queue_item.room.id}",
                 object_type='consultation_queue',
                 object_id=str(queue_item.id),
+                clinic_id=getattr(self.request.user, 'clinic_id', None),
             )
         except Exception:
             # Notifications must never break queue operations
@@ -944,6 +945,7 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                     action_url=f"/consultation/room/{updated.room.id}",
                     object_type='consultation_queue',
                     object_id=str(updated.id),
+                    clinic_id=getattr(self.request.user, 'clinic_id', None),
                 )
         except Exception:
             pass

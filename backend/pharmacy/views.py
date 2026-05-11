@@ -689,6 +689,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 action_url="/pharmacy/prescriptions",
                 object_type='prescription',
                 object_id=str(prescription.id),
+                clinic_id=getattr(self.request.user, 'clinic_id', None),
             )
         except Exception:
             # Notifications must never break prescription creation

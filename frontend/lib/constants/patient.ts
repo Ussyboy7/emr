@@ -54,20 +54,52 @@ export const DEPENDENT_TYPES = [
   "Retiree Dependent"
 ];
 
-// Titles
-export const TITLES = [
-  'Mr',
-  'Mrs',
-  'Ms',
-  'Master',
-  'Miss',
-  'Dr',
-  'Chief',
-  'Engr',
-  'Prof',
-  'Alhaji',
-  'Hajiya'
+/**
+ * Patient title options — ``value`` must match ``Patient.TITLE_CHOICES`` keys in the backend.
+ * Use labels for display (e.g. Hajiya maps to stored value ``hajia``).
+ */
+export type PatientTitleOption = { readonly value: string; readonly label: string };
+
+export const PATIENT_TITLE_OPTIONS: readonly PatientTitleOption[] = [
+  { value: 'mr', label: 'Mr' },
+  { value: 'mrs', label: 'Mrs' },
+  { value: 'ms', label: 'Ms' },
+  { value: 'master', label: 'Master' },
+  { value: 'miss', label: 'Miss' },
+  { value: 'dr', label: 'Dr' },
+  { value: 'chief', label: 'Chief' },
+  { value: 'engr', label: 'Engr' },
+  { value: 'prof', label: 'Prof' },
+  { value: 'alhaji', label: 'Alhaji' },
+  { value: 'hajia', label: 'Hajiya' },
+  { value: 'mallam', label: 'Mallam' },
+  { value: 'lady', label: 'Lady' },
 ];
+
+const PATIENT_TITLE_VALUE_SET = new Set(PATIENT_TITLE_OPTIONS.map((o) => o.value));
+
+/** Map legacy / mistaken stored values to a valid backend title key (lowercase). */
+export function normalizePatientTitleValue(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const k = String(raw).trim().toLowerCase();
+  const aliases: Record<string, string> = { hajiya: 'hajia' };
+  const resolved = aliases[k] ?? k;
+  return PATIENT_TITLE_VALUE_SET.has(resolved) ? resolved : '';
+}
+
+/** Display label for a stored title value (handles legacy keys). */
+export function patientTitleLabel(raw: string | null | undefined): string {
+  const key = normalizePatientTitleValue(raw);
+  if (key) {
+    const opt = PATIENT_TITLE_OPTIONS.find((o) => o.value === key);
+    if (opt) return opt.label;
+  }
+  const fallback = String(raw ?? '').trim();
+  return fallback ? fallback : '';
+}
+
+/** @deprecated Prefer ``PATIENT_TITLE_OPTIONS`` for selects (value/label). */
+export const TITLES = PATIENT_TITLE_OPTIONS.map((o) => o.label);
 
 // Marital Statuses
 export const MARITAL_STATUSES = [

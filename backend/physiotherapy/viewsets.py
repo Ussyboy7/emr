@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from common.session_report_pdf import build_physio_session_pdf_bytes
 from patients.models import Visit
 
-from .filters import PhysioSessionFilter
+from .filters import PhysioOrderFilter, PhysioSessionFilter
 from .models import PhysioOrder, PhysioSession, PhysioTemplate
 from .serializers import (
     PhysioOrderCreateSerializer,
@@ -55,7 +55,7 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
-    filterset_fields = ["status", "priority", "patient", "visit", "consultation_session", "referral_source"]
+    filterset_class = PhysioOrderFilter
     search_fields = ["patient__surname", "patient__first_name", "patient__middle_name", "patient__patient_id"]
     ordering_fields = ["ordered_at", "scheduled_at", "status"]
     ordering = ["-ordered_at"]

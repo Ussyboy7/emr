@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -34,6 +35,7 @@ import {
   AlertCircle,
   Loader2,
   Pill,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -87,6 +89,90 @@ export default function AdminDashboardPage() {
   const POLL_INTERVAL_MS = 30_000;
   const isMountedRef = useRef(true);
   const inFlightRef = useRef(false);
+
+  const canManageNotificationRouting =
+    Boolean(currentUser?.isSuperuser) ||
+    (currentUser?.systemRole || "").toLowerCase() === "system administrator";
+
+  const [routingMatrix, setRoutingMatrix] = useState<Record<string, string[]> | null>(null);
+  const [routingSource, setRoutingSource] = useState<"default" | "override" | null>(null);
+  const [routingJson, setRoutingJson] = useState("");
+  const [routingLoading, setRoutingLoading] = useState(false);
+  const [routingSaving, setRoutingSaving] = useState(false);
+  const [routingEditorOpen, setRoutingEditorOpen] = useState(false);
+
+  const loadRoutingMatrix = useCallback(async () => {
+    if (!canManageNotificationRouting) return;
+    setRoutingLoading(true);
+    try {
+      const res = await adminService.getNotificationRoutingMatrix();
+      setRoutingMatrix(res.matrix);
+      setRoutingSource(res.source === "override" ? "override" : "default");
+      setRoutingJson(JSON.stringify(res.matrix, null, 2));
+    } catch (err: unknown) {
+      console.error("Notification routing matrix:", err);
+      toast.error("Could not load notification routing matrix.");
+    } finally {
+      setRoutingLoading(false);
+    }
+  }, [canManageNotificationRouting]);
+
+  useEffect(() => {
+    void loadRoutingMatrix();
+  }, [loadRoutingMatrix]);
+
+  const handleSaveRoutingMatrix = async () => {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(routingJson) as Record<string, unknown>;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        toast.error("Matrix must be a JSON object.");
+        return;
+      }
+    } catch {
+      toast.error("Invalid JSON.");
+      return;
+    }
+    const asLists: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (Array.isArray(v)) {
+        asLists[k] = v.map((x) => String(x));
+      } else if (v == null) {
+        asLists[k] = [];
+      } else {
+        asLists[k] = [String(v)];
+      }
+    }
+    setRoutingSaving(true);
+    try {
+      const res = await adminService.updateNotificationRoutingMatrix(asLists);
+      setRoutingMatrix(res.matrix);
+      setRoutingSource(res.source === "override" ? "override" : "default");
+      setRoutingJson(JSON.stringify(res.matrix, null, 2));
+      toast.success("Notification routing matrix saved.");
+    } catch (err: unknown) {
+      console.error(err);
+      toast.error("Failed to save routing matrix.");
+    } finally {
+      setRoutingSaving(false);
+    }
+  };
+
+  const handleResetRoutingMatrix = async () => {
+    setRoutingSaving(true);
+    try {
+      const res = await adminService.resetNotificationRoutingMatrix();
+      setRoutingMatrix(res.matrix);
+      setRoutingSource("default");
+      setRoutingJson(JSON.stringify(res.matrix, null, 2));
+      toast.success("Reverted to deployment defaults (cache overlay cleared).");
+    } catch (err: unknown) {
+      console.error(err);
+      toast.error("Failed to reset routing matrix.");
+    } finally {
+      setRoutingSaving(false);
+    }
+  };
 
   // Silent ticks call a slim ``/common/dashboard/live/`` endpoint that
   // only returns ``onlineNow`` + ``systemHealth``. We skip the heavy
@@ -343,6 +429,110 @@ export default function AdminDashboardPage() {
             </div>
           </CardContent>
         </Card>
+
+        {canManageNotificationRouting && (
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Workflow className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-lg">Notification routing</CardTitle>
+                  {routingSource && (
+                    <Badge variant={routingSource === "override" ? "default" : "secondary"}>
+                      {routingSource === "override" ? "Cache overlay" : "Defaults"}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void loadRoutingMatrix()}
+                    disabled={routingLoading}
+                  >
+                    {routingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    <span className="ml-1">Reload</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRoutingEditorOpen((o) => !o)}
+                  >
+                    {routingEditorOpen ? "Hide editor" : "Edit JSON"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleResetRoutingMatrix()}
+                    disabled={routingSaving || routingSource !== "override"}
+                  >
+                    Reset to defaults
+                  </Button>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Maps each system role to department code/name hints used when sending role-based
+                workflow notifications (merged with deployment defaults; optional Redis cache overlay).
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {routingLoading && !routingMatrix ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading matrix…
+                </div>
+              ) : routingMatrix ? (
+                <>
+                  <div className="rounded-md border max-h-48 overflow-auto text-sm">
+                    <table className="w-full border-collapse">
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th className="text-left p-2 font-medium">Role</th>
+                          <th className="text-left p-2 font-medium">Department hints</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(routingMatrix).map(([role, hints]) => (
+                          <tr key={role} className="border-t">
+                            <td className="p-2 align-top whitespace-nowrap">{role}</td>
+                            <td className="p-2 text-muted-foreground">
+                              {hints.length ? hints.join(", ") : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {routingEditorOpen && (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={routingJson}
+                        onChange={(e) => setRoutingJson(e.target.value)}
+                        className="font-mono text-xs min-h-[220px]"
+                        spellCheck={false}
+                        aria-label="Notification routing matrix JSON"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void handleSaveRoutingMatrix()}
+                        disabled={routingSaving}
+                      >
+                        {routingSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                        Save overlay
+                      </Button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">No matrix data.</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Key Stats — five cards on lg+. The old "System Status" tile
             was a constant string that already lives in the status bar

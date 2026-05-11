@@ -72,6 +72,7 @@ export type {
   AuditLog,
   OutpatientClinicType,
   FacilityVisitClinicRow,
+  NotificationRoutingMatrixResponse,
 } from './admin-service';
 export type { Room } from './room-service';
 export type { MedicalCertificate, MedicalCertificatePurpose } from './medical-certificate-service';

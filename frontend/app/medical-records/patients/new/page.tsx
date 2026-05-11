@@ -28,7 +28,9 @@ import {
   NON_NPA_TYPES,
   EMPLOYEE_TYPES,
   DEPENDENT_TYPES,
-  TITLES,
+  PATIENT_TITLE_OPTIONS,
+  normalizePatientTitleValue,
+  patientTitleLabel,
   RELIGIONS,
   NIGERIAN_TRIBES,
   MARITAL_STATUSES,
@@ -499,11 +501,10 @@ export default function NewPatientPage() {
         payload.occupation = formData.occupation.trim();
       }
 
-      // Add optional title field
+      // Add optional title field (values must match backend Patient.TITLE_CHOICES)
       if (formData.title) {
-        const normalizedTitle = formData.title.toLowerCase();
-        // Backend TITLE_CHOICES do not include 'master', so map it to 'mr' to avoid validation errors
-        payload.title = normalizedTitle === 'master' ? 'mr' : normalizedTitle;
+        const t = normalizePatientTitleValue(formData.title);
+        if (t) payload.title = t;
       }
 
       // Category-specific fields
@@ -920,10 +921,14 @@ export default function NewPatientPage() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label>Title</Label>
-                        <Select value={formData.title} onValueChange={(v) => handleInputChange('title', v)}>
+                        <Select value={formData.title || undefined} onValueChange={(v) => handleInputChange('title', v)}>
                           <SelectTrigger><SelectValue placeholder="Select title" /></SelectTrigger>
                           <SelectContent>
-                            {TITLES.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
+                            {PATIENT_TITLE_OPTIONS.map(({ value, label }) => (
+                              <SelectItem key={value} value={value}>
+                                {label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1786,7 +1791,7 @@ export default function NewPatientPage() {
                     <span className="font-medium text-right max-w-[150px] truncate">
                       {(() => {
                         const titlePrefix = formData.title?.trim()
-                          ? `${formData.title.trim()} `
+                          ? `${patientTitleLabel(formData.title)} `
                           : '';
                         const parts = [formData.surname, formData.firstName, formData.middleName]
                           .map((s) => (s || '').trim())

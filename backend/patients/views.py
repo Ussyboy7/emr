@@ -183,7 +183,8 @@ class PatientViewSet(viewsets.ModelViewSet):
     pagination_class = PatientPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location', 'principal_staff']
-    search_fields = ['patient_id', 'surname', 'first_name', 'middle_name', 'personal_number', 'phone', 'email']
+    # List search: names, patient ID, personal number (not phone/email — fewer false positives).
+    search_fields = ['patient_id', 'surname', 'first_name', 'middle_name', 'personal_number']
     ordering_fields = ['created_at', 'surname', 'first_name']
     ordering = ['-created_at']
     
@@ -524,6 +525,7 @@ class VisitViewSet(viewsets.ModelViewSet):
                     action_url='/nursing/pool-queue',
                     object_type='visit',
                     object_id=str(visit.id),
+                    clinic_id=getattr(self.request.user, 'clinic_id', None),
                 )
         except Exception:
             # Notifications must never break core workflow actions

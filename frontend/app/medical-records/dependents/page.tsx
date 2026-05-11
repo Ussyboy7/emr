@@ -17,7 +17,8 @@ import { useRouter } from 'next/navigation';
 import { patientService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
 import {
   DEPENDENT_TYPES,
-  TITLES,
+  PATIENT_TITLE_OPTIONS,
+  normalizePatientTitleValue,
   MARITAL_STATUSES,
   RELIGIONS,
   NIGERIAN_TRIBES,
@@ -549,7 +550,7 @@ export default function DependentsPage() {
         principal_staff: primaryPatient.id,
 
         // Additional fields matching patient registration
-        title: editForm.title || '',
+        title: normalizePatientTitleValue(editForm.title),
         middle_name: editForm.middleName || '',
         marital_status: editForm.maritalStatus || '',
         religion: editForm.religion || '',
@@ -744,7 +745,7 @@ export default function DependentsPage() {
           status: dependentToEdit.is_active ? 'Active' : 'Inactive',
           dependentType: dep.dependentType || 'dependent',
           // Additional fields
-          title: dependentToEdit.title || '',
+          title: normalizePatientTitleValue(dependentToEdit.title as string),
           middleName: dependentToEdit.middle_name || '',
           maritalStatus: dependentToEdit.marital_status || '',
           religion: dependentToEdit.religion || '',
@@ -1208,7 +1209,11 @@ export default function DependentsPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">None</SelectItem>
-                              {TITLES.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
+                              {PATIENT_TITLE_OPTIONS.map(({ value, label }) => (
+                                <SelectItem key={value} value={value}>
+                                  {label}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         </div>

@@ -84,6 +84,14 @@ export interface Department {
   updated_at: string;
 }
 
+/** GET /notifications/routing-matrix/ — admin notification audience hints. */
+export interface NotificationRoutingMatrixResponse {
+  source: 'default' | 'override';
+  defaults?: Record<string, string[]>;
+  matrix: Record<string, string[]>;
+  description?: string;
+}
+
 /** Master OPD visit clinic (GOPD, Eye Clinic, …) — not the physical facility. */
 export interface OutpatientClinicType {
   id: number;
@@ -553,6 +561,36 @@ class AdminService {
       systemHealth: Record<string, unknown>[];
       serverTime: string;
     }>('/common/dashboard/live/');
+  }
+
+  /**
+   * Notification routing matrix (role → department hints). Staff / superuser /
+   * System Administrator only.
+   */
+  async getNotificationRoutingMatrix(): Promise<NotificationRoutingMatrixResponse> {
+    return apiFetch<NotificationRoutingMatrixResponse>('/notifications/routing-matrix/');
+  }
+
+  async updateNotificationRoutingMatrix(
+    matrix: Record<string, string[]>,
+  ): Promise<{ source: string; matrix: Record<string, string[]> }> {
+    return apiFetch<{ source: string; matrix: Record<string, string[]> }>(
+      '/notifications/routing-matrix/',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ matrix }),
+      },
+    );
+  }
+
+  async resetNotificationRoutingMatrix(): Promise<{
+    source: string;
+    matrix: Record<string, string[]>;
+  }> {
+    return apiFetch<{ source: string; matrix: Record<string, string[]> }>(
+      '/notifications/routing-matrix/',
+      { method: 'DELETE' },
+    );
   }
 
   /**

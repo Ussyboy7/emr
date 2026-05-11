@@ -14,10 +14,11 @@ import { toast } from "sonner";
 import {
   ArrowLeft, Download, Printer, Eye, User, Calendar, Clock, Stethoscope,
   TestTube, ScanLine, Pill, Heart, Activity, Building2, ClipboardList,
-  ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText, Pencil
+  ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText, Pencil, Share2,
 } from "lucide-react";
-import { patientService, consultationService, labService, radiologyService, 
-         pharmacyService, physioService, wardService, medicalCertificateService, type Patient } from '@/lib/services';
+import { patientService, consultationService, labService, radiologyService,
+         pharmacyService, physioService, wardService, medicalCertificateService, referralService, type Patient, type Visit } from '@/lib/services';
+import type { Referral } from '@/lib/services/referral-service';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
@@ -41,7 +42,8 @@ import {
 } from '@/lib/laboratory/template-utils';
 import { getOrganizationLabHeader } from '@/lib/constants/organization';
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
-import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { getVisitServiceClinicsDisplay, joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 
 // Utility functions
 const formatDate = (dateString: string | undefined): string => {
@@ -276,7 +278,26 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
   const [selectedWard, setSelectedWard] = useState<any>(null);
 
+  const [selectedVisitForModal, setSelectedVisitForModal] = useState<{
+    id: string;
+    numericId: number;
+    visitId?: string;
+    patientId: string;
+    date: string;
+    time: string;
+    type: string;
+    department: string;
+    doctor: string;
+    diagnosis: string;
+    status: string;
+    notes?: string;
+  } | null>(null);
+  const [isVisitDetailModalOpen, setIsVisitDetailModalOpen] = useState(false);
+
   // History data
+  const [visitHistory, setVisitHistory] = useState<any[]>([]);
+  const [referralHistory, setReferralHistory] = useState<Referral[]>([]);
+  const [isCreatingTestReferral, setIsCreatingTestReferral] = useState(false);
   const [consultationHistory, setConsultationHistory] = useState<any[]>([]);
   const [labHistory, setLabHistory] = useState<any[]>([]);
   const [imagingHistory, setImagingHistory] = useState<any[]>([]);
@@ -375,21 +396,86 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
     loadPatient();
   }, [patientId]);
 
-  // Load patient history
-  const loadPatientHistory = async (patientId: number) => {
+  // Load patient history (numericPatientId = patient DB primary key, not human patient_id string)
+  const loadPatientHistory = async (numericPatientId: number) => {
     setLoadingHistory(true);
     try {
       // Load consultations
-      const consultations = await consultationService.getSessions({ patient: patientId });
-      setConsultationHistory(consultations.results || []);
+      const consultations = await consultationService.getSessions({ patient: numericPatientId });
+      const consultationRows = consultations.results || [];
+      setConsultationHistory(consultationRows);
+
+      const sessionRows = consultationRows.map((session: any) => {
+        const startedAt = session?.started_at || '';
+        const [datePart, timePartRaw] = startedAt.includes('T')
+          ? startedAt.split('T')
+          : [startedAt, ''];
+        const timePart = timePartRaw ? String(timePartRaw).substring(0, 5) : '';
+
+        return {
+          // Prefix so `VisitDetailModal` knows this is a consultation-session "report"
+          id: `session-${session.id}`,
+          visit_id: session.session_id || `session-${session.id}`,
+          patient: session.patient,
+          date: datePart || '',
+          time: timePart || '',
+          visit_type: 'Consultation',
+          clinic: session.clinic_name || '',
+          clinics: Array.isArray((session as any).visit_clinics)
+            ? (session as any).visit_clinics
+            : undefined,
+          doctor_name: session.doctor_name || (session.doctor as any)?.name || '',
+          clinical_notes: session.notes || '',
+          status: session.status,
+        };
+      });
+
+      try {
+        const visits = await patientService.getPatientVisits(numericPatientId);
+        const list = Array.isArray(visits) ? [...visits] : [];
+
+        const combined = [...list, ...sessionRows];
+        combined.sort((a, b) => {
+          const dateA = String(a.date || '').split('T')[0];
+          const dateB = String(b.date || '').split('T')[0];
+          const timeA = String(a.time || '00:00:00');
+          const timeB = String(b.time || '00:00:00');
+          const ta = new Date(`${dateA}T${timeA}`).getTime();
+          const tb = new Date(`${dateB}T${timeB}`).getTime();
+          const safeTa = Number.isFinite(ta) ? ta : 0;
+          const safeTb = Number.isFinite(tb) ? tb : 0;
+          return safeTb - safeTa;
+        });
+        setVisitHistory(combined);
+      } catch (err) {
+        console.warn('Could not load visits:', err);
+        setVisitHistory([...sessionRows]);
+      }
+
+      try {
+        const referralsRes = await referralService.getReferrals({
+          patient: numericPatientId.toString(),
+          page_size: 500,
+        });
+        const refList = [...(referralsRes?.results || [])];
+        refList.sort((a, b) => {
+          const ta = new Date(a.referred_at || 0).getTime();
+          const tb = new Date(b.referred_at || 0).getTime();
+          return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+        });
+        setReferralHistory(refList);
+      } catch (err) {
+        console.warn('Could not load referrals:', err);
+        setReferralHistory([]);
+      }
 
       // Load lab results
-      const labResults = await labService.getCompletedTests({ patient: patientId.toString() });
+      const labResults = await labService.getCompletedTests({ patient: numericPatientId.toString() });
       setLabHistory(labResults?.results || []);
 
       // Load imaging
       try {
-        const imagingOrders = await radiologyService.getOrders({ patient: patientId.toString(), page_size: 1000 });
+        const imagingOrders = await radiologyService.getOrders({ patient: numericPatientId.toString(), page_size: 1000 });
         const items = (imagingOrders?.results || []).flatMap((order: any) => {
           const studies = Array.isArray(order.studies) ? order.studies : [];
           return studies.map((study: any) => ({
@@ -428,29 +514,30 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       }
 
       // Load prescriptions
-      const prescriptions = await pharmacyService.getPrescriptions({ patient: patientId.toString() });
+      const prescriptions = await pharmacyService.getPrescriptions({ patient: numericPatientId.toString() });
       setPrescriptionHistory(prescriptions?.results || []);
 
       // Load vitals
-      const vitals = await patientService.getPatientVitals(patientId);
+      const vitals = await patientService.getPatientVitals(numericPatientId);
       setVitalsHistory(vitals || []);
 
       // Load physio
       try {
-        const physioOrders = await physioService.getOrders({ patient: patientId.toString() });
+        const physioOrders = await physioService.getOrders({ patient: numericPatientId.toString() });
         setPhysioHistory(physioOrders?.results || []);
       } catch (err) {
         console.warn('Could not load physio history:', err);
+        setPhysioHistory([]);
       }
 
       // Load ward admissions
-      const admissions = await wardService.getAdmissions({ patient: patientId });
+      const admissions = await wardService.getAdmissions({ patient: numericPatientId });
       setWardAdmissions(admissions?.results || []);
 
       // Load medical certificates (persisted records)
       try {
         const certificates = await medicalCertificateService.getCertificates({
-          patient: patientId.toString(),
+          patient: numericPatientId.toString(),
           page_size: 1000,
         });
         setCertificateHistory(certificates?.results || []);
@@ -461,10 +548,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
       // Load medical history
       try {
-        const history = await patientService.getPatientHistory(patientId);
+        const history = await patientService.getPatientHistory(numericPatientId);
         setMedicalHistory(history);
       } catch (err) {
         console.warn('Could not load medical history:', err);
+        setMedicalHistory(null);
       }
     } catch (err) {
       console.error('Error loading patient history:', err);
@@ -495,6 +583,55 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       setShowConsultationReport(false);
     } finally {
       setLoadingReport(false);
+    }
+  };
+
+  const openVisitDetail = (v: any) => {
+    const clinics = getVisitServiceClinicsDisplay({ clinic: v.clinic, clinics: v.clinics });
+    const rawId = v?.id;
+    const numericId =
+      typeof rawId === 'number'
+        ? rawId
+        : typeof rawId === 'string' && rawId.startsWith('session-')
+          ? Number(rawId.replace('session-', ''))
+          : Number(rawId);
+    setSelectedVisitForModal({
+      id: String(v.id),
+      numericId: Number.isFinite(numericId) ? numericId : 0,
+      visitId: v.visit_id ?? undefined,
+      patientId: String(patient?.id ?? v.patient),
+      date: v.date || '',
+      time: v.time || '',
+      type: v.visit_type || 'OPD',
+      department: clinics || '—',
+      doctor: (v.doctor_name ?? '').trim() || '—',
+      diagnosis: '',
+      status: v.status || '',
+      notes: v.clinical_notes || '',
+    });
+    setIsVisitDetailModalOpen(true);
+  };
+
+  const handleCreateTestReferral = async () => {
+    if (!patient?.id) return;
+    setIsCreatingTestReferral(true);
+    try {
+      await referralService.createReferral({
+        patient: patient.id,
+        specialty: "Test Referral",
+        facility: "Test Facility",
+        facility_type: "internal",
+        urgency: "routine",
+        reason: `Test referral for patient ${patient.patient_id}`,
+        clinical_summary: "Generated by test button on Patient Medical Records page.",
+      });
+
+      // Refresh the chart so the new referral appears immediately.
+      void loadPatientHistory(patient.id);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to create test referral");
+    } finally {
+      setIsCreatingTestReferral(false);
     }
   };
 
@@ -630,6 +767,18 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           onOpenChange={setShowConsultationReport}
           session={selectedSession}
           loading={loadingReport}
+        />
+        <VisitDetailModal
+          visit={selectedVisitForModal}
+          visitId={selectedVisitForModal?.id}
+          isOpen={isVisitDetailModalOpen}
+          onClose={() => {
+            setIsVisitDetailModalOpen(false);
+            setSelectedVisitForModal(null);
+          }}
+          onVisitUpdated={() => {
+            if (patient?.id) void loadPatientHistory(patient.id);
+          }}
         />
         {/* Prescription View Dialog */}
         <Dialog open={showPrescriptionView} onOpenChange={setShowPrescriptionView}>
@@ -1954,45 +2103,115 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         {/* Tabs */}
         <Card>
           <CardHeader className="pb-0">
-            <Tabs defaultValue="consultations" className="w-full">
-              <TabsList className="grid w-full grid-cols-9">
-                <TabsTrigger value="consultations" className="text-xs">
-                  <ClipboardList className="h-3 w-3 mr-1" />
+              <Tabs defaultValue="consultations" className="w-full">
+                <TabsList className="mb-1 flex h-auto w-full flex-wrap items-center justify-start gap-1 overflow-visible rounded-md bg-muted p-1 text-muted-foreground">
+                  <TabsTrigger value="visits" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <Calendar className="h-3 w-3" />
+                  Visits ({visitHistory.length})
+                </TabsTrigger>
+                  <TabsTrigger value="consultations" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <ClipboardList className="h-3 w-3" />
                   Consultations ({consultationHistory.length})
                 </TabsTrigger>
-                <TabsTrigger value="labs" className="text-xs">
-                  <TestTube className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="labs" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <TestTube className="h-3 w-3" />
                   Lab Results ({labHistory.length})
                 </TabsTrigger>
-                <TabsTrigger value="imaging" className="text-xs">
-                  <ScanLine className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="imaging" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <ScanLine className="h-3 w-3" />
                   Imaging ({imagingHistory.length})
                 </TabsTrigger>
-                <TabsTrigger value="prescriptions" className="text-xs">
-                  <Pill className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="prescriptions" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <Pill className="h-3 w-3" />
                   Prescriptions ({prescriptionHistory.length})
                 </TabsTrigger>
-                <TabsTrigger value="vitals" className="text-xs">
-                  <Heart className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="vitals" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <Heart className="h-3 w-3" />
                   Vitals ({vitalsHistory.length})
                 </TabsTrigger>
-                <TabsTrigger value="physio" className="text-xs">
-                  <Activity className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="physio" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <Activity className="h-3 w-3" />
                   Physio ({physioHistory.length})
                 </TabsTrigger>
-                <TabsTrigger value="wards" className="text-xs">
-                  <Building2 className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="wards" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <Building2 className="h-3 w-3" />
                   Ward Admissions ({wardAdmissions.length})
                 </TabsTrigger>
-                <TabsTrigger value="certificates" className="text-xs">
-                  <FileText className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="certificates" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <FileText className="h-3 w-3" />
                   Certificates ({certificateHistory.length})
                 </TabsTrigger>
-                <TabsTrigger value="background" className="text-xs">
-                  <User className="h-3 w-3 mr-1" />
+                  <TabsTrigger value="referrals" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <Share2 className="h-3 w-3" />
+                  Referrals ({referralHistory.length})
+                </TabsTrigger>
+                  <TabsTrigger value="background" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
+                  <User className="h-3 w-3" />
                   Background
                 </TabsTrigger>
               </TabsList>
+
+              {/* Visits Tab */}
+              <TabsContent value="visits" className="mt-4">
+                {loadingHistory ? (
+                  <div className="text-center py-12">
+                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Loading visits...</p>
+                  </div>
+                ) : visitHistory.length === 0 ? (
+                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
+                    <Calendar className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                    <p className="font-medium text-muted-foreground mb-1">No visits found</p>
+                    <p className="text-sm text-muted-foreground">OPD visit attendance will appear here</p>
+                  </div>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium">Date</th>
+                          <th className="px-4 py-2 text-left font-medium">Time</th>
+                          <th className="px-4 py-2 text-left font-medium">Visit ID</th>
+                          <th className="px-4 py-2 text-left font-medium">Type</th>
+                          <th className="px-4 py-2 text-left font-medium">Clinics</th>
+                          <th className="px-4 py-2 text-left font-medium">Status</th>
+                          <th className="px-4 py-2 text-center font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {visitHistory.map((visit) => {
+                          const clinics = getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics });
+                          return (
+                            <tr key={visit.id} className="hover:bg-muted/30">
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(visit.date)}</td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{visit.time || '—'}</td>
+                              <td className="px-4 py-3 font-mono text-xs">{visit.visit_id || visit.id}</td>
+                              <td className="px-4 py-3">{visit.visit_type || '—'}</td>
+                              <td className="px-4 py-3 max-w-[220px]">
+                                {clinics ? (
+                                  <span className="text-xs leading-snug">{clinics}</span>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <Badge variant="outline" className="font-normal">
+                                  {humanizeStatus(visit.status)}
+                                </Badge>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <Button variant="ghost" size="sm" onClick={() => openVisitDetail(visit)}>
+                                  <Eye className="h-4 w-4 mr-1" /> View Report
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </TabsContent>
 
               {/* Consultations Tab */}
               <TabsContent value="consultations" className="mt-4">
@@ -2023,7 +2242,9 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                           {paginatedConsultations.map((session) => (
                             <tr key={session.id} className="hover:bg-muted/30">
                               <td className="px-4 py-3 text-muted-foreground">{formatDate(session.started_at)}</td>
-                              <td className="px-4 py-3">{session.doctor_name ?? ''}</td>
+                              <td className="px-4 py-3">
+                                {(session.doctor_name ?? '').trim() || '—'}
+                              </td>
                               <td className="px-4 py-3">
                                 <Badge variant="outline">{session.clinic_name ?? ''}</Badge>
                               </td>
@@ -2523,6 +2744,78 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                               <Button variant="ghost" size="sm" onClick={() => handlePrintMedicalCertificate(cert)}>
                                 <Printer className="h-4 w-4 mr-1" /> Print
                               </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Referrals Tab */}
+              <TabsContent value="referrals" className="mt-4">
+                {loadingHistory ? (
+                  <div className="text-center py-12">
+                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Loading referrals...</p>
+                  </div>
+                ) : referralHistory.length === 0 ? (
+                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
+                    <Share2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                    <p className="font-medium text-muted-foreground mb-1">No referrals found</p>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Referrals created for this patient will appear here
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleCreateTestReferral()}
+                      disabled={isCreatingTestReferral}
+                    >
+                      <Share2 className="h-4 w-4 mr-2" />
+                      {isCreatingTestReferral ? "Adding..." : "Add test referral"}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium">Date</th>
+                          <th className="px-4 py-2 text-left font-medium">Referral ID</th>
+                          <th className="px-4 py-2 text-left font-medium">Facility</th>
+                          <th className="px-4 py-2 text-left font-medium">Specialty</th>
+                          <th className="px-4 py-2 text-left font-medium">Urgency</th>
+                          <th className="px-4 py-2 text-left font-medium">Status</th>
+                          <th className="px-4 py-2 text-left font-medium">Referred by</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {referralHistory.map((ref) => (
+                          <tr key={ref.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                              {formatDate(ref.referred_at)}
+                            </td>
+                            <td className="px-4 py-3 font-mono text-xs">{ref.referral_id}</td>
+                            <td className="px-4 py-3 max-w-[200px]">
+                              <span className="text-xs leading-snug">
+                                {ref.facility_partner_detail?.name?.trim() || ref.facility?.trim() || '—'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">{ref.specialty || '—'}</td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline" className="font-normal capitalize">
+                                {ref.urgency || '—'}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline" className="font-normal">
+                                {humanizeStatus(ref.status)}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {(ref.referred_by_name ?? '').trim() || '—'}
                             </td>
                           </tr>
                         ))}
