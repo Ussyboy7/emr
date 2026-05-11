@@ -1,7 +1,6 @@
 """
 Views for the Accounts app.
 """
-from typing import Optional
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,6 +8,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.contrib.auth import update_session_auth_hash
+from django.db import transaction
 
 from .models import User, SystemRole
 from .serializers import (
@@ -115,7 +115,18 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(UserDirectorySerializer(user).data)
 
     def perform_create(self, serializer):
-        """Create user and log audit."""
+        """Create user with explicit access role in one atomic transaction."""
+        raw_role_id = self.request.data.get("access_role_id")
+        if raw_role_id in (None, ""):
+            raise ValidationError({"access_role_id": ["This field is required."]})
+        try:
+            role_id = int(raw_role_id)
+        except (TypeError, ValueError):
+            raise ValidationError({"access_role_id": ["A valid integer is required."]})
+        selected_role = Role.objects.filter(id=role_id, is_active=True).first()
+        if selected_role is None:
+            raise ValidationError({"access_role_id": ["Selected access role does not exist or is inactive."]})
+
         # Enforce department scoping for non-superusers creating users.
         if not self.request.user.is_superuser:
             if self.request.user.department_id is None:
@@ -128,19 +139,13 @@ class UserViewSet(viewsets.ModelViewSet):
             if requested_dept is None:
                 serializer.validated_data["department"] = self.request.user.department
 
-        user = serializer.save()
-
-        # Auto-assign a Role so the user gets page permissions.
-        # Frontend authorization relies on `permissions.pages`, which is derived from `user.user_roles`.
-        # If a user is created without roles, they will land on /no-access.
-        if not user.is_superuser and not user.user_roles.exists():
-            role = self._pick_default_role_for_user(user)
-            if role is not None:
-                UserRole.objects.get_or_create(
-                    user=user,
-                    role=role,
-                    defaults={"assigned_by": self.request.user},
-                )
+        with transaction.atomic():
+            user = serializer.save()
+            UserRole.objects.create(
+                user=user,
+                role=selected_role,
+                assigned_by=self.request.user,
+            )
 
         AuditService.log_activity(
             user=self.request.user,
@@ -183,17 +188,6 @@ class UserViewSet(viewsets.ModelViewSet):
         }
         user = serializer.save()
 
-        # If the user still has no roles after an update (common when only `system_role` was set),
-        # auto-assign a reasonable default role.
-        if not user.is_superuser and not user.user_roles.exists():
-            role = self._pick_default_role_for_user(user)
-            if role is not None:
-                UserRole.objects.get_or_create(
-                    user=user,
-                    role=role,
-                    defaults={"assigned_by": self.request.user},
-                )
-
         new_values = {
             'username': user.username,
             'email': user.email,
@@ -212,23 +206,6 @@ class UserViewSet(viewsets.ModelViewSet):
             new_values=new_values,
             request=self.request,
         )
-
-    def _pick_default_role_for_user(self, user: User) -> Optional[Role]:
-        """
-        Choose a default active Role for a user based on their `system_role` and department.
-
-        This is a safety net to keep newly-created staff from landing on `/no-access`
-        when roles were not explicitly assigned via the permissions UI.
-        """
-        system_role = (getattr(user, "system_role", "") or "").strip()
-
-        # 1) Exact name match (preferred, explicit).
-        if system_role:
-            exact = Role.objects.filter(is_active=True, name__iexact=system_role).first()
-            if exact is not None:
-                return exact
-
-        return None
 
     def perform_destroy(self, instance):
         """Delete user and log audit."""

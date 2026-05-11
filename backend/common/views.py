@@ -294,10 +294,15 @@ class SystemMetricsView(views.APIView):
 
             # Backup status — real file-system check.
             backup_status = cache.get('last_backup_status', None)
-            if backup_status:
-                metrics['backupStatus'] = backup_status
+            normalized_backup_status = self._normalize_cached_backup_status(backup_status)
+            if normalized_backup_status:
+                metrics['backupStatus'] = normalized_backup_status
             else:
-                metrics['backupStatus'] = self._detect_backup_status()
+                detected = self._detect_backup_status()
+                metrics['backupStatus'] = detected
+                # Keep a short-lived cached snapshot so repeated dashboard
+                # polls do not hammer disk scans when no sidecar cache exists.
+                cache.set('last_backup_status', detected, timeout=15 * 60)
             sources['backupStatus'] = 'live'
 
             # System health — process uptime + DB ping + storage check.
@@ -372,6 +377,34 @@ class SystemMetricsView(views.APIView):
                 return {'status': 'error', 'message': str(exc)}
 
         return {'status': 'unknown', 'message': 'No backup files found'}
+
+    def _normalize_cached_backup_status(self, cached_status):
+        """
+        Accept backup status from either:
+        - Django cache objects (dict), or
+        - JSON strings published directly into Redis by the backup sidecar.
+        """
+        if not cached_status:
+            return None
+
+        if isinstance(cached_status, dict):
+            return cached_status
+
+        if isinstance(cached_status, (bytes, bytearray)):
+            try:
+                cached_status = cached_status.decode('utf-8')
+            except Exception:
+                return None
+
+        if isinstance(cached_status, str):
+            try:
+                parsed = json.loads(cached_status)
+            except json.JSONDecodeError:
+                return None
+            if isinstance(parsed, dict):
+                return parsed
+
+        return None
 
     def _find_backup_files(self, backup_dir: Path, backup_suffixes: set[str]):
         """

@@ -34,7 +34,7 @@ scripts/
 ├── staging/            One file: env-manager.sh (pins env=stag)
 ├── production/         One file: env-manager.sh (pins env=prod)
 │
-├── backup/             Backup / restore helpers (invoked by env-manager backup/verify-backup)
+├── backup/             Backup / restore helpers (see backup/README.md runbook)
 ├── monitoring/         Long-running monitor scripts (invoked by env-manager monitor/performance)
 ├── security/           Cron setup, permission hardening
 └── testing/            Security & go-live validation suites
@@ -128,6 +128,13 @@ Every environment exposes the same list (via
 | `panic`           | Shortcut for `emergency reset` (DATA LOSS, prompts)            |
 
 Run any env-manager without arguments to see the current full list.
+
+## Backup restore docs
+
+For the backup/restore runbook (including non-interactive restore flags
+`--backup-dir` and `--yes`), see:
+
+- `scripts/backup/README.md`
 
 ## Deploying staging / production
 

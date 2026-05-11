@@ -428,7 +428,6 @@ export default function UserManagementPage() {
       return;
     }
     setIsSubmitting(true);
-    
     try {
       const newUser = await adminService.createUser({
         username: (formData as any).username,
@@ -441,14 +440,13 @@ export default function UserManagementPage() {
         system_role: formData.systemRole,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
+        access_role_id: Number(formData.accessRoleId),
       } as any);
 
       console.log('Created user:', newUser, 'id:', newUser.id);
       if (!newUser.id) {
         throw new Error('User created but no ID returned from server');
       }
-      await adminService.assignRoleToUser(newUser.id, Number(formData.accessRoleId));
-      
       toast.success(`${formData.lastName}${formData.firstName ? ` ${formData.firstName}` : ''} has been added`);
       setIsCreateDialogOpen(false);
       setFormData(emptyStaff);

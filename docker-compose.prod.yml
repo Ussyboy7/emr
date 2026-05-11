@@ -76,6 +76,7 @@ services:
     volumes:
       - static_files_prod:/app/staticfiles
       - media_files_prod:/app/media
+      - ./backups:/backups:ro
       - ./logs/production:/app/logs
     expose:
       - "8000"
@@ -241,6 +242,9 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD?REDIS_PASSWORD is required}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
     volumes:
       - ./backups:/backups

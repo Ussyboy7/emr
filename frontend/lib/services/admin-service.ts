@@ -166,6 +166,7 @@ class AdminService {
     if (data.department !== undefined) createData.department = data.department;
     if (data.is_active !== undefined) createData.is_active = data.is_active;
     if ((data as any).employee_id) createData.employee_id = (data as any).employee_id;
+    if ((data as any).access_role_id !== undefined) createData.access_role_id = (data as any).access_role_id;
     
     return apiFetch<User>('/accounts/users/', {
       method: 'POST',
