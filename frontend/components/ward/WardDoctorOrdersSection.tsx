@@ -35,7 +35,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiFetch } from '@/lib/api-client';
 import type { PatientAdmission } from '@/lib/services/ward-service';
-import { pharmacyService } from '@/lib/services';
+import { pharmacyService } from '@/lib/services/pharmacy-service';
 import { toast } from 'sonner';
 import {
   ClipboardList,

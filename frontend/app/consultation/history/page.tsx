@@ -1028,10 +1028,10 @@ export default function ConsultationHistoryPage() {
         notes: '', // Clear notes field since diagnoses are stored separately
       };
 
-      // Update session status if changed
+      // Update session status if changed (API uses active|paused|completed|cancelled — not in_progress)
       if (editForm.status !== selectedConsultation.status) {
-        updateData.status = editForm.status === 'Completed' ? 'completed' : 'in_progress';
-        if (editForm.status === 'Completed' && !selectedConsultation.status) {
+        updateData.status = editForm.status === 'Completed' ? 'completed' : 'active';
+        if (editForm.status === 'Completed' && selectedConsultation.status !== 'Completed') {
           updateData.ended_at = new Date().toISOString();
         }
       }

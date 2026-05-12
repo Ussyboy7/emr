@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Pharmacy API service
  */
