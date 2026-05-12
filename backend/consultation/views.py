@@ -217,6 +217,67 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
 
         session = serializer.save(created_by=self.request.user, **data)
 
+    def perform_update(self, serializer):
+        """
+        Keep Visit workflow state aligned when session status is updated via PATCH/PUT.
+        This covers edit-consultation flows that set status=completed without calling /end/.
+        """
+        session = self.get_object()
+        old_status = session.status
+        old_ended_at = session.ended_at
+        visit = session.visit
+        old_visit_status = visit.status if visit else None
+
+        updated = serializer.save()
+
+        if old_status != updated.status and updated.status == "completed":
+            fields_to_update = []
+            if not updated.ended_at:
+                updated.ended_at = timezone.now()
+                fields_to_update.append("ended_at")
+            if fields_to_update:
+                updated.save(update_fields=fields_to_update)
+
+            # Deactivate active queue row for this patient in this room, matching /end behavior.
+            queue_item = ConsultationQueue.objects.filter(
+                room=updated.room,
+                patient=updated.patient,
+                is_active=True,
+            ).first()
+            if queue_item:
+                queue_item.is_active = False
+                queue_item.called_at = updated.ended_at
+                queue_item.save(update_fields=["is_active", "called_at"])
+
+            if visit and visit.status != "completed":
+                visit.status = "completed"
+                visit.save(update_fields=["status"])
+                AuditService.log_activity(
+                    user=self.request.user,
+                    action="update",
+                    object_type="visit",
+                    object_id=str(visit.id),
+                    module="consultation",
+                    object_repr=f"Visit {visit.visit_id}",
+                    description=f"Marked visit {visit.visit_id} as completed after consultation status update",
+                    old_values={"status": old_visit_status},
+                    new_values={"status": "completed"},
+                    request=self.request,
+                )
+
+            AuditService.log_activity(
+                user=self.request.user,
+                action="update",
+                object_type="consultation_session",
+                object_id=str(updated.id),
+                module="consultation",
+                object_repr=f"Session {updated.session_id}",
+                description=f"Updated consultation session {updated.session_id} status to completed",
+                old_values={"status": old_status, "ended_at": str(old_ended_at) if old_ended_at else None},
+                new_values={"status": "completed", "ended_at": str(updated.ended_at) if updated.ended_at else None},
+                request=self.request,
+            )
+
     def _find_doctor_for_session(self, data):
         """Find appropriate doctor for consultation session using multiple strategies."""
         from accounts.models import User

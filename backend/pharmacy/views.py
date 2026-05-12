@@ -617,6 +617,80 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=True, methods=['get'], url_path='dispense-context')
+    def dispense_context(self, request, pk=None):
+        """
+        Return batch/stock context for all active prescription lines in one response.
+        This prevents frontend fan-out calls when opening the dispense modal.
+        """
+        prescription = self.get_object()
+        items = list(
+            prescription.medications.select_related("medication").all()
+        )
+        active_items = [i for i in items if not getattr(i, "superseded_at", None)]
+
+        medication_ids = sorted(
+            {
+                int(i.medication_id)
+                for i in active_items
+                if getattr(i, "medication_id", None)
+            }
+        )
+
+        receipt_qs = (
+            DispensaryReceiptLine.objects.filter(
+                quantity_remaining__gt=0,
+                medication_id__in=medication_ids,
+            )
+            .select_related("medication")
+            .order_by("received_at")
+        )
+
+        batches_by_medication = {}
+        totals_by_medication = {}
+        for line in receipt_qs:
+            med_id = int(line.medication_id)
+            qty = float(line.quantity_remaining or 0)
+            totals_by_medication[med_id] = totals_by_medication.get(med_id, 0.0) + qty
+            batches_by_medication.setdefault(med_id, []).append(
+                {
+                    "id": str(line.id),
+                    "batchNumber": line.batch_number or "",
+                    "quantity": qty,
+                    "expiryDate": str(line.expiry_date) if line.expiry_date else "",
+                    "receivedDate": line.received_at.date().isoformat() if line.received_at else "",
+                }
+            )
+
+        line_context = []
+        for item in active_items:
+            med_id = int(item.medication_id) if item.medication_id else None
+            prescribed = float(item.quantity or 0)
+            dispensed = float(item.dispensed_quantity or 0)
+            remaining = max(0.0, prescribed - dispensed)
+            stock = totals_by_medication.get(med_id, 0.0) if med_id else 0.0
+            default_batch_id = None
+            if med_id and batches_by_medication.get(med_id):
+                default_batch_id = batches_by_medication[med_id][0]["id"]
+
+            line_context.append(
+                {
+                    "item_id": int(item.id),
+                    "medication_id": med_id,
+                    "stock": stock,
+                    "default_batch_id": default_batch_id,
+                    "remaining_quantity": remaining,
+                    "batches": batches_by_medication.get(med_id, []) if med_id else [],
+                }
+            )
+
+        return Response(
+            {
+                "prescription_id": int(prescription.id),
+                "line_context": line_context,
+            }
+        )
+
     @staticmethod
     def _prescription_cancel_blocker(prescription):
         if prescription.status in ('dispensed', 'partially_dispensed'):

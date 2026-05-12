@@ -802,7 +802,7 @@ export default function PrescriptionsPage() {
           location: PHARMACY_LOCATIONS.DISPENSARY,
           medication__generic: genericId,
           page: 1,
-          page_size: 1000,
+          page_size: 250,
         } as const;
 
         let res = await pharmacyService.getInventory({ ...baseParams, search });
@@ -1017,60 +1017,80 @@ export default function PrescriptionsPage() {
     const initialSelection: string[] = [];
     const initialBatches: Record<string, string> = {};
     const loadedBatches: Record<string, MedicationBatch[]> = {};
-    const loadedMedicationMeta: Record<string, any> = {};
+    const rxMedById = new Map<string, any>(
+      Array.isArray((freshRx as any)?.medications)
+        ? (freshRx as any).medications.map((m: any) => [String(m.id), m])
+        : []
+    );
+    const lineContextByItemId = new Map<string, {
+      medication_id: number | null;
+      stock: number;
+      default_batch_id: string | null;
+      remaining_quantity: number;
+      batches: Array<MedicationBatch & { id: string; receivedDate?: string; supplier?: string; unitCost?: number }>;
+    }>();
+    try {
+      const dispenseCtx = await pharmacyService.getPrescriptionDispenseContext(Number(hydrated.id));
+      for (const line of dispenseCtx.line_context || []) {
+        lineContextByItemId.set(String(line.item_id), {
+          medication_id: line.medication_id,
+          stock: Number(line.stock || 0),
+          default_batch_id: line.default_batch_id || null,
+          remaining_quantity: Number(line.remaining_quantity || 0),
+          batches: (line.batches || []).map((b) => ({
+            id: b.id,
+            batchNumber: b.batchNumber,
+            quantity: Number(b.quantity || 0),
+            expiryDate: b.expiryDate,
+            receivedDate: b.receivedDate,
+            supplier: '',
+            unitCost: 0,
+          })),
+        });
+      }
+    } catch (ctxErr) {
+      console.warn('Failed to load dispense context, falling back to per-item fetch:', ctxErr);
+    }
+    for (const med of transformedMedications.filter((m: any) => isActiveDispenseLine(m))) {
+      if (med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Pending') {
+        initialQuantities[med.id] = getDefaultDispenseQuantity(med);
+        initialCoverageQuantities[med.id] = getDefaultCoverageQuantity(med);
+        if (med.status !== 'Pending') initialSelection.push(med.id);
+      }
+    }
+
+    // Open immediately, then hydrate batch/stock details in background.
+    setDispenseQuantities(initialQuantities);
+    setDispenseCoverageQuantities(initialCoverageQuantities);
+    setSelectedMedications(initialSelection);
+    setSelectedBatches(initialBatches);
+    setDispenseNotes('');
+    setShowDispenseModal(true);
 
     // Load batches for each medication
     const batchPromises = transformedMedications.filter((m: any) => isActiveDispenseLine(m)).map(async (med) => {
       // Include Pending items (Generics) so they appear in the list, but don't try to load batches for them yet
       if (med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Pending') {
-        initialQuantities[med.id] = getDefaultDispenseQuantity(med);
-        initialCoverageQuantities[med.id] = getDefaultCoverageQuantity(med);
-        // Don't auto-select Pending items (Generics) as they need brand selection first
-        if (med.status !== 'Pending') {
-             initialSelection.push(med.id);
-        }
-        
         // Load batches for this medication
         try {
-          let medicationIdToUse: string | number | undefined;
-
-          if (med.substitution) {
-            const medSearch = await pharmacyService.getMedications({ search: med.name, page_size: 5 });
-            if (medSearch.results.length > 0) {
-              medicationIdToUse = medSearch.results[0].id;
+          const ctx = lineContextByItemId.get(String(med.id));
+          if (ctx && Array.isArray(ctx.batches)) {
+            loadedBatches[med.id] = ctx.batches;
+            if (ctx.default_batch_id) {
+              initialBatches[med.id] = ctx.default_batch_id;
+            } else if (ctx.batches.length > 0) {
+              initialBatches[med.id] = ctx.batches[0].id;
             }
-          } else {
-            // Regular medication - get from prescription details (reuse fresh fetch when available)
-            const prescriptionId = parseInt(String(hydrated.id), 10) || hydrated.id;
-            const rxDetail =
-              freshRx ||
-              (await pharmacyService.getPrescription(
-                typeof prescriptionId === 'number' ? prescriptionId : parseInt(String(prescriptionId), 10)
-              ));
-            const rxMed = rxDetail.medications.find((m: any) => m.id.toString() === med.id);
-            
-            if (rxMed && rxMed.medication) {
-              medicationIdToUse = rxMed.medication;
-            } else if (rxMed && rxMed.generic) {
-              return;
-            } else {
-              console.warn(`Could not find medication in prescription details for: ${med.name}`);
-              return;
-            }
+            return;
           }
 
-          if (medicationIdToUse) {
-              try {
-                const medMeta = await pharmacyService.getMedication(Number(medicationIdToUse));
-                loadedMedicationMeta[med.id] = medMeta;
-              } catch (metaErr) {
-                console.warn(`Could not load medication metadata for ${med.name}:`, metaErr);
-              }
-              const batches = await pharmacyService.getMedicationBatches(Number(medicationIdToUse));
-              loadedBatches[med.id] = batches;
-              if (batches.length > 0) {
-                initialBatches[med.id] = batches[0].id; // Default to first batch
-              }
+          const rxMed = rxMedById.get(String(med.id));
+          if (rxMed && rxMed.medication) {
+            const batches = await pharmacyService.getMedicationBatches(Number(rxMed.medication));
+            loadedBatches[med.id] = batches;
+            if (batches.length > 0) {
+              initialBatches[med.id] = batches[0].id;
+            }
           }
         } catch (err) {
           console.error(`Error loading batches for ${med.name}:`, err);
@@ -1084,20 +1104,6 @@ export default function PrescriptionsPage() {
     const medsWithDispensaryStock = transformedMedications.map((m: any) => {
       if (m.prescribing_record_only) return m;
       const batches = loadedBatches[m.id];
-      const medMeta = loadedMedicationMeta[m.id];
-      const enrichedMedicationDetails = medMeta
-        ? {
-            ...(m.medication_details || {}),
-            id: medMeta.id,
-            medication_id: medMeta.id,
-            name: medMeta.name || m.medication_details?.name,
-            unit: medMeta.unit || m.medication_details?.unit,
-            form: medMeta.form || m.medication_details?.form,
-            strength: medMeta.strength || m.medication_details?.strength,
-            pack_size: medMeta.pack_size ?? m.medication_details?.pack_size,
-            type: 'brand',
-          }
-        : m.medication_details;
       if (!Array.isArray(batches)) return m;
       const stock = batches.reduce((total, b) => total + Number(b.quantity || 0), 0);
 
@@ -1114,7 +1120,6 @@ export default function PrescriptionsPage() {
 
       return {
         ...m,
-        medication_details: enrichedMedicationDetails,
         stockLevel: stock,
         status,
       };
@@ -1127,12 +1132,7 @@ export default function PrescriptionsPage() {
     setDetectedInteractions(interactions);
     setInteractionAcknowledged(interactions.length === 0);
     
-    setDispenseQuantities(initialQuantities);
-    setDispenseCoverageQuantities(initialCoverageQuantities);
-    setSelectedMedications(initialSelection);
     setSelectedBatches(initialBatches);
-    setDispenseNotes('');
-    setShowDispenseModal(true);
   };
 
   const handleMedicationSelection = async (medId: string, checked: boolean, quantity: number) => {
@@ -2876,19 +2876,23 @@ export default function PrescriptionsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setSubstituteSearchQuery(val);
-                        // Both modals: server-side search
+                        // Debounced server-side search to avoid UI stalls
+                        if (brandSelectionTimeoutRef.current) clearTimeout(brandSelectionTimeoutRef.current);
+                        if (substituteTimeoutRef.current) clearTimeout(substituteTimeoutRef.current);
                         if (substitutionForm.reason === 'brand_selection') {
-                          performSubstituteSearch(val, 'brand_selection'); // loads all brands when empty, filters when typed
-                        } else if (val.length >= 2) {
-                          performSubstituteSearch(val, 'substitute'); // generics search
+                          brandSelectionTimeoutRef.current = setTimeout(() => {
+                            void performSubstituteSearch(val, 'brand_selection');
+                          }, 220);
                         } else {
-                          setSubstituteSearchResults([]);
+                          substituteTimeoutRef.current = setTimeout(() => {
+                            void performSubstituteSearch(val, 'substitute');
+                          }, 260);
                         }
                       }}
                       placeholder={
                         substitutionForm.reason === 'brand_selection'
                           ? 'Type to filter brands...'
-                          : 'Type to search generics (min 2 characters)...'
+                          : 'Search generics...'
                       }
                       className="pl-10"
                     />

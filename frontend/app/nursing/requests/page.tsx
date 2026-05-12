@@ -69,7 +69,7 @@ export default function NursingRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalRequests, setTotalRequests] = useState(0);
-  const [medications, setMedications] = useState<Medication[]>([]);
+  const [medicationLookup, setMedicationLookup] = useState<Record<number, Medication>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
@@ -115,8 +115,7 @@ export default function NursingRequestsPage() {
     return p;
   }, [dateFilter]);
 
-  useEffect(() => { loadMedications(); }, []);
-  useEffect(() => { loadStats(); }, [debouncedSearchQuery, statusFilter, dateFilter]);
+  useEffect(() => { loadStats(); }, [debouncedSearchQuery, dateFilter]);
   useEffect(() => { loadRequests(); }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter]);
 
   const loadRequests = async () => {
@@ -170,15 +169,6 @@ export default function NursingRequestsPage() {
     }
   };
 
-  const loadMedications = async () => {
-    try {
-      const response = await pharmacyService.getMedications({ page: 1, page_size: 500 });
-      setMedications(response.results || []);
-    } catch (err) {
-      console.error("Error loading medications:", err);
-    }
-  };
-
   const handleAddItem = () => {
     if (!selectedMedication) { toast.error("Please select a medication"); return; }
     const packSize = selectedMedication.pack_size ?? 1;
@@ -228,14 +218,44 @@ export default function NursingRequestsPage() {
     }
   };
 
-  const filteredMedications = useMemo(() => {
-    if (!debouncedMedSearch.trim()) return [];
-    const term = debouncedMedSearch.toLowerCase();
-    return medications
-      .filter((med) => medicationMatchesCatalog(med, catalogTab))
-      .filter((med) => med.name.toLowerCase().includes(term) || (med.code || "").toLowerCase().includes(term))
-      .slice(0, MEDICATION_SEARCH_LIMIT);
-  }, [medications, debouncedMedSearch, catalogTab]);
+  const [filteredMedications, setFilteredMedications] = useState<Medication[]>([]);
+  const [isSearchingMedications, setIsSearchingMedications] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const term = debouncedMedSearch.trim();
+      if (!term) {
+        setFilteredMedications([]);
+        return;
+      }
+      try {
+        setIsSearchingMedications(true);
+        const response = await pharmacyService.getMedications({
+          search: term,
+          page: 1,
+          page_size: 100,
+        });
+        if (cancelled) return;
+        const matches = (response.results || [])
+          .filter((med) => medicationMatchesCatalog(med, catalogTab))
+          .slice(0, MEDICATION_SEARCH_LIMIT);
+        setFilteredMedications(matches);
+        if (matches.length > 0) {
+          setMedicationLookup((prev) => {
+            const next = { ...prev };
+            for (const med of matches) next[med.id] = med;
+            return next;
+          });
+        }
+      } catch {
+        if (!cancelled) setFilteredMedications([]);
+      } finally {
+        if (!cancelled) setIsSearchingMedications(false);
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [debouncedMedSearch, catalogTab]);
 
   const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
     if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
@@ -244,7 +264,7 @@ export default function NursingRequestsPage() {
   };
 
   const packSizeForItem = (item: any) =>
-    item.medication_pack_size ?? medications.find((m) => m.id === item.medication)?.pack_size ?? null;
+    item.medication_pack_size ?? medicationLookup[item.medication]?.pack_size ?? null;
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string; tip?: string }> = {
@@ -374,7 +394,8 @@ export default function NursingRequestsPage() {
 
         <div className="flex justify-between px-1">
           <p className="text-sm text-muted-foreground">
-            Showing <span className="font-medium text-foreground">{requests.length}</span> requests
+            Showing <span className="font-medium text-foreground">{requests.length}</span> of{" "}
+            <span className="font-medium text-foreground">{totalRequests}</span> requests
           </p>
         </div>
 
@@ -528,6 +549,11 @@ export default function NursingRequestsPage() {
                         )}
                       </div>
                     )}
+                    {!!medicationSearch && !isSearchingMedications && filteredMedications.length === 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg bg-background shadow-lg z-10 p-3 text-xs text-muted-foreground">
+                        No medication matched "{medicationSearch}".
+                      </div>
+                    )}
                   </div>
                   {selectedMedication && (
                     <div className="bg-muted/50 p-2 rounded border">
@@ -563,7 +589,7 @@ export default function NursingRequestsPage() {
                     <div className="mt-4 space-y-2">
                       <p className="text-sm font-medium">Items Added ({requestItems.length})</p>
                       {requestItems.map((item, idx) => {
-                        const med = medications.find((m) => m.id === item.medication);
+                        const med = medicationLookup[item.medication];
                         const packSize = med?.pack_size ?? null;
                         return (
                           <div key={idx} className="flex items-center justify-between p-2 bg-teal-50 dark:bg-teal-950/30 rounded border border-teal-200 dark:border-teal-900">

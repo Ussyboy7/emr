@@ -257,7 +257,33 @@ class VisitSerializer(serializers.ModelSerializer):
         patient = attrs.get('patient', self.instance.patient if self.instance else None)
         date = attrs.get('date', self.instance.date if self.instance else None)
         status = attrs.get('status', self.instance.status if self.instance else None)
-        new_clinics = attrs.get('clinics', [])
+        new_clinics = attrs.get('clinics', self.instance.clinics if self.instance else [])
+
+        # Guardrail after visit enters active workflow:
+        # keep edit available, but restrict to safe fields only.
+        if self.instance and self.instance.status in ['in_progress', 'completed']:
+            locked_fields = {
+                'patient', 'date', 'time', 'visit_type', 'doctor', 'location', 'location_clinic'
+            }
+            attempted_locked_updates = [field for field in locked_fields if field in attrs]
+            if attempted_locked_updates:
+                raise serializers.ValidationError({
+                    'non_field_errors': [
+                        'This visit is already in workflow. You can only update clinics and notes.'
+                    ]
+                })
+
+            # Never allow removing clinics that are already completed for the visit.
+            if 'clinics' in attrs:
+                existing_done = set(self.instance.completed_clinics or [])
+                requested = set(new_clinics or [])
+                removed_done = sorted(existing_done - requested)
+                if removed_done:
+                    raise serializers.ValidationError({
+                        'clinics': [
+                            f'Cannot remove clinic(s) already completed: {", ".join(removed_done)}.'
+                        ]
+                    })
 
         # Enforce only on create, or when patient/date/status is being changed.
         # This avoids blocking unrelated PATCH updates when duplicates already exist.

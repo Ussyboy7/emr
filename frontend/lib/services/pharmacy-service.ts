@@ -271,6 +271,26 @@ class PharmacyService {
     return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/`);
   }
 
+  async getPrescriptionDispenseContext(prescriptionId: number): Promise<{
+    prescription_id: number;
+    line_context: Array<{
+      item_id: number;
+      medication_id: number | null;
+      stock: number;
+      default_batch_id: string | null;
+      remaining_quantity: number;
+      batches: Array<{
+        id: string;
+        batchNumber: string;
+        quantity: number;
+        expiryDate: string;
+        receivedDate: string;
+      }>;
+    }>;
+  }> {
+    return apiFetch(`/v1/pharmacy/prescriptions/${prescriptionId}/dispense-context/`);
+  }
+
   /**
    * Create a prescription
    */
