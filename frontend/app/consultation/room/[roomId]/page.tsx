@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Separator } from "@/components/ui/separator";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, Droplets, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, Edit, DoorOpen, UserX, Wind, Zap, Scale, Search, Lightbulb, Target } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, Droplets, FileText, History, Loader2, MapPin, Pill, Play, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, Edit, DoorOpen, UserX, Wind, Zap, Scale, Search, Lightbulb, Target } from "lucide-react";
 import { toast } from "sonner";
 import { roomService, patientService, pharmacyService, labService, radiologyService, physioService, referralService, consultationService, appointmentService, wardService, type ConsultationSession, type ICD10Code, type Diagnosis, type RadiologyReport as ServiceRadiologyReport, type VitalReading, type Prescription, type LabTemplate as ServiceLabTemplate, type Medication, type PhysioSession } from '@/lib/services';
 import { sanitizePatientForRendering } from '@/lib/services/patient-service';
@@ -491,6 +491,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [loadingPausedSessions, setLoadingPausedSessions] = useState(false);
   const [isResumingPausedSession, setIsResumingPausedSession] = useState(false);
   const [endingPausedSessionId, setEndingPausedSessionId] = useState<number | null>(null);
+  /** Start session blocked: paused session(s) exist for same patient/visit in this room */
+  const [pausedDuplicateStartDialog, setPausedDuplicateStartDialog] = useState<{
+    patient: Patient;
+    sessions: ConsultationSession[];
+    confirmSwitch: boolean;
+  } | null>(null);
+  const [isEndingPausedForNewStart, setIsEndingPausedForNewStart] = useState(false);
   const [showWardAdmissionDetail, setShowWardAdmissionDetail] = useState(false);
   const [selectedWardAdmission, setSelectedWardAdmission] = useState<WardAdmission | null>(null);
   const [isEnding, setIsEnding] = useState(false);
@@ -2328,7 +2335,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => clearInterval(interval);
   }, [sessionActive, sessionId, medicalNotes]);
 
-  const handleStartSession = async (patient: Patient, confirmSwitch = false) => {
+  const handleStartSession = async (
+    patient: Patient,
+    confirmSwitch = false,
+    startOpts?: { skipPausedDuplicateCheck?: boolean },
+  ) => {
     if (isStartingSession) return;
     setIsStartingSession(true);
     try {
@@ -2399,6 +2410,33 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       } catch (checkError) {
         console.warn('Error checking for existing sessions:', checkError);
         // Continue with session creation if check fails
+      }
+
+      if (!startOpts?.skipPausedDuplicateCheck) {
+        try {
+          const pausedResp = await consultationService.getSessions({
+            room: numericRoomId,
+            patient: numericPatientId,
+            ...(numericVisitId ? { visit: numericVisitId } : {}),
+            status: 'paused',
+            ordering: '-started_at',
+            page_size: 20,
+          });
+          const pausedForRoom = (pausedResp.results || []).filter((s) => {
+            const rid = typeof s.room === 'object' ? Number((s.room as { id?: number }).id) : Number(s.room);
+            return Number.isFinite(rid) && rid === numericRoomId;
+          });
+          if (pausedForRoom.length > 0) {
+            setPausedDuplicateStartDialog({
+              patient,
+              sessions: pausedForRoom,
+              confirmSwitch,
+            });
+            return;
+          }
+        } catch (pausedCheckErr) {
+          console.warn('Error checking for paused sessions:', pausedCheckErr);
+        }
       }
 
       const sessionData = await apiFetch<{ id: number; resumed?: boolean; started_at?: string }>('/consultation/sessions/', {
@@ -2550,6 +2588,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.error(err?.message || 'Failed to end session');
     } finally {
       setEndingPausedSessionId(null);
+    }
+  };
+
+  const handlePausedDuplicateResume = async () => {
+    const ctx = pausedDuplicateStartDialog;
+    if (!ctx?.sessions?.[0]) return;
+    const toResume = ctx.sessions[0];
+    await handleResumePausedSession(toResume);
+    setPausedDuplicateStartDialog(null);
+  };
+
+  const handlePausedDuplicateEndAndStart = async () => {
+    const ctx = pausedDuplicateStartDialog;
+    if (!ctx?.sessions?.length) return;
+    setIsEndingPausedForNewStart(true);
+    try {
+      for (const s of ctx.sessions) {
+        await consultationService.endSession(s.id);
+        if (sessionId === s.id) {
+          clearSessionState();
+        }
+      }
+      await loadPausedSessions();
+      await refreshQueueData({ silent: true });
+      const { patient, confirmSwitch } = ctx;
+      setPausedDuplicateStartDialog(null);
+      await handleStartSession(patient, confirmSwitch, { skipPausedDuplicateCheck: true });
+    } catch (err: any) {
+      console.error('End paused & start new failed:', err);
+      toast.error(err?.message || 'Could not end paused session(s). Try Paused Sessions or try again.');
+    } finally {
+      setIsEndingPausedForNewStart(false);
     }
   };
 
@@ -8757,6 +8827,98 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
+        <Dialog
+          open={pausedDuplicateStartDialog != null}
+          onOpenChange={(open) => {
+            if (!open && !isEndingPausedForNewStart && !isResumingPausedSession) {
+              setPausedDuplicateStartDialog(null);
+            }
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <History className="h-5 w-5 text-amber-500" />
+                Paused consultation already exists
+              </DialogTitle>
+              <DialogDescription asChild>
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <p>
+                    <strong className="text-foreground">
+                      {pausedDuplicateStartDialog?.patient.name || 'This patient'}
+                    </strong>{' '}
+                    already has a paused consultation in this room. Starting again would create a second session and
+                    split notes and orders.
+                  </p>
+                  {pausedDuplicateStartDialog && pausedDuplicateStartDialog.sessions.length > 0 && (
+                    <ul className="list-disc list-inside space-y-1">
+                      {pausedDuplicateStartDialog.sessions.map((s) => (
+                        <li key={s.id}>
+                          <span className="font-mono text-xs">{s.session_id}</span>
+                          {s.started_at && (
+                            <span className="text-xs"> — started {new Date(s.started_at).toLocaleString()}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p>
+                    <span className="font-medium text-foreground">Resume</span> to continue the same session, or{' '}
+                    <span className="font-medium text-foreground">End old &amp; start new</span> to complete the paused
+                    session(s) and open a fresh consultation (the visit may be marked completed).
+                  </p>
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isEndingPausedForNewStart || isResumingPausedSession}
+                onClick={() => setPausedDuplicateStartDialog(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isEndingPausedForNewStart || isResumingPausedSession}
+                onClick={() => void handlePausedDuplicateEndAndStart()}
+              >
+                {isEndingPausedForNewStart ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Ending…
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    End old &amp; start new
+                  </>
+                )}
+              </Button>
+              <Button
+                type="button"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                disabled={isEndingPausedForNewStart || isResumingPausedSession}
+                onClick={() => void handlePausedDuplicateResume()}
+              >
+                {isResumingPausedSession ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Resuming…
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    Resume paused session
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Paused Sessions Dialog */}
         <Dialog open={showPausedSessionsDialog} onOpenChange={setShowPausedSessionsDialog}>
           <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
@@ -8770,9 +8932,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 can differ.
               </DialogDescription>
               <p className="text-sm text-muted-foreground">
-                If Resume shows <span className="font-medium text-foreground">Not found</span>, the server does not yet
-                have the resume API—deploy the latest backend, or use <span className="font-medium">End consultation</span>{' '}
-                below to clear a session (uses the existing end-session API).
+                If <span className="font-medium text-foreground">Resume</span> fails, use{' '}
+                <span className="font-medium text-foreground">End consultation</span> on that patient to close the paused
+                session, or ask your administrator to check the system.
               </p>
             </DialogHeader>
 

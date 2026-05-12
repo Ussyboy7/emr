@@ -18,8 +18,18 @@ import { consultationService, visitService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import {
-  Search, Plus, Calendar, Clock, CheckCircle2,
-  Edit, Send, AlertTriangle, Loader2, Eye, X, FileText
+  Search,
+  Plus,
+  Calendar,
+  Clock,
+  CheckCircle2,
+  Edit,
+  Send,
+  AlertTriangle,
+  Loader2,
+  Eye,
+  X,
+  FileText,
 } from 'lucide-react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -76,6 +86,9 @@ export default function VisitsPage() {
   
   // Edit form state
   const [editForm, setEditForm] = useState({ type: '', clinic: '', location: '', notes: '' });
+  /** Clinics to append on save (Manage Visits — in-workflow add Physio etc.) */
+  const [clinicsToAppend, setClinicsToAppend] = useState<string[]>([]);
+  const [extraClinicPick, setExtraClinicPick] = useState('');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -108,6 +121,8 @@ export default function VisitsPage() {
     clinic: visit.clinic || '',
     clinics: visit.clinics || [], // All clinics for this visit
     completedClinics: visit.completed_clinics || [], // Completed clinics
+    /** Raw API status — used to respect VisitSerializer workflow guardrails on PATCH */
+    visitStatusRaw: visit.status,
     date: visit.date,
     time: visit.time,
     status: visit.status === 'scheduled' ? 'Scheduled' :
@@ -288,6 +303,46 @@ export default function VisitsPage() {
     setIsDateFilterDialogOpen(false);
   };
 
+  const inWorkflowEdit =
+    selectedVisit?.visitStatusRaw === 'in_progress' ||
+    selectedVisit?.visitStatusRaw === 'completed';
+
+  const extraClinicSelectOptions = useMemo(() => {
+    if (!selectedVisit) return opdClinicNames;
+    const existing = new Set<string>();
+    const mark = (s: string) => {
+      const n = normalizeClinicName(String(s).trim(), opdClinicNames);
+      if (n) existing.add(n);
+    };
+    (selectedVisit.clinics || []).forEach((c: string) => mark(c));
+    if (selectedVisit.clinic) mark(selectedVisit.clinic);
+    clinicsToAppend.forEach((c) => mark(c));
+    return opdClinicNames.filter((name) => {
+      const n = normalizeClinicName(name, opdClinicNames);
+      return n && !existing.has(n);
+    });
+  }, [selectedVisit, clinicsToAppend, opdClinicNames]);
+
+  const handleAppendExtraClinic = () => {
+    if (!extraClinicPick.trim() || !selectedVisit) return;
+    const n = normalizeClinicName(extraClinicPick.trim(), opdClinicNames);
+    if (!n) return;
+    const existing = new Set<string>();
+    const mark = (s: string) => {
+      const x = normalizeClinicName(String(s).trim(), opdClinicNames);
+      if (x) existing.add(x);
+    };
+    (selectedVisit.clinics || []).forEach((c: string) => mark(c));
+    if (selectedVisit.clinic) mark(selectedVisit.clinic);
+    clinicsToAppend.forEach((c) => mark(c));
+    if (existing.has(n)) {
+      toast.info('That clinic is already on this visit.');
+      return;
+    }
+    setClinicsToAppend((prev) => [...prev, n]);
+    setExtraClinicPick('');
+  };
+
   // Stats - 4 cards with useful metrics (now from separate API calls for accuracy)
   const stats = useMemo(() => {
     return [
@@ -306,6 +361,8 @@ export default function VisitsPage() {
       location: visit.location,
       notes: visit.notes,
     });
+    setClinicsToAppend([]);
+    setExtraClinicPick('');
     setIsEditModalOpen(true);
   };
 
@@ -322,15 +379,60 @@ export default function VisitsPage() {
 
       // Use numeric ID for API calls (backend expects primary key, not visit_id string)
       const visitId = selectedVisit.numericId || Number(selectedVisit.id);
-      
-      const updateData: any = {
-        visit_type: editForm.type || undefined,
-        clinic: editForm.clinic ? normalizeClinicName(editForm.clinic, opdClinicNames) : undefined,
-        location: editForm.location || undefined,
-        clinical_notes: editForm.notes || undefined,
-      };
 
-      await visitService.updateVisit(visitId, updateData);
+      const rawStatus = visitToUpdate.visitStatusRaw;
+      const inWorkflow = rawStatus === 'in_progress' || rawStatus === 'completed';
+
+      // VisitSerializer blocks visit_type, location, etc. once the visit is in workflow;
+      // only clinical_notes, clinic, and clinics are safe to PATCH.
+      let updateData: Record<string, unknown>;
+      if (inWorkflow) {
+        updateData = {
+          clinical_notes: editForm.notes ?? '',
+        };
+        if (clinicsToAppend.length > 0) {
+          const norm = (s: string) =>
+            s.trim() ? normalizeClinicName(s.trim(), opdClinicNames) : '';
+          const prevList: string[] =
+            visitToUpdate.clinics?.length > 0
+              ? [...visitToUpdate.clinics]
+              : visitToUpdate.clinic
+                ? [visitToUpdate.clinic]
+                : [];
+          const merged: string[] = [];
+          const seen = new Set<string>();
+          for (const c of prevList) {
+            const n = norm(String(c));
+            if (n && !seen.has(n)) {
+              seen.add(n);
+              merged.push(n);
+            }
+          }
+          for (const c of clinicsToAppend) {
+            const n = norm(String(c));
+            if (n && !seen.has(n)) {
+              seen.add(n);
+              merged.push(n);
+            }
+          }
+          if (merged.length) {
+            updateData.clinics = merged;
+            const primaryRaw = (visitToUpdate.clinic || merged[0] || '').trim();
+            const primaryNorm = primaryRaw ? norm(primaryRaw) : '';
+            updateData.clinic =
+              primaryNorm && merged.includes(primaryNorm) ? primaryNorm : merged[0];
+          }
+        }
+      } else {
+        updateData = {
+          visit_type: editForm.type || undefined,
+          clinic: editForm.clinic ? normalizeClinicName(editForm.clinic, opdClinicNames) : undefined,
+          location: editForm.location || undefined,
+          clinical_notes: editForm.notes || undefined,
+        };
+      }
+
+      await visitService.updateVisit(visitId, updateData as Partial<Visit>);
       
       // Reload visits with current filters preserved
       await loadVisits();
@@ -723,14 +825,11 @@ export default function VisitsPage() {
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
                       setSelectedVisit(visit);
                       setIsViewModalOpen(true);
-                    }} title="View Visit">
+                    }} title="View visit details (edit from there)">
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
-                    {visit.status === 'Scheduled' && (
+                    {visit.visitStatusRaw === 'scheduled' && (
                       <>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditVisit(visit)} title="Edit Visit">
-                          <Edit className="h-3.5 w-3.5" />
-                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -750,7 +849,7 @@ export default function VisitsPage() {
                       </>
                     )}
                     
-                    {visit.status === 'Completed' && (
+                    {visit.visitStatusRaw === 'completed' && (
                       <>
                         <Button
                           variant="ghost"
@@ -801,7 +900,16 @@ export default function VisitsPage() {
         </>
 
         {/* Edit Visit Modal */}
-        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <Dialog
+          open={isEditModalOpen}
+          onOpenChange={(open) => {
+            setIsEditModalOpen(open);
+            if (!open) {
+              setClinicsToAppend([]);
+              setExtraClinicPick('');
+            }
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -810,13 +918,29 @@ export default function VisitsPage() {
               </DialogTitle>
               <DialogDescription>
                 Update the visit details for {selectedVisit?.patient}
+                {selectedVisit &&
+                  (selectedVisit.visitStatusRaw === 'in_progress' ||
+                    selectedVisit.visitStatusRaw === 'completed') && (
+                  <span className="mt-2 block text-amber-700 dark:text-amber-400">
+                    Visit type and location are locked. You can update clinical notes and add more service clinics
+                    (e.g. Physiotherapy) — they are saved when you click Save.
+                  </span>
+                )}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Visit Type</Label>
-                  <Select value={editForm.type} onValueChange={(v) => setEditForm(prev => ({ ...prev, type: v }))}>
+                  <Select
+                    value={editForm.type}
+                    onValueChange={(v) => setEditForm(prev => ({ ...prev, type: v }))}
+                    disabled={
+                      !!selectedVisit &&
+                      (selectedVisit.visitStatusRaw === 'in_progress' ||
+                        selectedVisit.visitStatusRaw === 'completed')
+                    }
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                     <SelectItem value="consultation">Consultation</SelectItem>
@@ -829,7 +953,11 @@ export default function VisitsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Clinic</Label>
-                  <Select value={editForm.clinic} onValueChange={(v) => setEditForm(prev => ({ ...prev, clinic: v }))}>
+                  <Select
+                    value={editForm.clinic}
+                    onValueChange={(v) => setEditForm(prev => ({ ...prev, clinic: v }))}
+                    disabled={inWorkflowEdit}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {opdClinicNames.map((c) => (
@@ -842,7 +970,15 @@ export default function VisitsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Location</Label>
-                  <Select value={editForm.location} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v }))}>
+                  <Select
+                    value={editForm.location}
+                    onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v }))}
+                    disabled={
+                      !!selectedVisit &&
+                      (selectedVisit.visitStatusRaw === 'in_progress' ||
+                        selectedVisit.visitStatusRaw === 'completed')
+                    }
+                  >
                     <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
                     <SelectContent>
                       {locationOptions.filter((l) => l.value !== "all").map((l) => (
@@ -852,6 +988,85 @@ export default function VisitsPage() {
                   </Select>
                 </div>
               </div>
+              {inWorkflowEdit && (
+                <div className="space-y-3 rounded-lg border border-border p-3 bg-muted/30">
+                  <div className="space-y-1">
+                    <Label>Clinics already on this visit</Label>
+                    <div className="flex flex-wrap gap-1">
+                      {(selectedVisit.clinics?.length
+                        ? selectedVisit.clinics
+                        : selectedVisit.clinic
+                          ? [selectedVisit.clinic]
+                          : []
+                      ).length === 0 ? (
+                        <span className="text-sm text-muted-foreground">None listed</span>
+                      ) : (
+                        (selectedVisit.clinics?.length
+                          ? selectedVisit.clinics
+                          : selectedVisit.clinic
+                            ? [selectedVisit.clinic]
+                            : []
+                        ).map((c: string) => (
+                          <Badge key={c} variant="secondary" className="text-xs">
+                            {c}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  {clinicsToAppend.length > 0 && (
+                    <div className="space-y-1">
+                      <Label>Added (saved when you click Save)</Label>
+                      <div className="flex flex-wrap gap-1">
+                        {clinicsToAppend.map((c) => (
+                          <Badge key={c} variant="default" className="text-xs gap-1 pr-1">
+                            {c}
+                            <button
+                              type="button"
+                              className="rounded-full hover:bg-background/20 p-0.5"
+                              onClick={() => setClinicsToAppend((p) => p.filter((x) => x !== c))}
+                              aria-label={`Remove ${c}`}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label>Add another clinic</Label>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Select value={extraClinicPick} onValueChange={setExtraClinicPick}>
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Choose clinic to add" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {extraClinicSelectOptions.map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="sm:shrink-0"
+                        onClick={handleAppendExtraClinic}
+                        disabled={!extraClinicPick || extraClinicSelectOptions.length === 0}
+                      >
+                        <Plus className="h-4 w-4 mr-1" /> Add
+                      </Button>
+                    </div>
+                    {extraClinicSelectOptions.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        All clinics from your directory are already on this visit.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Notes / Special Instructions</Label>
                 <Textarea 
@@ -879,6 +1094,15 @@ export default function VisitsPage() {
               </DialogTitle>
               <DialogDescription>
                 {selectedVisit?.patient}
+                {selectedVisit &&
+                  (selectedVisit.visitStatusRaw === 'scheduled' ||
+                    selectedVisit.visitStatusRaw === 'in_progress' ||
+                    selectedVisit.visitStatusRaw === 'completed') && (
+                  <span className="mt-1 block text-sm text-muted-foreground">
+                    Use <span className="font-medium text-foreground">Edit</span> below to change clinics or notes — it
+                    opens here so the list stays compact.
+                  </span>
+                )}
               </DialogDescription>
             </DialogHeader>
             {selectedVisit && (
@@ -931,11 +1155,16 @@ export default function VisitsPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsViewModalOpen(false)}>Close</Button>
-              {selectedVisit?.status === 'Scheduled' && (
-                <Button onClick={() => {
-                  setIsViewModalOpen(false);
-                  handleEditVisit(selectedVisit);
-                }}>
+              {selectedVisit &&
+                (selectedVisit.visitStatusRaw === 'scheduled' ||
+                  selectedVisit.visitStatusRaw === 'in_progress' ||
+                  selectedVisit.visitStatusRaw === 'completed') && (
+                <Button
+                  onClick={() => {
+                    setIsViewModalOpen(false);
+                    handleEditVisit(selectedVisit);
+                  }}
+                >
                   <Edit className="h-4 w-4 mr-2" />Edit
                 </Button>
               )}

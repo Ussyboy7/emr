@@ -1098,11 +1098,35 @@ export default function ConsultationHistoryPage() {
           : c
       ));
 
+      try {
+        const fresh = await consultationService.getSession(sessionId);
+        setConsultations((prev) =>
+          prev.map((c) =>
+            c.id === String(sessionId)
+              ? {
+                  ...c,
+                  status: fresh.status === 'completed' ? 'Completed' : 'In Progress',
+                  sessionDuration:
+                    fresh.started_at && fresh.ended_at
+                      ? Math.floor(
+                          (new Date(fresh.ended_at).getTime() -
+                            new Date(fresh.started_at).getTime()) /
+                            (1000 * 60),
+                        )
+                      : c.sessionDuration,
+                }
+              : c,
+          ),
+        );
+      } catch {
+        /* keep optimistic row */
+      }
+
       toast.success(`Consultation ${selectedConsultation.id} updated`);
       setShowEditModal(false);
     } catch (err: any) {
       console.error('Error saving consultation:', err);
-      toast.error('Failed to update consultation. Please try again.');
+      toast.error(err?.message || 'Failed to update consultation. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1129,13 +1153,34 @@ export default function ConsultationHistoryPage() {
         }),
       });
       
-      // Update local state
-      setConsultations(prev => prev.map(c => c.id === consultation.id ? { ...c, status: "Completed" } : c));
+      try {
+        const fresh = await consultationService.getSession(sessionId);
+        setConsultations((prev) =>
+          prev.map((c) =>
+            c.id === consultation.id
+              ? {
+                  ...c,
+                  status: fresh.status === 'completed' ? 'Completed' : 'In Progress',
+                  sessionDuration:
+                    fresh.started_at && fresh.ended_at
+                      ? Math.floor(
+                          (new Date(fresh.ended_at).getTime() -
+                            new Date(fresh.started_at).getTime()) /
+                            (1000 * 60),
+                        )
+                      : c.sessionDuration,
+                }
+              : c,
+          ),
+        );
+      } catch {
+        setConsultations(prev => prev.map(c => c.id === consultation.id ? { ...c, status: "Completed" } : c));
+      }
       toast.success("Consultation marked as complete");
       setShowViewModal(false);
     } catch (err: any) {
       console.error('Error completing consultation:', err);
-      toast.error('Failed to complete consultation. Please try again.');
+      toast.error(err?.message || 'Failed to complete consultation. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
