@@ -117,6 +117,7 @@ export default function NewPatientPage() {
 
   useEffect(() => {
     const prefilledCategory = searchParams.get('category');
+    const principalPk = searchParams.get('principal');
     const principalStaffId = searchParams.get('principal_staff_id');
     const dependentType = searchParams.get('dependent_type');
 
@@ -124,11 +125,43 @@ export default function NewPatientPage() {
       setPatientCategory('dependent');
     }
 
-    if (principalStaffId || dependentType) {
-      setFormData(prev => ({
+    if (dependentType) {
+      setFormData((prev) => ({
         ...prev,
-        principalStaffId: principalStaffId?.trim() || prev.principalStaffId,
-        dependentType: dependentType?.trim() || prev.dependentType,
+        dependentType: dependentType.trim() || prev.dependentType,
+      }));
+    }
+
+    const resolvePrincipalByNumericId = async (pk: string) => {
+      if (!/^\d+$/.test(pk.trim())) return;
+      try {
+        const p = await patientService.getPatient(Number(pk.trim()));
+        if (p.category !== 'employee' && p.category !== 'retiree') return;
+        const pn = (p.personal_number || '').trim();
+        setFormData((prev) => ({
+          ...prev,
+          principalStaffId: pn || prev.principalStaffId,
+          dependentType:
+            p.category === 'retiree' ? 'Retiree Dependent' : 'Employee Dependent',
+        }));
+        setPrincipalValidation({
+          isValidating: false,
+          isValid: true,
+          message: `Linked principal: ${p.full_name ?? ''} (${p.category})`,
+          patient: p,
+        });
+        setNokAutoPopulated(false);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    if (principalPk?.trim()) {
+      void resolvePrincipalByNumericId(principalPk);
+    } else if (principalStaffId?.trim()) {
+      setFormData((prev) => ({
+        ...prev,
+        principalStaffId: principalStaffId.trim() || prev.principalStaffId,
       }));
     }
   }, [searchParams]);
@@ -1903,10 +1936,6 @@ export default function NewPatientPage() {
                 <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => router.push('/medical-records/visits/new')}>
                   <FileText className="h-4 w-4 mr-2" />
                   Create Visit
-                </Button>
-                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => router.push('/medical-records/dependents')}>
-                  <Users className="h-4 w-4 mr-2" />
-                  Manage Dependents
                 </Button>
               </CardContent>
             </Card>

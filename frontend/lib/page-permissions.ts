@@ -23,7 +23,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/medical-records/visits/new", name: "Create Visit", description: "Create new patient visits", module: "Medical Records" },
   { id: "/medical-records/visits", name: "Manage Visits", description: "View and manage patient visits", module: "Medical Records" },
   { id: "/medical-records/appointments", name: "Appointments", description: "Manage patient appointments", module: "Medical Records" },
-  { id: "/medical-records/dependents", name: "Manage Dependents", description: "Manage patient dependents", module: "Medical Records" },
+  { id: "/medical-records/dependents", name: "Dependents (legacy URL)", description: "Redirects to Manage Patients with dependents filter", module: "Medical Records" },
   { id: "/medical-records/reports", name: "Reports", description: "View and generate reports", module: "Medical Records" },
   { id: "/medical-records/referrals", name: "Referral queue (records)", description: "Review referrals for stamping and records workflow (same data as consultation referrals)", module: "Medical Records" },
 

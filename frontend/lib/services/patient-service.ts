@@ -87,6 +87,10 @@ export interface Patient {
   nonnpa_type?: string;
   dependent_type?: string;
   principal_staff?: number;
+  /** Populated on list responses when serializer embeds principal (dependents list). */
+  principal_staff_full_name?: string;
+  principal_staff_patient_id?: string;
+  principal_staff_category?: string;
   email?: string;
   phone?: string;
   state_of_residence?: string;

@@ -103,7 +103,7 @@ class PatientSerializer(serializers.ModelSerializer):
 
 class PatientListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for patient lists."""
-    
+
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
     age_display = serializers.ReadOnlyField()
@@ -111,22 +111,46 @@ class PatientListSerializer(serializers.ModelSerializer):
     photo = serializers.SerializerMethodField()
     total_visits = serializers.SerializerMethodField()
     last_visit_at = serializers.SerializerMethodField()
-    
+    # Dependent / principal (list + Manage Dependents; queryset uses select_related("principal_staff"))
+    principal_staff_full_name = serializers.SerializerMethodField()
+    principal_staff_patient_id = serializers.SerializerMethodField()
+    principal_staff_category = serializers.SerializerMethodField()
+
     class Meta:
         model = Patient
         fields = [
-            'id', 'patient_id', 'category', 'full_name', 'gender', 'age',
-            'age_display', 'personal_number', 'phone', 'email', 'blood_group', 'is_active', 'created_at', 'photo',
+            'id', 'patient_id', 'category', 'surname', 'first_name', 'full_name', 'gender', 'age',
+            'age_display', 'date_of_birth', 'personal_number', 'phone', 'email', 'blood_group', 'is_active', 'created_at', 'photo',
             'total_visits', 'last_visit_at',
+            'dependent_type', 'principal_staff', 'nok_relationship',
+            'principal_staff_full_name', 'principal_staff_patient_id', 'principal_staff_category',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'age']
-    
+
     def get_full_name(self, obj):
         return obj.get_full_name()
 
     def get_gender(self, obj):
         return obj.get_gender_display() if obj.gender else ''
-    
+
+    def get_principal_staff_full_name(self, obj):
+        p = getattr(obj, 'principal_staff', None)
+        if p is None:
+            return ''
+        return p.get_full_name()
+
+    def get_principal_staff_patient_id(self, obj):
+        p = getattr(obj, 'principal_staff', None)
+        if p is None:
+            return ''
+        return (p.patient_id or '').strip()
+
+    def get_principal_staff_category(self, obj):
+        p = getattr(obj, 'principal_staff', None)
+        if p is None:
+            return ''
+        return p.category or ''
+
     def get_photo(self, obj):
         """Return the photo URL if photo exists."""
         if obj.photo:

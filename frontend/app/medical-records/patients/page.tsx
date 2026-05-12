@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, Suspense } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { patientService, type Patient as ApiPatient } from '@/lib/services';
 import {
   PATIENT_TITLE_OPTIONS,
@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { PatientOverviewModal } from '@/components/shared/PatientOverviewModal';
+import { PrincipalDependentsModal } from '@/components/shared/PrincipalDependentsModal';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { useLocationOptions } from '@/hooks/use-location-options';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
@@ -95,6 +96,8 @@ type Patient = {
   primaryPatient?: string;
   relationship?: string;
   nonNpaType?: string;
+  /** Active dependents for employee/retiree principals (from API count). */
+  dependentsCount?: number;
 };
 
 // Helper function to construct full photo URL from relative path
@@ -201,8 +204,9 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
 
 const categories = ["All Categories", "Employee", "Retiree", "Dependent", "NonNPA"];
 
-export default function PatientsListPage() {
+function PatientsListPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { currentUser } = useCurrentUser();
   const { locations: locationOptions } = useLocationOptions({ includeAll: true });
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -311,6 +315,20 @@ export default function PatientsListPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [counts, setCounts] = useState<{ total: number; employees: number; retirees: number; dependents: number; nonnpa: number } | null>(null);
+  const [principalBannerName, setPrincipalBannerName] = useState<string | null>(null);
+  const [principalDepsOpen, setPrincipalDepsOpen] = useState<{
+    principalNumericId: number;
+    principalDisplayName: string;
+    principalPatientId: string;
+    principalCategory: 'employee' | 'retiree';
+    defaultTab: 'list' | 'add';
+  } | null>(null);
+
+  const principalIdFromUrl = useMemo(() => {
+    const raw = searchParams.get('principal');
+    if (raw && /^\d+$/.test(raw.trim())) return Number(raw.trim());
+    return null;
+  }, [searchParams]);
 
   // Client-side: only filter by age (search, category, gender, location are applied by the API)
   const filteredPatients = useMemo(() => {
@@ -328,6 +346,39 @@ export default function PatientsListPage() {
   useEffect(() => {
     patientService.getPatientCounts().then(setCounts).catch(() => setCounts(null));
   }, []);
+
+  // Deep links: ?category=employee|retiree|dependent|nonnpa
+  useEffect(() => {
+    const cat = (searchParams.get('category') || '').toLowerCase();
+    if (['employee', 'retiree', 'dependent', 'nonnpa'].includes(cat)) {
+      setCategoryFilter(cat);
+    }
+  }, [searchParams]);
+
+  // Principal filter label for banner
+  useEffect(() => {
+    if (!principalIdFromUrl) {
+      setPrincipalBannerName(null);
+      return;
+    }
+    let cancelled = false;
+    patientService
+      .getPatient(principalIdFromUrl)
+      .then((p) => {
+        if (!cancelled) setPrincipalBannerName((p.full_name || p.patient_id || '').trim() || null);
+      })
+      .catch(() => {
+        if (!cancelled) setPrincipalBannerName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [principalIdFromUrl]);
+
+  // When filtering by principal, list is dependents only
+  useEffect(() => {
+    if (principalIdFromUrl != null) setCategoryFilter('dependent');
+  }, [principalIdFromUrl]);
 
   // Debounce search query to avoid excessive API calls
   useEffect(() => {
@@ -348,12 +399,12 @@ export default function PatientsListPage() {
   // Load patients from API when page, page size, or server-side filters change
   useEffect(() => {
     loadPatients();
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, genderFilter, categoryFilter, locationFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, principalIdFromUrl]);
 
   // Reset to page 1 when filters or items per page change
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage]);
+  }, [debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage, principalIdFromUrl]);
 
   const loadPatients = async () => {
     try {
@@ -363,7 +414,12 @@ export default function PatientsListPage() {
         page: currentPage,
         page_size: itemsPerPage,
       };
-      if (categoryFilter !== 'all') params.category = categoryFilter;
+      if (principalIdFromUrl != null) {
+        params.category = 'dependent';
+        params.principal_staff = principalIdFromUrl;
+      } else if (categoryFilter !== 'all') {
+        params.category = categoryFilter;
+      }
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (locationFilter !== 'all') params.location = locationFilter;
       const searchTerm = debouncedSearchQuery.trim();
@@ -424,6 +480,27 @@ export default function PatientsListPage() {
           }
         })
       );
+
+      if (principalIdFromUrl == null) {
+        await Promise.allSettled(
+          transformedPatients.map(async (patient, index) => {
+            const apiPatient = response.results[index];
+            if ((apiPatient.category === 'employee' || apiPatient.category === 'retiree') && apiPatient.id) {
+              try {
+                const depList = await patientService.getPatients({
+                  category: 'dependent',
+                  principal_staff: apiPatient.id,
+                  page_size: 1,
+                });
+                patient.dependentsCount =
+                  typeof depList.count === 'number' ? depList.count : depList.results?.length ?? 0;
+              } catch {
+                patient.dependentsCount = undefined;
+              }
+            }
+          })
+        );
+      }
       
       // Optionally fetch visit counts and principal staff names in parallel (but limit to avoid slowdown)
       // For better performance, we'll only fetch these when opening the view modal
@@ -960,6 +1037,7 @@ export default function PatientsListPage() {
     setAgeRange({ min: '', max: '' });
     setDateRange({ from: '', to: '' });
     setIsFilterDialogOpen(false);
+    router.push('/medical-records/patients');
     toast.info('Filters cleared');
   };
 
@@ -1026,7 +1104,7 @@ export default function PatientsListPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <AdvancedFiltersButton onClick={() => setIsFilterDialogOpen(true)} />
-                    <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <Select value={categoryFilter} onValueChange={setCategoryFilter} disabled={principalIdFromUrl != null}>
                       <SelectTrigger className="w-[140px]"><SelectValue placeholder="Category" /></SelectTrigger>
                       <SelectContent>
                         {categories.map(c => <SelectItem key={c} value={c === 'All Categories' ? 'all' : c.toLowerCase()}>{c}</SelectItem>)}
@@ -1053,6 +1131,27 @@ export default function PatientsListPage() {
               </CardContent>
             </Card>
 
+            {principalIdFromUrl != null && (
+              <Card className="border-violet-200 bg-violet-50/40 dark:bg-violet-950/20 dark:border-violet-800">
+                <CardContent className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <p className="text-sm text-foreground">
+                    Showing <span className="font-medium">dependents</span> linked to{' '}
+                    <span className="font-semibold">{principalBannerName || `record #${principalIdFromUrl}`}</span>.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => {
+                      setCategoryFilter('all');
+                      router.push('/medical-records/patients');
+                    }}
+                  >
+                    Clear principal filter
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Patients List */}
             <div className="space-y-3">
@@ -1156,6 +1255,35 @@ export default function PatientsListPage() {
                               <span className="text-teal-600 dark:text-teal-400">({patient.totalVisits} visits)</span>
                             )}
                           </div>
+                          {(patient.category === 'Employee' || patient.category === 'Retiree') && patient.numericId ? (
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                              <span className="text-[11px] text-muted-foreground tabular-nums">
+                                Dependents{' '}
+                                <span className="font-medium text-foreground">
+                                  {typeof patient.dependentsCount === 'number' ? patient.dependentsCount : '—'}
+                                </span>
+                                {patient.category === 'Employee' ? '/5' : '/1'}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs gap-1.5 px-2.5"
+                                onClick={() =>
+                                  setPrincipalDepsOpen({
+                                    principalNumericId: patient.numericId!,
+                                    principalDisplayName: patient.name,
+                                    principalPatientId: patient.id,
+                                    principalCategory: patient.category === 'Retiree' ? 'retiree' : 'employee',
+                                    defaultTab: 'list',
+                                  })
+                                }
+                              >
+                                <Users className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                Dependents
+                              </Button>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </CardContent>
@@ -1202,9 +1330,6 @@ export default function PatientsListPage() {
                 </Button>
                 <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => router.push('/medical-records/visits/new')}>
                   <Calendar className="h-4 w-4 mr-2" />Create Visit
-                </Button>
-                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => router.push('/medical-records/dependents')}>
-                  <Users className="h-4 w-4 mr-2" />Manage Dependents
                 </Button>
                 <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => router.push('/medical-records/reports')}>
                   <FileText className="h-4 w-4 mr-2" />Reports
@@ -1286,6 +1411,23 @@ export default function PatientsListPage() {
           onEdit={(patient) => {
             setIsOverviewModalOpen(false);
             openEditModal(patient);
+          }}
+        />
+
+        <PrincipalDependentsModal
+          open={principalDepsOpen !== null}
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setPrincipalDepsOpen(null);
+          }}
+          principalNumericId={principalDepsOpen?.principalNumericId ?? null}
+          principalDisplayName={principalDepsOpen?.principalDisplayName ?? ''}
+          principalPatientId={principalDepsOpen?.principalPatientId ?? ''}
+          principalCategory={principalDepsOpen?.principalCategory ?? 'employee'}
+          defaultTab={principalDepsOpen?.defaultTab ?? 'list'}
+          onAfterChange={() => void loadPatients()}
+          onEditDependent={async (api) => {
+            setPrincipalDepsOpen(null);
+            await openEditModal(transformPatient(api));
           }}
         />
 
@@ -1403,7 +1545,7 @@ export default function PatientsListPage() {
                             />
                             <p className="text-xs text-muted-foreground">
                               {editPrincipalInfo?.fullName
-                                ? `Linked to ${editPrincipalInfo.fullName}. Dependent patient IDs (ED-/RD-) use this number; to change the link, use Manage Dependents.`
+                                ? `Linked to ${editPrincipalInfo.fullName}. Dependent IDs (ED-/RD-) follow the principal; changing the link is not supported in this form—register a new dependent under the correct principal if needed.`
                                 : "Principal record not loaded or not linked."}
                             </p>
                           </div>
@@ -2197,5 +2339,22 @@ export default function PatientsListPage() {
         </AlertDialog>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function PatientsListPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardLayout>
+          <div className="container mx-auto p-6 flex flex-col items-center justify-center gap-2 min-h-[40vh]">
+            <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">Loading patients…</p>
+          </div>
+        </DashboardLayout>
+      }
+    >
+      <PatientsListPageContent />
+    </Suspense>
   );
 }
