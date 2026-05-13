@@ -15,6 +15,7 @@ import { patientService, wardService, physioService, labService } from '@/lib/se
 import { toast } from 'sonner';
 import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultation/orders/LabOrderModal';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
+import { summarizeLabTestForConsultationReport } from '@/lib/consultation-report';
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -814,7 +815,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
             status: test.status || 'pending',
             orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
             createdAt: test.created_at || l.ordered_at || new Date().toISOString(),
-            result: test.results ? JSON.stringify(test.results) : undefined,
+            result: test.results ? summarizeLabTestForConsultationReport(test) : undefined,
           }));
         }
         // Fallback: single test entry from order-level fields
@@ -1200,7 +1201,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
             status: test.status || 'pending',
             orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
             createdAt: test.created_at || l.ordered_at || new Date().toISOString(),
-            result: test.results ? JSON.stringify(test.results) : undefined,
+            result: test.results ? summarizeLabTestForConsultationReport(test) : undefined,
           }));
         }
         // Fallback: single test entry from order-level fields

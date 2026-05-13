@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api-client';
 import { consultationService, physioService, patientService } from '@/lib/services';
 import { logWarn } from './client-logger';
 import type { ApiResponse } from './types/common';
+import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 
 // API Response interfaces for consultation report
 interface PrescriptionApiResponse {
@@ -132,51 +133,19 @@ const formatLabResult = (value: unknown, normalRange?: Record<string, any>): str
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
-  if (typeof value !== 'object') return String(value);
+  if (typeof value !== 'object' || Array.isArray(value)) return String(value);
 
   const payload = value as Record<string, unknown>;
-  if (Array.isArray(payload.custom_results)) {
-    return payload.custom_results
-      .filter((row: any) => row && (row.name || row.value || row.unit || row.reference_range || row.notes))
-      .map((row: any) => {
-        const unit = row.unit ? ` ${row.unit}` : '';
-        const range = row.reference_range ? ` (${row.reference_range})` : '';
-        const notes = row.notes ? ` - ${row.notes}` : '';
-        return `${row.name || 'Custom Result'}: ${row.value || 'Pending'}${unit}${range}${notes}`.trim();
-      })
-      .join('\n');
-  }
+  if (!Object.keys(payload).length) return '';
 
-  const entries = Object.entries(payload).filter(([, v]) => v != null && v !== '');
-  if (entries.length === 0) return '';
+  const rows = buildOrderedLabResultViewRows(payload as Record<string, any>, normalRange);
+  if (!rows.length) return '';
 
-  // Honour template _order so consultation reports match Enter Results / Result Details.
-  const explicitOrder: string[] = Array.isArray(normalRange?._order)
-    ? ((normalRange as any)._order as any[]).filter((k): k is string => typeof k === 'string')
-    : [];
-  const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
-  const orderIndex = new Map<string, number>();
-  explicitOrder.forEach((k, i) => orderIndex.set(norm(k), i));
-  const ordered = [...entries].sort((a, b) => {
-    const ai = orderIndex.get(norm(a[0]));
-    const bi = orderIndex.get(norm(b[0]));
-    if (ai !== undefined && bi !== undefined) return ai - bi;
-    if (ai !== undefined) return -1;
-    if (bi !== undefined) return 1;
-    return a[0].localeCompare(b[0]);
-  });
-
-  return ordered
-    .map(([key, v]) => {
-      const fieldMeta = normalRange?.[key] ?? {};
-      const unit = fieldMeta.unit ? ` ${fieldMeta.unit}` : '';
-      let range = '';
-      if (fieldMeta.range) {
-        range = ` (${fieldMeta.range})`;
-      } else if (fieldMeta.min != null || fieldMeta.max != null) {
-        range = ` (${fieldMeta.min ?? ''}-${fieldMeta.max ?? ''})`;
-      }
-      return `${key}: ${String(v)}${unit}${range}`.trim();
+  return rows
+    .map((r) => {
+      const unit = r.unit ? ` ${r.unit}` : '';
+      const range = r.normalRange ? ` (${r.normalRange})` : '';
+      return `${r.parameter}: ${r.value}${unit}${range}`.trim();
     })
     .join('\n');
 };

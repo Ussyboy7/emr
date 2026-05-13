@@ -1,9 +1,7 @@
 import { transformPriority } from '@/lib/services/transformers';
 import {
-  classifyValue,
+  buildOrderedLabResultViewRows,
   deriveOverallStatus,
-  fieldForParameter,
-  orderResultRows,
   type ResultStatus,
 } from '@/lib/laboratory/template-utils';
 
@@ -103,82 +101,20 @@ export function transformApiRowToCompletedTest(
   const normalRangeObj: Record<string, any> | undefined =
     (test as any)?.template_normal_range || (test as any)?.template?.normal_range;
 
-  const attachmentsByRowId = new Map<string, any>();
-  const attachmentsByRowName = new Map<string, any>();
-  ((test as any).result_attachments || []).forEach((attachment: any) => {
-    if (attachment?.row_id) attachmentsByRowId.set(String(attachment.row_id), attachment);
-    if (attachment?.row_name) attachmentsByRowName.set(String(attachment.row_name).trim().toLowerCase(), attachment);
-  });
-
   const resultPayload = (test.results || {}) as Record<string, any>;
-  const customRows = Array.isArray(resultPayload.custom_results) ? resultPayload.custom_results : null;
 
-  const processedResultsRaw = customRows ? customRows.map((row: any) => {
-    const rowId = String(row?.id || '');
-    const parameter = String(row?.name || 'Custom Result');
-    const attachment = attachmentsByRowId.get(rowId) || attachmentsByRowName.get(parameter.trim().toLowerCase());
-    const fileUrl = attachment?.file
-      ? String(attachment.file).startsWith('http')
-        ? String(attachment.file)
-        : typeof window !== 'undefined'
-          ? `${window.location.origin}${attachment.file}`
-          : String(attachment.file)
-      : null;
+  const toAbs = (raw: string) => {
+    const s = String(raw);
+    if (s.startsWith('http')) return s;
+    if (typeof window === 'undefined') return s;
+    return s.startsWith('/') ? `${window.location.origin}${s}` : `${window.location.origin}/${s}`;
+  };
 
-    return {
-      parameter,
-      value: String(row?.value || ''),
-      unit: String(row?.unit || ''),
-      normalRange: String(row?.reference_range || ''),
-      status: 'Normal' as ResultStatus,
-      attachment: fileUrl
-        ? {
-            url: fileUrl,
-            name: displayNameFromLabResultFileUrl(fileUrl),
-          }
-        : null,
-    };
-  }) : Object.entries(resultPayload).map(([key, value]) => {
-    const valueStr = String(value);
-    const field = fieldForParameter(key, normalRangeObj);
-
-    let unit = '';
-    let normalRange = '';
-    let status: ResultStatus = 'Normal';
-
-    if (field) {
-      unit = field.unit;
-      normalRange = field.normalRange;
-      status = classifyValue(valueStr, field);
-    }
-
-    return {
-      parameter: key,
-      value: valueStr,
-      unit,
-      normalRange,
-      status,
-    };
+  const processedResults = buildOrderedLabResultViewRows(resultPayload, normalRangeObj, {
+    resultAttachments: (test as any).result_attachments,
+    resolveFileUrl: toAbs,
+    attachmentDisplayName: displayNameFromLabResultFileUrl,
   });
-
-  // De-duplicate generic "Result" alias when a specific analyte row has the same value/range/unit.
-  const dedupedResults = (() => {
-    const generic = processedResultsRaw.find((r) => String(r.parameter).trim().toLowerCase() === 'result');
-    if (!generic) return processedResultsRaw;
-    const hasEquivalentSpecific = processedResultsRaw.some(
-      (r) =>
-        String(r.parameter).trim().toLowerCase() !== 'result' &&
-        String(r.value).trim() === String(generic.value).trim() &&
-        String(r.unit).trim().toLowerCase() === String(generic.unit).trim().toLowerCase() &&
-        String(r.normalRange).trim().toLowerCase() === String(generic.normalRange).trim().toLowerCase()
-    );
-    if (!hasEquivalentSpecific) return processedResultsRaw;
-    return processedResultsRaw.filter((r) => String(r.parameter).trim().toLowerCase() !== 'result');
-  })();
-
-  // Render rows in the template's canonical clinical order so completed reports match
-  // the order seen on Enter Results and Result Details.
-  const processedResults = orderResultRows(dedupedResults, normalRangeObj);
 
   let overallStatus: ResultStatus;
   if (test.overall_status) {

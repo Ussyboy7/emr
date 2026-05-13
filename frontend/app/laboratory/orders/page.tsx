@@ -23,7 +23,13 @@ import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
-import { buildEntryTemplate, classifyValue, type TemplateField } from '@/lib/laboratory/template-utils';
+import {
+  buildEntryTemplate,
+  classifyValue,
+  coerceStoredResultValue,
+  orderResultRows,
+  type TemplateField,
+} from '@/lib/laboratory/template-utils';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
@@ -1610,7 +1616,8 @@ export default function LabOrdersPage() {
     if (isRework && test.results) {
       // Overlay existing results for rework (only matching keys; preserves full template shape)
       Object.entries(test.results).forEach(([key, value]) => {
-        initial[key] = String(value);
+        if (key === 'custom_results') return;
+        initial[key] = coerceStoredResultValue(value);
       });
     }
 
@@ -2506,7 +2513,8 @@ export default function LabOrdersPage() {
                       {test.results && (
                         <div className="mt-2 p-2 rounded bg-emerald-50 dark:bg-emerald-900/20 text-xs">
                           <p className="font-medium text-emerald-700 dark:text-emerald-400 mb-1">Results:</p>
-                          {Array.isArray((test.results as any).custom_results) ? (
+                          {Array.isArray((test.results as any).custom_results) &&
+                          (test.results as any).custom_results.length > 0 ? (
                             <div className="space-y-2">
                               {((test.results as any).custom_results as CustomResultRow[]).map((row, rowIdx) => {
                                 const attachment = (test.resultAttachments || []).find((file) =>
@@ -2552,12 +2560,18 @@ export default function LabOrdersPage() {
                             </div>
                           ) : (
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
-                              {Object.entries(test.results).map(([key, value]) => (
-                                <div key={key}>
-                                  <span className="text-muted-foreground">{key}:</span>{' '}
-                                  <span className="font-medium">
-                                    {typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '')}
-                                  </span>
+                              {orderResultRows(
+                                Object.entries(test.results as Record<string, unknown>)
+                                  .filter(([key]) => key !== 'custom_results')
+                                  .map(([key, value]) => ({
+                                    parameter: key,
+                                    value: coerceStoredResultValue(value),
+                                  })),
+                                test.templateNormalRange ?? undefined
+                              ).map(({ parameter, value }) => (
+                                <div key={parameter}>
+                                  <span className="text-muted-foreground">{parameter}:</span>{' '}
+                                  <span className="font-medium">{value}</span>
                                 </div>
                               ))}
                             </div>

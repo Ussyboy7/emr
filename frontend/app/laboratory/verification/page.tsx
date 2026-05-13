@@ -22,10 +22,8 @@ import { transformPriority, transformToBackendPriority } from '@/lib/services/tr
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
 import {
-  classifyValue,
+  buildOrderedLabResultViewRows,
   deriveOverallStatus,
-  fieldForParameter,
-  orderResultRows,
   type ResultStatus,
 } from '@/lib/laboratory/template-utils';
 import {
@@ -96,6 +94,11 @@ const transformResult = (
   const testName = testDetails?.name || test?.name || '';
 
   const testCodeForTemplate = (testDetails as any)?.code || (test as any)?.code || '';
+  const normalRangeObj: Record<string, any> | undefined =
+    (testDetails as any)?.template_normal_range ||
+    (testDetails as any)?.template?.normal_range ||
+    (testCodeForTemplate ? templateNormalRangesByCode?.[testCodeForTemplate] : undefined);
+
   const toAbsoluteResultFileUrl = (url: string): string => {
     if (!url) return url;
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
@@ -111,141 +114,35 @@ const transformResult = (
       return 'Result file';
     }
   };
-  const attachmentsByRowId = new Map<string, any>();
-  const attachmentsByRowName = new Map<string, any>();
-  ((testDetails as any)?.result_attachments || (test as any)?.result_attachments || []).forEach((attachment: any) => {
-    if (attachment?.row_id) attachmentsByRowId.set(String(attachment.row_id), attachment);
-    if (attachment?.row_name) attachmentsByRowName.set(String(attachment.row_name).trim().toLowerCase(), attachment);
-  });
 
-  // Canonical template source: test-specific range first, then template object, then
-  // a cached per-code map (fallback for legacy rows missing `template_normal_range`).
-  const normalRangeObj: Record<string, any> | undefined =
-    (testDetails as any)?.template_normal_range ||
-    (testDetails as any)?.template?.normal_range ||
-    (testCodeForTemplate ? templateNormalRangesByCode?.[testCodeForTemplate] : undefined);
-  
-  // Debug: Log the structure to help identify issues
-  if (process.env.NODE_ENV === 'development') {
-    console.log('LabResult API response:', {
-      hasTest: !!apiResult.test,
-      hasTestDetails: !!(apiResult as any).test_details,
-      testObject: test,
-      testType: typeof test,
-      testIsObject: test && typeof test === 'object' && !Array.isArray(test),
-      testResults: test?.results,
-      testResultsType: typeof test?.results,
-      testResultsKeys: test?.results ? Object.keys(test.results) : [],
-      fullApiResult: apiResult,
-    });
-  }
-  
   // Transform results from JSON format to TestResult array
-  // Try multiple ways to access results
   let resultsObj: Record<string, any> | null = null;
-  
-  // If test is an object (not just an ID), try to access results
+
   if (test && typeof test === 'object' && !Array.isArray(test)) {
-    // Try direct access to test.results
     if (test.results && typeof test.results === 'object' && !Array.isArray(test.results)) {
       resultsObj = test.results;
     }
   }
-  
-  // Also try accessing from test_details.results if test_details exists
+
   if (!resultsObj && (apiResult as any).test_details) {
-    const testDetails = (apiResult as any).test_details;
-    if (testDetails.results && typeof testDetails.results === 'object' && !Array.isArray(testDetails.results)) {
-      resultsObj = testDetails.results;
+    const td = (apiResult as any).test_details;
+    if (td.results && typeof td.results === 'object' && !Array.isArray(td.results)) {
+      resultsObj = td.results;
     }
   }
-  
-  // Also try accessing from the root API result
+
   if (!resultsObj && (apiResult as any).results && typeof (apiResult as any).results === 'object') {
     resultsObj = (apiResult as any).results;
   }
-  
-  // Process results if we found them
+
   if (resultsObj && Object.keys(resultsObj).length > 0) {
-    if (Array.isArray((resultsObj as any).custom_results)) {
-      (resultsObj as any).custom_results.forEach((row: any) => {
-        if (!row || (!row.name && !row.value && !row.unit && !row.reference_range && !row.notes)) return;
-        const rowId = String(row.id || '');
-        const parameter = String(row.name || 'Custom Result');
-        const attachment = attachmentsByRowId.get(rowId) || attachmentsByRowName.get(parameter.trim().toLowerCase());
-        const attachmentUrl = attachment?.file ? toAbsoluteResultFileUrl(String(attachment.file)) : '';
-        results.push({
-          parameter,
-          value: String(row.value || ''),
-          unit: String(row.unit || ''),
-          normalRange: String(row.reference_range || ''),
-          status: 'Normal',
-          attachment: attachmentUrl
-            ? {
-                url: attachmentUrl,
-                name: displayNameFromResultFileUrl(attachmentUrl),
-              }
-            : null,
-        });
-      });
-    } else {
-      Object.entries(resultsObj).forEach(([key, value]) => {
-      // Skip if value is null, undefined, or empty string
-      if (value === null || value === undefined || value === '') {
-        return;
-      }
-
-      const valueStr = String(value);
-      const field = fieldForParameter(key, normalRangeObj);
-
-      let status: ResultStatus = 'Normal';
-      let unit = '';
-      let normalRange = '';
-
-      if (field) {
-        unit = field.unit;
-        normalRange = field.normalRange;
-        status = classifyValue(valueStr, field);
-      } else if (valueStr.trim()) {
-        // Text-only legacy values: honour explicit markers if the template is unknown.
-        const normalized = valueStr.toLowerCase();
-        if (normalized.includes('critical')) status = 'Critical';
-        else if (normalized.includes('abnormal')) status = 'Abnormal';
-      }
-
-      results.push({
-        parameter: key,
-        value: valueStr,
-        unit,
-        normalRange,
-        status,
-      });
-      });
-    }
-
-    // De-duplicate generic "Result" alias when a specific analyte row has the same value/range/unit.
-    const genericResultRow = results.find((r) => r.parameter.trim().toLowerCase() === 'result');
-    if (genericResultRow) {
-      const hasEquivalentSpecific = results.some(
-        (r) =>
-          r.parameter.trim().toLowerCase() !== 'result' &&
-          String(r.value).trim() === String(genericResultRow.value).trim() &&
-          String(r.unit).trim().toLowerCase() === String(genericResultRow.unit).trim().toLowerCase() &&
-          String(r.normalRange).trim().toLowerCase() === String(genericResultRow.normalRange).trim().toLowerCase()
-      );
-      if (hasEquivalentSpecific) {
-        const deduped = results.filter((r) => r.parameter.trim().toLowerCase() !== 'result');
-        results.length = 0;
-        results.push(...deduped);
-      }
-    }
+    const built = buildOrderedLabResultViewRows(resultsObj, normalRangeObj, {
+      resultAttachments: (testDetails as any)?.result_attachments || (test as any)?.result_attachments,
+      resolveFileUrl: toAbsoluteResultFileUrl,
+      attachmentDisplayName: displayNameFromResultFileUrl,
+    });
+    results.push(...built);
   }
-
-  // Render rows in the template's canonical clinical order (same sequence as
-  // the Enter Results form). Unknown keys are appended alphabetically.
-  const orderedResults = orderResultRows(results, normalRangeObj);
-  results.length = 0;
-  results.push(...orderedResults);
 
   // Determine overall status from individual results or use API value
   let overallStatus: ResultStatus = 'Normal';

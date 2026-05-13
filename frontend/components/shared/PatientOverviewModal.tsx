@@ -20,6 +20,7 @@ import { TimelineTab } from '@/components/patient-overview/TimelineTab';
 import {
   getVisitServiceClinicsDisplay,
 } from '@/lib/utils/clinic-utils';
+import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 import {
   User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
   ChevronRight, AlertTriangle, Loader2, Mail, MapPin, Droplets,
@@ -452,12 +453,15 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           (order.tests || []).filter((test: any) => test.status === 'results_ready' || test.status === 'verified').map((test: any) => {
             // Extract results with units and ranges
             const results = test.results || {};
-            const resultEntries = Object.entries(results);
-            const formattedResults = resultEntries.map(([key, value]: [string, any]) => {
-              const unit = test.normal_range?.[key]?.unit || '';
-              const range = test.normal_range?.[key]?.range || '';
-              return `${key}: ${value}${unit ? ` ${unit}` : ''}${range ? ` (${range})` : ''}`;
-            }).join(', ') || 'Pending';
+            const nr = test.template_normal_range || test.normal_range;
+            const orderedRows = buildOrderedLabResultViewRows(results as Record<string, any>, nr);
+            const formattedResults =
+              orderedRows
+                .map((r) => {
+                  const range = r.normalRange?.trim() || '';
+                  return `${r.parameter}: ${r.value}${r.unit ? ` ${r.unit}` : ''}${range ? ` (${range})` : ''}`;
+                })
+                .join(', ') || 'Pending';
             
             return {
               id: `${order.id}-${test.id}`,

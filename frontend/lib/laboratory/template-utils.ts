@@ -6,6 +6,7 @@
  *  - Result entry (`app/laboratory/orders/page.tsx`)
  *  - Result verification (`app/laboratory/verification/page.tsx`)
  *  - Completed lab report (`lib/laboratory/completedLabReport.ts`)
+ *  - Patient chart / overview / consultation history (`buildOrderedLabResultViewRows`)
  *
  * Keeping ordering + classification here means the three screens never disagree
  * about whether a value is Normal/Abnormal/Critical, or about row order.
@@ -49,6 +50,20 @@ const toNumber = (value: unknown): number | undefined => {
   const n = Number(s);
   return Number.isNaN(n) ? undefined : n;
 };
+
+/** Unwrap a stored API cell: plain scalar or `{ value, unit?, ... }` shape. */
+export function coerceStoredResultValue(raw: unknown): string {
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
+    return String(raw);
+  }
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw) && 'value' in raw) {
+    const v = (raw as { value?: unknown }).value;
+    if (v === undefined || v === null) return '';
+    return String(v);
+  }
+  return '';
+}
 
 /** Extract the normal-range text (e.g. "11.0-18.0") from a template analyte meta. */
 export const getNormalRangeText = (meta: AnalyteMeta | undefined | null): string => {
@@ -243,3 +258,137 @@ export const deriveOverallStatus = (
   if (rows.some((r) => r.status === 'Abnormal')) return 'Abnormal';
   return 'Normal';
 };
+
+/** One row for lab report tables / history strings (matches CompletedTestResultRow / verification TestResult). */
+export interface LabViewRow {
+  parameter: string;
+  value: string;
+  unit: string;
+  normalRange: string;
+  status: ResultStatus;
+  attachment?: { url: string; name: string } | null;
+}
+
+export interface BuildOrderedLabRowsOptions {
+  resultAttachments?: any[];
+  /** Turn a stored media path into an absolute URL (callers pass API/window origin logic). */
+  resolveFileUrl?: (raw: string) => string;
+  attachmentDisplayName?: (url: string) => string;
+}
+
+const defaultAttachmentDisplayName = (url: string): string => {
+  try {
+    return decodeURIComponent(url.split('?')[0].split('/').filter(Boolean).pop() || 'attachment');
+  } catch {
+    return 'attachment';
+  }
+};
+
+/**
+ * Canonical pipeline: same rules as backend `download_report` and PDF row builder —
+ * non-empty `custom_results` → only those rows; otherwise all keys except `custom_results`;
+ * unwrap `{ value }` cells; classify; dedupe `Result` alias; sort by template `_order`.
+ */
+export function buildOrderedLabResultViewRows(
+  resultPayload: Record<string, any> | null | undefined,
+  normalRange: Record<string, any> | null | undefined,
+  options?: BuildOrderedLabRowsOptions
+): LabViewRow[] {
+  const nr = normalRange;
+  const payload =
+    resultPayload && typeof resultPayload === 'object' && !Array.isArray(resultPayload)
+      ? resultPayload
+      : {};
+
+  const customList = payload.custom_results;
+  const useCustomOnly = Array.isArray(customList) && customList.length > 0;
+
+  const attachmentsByRowId = new Map<string, any>();
+  const attachmentsByRowName = new Map<string, any>();
+  (options?.resultAttachments || []).forEach((attachment: any) => {
+    if (attachment?.row_id) attachmentsByRowId.set(String(attachment.row_id), attachment);
+    if (attachment?.row_name) {
+      attachmentsByRowName.set(String(attachment.row_name).trim().toLowerCase(), attachment);
+    }
+  });
+
+  const toAbs = options?.resolveFileUrl ?? ((u: string) => u);
+  const nameFromUrl = options?.attachmentDisplayName ?? defaultAttachmentDisplayName;
+
+  let processed: LabViewRow[] = [];
+
+  if (useCustomOnly) {
+    processed = customList.flatMap((row: any) => {
+      if (
+        !row ||
+        (!row.name && !row.value && !row.unit && !row.reference_range && !row.notes)
+      ) {
+        return [];
+      }
+      const rowId = String(row.id || '');
+      const parameter = String(row.name || 'Custom Result');
+      const attachment =
+        attachmentsByRowId.get(rowId) ||
+        attachmentsByRowName.get(parameter.trim().toLowerCase());
+      const rawFile = attachment?.file ? String(attachment.file) : '';
+      const attachmentUrl = rawFile ? toAbs(rawFile) : '';
+      const noteSuffix = row.notes ? ` — ${String(row.notes)}` : '';
+      const out: LabViewRow = {
+        parameter,
+        value: `${String(row.value || '')}${noteSuffix}`,
+        unit: String(row.unit || ''),
+        normalRange: String(row.reference_range || ''),
+        status: 'Normal',
+        attachment: attachmentUrl ? { url: attachmentUrl, name: nameFromUrl(attachmentUrl) } : null,
+      };
+      return [out];
+    });
+  } else {
+    processed = Object.entries(payload)
+      .filter(([key]) => key !== 'custom_results')
+      .map(([key, value]) => {
+        const valueStr = coerceStoredResultValue(value);
+        const field = fieldForParameter(key, nr);
+
+        let unit = '';
+        let normalRange = '';
+        let status: ResultStatus = 'Normal';
+
+        if (field) {
+          unit = field.unit;
+          normalRange = field.normalRange;
+          status = classifyValue(valueStr, field);
+        } else if (valueStr.trim()) {
+          const normalized = valueStr.toLowerCase();
+          if (normalized.includes('critical')) status = 'Critical';
+          else if (normalized.includes('abnormal')) status = 'Abnormal';
+        }
+
+        const out: LabViewRow = {
+          parameter: key,
+          value: valueStr,
+          unit,
+          normalRange,
+          status,
+          attachment: null,
+        };
+        return out;
+      });
+  }
+
+  const deduped = (() => {
+    const generic = processed.find((r) => String(r.parameter).trim().toLowerCase() === 'result');
+    if (!generic) return processed;
+    const hasEquivalentSpecific = processed.some(
+      (r) =>
+        String(r.parameter).trim().toLowerCase() !== 'result' &&
+        String(r.value).trim() === String(generic.value).trim() &&
+        String(r.unit).trim().toLowerCase() === String(generic.unit).trim().toLowerCase() &&
+        String(r.normalRange).trim().toLowerCase() === String(generic.normalRange).trim().toLowerCase()
+    );
+    if (!hasEquivalentSpecific) return processed;
+    return processed.filter((r) => String(r.parameter).trim().toLowerCase() !== 'result');
+  })();
+
+  return orderResultRows(deduped, nr);
+}

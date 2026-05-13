@@ -72,10 +72,6 @@ export function LabCompletedReportDialog({
 }: LabCompletedReportDialogProps) {
   const hasUsableResultFile = Boolean(test?.result_file && test?.result_file_exists !== false);
 
-  // Hide Unit and Normal Range columns if all results have empty unit and normalRange doesn't contain '-' (qualitative tests)
-  const hideUnitNormalColumns = test?.results.every(r =>
-    !r.unit?.trim() && (!r.normalRange?.trim() || !r.normalRange.includes('-'))
-  ) ?? false;
   const hasRowAttachments = test?.results.some((r) => Boolean(r.attachment?.url)) ?? false;
 
   const handlePrint = async () => {
@@ -261,12 +257,8 @@ export function LabCompletedReportDialog({
                       <tr>
                         <th className="text-left p-3 font-medium">Parameter</th>
                         <th className="text-left p-3 font-medium">Result</th>
-                        {!hideUnitNormalColumns && (
-                          <>
-                            <th className="text-left p-3 font-medium">Unit</th>
-                            <th className="text-left p-3 font-medium">Reference Range</th>
-                          </>
-                        )}
+                        <th className="text-left p-3 font-medium">Unit</th>
+                        <th className="text-left p-3 font-medium">Reference Range</th>
                         <th className="text-left p-3 font-medium">Status</th>
                         {hasRowAttachments && <th className="text-left p-3 font-medium">File</th>}
                       </tr>
@@ -278,14 +270,10 @@ export function LabCompletedReportDialog({
                           <td className={`p-3 font-mono ${getResultStatusColor(result.status)}`}>
                             {result.value || '—'}
                           </td>
-                          {!hideUnitNormalColumns && (
-                            <>
-                              <td className="p-3 text-muted-foreground">{result.unit || '—'}</td>
-                              <td className="p-3 text-muted-foreground">
-                                {result.normalRange || '—'}
-                              </td>
-                            </>
-                          )}
+                          <td className="p-3 text-muted-foreground">{result.unit || '—'}</td>
+                          <td className="p-3 text-muted-foreground">
+                            {result.normalRange || '—'}
+                          </td>
                           <td className="p-3">
                             {result.status !== 'Normal' && (
                               <Badge variant="outline" className={getResultStatusColor(result.status)}>

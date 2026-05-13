@@ -42,6 +42,7 @@ from .serializers import (
     OTHER_TEMPLATE_CODES,
 )
 from .pagination import FlexiblePageNumberPagination
+from .result_display import dedupe_result_alias_rows, sort_lab_result_rows_for_pdf
 from audit.services import AuditService
 
 
@@ -1340,50 +1341,70 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         row_flags = []
 
         if result.test.results and isinstance(result.test.results, dict):
-            for param, param_data in result.test.results.items():
-                if param == 'custom_results' and isinstance(param_data, list):
-                    for row in param_data:
-                        if not isinstance(row, dict):
-                            continue
-                        name = str(row.get('name') or 'Custom Result')
-                        value = row.get('value', '')
-                        if value is None:
-                            value = ''
-                        unit = str(row.get('unit') or '')
-                        ref_range = str(row.get('reference_range') or '')
-                        status = str(row.get('status') or 'normal').title()
-                        if status not in ('Normal', 'Abnormal', 'Critical'):
-                            status = 'Normal'
-                        result_rows.append(
-                            [name, str(value), unit, ref_range, status if status != 'Normal' else '']
+            results_dict = result.test.results
+            custom_list = results_dict.get('custom_results')
+            use_custom_only = isinstance(custom_list, list) and len(custom_list) > 0
+
+            packed_rows = []
+
+            if use_custom_only:
+                for row in custom_list:
+                    if not isinstance(row, dict):
+                        continue
+                    name = str(row.get('name') or 'Custom Result')
+                    value = row.get('value', '')
+                    if value is None:
+                        value = ''
+                    unit = str(row.get('unit') or '')
+                    ref_range = str(row.get('reference_range') or '')
+                    status = str(row.get('status') or 'normal').title()
+                    if status not in ('Normal', 'Abnormal', 'Critical'):
+                        status = 'Normal'
+                    packed_rows.append(
+                        (name, '' if value is None else str(value), unit, ref_range, status, '')
+                    )
+            else:
+                for param, param_data in results_dict.items():
+                    if param == 'custom_results':
+                        continue
+                    meta = _meta_for(param)
+                    if isinstance(param_data, dict):
+                        value = param_data.get('value', '')
+                        unit = str(param_data.get('unit') or (meta or {}).get('unit') or '')
+                        ref_range = str(
+                            param_data.get('reference_range') or _fmt_reference_range(meta)
                         )
-                        row_statuses.append(status)
-                        row_flags.append('')  # custom rows don't carry numeric ranges
-                    continue
-                meta = _meta_for(param)
-                if isinstance(param_data, dict):
-                    value = param_data.get('value', '')
-                    unit = str(param_data.get('unit') or (meta or {}).get('unit') or '')
-                    ref_range = str(param_data.get('reference_range') or _fmt_reference_range(meta))
-                    raw_status = str(param_data.get('status') or '').strip().title()
-                    if raw_status in ('Normal', 'Abnormal', 'Critical'):
-                        status = raw_status
+                        raw_status = str(param_data.get('status') or '').strip().title()
+                        if raw_status in ('Normal', 'Abnormal', 'Critical'):
+                            status = raw_status
+                        else:
+                            status = _classify(value, meta)
                     else:
+                        value = param_data
+                        unit = str((meta or {}).get('unit') or '')
+                        ref_range = _fmt_reference_range(meta)
                         status = _classify(value, meta)
-                else:
-                    value = param_data
-                    unit = str((meta or {}).get('unit') or '')
-                    ref_range = _fmt_reference_range(meta)
-                    status = _classify(value, meta)
-                result_rows.append([
-                    str(param),
-                    '' if value is None else str(value),
-                    unit,
-                    ref_range,
-                    status if status != 'Normal' else '',
-                ])
+                    packed_rows.append(
+                        (
+                            str(param),
+                            '' if value is None else str(value),
+                            unit,
+                            ref_range,
+                            status,
+                            _flag_letter(value, meta),
+                        )
+                    )
+
+            packed_rows = dedupe_result_alias_rows(
+                sort_lab_result_rows_for_pdf(packed_rows, template_normal_range)
+            )
+
+            for param, value, unit, ref_range, status, flag in packed_rows:
+                result_rows.append(
+                    [param, value, unit, ref_range, status if status != 'Normal' else '']
+                )
                 row_statuses.append(status)
-                row_flags.append(_flag_letter(value, meta))
+                row_flags.append(flag)
 
         if not result_rows:
             result_rows.append(['Result', 'N/A', '', '', ''])

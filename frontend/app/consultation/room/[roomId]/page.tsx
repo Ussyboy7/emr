@@ -98,6 +98,7 @@ import {
   summarizeLabTestForConsultationReport,
   reportFormatters,
 } from '@/lib/consultation-report';
+import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 
 const { formatLabResult, formatResultWithPending } = reportFormatters;
 
@@ -1169,15 +1170,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Transform lab results with actual users who processed/verified them
   const transformLabResults = (labResults: any[]) => {
     return labResults.map((test: any) => {
-      // Check if this test has manual results or uploaded file
-      const hasManualResults = test.results && Object.keys(test.results).length > 0;
+      const resultsPayload = test.results && typeof test.results === 'object' ? test.results : null;
+      const normalRange = test.template_normal_range || test.normal_range;
+      const orderedRows = buildOrderedLabResultViewRows(
+        resultsPayload as Record<string, any> | null | undefined,
+        normalRange
+      );
+
+      const hasManualResults = Boolean(
+        resultsPayload &&
+          (() => {
+            const cr = (resultsPayload as any).custom_results;
+            if (Array.isArray(cr) && cr.length > 0) return true;
+            return Object.keys(resultsPayload).filter((k) => k !== 'custom_results').length > 0;
+          })()
+      );
       const resultFile = normalizeLabResultFileFromApi(test.result_file);
       const hasUploadedFile = resultFile != null;
+
+      const resultSummary = orderedRows.length
+        ? orderedRows.map((r) => `${r.parameter}: ${r.value}${r.unit ? ` ${r.unit}` : ''}`).join('; ')
+        : '';
 
       return {
         id: test.id || 0,
         test_name: test.name || 'Unknown Test',
-        result: test.results ? Object.values(test.results).join(', ') : '',
+        result: resultSummary,
         unit: '',
         reference_range: '',
         status: test.status === 'verified' ? 'Normal' : test.status || 'pending',
@@ -1197,13 +1215,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         resultFile,
         hasManualResults,
         hasUploadedFile,
-        parameters: test.results ? Object.entries(test.results).map(([key, value]: [string, any]) => ({
-          name: key,
-          value: value,
-          unit: '',
-          referenceRange: '',
-          status: 'Normal'
-        })) : [],
+        parameters: orderedRows.map((r) => ({
+          name: r.parameter,
+          value: r.value,
+          unit: r.unit,
+          referenceRange: r.normalRange,
+          status: r.status,
+        })),
       };
     });
   };

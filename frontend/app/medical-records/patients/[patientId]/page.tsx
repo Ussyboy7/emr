@@ -34,10 +34,8 @@ import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import {
-  classifyValue,
+  buildOrderedLabResultViewRows,
   deriveOverallStatus,
-  fieldForParameter,
-  orderResultRows,
   type ResultStatus,
 } from '@/lib/laboratory/template-utils';
 import { getOrganizationLabHeader } from '@/lib/constants/organization';
@@ -971,21 +969,18 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               const doctorDetails = orderDetails.doctor_details || {};
               const normalRangeObj: Record<string, any> | undefined = selectedLab?.template_normal_range;
 
-              const rawResults = Object.entries(selectedLab.results || {}).map(([key, value]) => {
-                const valueStr = String(value ?? '');
-                const field = fieldForParameter(key, normalRangeObj);
-                let unit = '';
-                let normalRange = '';
-                let status: ResultStatus = 'Normal';
-                if (field) {
-                  unit = field.unit;
-                  normalRange = field.normalRange;
-                  status = classifyValue(valueStr, field);
+              const processedResults = buildOrderedLabResultViewRows(
+                (selectedLab.results || {}) as Record<string, any>,
+                normalRangeObj,
+                {
+                  resultAttachments: selectedLab.result_attachments,
+                  resolveFileUrl: (raw) => {
+                    const s = String(raw);
+                    if (s.startsWith('http')) return s;
+                    return s.startsWith('/') ? `${window.location.origin}${s}` : `${window.location.origin}/${s}`;
+                  },
                 }
-                return { parameter: key, value: valueStr, unit, normalRange, status };
-              });
-
-              const processedResults = orderResultRows(rawResults, normalRangeObj);
+              );
               const overallStatus: ResultStatus = deriveOverallStatus(processedResults);
 
               const orderedAt = selectedLab.created_at || selectedLab.collected_at || '';
