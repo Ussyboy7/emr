@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
@@ -160,16 +161,17 @@ export default function EyeClinicOrdersPage() {
   useAuthRedirect(authError);
 
   const [orders, setOrders] = useState<EyeOrder[]>([]);
-  const [allSessions, setAllSessions] = useState<EyeSession[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [activeTab, setActiveTab] = useState('pending');
   const [dateFilter, setDateFilter] = useState('today');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [selectedOrder, setSelectedOrder] = useState<EyeOrder | null>(null);
   const [selectedOrderSessions, setSelectedOrderSessions] = useState<EyeSession[]>([]);
@@ -202,35 +204,106 @@ export default function EyeClinicOrdersPage() {
     soap_note: createEmptySoapNote(),
   });
 
-  const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
-    const silent = opts?.silent;
-    try {
-      if (!silent) {
-        setLoading(true);
-        setError(null);
-      }
-      const [ordersResponse, sessionsResponse] = await Promise.all([
-        eyeCareService.getOrders({ page_size: 100 }),
-        eyeCareService.getSessions({ page_size: 500 }),
-      ]);
-      setOrders(ordersResponse.results || []);
-      setAllSessions(sessionsResponse.results || []);
-    } catch (err) {
-      console.error('Error loading eye clinic orders:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else if (!silent) {
-        setError(err instanceof Error ? err.message : 'Failed to load eye clinic orders');
-        toast.error('Failed to load eye clinic orders');
-      }
-    } finally {
-      if (!silent) setLoading(false);
+  const [stats, setStats] = useState({
+    pending: 0,
+    inProgress: 0,
+    cancelled: 0,
+    completed: 0,
+  });
+
+  const buildOrdersListParams = useCallback((): Parameters<typeof eyeCareService.getOrders>[0] => {
+    const params: Parameters<typeof eyeCareService.getOrders>[0] = {
+      page: currentPage,
+      page_size: itemsPerPage,
+      search: debouncedSearchQuery.trim() || undefined,
+    };
+    if (activeTab !== 'all') {
+      params.status_tab = activeTab as 'pending' | 'in_progress' | 'cancelled' | 'completed';
     }
-  }, []);
+    if (dateRange.from || dateRange.to) {
+      params.date_filter = 'all';
+      if (dateRange.from) params.ordered_at_after = dateRange.from;
+      if (dateRange.to) params.ordered_at_before = dateRange.to;
+    } else {
+      params.date_filter = dateFilter;
+    }
+    return params;
+  }, [
+    currentPage,
+    itemsPerPage,
+    debouncedSearchQuery,
+    activeTab,
+    dateFilter,
+    dateRange.from,
+    dateRange.to,
+  ]);
+
+  const buildOrdersStatsBase = useCallback((): Parameters<typeof eyeCareService.getOrders>[0] => {
+    const params: Parameters<typeof eyeCareService.getOrders>[0] = {
+      search: debouncedSearchQuery.trim() || undefined,
+    };
+    if (dateRange.from || dateRange.to) {
+      params.date_filter = 'all';
+      if (dateRange.from) params.ordered_at_after = dateRange.from;
+      if (dateRange.to) params.ordered_at_before = dateRange.to;
+    } else {
+      params.date_filter = dateFilter;
+    }
+    return params;
+  }, [debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
+
+  const loadOrders = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent;
+      try {
+        if (!silent) {
+          setLoading(true);
+          setError(null);
+        }
+        const res = await eyeCareService.getOrders(buildOrdersListParams());
+        setOrders(res.results || []);
+        setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
+      } catch (err) {
+        console.error('Error loading eye clinic orders:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else if (!silent) {
+          setError(err instanceof Error ? err.message : 'Failed to load eye clinic orders');
+          toast.error('Failed to load eye clinic orders');
+        }
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [buildOrdersListParams]
+  );
 
   useEffect(() => {
     void loadOrders();
   }, [loadOrders]);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const base = { ...buildOrdersStatsBase(), page: 1, page_size: 1 };
+        const [pendingRes, inProgressRes, cancelledRes, completedRes] = await Promise.all([
+          eyeCareService.getOrders({ ...base, status_tab: 'pending' }),
+          eyeCareService.getOrders({ ...base, status_tab: 'in_progress' }),
+          eyeCareService.getOrders({ ...base, status_tab: 'cancelled' }),
+          eyeCareService.getOrders({ ...base, status_tab: 'completed' }),
+        ]);
+        setStats({
+          pending: pendingRes.count ?? 0,
+          inProgress: inProgressRes.count ?? 0,
+          cancelled: cancelledRes.count ?? 0,
+          completed: completedRes.count ?? 0,
+        });
+      } catch {
+        /* keep previous stats */
+      }
+    };
+    void loadStats();
+  }, [buildOrdersStatsBase]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -241,7 +314,7 @@ export default function EyeClinicOrdersPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   useEffect(() => {
     if ((!isViewDialogOpen && !isSessionDialogOpen) || !selectedOrder?.id) {
@@ -263,66 +336,6 @@ export default function EyeClinicOrdersPage() {
       cancelled = true;
     };
   }, [isViewDialogOpen, isSessionDialogOpen, selectedOrder?.id]);
-
-  const stats = useMemo(() => ({
-    pending: orders.filter((order) => order.status === 'pending' || order.status === 'scheduled').length,
-    inProgress: orders.filter((order) => order.status === 'in_progress').length,
-    cancelled: orders.filter((order) => order.status === 'cancelled').length,
-    completed: orders.filter((order) => order.status === 'completed').length,
-  }), [orders]);
-
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const matchesSearch =
-        order.patient_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.patient_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.diagnosis?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        String(order.id).includes(searchQuery.toLowerCase());
-
-      const orderedDate = new Date(order.ordered_at);
-      if (Number.isNaN(orderedDate.getTime())) return false;
-
-      if (dateFilter !== 'all') {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
-        if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          if (orderedDate < weekAgo) return false;
-        }
-        if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          if (orderedDate < monthAgo) return false;
-        }
-      }
-
-      if (dateRange.from || dateRange.to) {
-        if (dateRange.from) {
-          const from = new Date(`${dateRange.from}T00:00:00`);
-          if (orderedDate < from) return false;
-        }
-        if (dateRange.to) {
-          const to = new Date(`${dateRange.to}T23:59:59.999`);
-          if (orderedDate > to) return false;
-        }
-      }
-
-      if (activeTab === 'all') return matchesSearch;
-      if (activeTab === 'pending') return matchesSearch && (order.status === 'pending' || order.status === 'scheduled');
-      if (activeTab === 'in_progress') return matchesSearch && order.status === 'in_progress';
-      if (activeTab === 'cancelled') return matchesSearch && order.status === 'cancelled';
-      if (activeTab === 'completed') return matchesSearch && order.status === 'completed';
-      return matchesSearch;
-    });
-  }, [orders, searchQuery, activeTab, dateFilter, dateRange.from, dateRange.to]);
-
-  const paginatedOrders = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredOrders.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredOrders, currentPage, itemsPerPage]);
 
   const openViewDialog = (order: EyeOrder) => {
     setSelectedOrder(order);
@@ -628,24 +641,6 @@ export default function EyeClinicOrdersPage() {
     }
   };
 
-  const sessionsMap = useMemo(() => {
-    const map = new Map<number, EyeSession[]>();
-    allSessions.forEach((session) => {
-      const orderId =
-        typeof session.order === 'number'
-          ? session.order
-          : (session.order_details as EyeOrder | undefined)?.id;
-      if (!orderId) return;
-      const list = map.get(orderId) || [];
-      list.push(session);
-      map.set(orderId, list);
-    });
-    if (selectedOrder?.id && selectedOrderSessions.length > 0) {
-      map.set(selectedOrder.id, selectedOrderSessions);
-    }
-    return map;
-  }, [allSessions, selectedOrder?.id, selectedOrderSessions]);
-
   const updateSoapNote = (updater: (soapNote: EyeSoapNote) => EyeSoapNote) => {
     setSessionForm((prev) => {
       const soapNote = updater(prev.soap_note);
@@ -793,8 +788,7 @@ export default function EyeClinicOrdersPage() {
   };
 
   const OrderCard = ({ order }: { order: EyeOrder }) => {
-    const orderSessions = sessionsMap.get(order.id) || [];
-    const completedSessions = orderSessions.filter((session) => session.status === 'completed').length;
+    const completedSessions = order.completed_sessions_count ?? 0;
 
     return (
       <Card
@@ -1015,21 +1009,21 @@ export default function EyeClinicOrdersPage() {
                 <p className="text-red-600 dark:text-red-400">{error}</p>
                 <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
               </CardContent></Card>
-            ) : paginatedOrders.length === 0 ? (
+            ) : orders.length === 0 ? (
               <Card><CardContent className="p-8 text-center text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No orders found</p>
               </CardContent></Card>
             ) : (
-              paginatedOrders.map((order) => <OrderCard key={order.id} order={order} />)
+              orders.map((order) => <OrderCard key={order.id} order={order} />)
             )}
           </div>
 
-          {filteredOrders.length > 0 && (
+          {totalCount > 0 && (
             <Card className="p-4">
               <StandardPagination
                 currentPage={currentPage}
-                totalItems={filteredOrders.length}
+                totalItems={totalCount}
                 itemsPerPage={itemsPerPage}
                 onPageChange={setCurrentPage}
                 onItemsPerPageChange={(newSize) => {

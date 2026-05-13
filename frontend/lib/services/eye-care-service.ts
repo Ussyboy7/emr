@@ -27,6 +27,7 @@ export interface EyeOrder {
   ordered_at: string;
   scheduled_at: string | null;
   completed_at: string | null;
+  completed_sessions_count?: number;
 }
 
 export type EyeRefractionEntry = {
@@ -113,17 +114,22 @@ export interface EyeSession {
 
 export const eyeCareService = {
   /**
-   * Fetch all eye orders with optional filters
+   * Fetch eye orders with server-side pagination and filters.
    */
   async getOrders(params?: {
     status?: string;
+    status_tab?: 'pending' | 'in_progress' | 'cancelled' | 'completed' | 'all' | string;
     priority?: string;
     patient?: number;
+    page?: number;
     page_size?: number;
-  }) {
-    const queryString = new URLSearchParams(params as Record<string, string>).toString();
-    const url = `/eyecare/orders/${queryString ? `?${queryString}` : ''}`;
-    return apiFetch<{ results: EyeOrder[] }>(url);
+    search?: string;
+    date_filter?: 'today' | 'week' | 'month' | 'all' | string;
+    ordered_at_after?: string;
+    ordered_at_before?: string;
+  }): Promise<{ results: EyeOrder[]; count: number }> {
+    const qs = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    return apiFetch<{ results: EyeOrder[]; count: number }>(`/eyecare/orders${qs || ''}`);
   },
 
   /**

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -103,10 +104,12 @@ export default function ClinicDepartmentPage() {
   const [deptUsers, setDeptUsers] = useState<any[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
-  const [totalCount, setTotalCount] = useState(0);
+  const [clinicsTotalCount, setClinicsTotalCount] = useState(0);
+  const [departmentsTotalCount, setDepartmentsTotalCount] = useState(0);
   const [kpiStats, setKpiStats] = useState<{
     total_clinics: number;
     active_clinics: number;
@@ -127,6 +130,7 @@ export default function ClinicDepartmentPage() {
   });
   const [deptForm, setDeptForm] = useState<Partial<Department>>({ code: '', name: '', description: '', clinic: '', head: '', isActive: true });
   const [availableUsers, setAvailableUsers] = useState<any[]>([]);
+  const [userRoleCounts, setUserRoleCounts] = useState<Record<string, number>>({});
 
   // Live "clinical" system-role catalog. Sourced from /accounts/system-roles/
   // so adding a new specialty (e.g. Cardiologist, Ophthalmologist) under
@@ -150,17 +154,8 @@ export default function ClinicDepartmentPage() {
     is_active: true,
   });
 
-  const loadUsers = async () => {
-    try {
-      const usersResponse = await adminService.getUsers({ page_size: 1000 });
-      setAvailableUsers(usersResponse.results || []);
-    } catch (err: any) {
-      console.error('Error loading users:', err);
-    }
-  };
-
   const loadData = async (
-    users: any[] = [],
+    roleCounts: Record<string, number> = {},
     clinicalRoles: Set<string> = clinicalSystemRoleNames,
   ) => {
     try {
@@ -170,23 +165,24 @@ export default function ClinicDepartmentPage() {
         adminService.getClinics({
           page: currentPage,
           page_size: itemsPerPage,
-          search: searchQuery,
+          search: debouncedSearch.trim() || undefined,
           is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
         }),
         adminService.getDepartments({
           page: currentPage,
           page_size: itemsPerPage,
-          search: searchQuery,
+          search: debouncedSearch.trim() || undefined,
           is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
         }),
       ]);
+      setClinicsTotalCount(typeof clinicsResponse.count === "number" ? clinicsResponse.count : (clinicsResponse.results || []).length);
+      setDepartmentsTotalCount(typeof deptsResponse.count === "number" ? deptsResponse.count : (deptsResponse.results || []).length);
 
-      // Calculate clinical staff count (same for all facilities since they're
-      // physical sites). `clinicalRoles` is sourced from the live System Roles
-      // catalog (see effect above), so new clinical specialties auto-count.
-      const clinicalStaffCount = users.filter((user) =>
-        user.is_active && clinicalRoles.has(user.system_role),
-      ).length;
+      // Calculate clinical staff count from aggregated stats.
+      const clinicalStaffCount = Array.from(clinicalRoles).reduce(
+        (acc, roleName) => acc + (roleCounts[roleName] || 0),
+        0,
+      );
 
       // Transform clinics - use calculated staff count since assignments were removed
       const transformedClinics: Clinic[] = clinicsResponse.results.map((clinic: ApiClinic) => ({
@@ -225,9 +221,7 @@ export default function ClinicDepartmentPage() {
         };
 
         const matchingRoles = roleMappings[deptCode] || roleMappings[deptName] || [];
-        return users.filter(user =>
-          user.is_active && matchingRoles.includes(user.system_role)
-        ).length;
+        return matchingRoles.reduce((acc, roleName) => acc + (roleCounts[roleName] || 0), 0);
       };
 
       // Transform departments
@@ -265,20 +259,21 @@ export default function ClinicDepartmentPage() {
 
   useEffect(() => {
     const loadAllData = async () => {
-      // Fetch users + system-roles catalog in parallel so the "clinical"
-      // filter is ready before loadData computes per-facility staff counts.
-      let users: any[] = [];
+      let counts: Record<string, number> = {};
       let clinical: Set<string> = clinicalSystemRoleNames;
       try {
-        const [usersResponse, systemRolesRaw] = await Promise.all([
-          adminService.getUsers({ page_size: 1000 }),
+        const [userStats, systemRolesRaw] = await Promise.all([
+          adminService.getUserStats().catch((err) => {
+            console.error('Error loading user stats:', err);
+            return null;
+          }),
           adminService.getSystemRoles().catch((err) => {
             console.error('Error loading system roles:', err);
             return null;
           }),
         ]);
-        users = usersResponse.results || [];
-        setAvailableUsers(users);
+        counts = userStats?.by_system_role || {};
+        setUserRoleCounts(counts);
 
         if (systemRolesRaw) {
           const rows = parseSystemRolesResponse(systemRolesRaw);
@@ -290,78 +285,21 @@ export default function ClinicDepartmentPage() {
           setClinicalSystemRoleNames(clinical);
         }
       } catch (err: any) {
-        console.error('Error loading users:', err);
+        console.error('Error loading bootstrap stats:', err);
       }
 
-      // Then load departments/facilities with users data for staff count calculations.
-      await loadData(users, clinical);
+      await loadData(counts, clinical);
     };
     loadAllData();
     // clinicalSystemRoleNames intentionally omitted: we read & set it inside.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearch, statusFilter]);
 
   useEffect(() => {
     void loadKpiStats();
   }, [loadKpiStats]);
 
-  const filteredClinics = useMemo(() => {
-    return clinics.filter(c => {
-      const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.code.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || (statusFilter === 'Active' ? c.isActive : !c.isActive);
-      return matchesSearch && matchesStatus;
-    });
-  }, [clinics, searchQuery, statusFilter]);
-
-  const filteredDepartments = useMemo(() => {
-    // Only calculate if we have user data
-    if (!availableUsers || availableUsers.length === 0) {
-      return departments.filter(d => {
-        const matchesSearch = d.name.toLowerCase().includes(searchQuery.toLowerCase()) || d.code.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesStatus = statusFilter === 'all' || (statusFilter === 'Active' ? d.isActive : !d.isActive);
-        return matchesSearch && matchesStatus;
-      });
-    }
-
-    // Recalculate staff counts for departments using current user data
-    const calculateStaffCountForDepartment = (deptCode: string, deptName: string): number => {
-      // Map department codes/names to corresponding user roles
-      const roleMappings: Record<string, string[]> = {
-        'CONSULT': ['Medical Doctor'],
-        'LAB': ['Laboratory Scientist'],
-        'MED-REC': ['Medical Records Officer'],
-        'NURSING': ['Nursing Officer'],
-        'PHARM': ['Pharmacist'],
-        'PHYSIO': ['Physiotherapist'],
-        'RAD': ['Radiologist'],
-        // Also check by name for flexibility
-        'Consultation': ['Medical Doctor'],
-        'Laboratory': ['Laboratory Scientist'],
-        'Medical Records': ['Medical Records Officer'],
-        'Nursing': ['Nursing Officer'],
-        'Pharmacy': ['Pharmacist'],
-        'Physiotherapy': ['Physiotherapist'],
-        'Radiology': ['Radiologist'],
-      };
-
-      const matchingRoles = roleMappings[deptCode] || roleMappings[deptName] || [];
-      return availableUsers.filter(user =>
-        user.is_active && matchingRoles.includes(user.system_role)
-      ).length;
-    };
-
-    // Update departments with current staff counts
-    const updatedDepartments = departments.map(dept => ({
-      ...dept,
-      staffCount: calculateStaffCountForDepartment(dept.code, dept.name)
-    }));
-
-    return updatedDepartments.filter(d => {
-      const matchesSearch = d.name.toLowerCase().includes(searchQuery.toLowerCase()) || d.code.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || (statusFilter === 'Active' ? d.isActive : !d.isActive);
-      return matchesSearch && matchesStatus;
-    });
-  }, [departments, availableUsers, searchQuery, statusFilter]);
+  const departmentsWithStaffCounts = departments;
 
   const filteredVisitTypes = useMemo(() => {
     let list = visitTypesList;
@@ -379,11 +317,7 @@ export default function ClinicDepartmentPage() {
     );
   }, [visitTypesList, searchQuery, statusFilter]);
 
-  // Use filtered data directly (server-side pagination when no client-side filters)
-  const paginatedClinics = filteredClinics;
-  const paginatedDepartments = filteredDepartments;
-
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, activeTab, itemsPerPage]);
+  useEffect(() => { setCurrentPage(1); }, [debouncedSearch, statusFilter, activeTab, itemsPerPage]);
 
   const stats = useMemo(() => {
     if (!kpiStats) {
@@ -434,12 +368,9 @@ export default function ClinicDepartmentPage() {
   const loadClinicDetails = async (clinicId: number) => {
     setLoadingDetails(true);
     try {
-      // Load clinic details (rooms and users) - data fetched but not currently displayed
-      // Note: API doesn't support clinic filtering for users
-      await Promise.all([
-        adminService.getRooms({ page_size: 1000 }), // Get all rooms, filter client-side if needed
-        adminService.getUsers({ page_size: 1000 }), // Get all users, filter client-side if needed
-      ]);
+      // Nothing to fetch yet: clinic details dialog currently doesn't render rooms/users,
+      // and the APIs don't support clinic filtering for users anyway.
+      void clinicId;
     } catch (err: any) {
       console.error('Error loading clinic details:', err);
       toast.error('Failed to load clinic details');
@@ -479,7 +410,22 @@ export default function ClinicDepartmentPage() {
     setIsDeleteDialogOpen(true);
   };
 
-  const openCreateDept = () => { resetDeptForm(); setIsCreateDialogOpen(true); };
+  const ensureAvailableUsersLoaded = async () => {
+    if (availableUsers.length > 0) return;
+    try {
+      const res = await adminService.getUsers({ is_active: true, page: 1, page_size: 200 });
+      setAvailableUsers(res.results || []);
+    } catch (e) {
+      console.error('Failed to load users for head picker:', e);
+      setAvailableUsers([]);
+    }
+  };
+
+  const openCreateDept = () => {
+    void ensureAvailableUsersLoaded();
+    resetDeptForm();
+    setIsCreateDialogOpen(true);
+  };
   const openViewDept = async (d: Department) => { 
     setSelectedDepartment(d); 
     setIsViewDialogOpen(true);
@@ -497,10 +443,6 @@ export default function ClinicDepartmentPage() {
         setDeptUsers([]);
         return;
       }
-
-      // Get all users
-      const usersResponse = await adminService.getUsers({ page_size: 1000 });
-      const allUsers = usersResponse.results || [];
 
       // Filter users based on department's matching roles
       const roleMappings: Record<string, string[]> = {
@@ -524,11 +466,24 @@ export default function ClinicDepartmentPage() {
       const deptCode = String(department.code || '');
       const deptName = String(department.name || '');
       const matchingRoles = (roleMappings[deptCode] || roleMappings[deptName] || []) as string[];
-      const filteredUsers = allUsers.filter(user =>
-        user.is_active && user.system_role && matchingRoles.includes(user.system_role)
+      const perRole = await Promise.all(
+        matchingRoles.map((roleName) =>
+          adminService
+            .getUsers({
+              system_role: roleName,
+              is_active: true,
+              page: 1,
+              page_size: 200,
+            })
+            .catch(() => ({ results: [] as any[] })),
+        ),
       );
-
-      setDeptUsers(filteredUsers);
+      const rows = perRole.flatMap((r) => r.results || []);
+      const uniq = new Map<number, any>();
+      rows.forEach((u) => {
+        if (u && typeof u.id === 'number') uniq.set(u.id, u);
+      });
+      setDeptUsers(Array.from(uniq.values()));
     } catch (err: any) {
       console.error('Error loading department details:', err);
       toast.error('Failed to load department details');
@@ -537,6 +492,7 @@ export default function ClinicDepartmentPage() {
     }
   };
   const openEditDept = (d: Department) => { 
+    void ensureAvailableUsersLoaded();
     setSelectedDepartment(d); 
     setDeptForm({
       code: d.code,
@@ -576,7 +532,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Facility "${clinicForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetClinicForm();
-      await loadData(availableUsers);
+      await loadData(userRoleCounts);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to create clinic');
@@ -607,7 +563,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedClinic(null);
       resetClinicForm();
-      await loadData(availableUsers);
+      await loadData(userRoleCounts);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update clinic');
@@ -627,7 +583,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Clinic "${selectedClinic.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedClinic(null);
-      await loadData(availableUsers);
+      await loadData(userRoleCounts);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete clinic');
@@ -661,7 +617,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${deptForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetDeptForm();
-      await loadData(availableUsers);
+      await loadData(userRoleCounts);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to create department');
@@ -694,7 +650,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedDepartment(null);
       resetDeptForm();
-      await loadData(availableUsers);
+      await loadData(userRoleCounts);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update department');
@@ -714,7 +670,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${selectedDepartment.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedDepartment(null);
-      await loadData(availableUsers);
+      await loadData(userRoleCounts);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete department');
@@ -943,7 +899,7 @@ export default function ClinicDepartmentPage() {
               </Card>
             ) : (
               <div className="space-y-3 mt-4">
-                {paginatedClinics.map(clinic => (
+                {clinics.map((clinic) => (
                 <Card key={clinic.id} className={`border-l-4 hover:shadow-md transition-shadow ${clinic.isActive ? 'border-l-teal-500' : 'border-l-gray-500'} ${!clinic.isActive ? 'opacity-60' : ''}`}>
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
@@ -987,16 +943,16 @@ export default function ClinicDepartmentPage() {
                 ))}
               </div>
             )}
-            {!loading && filteredClinics.length === 0 && (
+            {!loading && clinicsTotalCount === 0 && (
               <Card className="mt-4"><CardContent className="p-8 text-center text-muted-foreground">
                 <Building2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No facilities found</p>
               </CardContent></Card>
             )}
-            {filteredClinics.length > 0 && (
+            {clinicsTotalCount > 0 && (
               <div className="mt-4">
                 <Card className="p-4">
-                  <StandardPagination currentPage={currentPage} totalItems={filteredClinics.length} itemsPerPage={itemsPerPage} onPageChange={setCurrentPage} onItemsPerPageChange={setItemsPerPage} itemName="clinics" />
+                  <StandardPagination currentPage={currentPage} totalItems={clinicsTotalCount} itemsPerPage={itemsPerPage} onPageChange={setCurrentPage} onItemsPerPageChange={setItemsPerPage} itemName="clinics" />
                 </Card>
               </div>
             )}
@@ -1012,7 +968,7 @@ export default function ClinicDepartmentPage() {
               </Card>
             ) : (
               <div className="space-y-3 mt-4">
-                {paginatedDepartments.map(dept => (
+                {departments.map((dept) => (
                 <Card key={dept.id} className={`border-l-4 hover:shadow-md transition-shadow ${dept.isActive ? 'border-l-blue-500' : 'border-l-gray-500'} ${!dept.isActive ? 'opacity-60' : ''}`}>
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
@@ -1060,27 +1016,25 @@ export default function ClinicDepartmentPage() {
                 ))}
               </div>
             )}
-            {!loading && filteredDepartments.length === 0 && (
+            {!loading && departmentsTotalCount === 0 && (
               <Card className="mt-4"><CardContent className="p-8 text-center text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No departments found</p>
               </CardContent></Card>
             )}
-            {filteredDepartments.length > 0 && (
+            {departmentsTotalCount > 0 && (
               <div className="mt-4">
                 <Card className="p-4">
-                  <StandardPagination 
-                    currentPage={currentPage} 
-                    totalItems={searchQuery || statusFilter !== 'all'
-                      ? filteredDepartments.length 
-                      : totalCount} 
-                    itemsPerPage={itemsPerPage} 
-                    onPageChange={setCurrentPage} 
+                  <StandardPagination
+                    currentPage={currentPage}
+                    totalItems={departmentsTotalCount}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
                     onItemsPerPageChange={(newSize) => {
                       setItemsPerPage(newSize);
                       setCurrentPage(1);
-                    }} 
-                    itemName="departments" 
+                    }}
+                    itemName="departments"
                   />
                 </Card>
               </div>

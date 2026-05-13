@@ -84,7 +84,7 @@ export default function CompletedReportsPage() {
   // Load clinics function
   const loadClinics = useCallback(async () => {
     try {
-      const clinicsResult = await adminService.getClinics({ page_size: 1000 });
+      const clinicsResult = await adminService.getClinics({ page_size: 200 });
       setClinics(clinicsResult.results);
     } catch (err) {
       console.error('Failed to load clinics:', err);

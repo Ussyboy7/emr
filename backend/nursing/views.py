@@ -1,6 +1,10 @@
 """
 Views for the Nursing app.
 """
+from datetime import timedelta
+
+from django.db.models import Case, IntegerField, Q, When
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
@@ -18,15 +22,91 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
     serializer_class = NursingOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'ordered_by', 'status', 'priority', 'order_type', 'consultation_session', 'visit', 'admission']
-    search_fields = ['order_id', 'description']
+    search_fields = [
+        'order_id',
+        'description',
+        'patient__first_name',
+        'patient__surname',
+        'patient__patient_id',
+        'patient__personal_number',
+    ]
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
     
     def get_queryset(self):
-        return NursingOrder.objects.all().select_related(
-            'patient', 'ordered_by', 'visit', 'consultation_session', 'created_by', 'admission'
+        qs = (
+            NursingOrder.objects.all()
+            .select_related(
+                'patient',
+                'patient__medical_history',
+                'ordered_by',
+                'visit',
+                'consultation_session',
+                'created_by',
+                'admission',
+            )
         )
-    
+        if self.request.query_params.get('procedures_queue') == '1':
+            qs = qs.exclude(order_type__iexact='ward instruction')
+
+        df = (self.request.query_params.get('date_filter') or '').strip().lower()
+        if df and df != 'all':
+            today = timezone.now().date()
+            if df == 'today':
+                qs = qs.filter(ordered_at__date=today)
+            elif df == 'week':
+                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=7))
+            elif df == 'month':
+                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=31))
+
+        after = (self.request.query_params.get('ordered_at_after') or '').strip()
+        before = (self.request.query_params.get('ordered_at_before') or '').strip()
+        if after:
+            qs = qs.filter(ordered_at__date__gte=after)
+        if before:
+            qs = qs.filter(ordered_at__date__lte=before)
+
+        gender = (self.request.query_params.get('patient_gender') or '').strip().lower()
+        if gender in ('male', 'female'):
+            qs = qs.filter(patient__gender=gender)
+
+        qt = (self.request.query_params.get('queue_type') or 'all').strip().lower()
+        if qt != 'all':
+            if qt == 'injection':
+                qs = qs.filter(
+                    Q(order_type__icontains='injection') | Q(order_type__icontains='iv infusion')
+                )
+            elif qt == 'dressing':
+                qs = qs.filter(
+                    Q(order_type__icontains='dressing') | Q(order_type__icontains='wound')
+                )
+            elif qt == 'medication':
+                qs = qs.filter(order_type__icontains='medication')
+            elif qt == 'ward_admission':
+                qs = qs.filter(
+                    Q(order_type__icontains='ward admission')
+                    | Q(order_type__icontains='observation admission')
+                )
+
+        return qs
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        if self.request.query_params.get("procedures_queue") == "1":
+            ordering_param = (self.request.query_params.get("ordering") or "").strip()
+            if not ordering_param:
+                queryset = queryset.annotate(
+                    _pq_rank=Case(
+                        When(priority="urgent", then=0),
+                        When(priority="high", then=1),
+                        When(priority="medium", then=2),
+                        When(priority="low", then=3),
+                        default=2,
+                        output_field=IntegerField(),
+                    )
+                ).order_by("_pq_rank", "ordered_at")
+        return queryset
+
     def perform_create(self, serializer):
         order = serializer.save(created_by=self.request.user)
         normalized_order_type = (order.order_type or '').strip().lower()
@@ -81,12 +161,63 @@ class ProcedureViewSet(viewsets.ModelViewSet):
     serializer_class = ProcedureSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'procedure_type', 'performed_by']
-    search_fields = ['procedure_id', 'description', 'notes']
+    search_fields = [
+        'procedure_id',
+        'description',
+        'notes',
+        'patient__first_name',
+        'patient__surname',
+        'patient__patient_id',
+        'patient__personal_number',
+    ]
     ordering_fields = ['performed_at']
     ordering = ['-performed_at']
     
     def get_queryset(self):
-        return Procedure.objects.all().select_related('patient', 'nursing_order', 'visit', 'performed_by')
+        qs = Procedure.objects.all().select_related(
+            'patient',
+            'patient__medical_history',
+            'nursing_order',
+            'nursing_order__ordered_by',
+            'visit',
+            'performed_by',
+        )
+
+        gender = (self.request.query_params.get('patient_gender') or '').strip().lower()
+        if gender in ('male', 'female'):
+            qs = qs.filter(patient__gender=gender)
+
+        df = (self.request.query_params.get('date_filter') or '').strip().lower()
+        if df and df != 'all':
+            today = timezone.now().date()
+            if df == 'today':
+                qs = qs.filter(performed_at__date=today)
+            elif df == 'week':
+                qs = qs.filter(performed_at__date__gte=today - timedelta(days=7))
+            elif df == 'month':
+                qs = qs.filter(performed_at__date__gte=today - timedelta(days=31))
+
+        after = (self.request.query_params.get('performed_at_after') or '').strip()
+        before = (self.request.query_params.get('performed_at_before') or '').strip()
+        if after:
+            qs = qs.filter(performed_at__date__gte=after)
+        if before:
+            qs = qs.filter(performed_at__date__lte=before)
+
+        ht = (self.request.query_params.get('history_type') or 'all').strip().lower()
+        if ht != 'all':
+            if ht == 'injection':
+                qs = qs.filter(procedure_type='injection')
+            elif ht == 'dressing':
+                qs = qs.filter(Q(procedure_type='dressing') | Q(procedure_type='wound_care'))
+            elif ht == 'ward_admission':
+                qs = qs.filter(procedure_type='ward_admission')
+            elif ht == 'medication':
+                qs = qs.exclude(
+                    procedure_type__in=['injection', 'dressing', 'wound_care', 'ward_admission']
+                )
+
+        return qs
     
     def perform_create(self, serializer):
         procedure = serializer.save(performed_by=self.request.user)

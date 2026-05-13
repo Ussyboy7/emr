@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import json
 
+from datetime import timedelta
+
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.filters import OrderingFilter
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -33,7 +36,7 @@ from .serializers import (
 class StandardResultsPagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = "page_size"
-    max_page_size = 200
+    max_page_size = 500
 
 
 ACTIVE_EYE_ORDER_STATUSES = ("pending", "scheduled", "in_progress")
@@ -44,13 +47,62 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsPagination
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ["status", "priority", "patient", "visit"]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["priority", "patient", "visit"]
+    search_fields = [
+        "patient__first_name",
+        "patient__surname",
+        "patient__patient_id",
+        "diagnosis",
+        "chief_complaint",
+    ]
     ordering_fields = ["ordered_at", "scheduled_at", "status", "priority"]
     ordering = ["-ordered_at"]
 
     def get_queryset(self):
-        return EyeOrder.objects.select_related("patient", "ordered_by", "visit", "consultation_session").all()
+        qs = (
+            EyeOrder.objects.select_related("patient", "ordered_by", "visit", "consultation_session")
+            .annotate(
+                completed_sessions_count=Count(
+                    "sessions",
+                    filter=Q(sessions__status="completed"),
+                )
+            )
+            .all()
+        )
+
+        params = self.request.query_params
+        status_tab = (params.get("status_tab") or "").strip().lower()
+        if status_tab == "pending":
+            qs = qs.filter(status__in=["pending", "scheduled"])
+        elif status_tab == "in_progress":
+            qs = qs.filter(status="in_progress")
+        elif status_tab == "cancelled":
+            qs = qs.filter(status="cancelled")
+        elif status_tab == "completed":
+            qs = qs.filter(status="completed")
+        elif params.get("status"):
+            qs = qs.filter(status=params.get("status"))
+
+        after = (params.get("ordered_at_after") or "").strip()
+        before = (params.get("ordered_at_before") or "").strip()
+        if after or before:
+            if after:
+                qs = qs.filter(ordered_at__date__gte=after)
+            if before:
+                qs = qs.filter(ordered_at__date__lte=before)
+        else:
+            date_filter = (params.get("date_filter") or "today").strip().lower()
+            today = timezone.now().date()
+            if date_filter == "today":
+                qs = qs.filter(ordered_at__date=today)
+            elif date_filter == "week":
+                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=7))
+            elif date_filter == "month":
+                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=31))
+            # "all" — no extra date constraint
+
+        return qs
 
     def get_serializer_class(self):
         if self.action == "create":

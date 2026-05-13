@@ -113,3 +113,20 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         
         return Response(stats)
 
+    @action(detail=False, methods=["get"], url_path="modules")
+    def modules(self, request):
+        """
+        List distinct module keys present in the audit log queryset.
+
+        Respects the same permission scoping as the list endpoint.
+        """
+        qs = self.get_queryset()
+        modules = (
+            qs.exclude(module__isnull=True)
+            .exclude(module__exact="")
+            .values_list("module", flat=True)
+            .distinct()
+            .order_by("module")
+        )
+        return Response({"results": list(modules)})
+

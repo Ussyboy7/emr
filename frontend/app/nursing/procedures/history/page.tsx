@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,7 +15,6 @@ import {
   Activity, User, Clock, Stethoscope, FileText, Loader2, AlertTriangle
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
-import { patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -139,17 +139,111 @@ const formatGender = (gender?: string): string => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
+function nursingProcedureToHistory(proc: any): CompletedProcedure {
+  const typeMap: Record<string, CompletedProcedure['type']> = {
+    injection: 'injection',
+    dressing: 'dressing',
+    wound_care: 'dressing',
+    medication: 'medication',
+    other: 'medication',
+    'ward admission': 'ward_admission',
+    'observation admission': 'ward_admission',
+    ward_admission: 'ward_admission',
+    observation_admission: 'ward_admission',
+  };
+  const procedureType = typeMap[String(proc.procedure_type || '').toLowerCase()] || 'medication';
+  const description = String(proc.description || '');
+  const wardFromDescription = description.match(/to\s+([^.;,\n]+)$/i)?.[1]?.trim() || '';
+  const wardLabel =
+    proc.ward_name ||
+    proc.ward?.name ||
+    wardFromDescription ||
+    (procedureType === 'ward_admission' ? 'Observation Ward' : '');
+  const orderedByLabel =
+    proc.ordered_by_name ||
+    proc.ordered_by_user_name ||
+    proc.ordered_by?.full_name ||
+    proc.ordered_by?.username ||
+    proc.requested_by_name ||
+    proc.requested_by?.full_name ||
+    proc.recorded_by_name ||
+    proc.performed_by_name ||
+    '';
+
+  const details: CompletedProcedure['details'] = {};
+  const record: CompletedProcedure['record'] = {
+    site: proc.site || '',
+    notes: proc.notes || '',
+  };
+
+  if (description) {
+    if (procedureType === 'injection') {
+      const match = description.match(/([^:]+):\s*(.+)/);
+      if (match) {
+        details.medication = match[1].trim();
+        const rest = match[2].trim();
+        const parts = rest.split(' • ');
+        details.dosage = parts[0] || '';
+        details.route = parts[1] || '';
+      }
+    } else if (procedureType === 'dressing') {
+      const match = description.match(/([^:]+):\s*(.+)/);
+      if (match) {
+        details.woundType = match[1].trim();
+        details.woundLocation = match[2].trim();
+      }
+    } else {
+      const match = description.match(/([^:]+):\s*(.+)/);
+      if (match) {
+        details.medication = match[1].trim();
+      } else if (procedureType === 'ward_admission') {
+        details.medication = 'Observation Admission';
+      }
+    }
+  }
+
+  const age = resolvePatientAge({
+    age: proc.patient_age,
+    date_of_birth: proc.patient_date_of_birth,
+  }) ?? 0;
+
+  return {
+    id: String(proc.id),
+    type: procedureType,
+    patientName: proc.patient_name ?? '',
+    patientId: proc.patient_patient_id ?? '',
+    age,
+    dob: proc.patient_date_of_birth || '',
+    gender: formatGender(proc.patient_gender),
+    ward: wardLabel,
+    orderedBy: orderedByLabel,
+    completedAt: proc.performed_at || proc.created_at || new Date().toISOString(),
+    completedBy: proc.performed_by_name || 'Unknown',
+    details,
+    record,
+  };
+}
+
 export default function ProceduresHistoryPage() {
   const [history, setHistory] = useState<CompletedProcedure[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [typeFilter, setTypeFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
+  const [historyStats, setHistoryStats] = useState({
+    total: 0,
+    injections: 0,
+    dressings: 0,
+    medications: 0,
+    todayCount: 0,
+  });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -161,191 +255,89 @@ export default function ProceduresHistoryPage() {
 
   useAuthRedirect(authError);
 
-  // Load procedures history from API
-  useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Fetch completed nursing procedures
-        const proceduresResult = await apiFetch<{ results: any[] }>('/nursing/procedures/?page_size=1000');
-        const procedures = proceduresResult.results || [];
-        
-        // Transform procedures to history format
-        const transformedHistory = await Promise.all(procedures.map(async (proc: any) => {
-          try {
-            // Get patient details
-            const patient = await patientService.getPatient(proc.patient);
-            
-            // Map backend procedure_type to frontend type
-            const typeMap: Record<string, CompletedProcedure['type']> = {
-              'injection': 'injection',
-              'dressing': 'dressing',
-              'wound_care': 'dressing',
-              'medication': 'medication',
-              'other': 'medication',
-              'ward admission': 'ward_admission',
-              'observation admission': 'ward_admission',
-              'ward_admission': 'ward_admission',
-              'observation_admission': 'ward_admission',
-            };
-            
-            const procedureType = typeMap[String(proc.procedure_type || '').toLowerCase()] || 'medication';
-            const description = String(proc.description || '');
-            const wardFromDescription = description.match(/to\s+([^.;,\n]+)$/i)?.[1]?.trim() || '';
-            const wardLabel =
-              proc.ward_name ||
-              proc.ward?.name ||
-              wardFromDescription ||
-              (procedureType === 'ward_admission' ? 'Observation Ward' : '');
-            const orderedByLabel =
-              proc.ordered_by_name ||
-              proc.ordered_by_user_name ||
-              proc.ordered_by?.full_name ||
-              proc.ordered_by?.username ||
-              proc.requested_by_name ||
-              proc.requested_by?.full_name ||
-              proc.recorded_by_name ||
-              proc.performed_by_name ||
-              '';
-            
-            // Parse description for details
-            const details: CompletedProcedure['details'] = {};
-            const record: CompletedProcedure['record'] = {
-              site: proc.site || '',
-              notes: proc.notes || '',
-            };
-            
-            // Try to extract details from description
-            if (description) {
-              if (procedureType === 'injection') {
-                const match = description.match(/([^:]+):\s*(.+)/);
-                if (match) {
-                  details.medication = match[1].trim();
-                  const rest = match[2].trim();
-                  const parts = rest.split(' • ');
-                  details.dosage = parts[0] || '';
-                  details.route = parts[1] || '';
-                }
-              } else if (procedureType === 'dressing') {
-                const match = description.match(/([^:]+):\s*(.+)/);
-                if (match) {
-                  details.woundType = match[1].trim();
-                  details.woundLocation = match[2].trim();
-                }
-              } else {
-                const match = description.match(/([^:]+):\s*(.+)/);
-                if (match) {
-                  details.medication = match[1].trim();
-                } else if (procedureType === 'ward_admission') {
-                  details.medication = 'Observation Admission';
-                }
-              }
-            }
-            
-            return {
-              id: String(proc.id),
-              type: procedureType,
-              patientName: patient.full_name ?? '',
-              patientId: patient.patient_id || '',
-              age: resolvePatientAge(patient) ?? 0,
-              dob: patient.date_of_birth || '',
-              gender: formatGender(patient.gender),
-              ward: wardLabel,
-              orderedBy: orderedByLabel,
-              completedAt: proc.created_at || proc.recorded_at || new Date().toISOString(),
-              completedBy: proc.recorded_by_name || proc.performed_by_name || 'Unknown',
-              details,
-              record,
-            } as CompletedProcedure;
-          } catch (err) {
-            console.error(`Error loading procedure ${proc.id}:`, err);
-            return null;
-          }
-        }));
-        
-        const validHistory = transformedHistory.filter((p): p is CompletedProcedure => p !== null);
-        setHistory(validHistory);
-      } catch (err) {
-        console.error('Error loading procedures history:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load procedures history. Please try again.');
-        }
-      } finally {
-        setLoading(false);
+  const appendHistoryFilters = useCallback(
+    (qs: URLSearchParams, opts?: { skipDate?: boolean }) => {
+      const q = debouncedSearch.trim();
+      if (q) qs.set('search', q);
+      if (typeFilter !== 'all') qs.set('history_type', typeFilter);
+      if (genderFilter !== 'all') qs.set('patient_gender', genderFilter.toLowerCase());
+      if (opts?.skipDate) return;
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) qs.set('performed_at_after', dateRange.from);
+        if (dateRange.to) qs.set('performed_at_before', dateRange.to);
+      } else if (dateFilter !== 'all') {
+        qs.set('date_filter', dateFilter);
       }
-    };
-    
-    loadHistory();
-  }, []);
+    },
+    [debouncedSearch, typeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to]
+  );
 
-  // Stats
-  const stats = useMemo(() => ({
-    total: history.length,
-    injections: history.filter(p => p.type === 'injection').length,
-    dressings: history.filter(p => p.type === 'dressing').length,
-    medications: history.filter(p => p.type === 'medication').length,
-    todayCount: history.filter(p => new Date(p.completedAt).toDateString() === new Date().toDateString()).length,
-  }), [history]);
+  const loadHistoryStats = useCallback(async () => {
+    try {
+      const mk = (extra: Record<string, string> = {}) => {
+        const qs = new URLSearchParams({ page: '1', page_size: '1' });
+        appendHistoryFilters(qs);
+        Object.entries(extra).forEach(([k, v]) => qs.set(k, v));
+        return apiFetch<{ count?: number }>(`/nursing/procedures/?${qs.toString()}`);
+      };
+      const mkToday = () => {
+        const qs = new URLSearchParams({ page: '1', page_size: '1', date_filter: 'today' });
+        appendHistoryFilters(qs, { skipDate: true });
+        return apiFetch<{ count?: number }>(`/nursing/procedures/?${qs.toString()}`);
+      };
+      const [total, inj, dress, med, today] = await Promise.all([
+        mk(),
+        mk({ history_type: 'injection' }),
+        mk({ history_type: 'dressing' }),
+        mk({ history_type: 'medication' }),
+        mkToday(),
+      ]);
+      setHistoryStats({
+        total: typeof total.count === 'number' ? total.count : 0,
+        injections: typeof inj.count === 'number' ? inj.count : 0,
+        dressings: typeof dress.count === 'number' ? dress.count : 0,
+        medications: typeof med.count === 'number' ? med.count : 0,
+        todayCount: typeof today.count === 'number' ? today.count : 0,
+      });
+    } catch (e) {
+      console.error('Failed to load procedure history stats:', e);
+    }
+  }, [appendHistoryFilters]);
 
-  // Filtering
-  const filteredHistory = useMemo(() => {
-    return history
-      .filter(p => {
-        const matchesSearch = p.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                             p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                             p.completedBy.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesType = typeFilter === 'all' || p.type === typeFilter;
-        const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
-        
-        // Date filter
-        if (dateRange.from || dateRange.to) {
-          const completedDate = new Date(p.completedAt);
-          if (Number.isNaN(completedDate.getTime())) return false;
-          if (dateRange.from) {
-            const from = new Date(`${dateRange.from}T00:00:00`);
-            if (completedDate < from) return false;
-          }
-          if (dateRange.to) {
-            const to = new Date(`${dateRange.to}T23:59:59.999`);
-            if (completedDate > to) return false;
-          }
-        } else if (dateFilter !== 'all') {
-          const completedDate = new Date(p.completedAt);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          
-          if (dateFilter === 'today' && completedDate.toDateString() !== today.toDateString()) return false;
-          if (dateFilter === 'week') {
-            const weekAgo = new Date(today);
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            if (completedDate < weekAgo) return false;
-          }
-          if (dateFilter === 'month') {
-            const monthAgo = new Date(today);
-            monthAgo.setMonth(monthAgo.getMonth() - 1);
-            if (completedDate < monthAgo) return false;
-          }
-        }
-        
-        return matchesSearch && matchesType && matchesGender;
-      })
-      .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
-  }, [history, searchQuery, typeFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+  const loadHistoryPage = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const qs = new URLSearchParams();
+      qs.set('page', String(currentPage));
+      qs.set('page_size', String(itemsPerPage));
+      appendHistoryFilters(qs);
+      const res = await apiFetch<{ results: any[]; count?: number }>(`/nursing/procedures/?${qs.toString()}`);
+      setHistory((res.results || []).map(nursingProcedureToHistory));
+      setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
+    } catch (err) {
+      console.error('Error loading procedures history:', err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        setError('Failed to load procedures history. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [appendHistoryFilters, currentPage, itemsPerPage]);
 
-  // Paginated history
-  const paginatedHistory = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredHistory.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredHistory, currentPage, itemsPerPage]);
+  useEffect(() => {
+    void loadHistoryStats();
+  }, [loadHistoryStats]);
 
-  // Reset to page 1 when filters change
+  useEffect(() => {
+    void loadHistoryPage();
+  }, [loadHistoryPage]);
+
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, typeFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+  }, [debouncedSearch, typeFilter, dateFilter, genderFilter, dateRange.from, dateRange.to, itemsPerPage]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -356,38 +348,6 @@ export default function ProceduresHistoryPage() {
     setSelectedProcedure(procedure);
     setIsViewDialogOpen(true);
   };
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="container mx-auto p-4 sm:p-6">
-          <div className="flex items-center justify-center h-[60vh]">
-            <div className="text-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
-              <p className="text-muted-foreground">Loading procedures history...</p>
-            </div>
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="container mx-auto p-4 sm:p-6">
-          <div className="flex items-center justify-center h-[60vh]">
-            <div className="text-center">
-              <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Error loading history</h3>
-              <p className="text-muted-foreground mb-4">{error}</p>
-              <Button onClick={() => window.location.reload()}>Retry</Button>
-            </div>
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>
@@ -408,7 +368,7 @@ export default function ProceduresHistoryPage() {
           <Card>
             <CardContent className="p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Records</p>
-              <p className="text-2xl sm:text-3xl font-bold text-foreground">{stats.total}</p>
+              <p className="text-2xl sm:text-3xl font-bold text-foreground">{historyStats.total}</p>
             </CardContent>
           </Card>
           <Card>
@@ -416,7 +376,7 @@ export default function ProceduresHistoryPage() {
               <div className="p-2 rounded-lg bg-emerald-500/10"><CheckCircle2 className="h-4 w-4 text-emerald-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Today</p>
-                <p className="text-xl font-bold text-emerald-500">{stats.todayCount}</p>
+                <p className="text-xl font-bold text-emerald-500">{historyStats.todayCount}</p>
               </div>
             </CardContent>
           </Card>
@@ -425,7 +385,7 @@ export default function ProceduresHistoryPage() {
               <div className="p-2 rounded-lg bg-emerald-500/10"><Syringe className="h-4 w-4 text-emerald-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Injections</p>
-                <p className="text-xl font-bold text-emerald-500">{stats.injections}</p>
+                <p className="text-xl font-bold text-emerald-500">{historyStats.injections}</p>
               </div>
             </CardContent>
           </Card>
@@ -434,7 +394,7 @@ export default function ProceduresHistoryPage() {
               <div className="p-2 rounded-lg bg-violet-500/10"><Bandage className="h-4 w-4 text-violet-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Dressings</p>
-                <p className="text-xl font-bold text-violet-500">{stats.dressings}</p>
+                <p className="text-xl font-bold text-violet-500">{historyStats.dressings}</p>
               </div>
             </CardContent>
           </Card>
@@ -443,7 +403,7 @@ export default function ProceduresHistoryPage() {
               <div className="p-2 rounded-lg bg-blue-500/10"><Pill className="h-4 w-4 text-blue-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Medications</p>
-                <p className="text-xl font-bold text-blue-500">{stats.medications}</p>
+                <p className="text-xl font-bold text-blue-500">{historyStats.medications}</p>
               </div>
             </CardContent>
           </Card>
@@ -501,8 +461,26 @@ export default function ProceduresHistoryPage() {
           onClear={clearDateRangeFilters}
         />
 
+        {error && (
+          <Card className="border-red-200 dark:border-red-900">
+            <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              <Button variant="outline" size="sm" onClick={() => void loadHistoryPage()}>
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* History List */}
-        {filteredHistory.length === 0 ? (
+        {loading && history.length === 0 ? (
+          <Card>
+            <CardContent className="p-8 text-center text-muted-foreground">
+              <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
+              <p>Loading procedures history...</p>
+            </CardContent>
+          </Card>
+        ) : totalCount === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <FileText className="h-16 w-16 text-muted-foreground mb-4" />
@@ -512,7 +490,7 @@ export default function ProceduresHistoryPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {paginatedHistory.map((procedure) => {
+            {history.map((procedure) => {
               const typeConfig = getTypeConfig(procedure.type);
               const TypeIcon = typeConfig.icon;
               const { date, time } = formatDateTime(procedure.completedAt);
@@ -521,6 +499,8 @@ export default function ProceduresHistoryPage() {
                   ? 'border-l-emerald-500'
                   : procedure.type === 'dressing'
                     ? 'border-l-violet-500'
+                    : procedure.type === 'ward_admission'
+                      ? 'border-l-amber-500'
                     : 'border-l-blue-500';
 
               return (
@@ -581,11 +561,11 @@ export default function ProceduresHistoryPage() {
           </div>
         )}
 
-        {filteredHistory.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredHistory.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

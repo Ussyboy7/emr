@@ -12,8 +12,32 @@ class NursingOrderSerializer(serializers.ModelSerializer):
     """Serializer for NursingOrder model."""
     
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_personal_number = serializers.CharField(source='patient.personal_number', read_only=True)
+    patient_age = serializers.SerializerMethodField()
+    patient_allergies = serializers.SerializerMethodField()
     ordered_by_name = serializers.CharField(source='ordered_by.get_full_name', read_only=True, allow_null=True)
     admission_id_display = serializers.CharField(source='admission.admission_id', read_only=True, allow_null=True)
+
+    def get_patient_age(self, obj):
+        if not obj.patient_id or not obj.patient.date_of_birth:
+            return None
+        d = obj.patient.date_of_birth
+        today = timezone.now().date()
+        return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+
+    def get_patient_allergies(self, obj):
+        if not obj.patient_id:
+            return []
+        mh = getattr(obj.patient, "medical_history", None)
+        if not mh or not mh.allergies:
+            return []
+        if isinstance(mh.allergies, list):
+            return [str(a) for a in mh.allergies if a is not None]
+        if isinstance(mh.allergies, str):
+            return [a.strip() for a in mh.allergies.replace("\n", ",").split(",") if a.strip()]
+        return []
 
     class Meta:
         model = NursingOrder
@@ -44,8 +68,28 @@ class ProcedureSerializer(serializers.ModelSerializer):
     """Serializer for Procedure model."""
     
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_age = serializers.SerializerMethodField()
+    patient_date_of_birth = serializers.DateField(
+        source='patient.date_of_birth', read_only=True, allow_null=True
+    )
+    ordered_by_name = serializers.SerializerMethodField()
     performed_by_name = serializers.CharField(source='performed_by.get_full_name', read_only=True, allow_null=True)
-    
+
+    def get_patient_age(self, obj):
+        if not obj.patient_id or not obj.patient.date_of_birth:
+            return None
+        d = obj.patient.date_of_birth
+        today = timezone.now().date()
+        return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+
+    def get_ordered_by_name(self, obj):
+        order = getattr(obj, 'nursing_order', None)
+        if order and order.ordered_by_id:
+            return order.ordered_by.get_full_name() or ''
+        return ''
+
     class Meta:
         model = Procedure
         fields = '__all__'

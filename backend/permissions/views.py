@@ -10,6 +10,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import Role, UserRole
 from .serializers import RoleSerializer, UserRoleSerializer
 from audit.services import AuditService
+from django.db.models import Count
 
 
 class RoleViewSet(viewsets.ModelViewSet):
@@ -24,7 +25,19 @@ class RoleViewSet(viewsets.ModelViewSet):
     ordering = ['name']
     
     def get_queryset(self):
-        return Role.objects.all().prefetch_related('user_roles')
+        qs = Role.objects.all().prefetch_related('user_roles')
+        tg = (self.request.query_params.get('type_group') or '').strip().lower()
+        if tg == 'system':
+            qs = qs.filter(type='admin')
+        elif tg == 'clinical':
+            qs = qs.filter(
+                type__in=['doctor', 'nurse', 'lab_tech', 'pharmacist', 'radiologist']
+            )
+        elif tg == 'administrative':
+            qs = qs.filter(type='records')
+        elif tg == 'custom':
+            qs = qs.filter(type='custom')
+        return qs
     
     def perform_create(self, serializer):
         """Create role and log audit."""
@@ -106,6 +119,22 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         return UserRole.objects.all().select_related('user', 'role', 'assigned_by')
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        """
+        Summary counts for role assignments.
+
+        - assignments: total user-role rows
+        - unique_users: distinct users with >= 1 role assignment
+        """
+        qs = self.filter_queryset(self.get_queryset())
+        return Response(
+            {
+                "assignments": qs.count(),
+                "unique_users": qs.values("user_id").distinct().count(),
+            }
+        )
     
     def perform_create(self, serializer):
         user_role = serializer.save(assigned_by=self.request.user)

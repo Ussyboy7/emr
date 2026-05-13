@@ -148,7 +148,7 @@ export default function PatientVitalsPage() {
       // Get consultation sessions to exclude already processed visits
       let visitsWithSessions: Set<number> = new Set();
       try {
-        const sessionsResult = await consultationService.getSessions({ page_size: 1000 });
+        const sessionsResult = await consultationService.getSessions({ page_size: 200 });
         visitsWithSessions = new Set(
           sessionsResult.results
             .map((s: any) => s.visit?.id || s.visit_id)

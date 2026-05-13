@@ -864,7 +864,7 @@ export default function LabOrdersPage() {
   // Load Test Templates from API for result entry (so FBC, etc. use template parameters)
   const loadTemplatesForResults = useCallback(async () => {
     try {
-      const { results } = await labService.getTemplates({ page_size: 1000 });
+      const { results } = await labService.getTemplates({ page_size: 200 });
       const next: Record<string, { name: string; fields: TemplateField[] }> = {};
       for (const t of results) {
         const tpl = buildEntryTemplate(t.code, (t as any).normal_range);
@@ -883,7 +883,7 @@ export default function LabOrdersPage() {
 
   const loadTemplatesForExternalOrders = useCallback(async () => {
     try {
-      const response = await labService.getTemplates({ page_size: 1000, is_active: true });
+      const response = await labService.getTemplates({ page_size: 200, is_active: true });
       setLabTemplates((response.results || []).map((t) => ({
         id: Number(t.id),
         name: t.name,
@@ -905,7 +905,7 @@ export default function LabOrdersPage() {
           labTemplates.length === 0 ? loadTemplatesForExternalOrders() : Promise.resolve(),
           (async () => {
             try {
-              const res = await adminService.getClinics({ is_active: true, page_size: 1000 });
+              const res = await adminService.getClinics({ is_active: true, page_size: 200 });
               setExternalClinics(res.results || []);
             } catch {
               setExternalClinics([]);

@@ -973,7 +973,7 @@ export default function RadiologyOrdersPage() {
   const loadTemplates = useCallback(async () => {
     setLoadingTemplates(true);
     try {
-      const response = await radiologyService.getTemplates({ page_size: 1000 });
+      const response = await radiologyService.getTemplates({ page_size: 200 });
       setTemplates(response.results || []);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to load templates');
@@ -994,7 +994,7 @@ export default function RadiologyOrdersPage() {
     if (templates.length === 0) loadTemplates();
     (async () => {
       try {
-        const res = await adminService.getClinics({ is_active: true, page_size: 1000 });
+        const res = await adminService.getClinics({ is_active: true, page_size: 200 });
         setExternalClinics(res.results || []);
       } catch (err: any) {
         toast.error(err?.message || 'Failed to load originating clinics');

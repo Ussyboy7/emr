@@ -133,10 +133,10 @@ const StartConsultation = () => {
         setError(null);
         
         // Load rooms
-        const roomsResult = await roomService.getRooms({ page_size: 1000 });
+        const roomsResult = await roomService.getRooms({ page_size: 200 });
         
         // Load queue items to get patient counts per room
-        const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
+        const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=200');
         const queueItems = queueResult.results || [];
         
         

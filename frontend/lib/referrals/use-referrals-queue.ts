@@ -215,24 +215,36 @@ export function useReferralsQueue(
       const commonParams: ReferralListParams = {
         ...baseFilterParams(),
         page: 1,
-        page_size: 1000,
+        page_size: 1,
       };
-      const totalRes = await getReferralsWithStatusFallback({
-        ...commonParams,
-        status: undefined,
-      });
-      const rows = totalRes.results || [];
+      const countForStatuses = async (statuses: string[]) => {
+        const counts = await Promise.all(
+          statuses.map(async (status) => {
+            const res = await getReferralsWithStatusFallback({
+              ...commonParams,
+              status,
+            });
+            return res.count || 0;
+          }),
+        );
+        return counts.reduce((acc, c) => acc + c, 0);
+      };
+
+      const [totalRes, submittedCount, inReviewCount, approvedCount] =
+        await Promise.all([
+          getReferralsWithStatusFallback({
+            ...commonParams,
+            status: undefined,
+          }),
+          countForStatuses(Array.from(SUBMITTED_STATUSES)),
+          countForStatuses(Array.from(REVIEW_STATUSES)),
+          countForStatuses(Array.from(APPROVED_STATUSES)),
+        ]);
       setStats({
         total: totalRes.count || 0,
-        submitted: rows.filter((r) =>
-          SUBMITTED_STATUSES.has(String(r.status || ""))
-        ).length,
-        inReview: rows.filter((r) =>
-          REVIEW_STATUSES.has(String(r.status || ""))
-        ).length,
-        approved: rows.filter((r) =>
-          APPROVED_STATUSES.has(String(r.status || ""))
-        ).length,
+        submitted: submittedCount,
+        inReview: inReviewCount,
+        approved: approvedCount,
       });
     } catch (error) {
       console.error(error);

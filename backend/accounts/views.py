@@ -9,6 +9,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.contrib.auth import update_session_auth_hash
 from django.db import transaction
+from django.db import models
 
 from .models import User, SystemRole
 from .serializers import (
@@ -88,9 +89,33 @@ class UserViewSet(viewsets.ModelViewSet):
         """
         if self.action in ['me', 'update_me', 'change_password', 'directory', 'public']:
             return [permissions.IsAuthenticated()]
-        if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update', 'destroy', 'reset_password']:
+        if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update', 'destroy', 'reset_password', 'stats']:
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAdminUser])
+    def stats(self, request):
+        """
+        Lightweight user counts for admin dashboards.
+
+        Returns:
+        - total_active: active users in scope
+        - by_system_role: map of system_role -> active count (empty role omitted)
+        """
+        qs = self.get_queryset().filter(is_active=True)
+        by_role = (
+            qs.exclude(system_role__isnull=True)
+            .exclude(system_role__exact="")
+            .values("system_role")
+            .annotate(count=models.Count("id"))
+            .order_by()
+        )
+        return Response(
+            {
+                "total_active": qs.count(),
+                "by_system_role": {r["system_role"]: r["count"] for r in by_role},
+            }
+        )
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def directory(self, request):

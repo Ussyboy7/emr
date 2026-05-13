@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { pharmacyService, type GenericMedication } from "@/lib/services";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { DOSAGE_FORMS as DOSAGE_FORM_OPTIONS, MEDICATION_STRENGTHS, MEDICATION_CATEGORIES } from "@/lib/constants/pharmacy";
 import { Plus, Search, Edit, Eye, Trash2, Loader2 } from "lucide-react";
 
@@ -47,7 +48,9 @@ const GENERIC_CATEGORIES = MEDICATION_CATEGORIES.filter((c) => c.value !== "All 
 export default function GenericsPage() {
   const [loading, setLoading] = useState(true);
   const [generics, setGenerics] = useState<GenericMedication[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [routeFilter, setRouteFilter] = useState(ANY);
   const [formFilter, setFormFilter] = useState(ANY);
   const [currentPage, setCurrentPage] = useState(1);
@@ -69,47 +72,33 @@ export default function GenericsPage() {
     is_active: true,
   });
 
-  useEffect(() => {
-    loadGenerics();
-  }, []);
-
-  const loadGenerics = async () => {
+  const loadGenerics = useCallback(async () => {
     try {
       setLoading(true);
       const response = await pharmacyService.getGenerics({
-        page: 1,
-        page_size: 10000,
+        page: currentPage,
+        page_size: itemsPerPage,
+        search: debouncedSearch.trim() || undefined,
+        route: routeFilter !== ANY ? routeFilter : undefined,
+        dosage_form: formFilter !== ANY ? formFilter : undefined,
       });
       setGenerics(response.results || []);
+      setTotalCount(typeof response.count === "number" ? response.count : (response.results || []).length);
     } catch (err) {
       console.error("Error loading generics:", err);
       toast.error("Failed to load generics");
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, itemsPerPage, debouncedSearch, routeFilter, formFilter]);
 
-  const filteredGenerics = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return generics.filter((g) => {
-      const matchesSearch =
-        !q ||
-        g.name.toLowerCase().includes(q) ||
-        (g.active_ingredient || "").toLowerCase().includes(q) ||
-        (g.category || "").toLowerCase().includes(q) ||
-        (g.strength || "").toLowerCase().includes(q) ||
-        (g.dosage_form || "").toLowerCase().includes(q) ||
-        (g.route || "").toLowerCase().includes(q);
-      const matchesRoute = routeFilter === ANY || (g.route || "") === routeFilter;
-      const matchesForm = formFilter === ANY || (g.dosage_form || "") === formFilter;
-      return matchesSearch && matchesRoute && matchesForm;
-    });
-  }, [generics, searchQuery, routeFilter, formFilter]);
+  useEffect(() => {
+    void loadGenerics();
+  }, [loadGenerics]);
 
-  const paginatedGenerics = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredGenerics.slice(start, start + itemsPerPage);
-  }, [filteredGenerics, currentPage, itemsPerPage]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, routeFilter, formFilter, itemsPerPage]);
 
   const openCreate = () => {
     setFormData({
@@ -287,8 +276,8 @@ export default function GenericsPage() {
                 <p>Loading generics...</p>
               </CardContent>
             </Card>
-          ) : paginatedGenerics.length > 0 ? (
-            paginatedGenerics.map((g) => (
+          ) : generics.length > 0 ? (
+            generics.map((g) => (
               <Card key={g.id} className={`border-l-4 ${g.is_active ? "border-l-violet-500" : "border-l-slate-400"} hover:shadow-md transition-shadow`}>
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between gap-4">
@@ -336,11 +325,11 @@ export default function GenericsPage() {
           )}
         </div>
 
-        {filteredGenerics.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredGenerics.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {

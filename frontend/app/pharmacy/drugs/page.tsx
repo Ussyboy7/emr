@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
@@ -13,13 +13,16 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { pharmacyService, type Medication } from "@/lib/services";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { MEDICATION_CATEGORIES, MEDICATION_STRENGTHS, MEDICATION_MANUFACTURERS, DOSAGE_FORMS } from "@/lib/constants/pharmacy";
 import { Plus, Search, Edit, Eye, Pill, Loader2 } from "lucide-react";
 
 export default function DrugMasterPage() {
   const [medLoading, setMedLoading] = useState(false);
   const [medications, setMedications] = useState<Medication[]>([]);
+  const [medicationsTotal, setMedicationsTotal] = useState(0);
   const [drugSearchQuery, setDrugSearchQuery] = useState("");
+  const debouncedDrugSearch = useDebouncedValue(drugSearchQuery, 300);
   const [showAddModal, setShowAddModal] = useState(false);
   const [creatingMed, setCreatingMed] = useState(false);
   const [addDrugError, setAddDrugError] = useState<string | null>(null);
@@ -31,7 +34,7 @@ export default function DrugMasterPage() {
   const [showDrugDetailsModal, setShowDrugDetailsModal] = useState(false);
   const [drugDetailsLoading, setDrugDetailsLoading] = useState(false);
   const [drugCurrentPage, setDrugCurrentPage] = useState(1);
-  const [drugItemsPerPage, setDrugItemsPerPage] = useState(10);
+  const [drugItemsPerPage, setDrugItemsPerPage] = useState(50);
 
   const [generics, setGenerics] = useState<Array<{ id: number; name: string; unit?: string }>>([]);
   const [newGenericName, setNewGenericName] = useState("");
@@ -65,35 +68,43 @@ export default function DrugMasterPage() {
     is_active: true,
   });
 
-  useEffect(() => {
-    loadMedications();
-    loadGenerics();
-  }, []);
-
-  const loadGenerics = async () => {
-    try {
-      const res = await pharmacyService.getGenerics({ page: 1, page_size: 1000 });
-      setGenerics((res.results || []).map((g: any) => ({ id: g.id, name: g.name, unit: g.unit })));
-    } catch {
-      // silent
-    }
-  };
-
-  const loadMedications = async () => {
+  const loadMedications = useCallback(async () => {
     try {
       setMedLoading(true);
       const response = await pharmacyService.getMedications({
-        page: 1,
-        page_size: 10000,
+        page: drugCurrentPage,
+        page_size: drugItemsPerPage,
+        search: debouncedDrugSearch.trim() || undefined,
       });
       setMedications(response.results || []);
+      setMedicationsTotal(typeof response.count === "number" ? response.count : (response.results || []).length);
     } catch (err) {
       console.error("Error loading medications:", err);
       toast.error("Failed to load medications");
     } finally {
       setMedLoading(false);
     }
-  };
+  }, [drugCurrentPage, drugItemsPerPage, debouncedDrugSearch]);
+
+  useEffect(() => {
+    void loadMedications();
+  }, [loadMedications]);
+
+  useEffect(() => {
+    setDrugCurrentPage(1);
+  }, [debouncedDrugSearch, drugItemsPerPage]);
+
+  useEffect(() => {
+    const loadGenerics = async () => {
+      try {
+        const res = await pharmacyService.getGenerics({ page: 1, page_size: 200 });
+        setGenerics((res.results || []).map((g: any) => ({ id: g.id, name: g.name, unit: g.unit })));
+      } catch {
+        /* silent */
+      }
+    };
+    void loadGenerics();
+  }, []);
 
   const handleAddMedication = async () => {
     setAddDrugError(null);
@@ -103,20 +114,6 @@ export default function DrugMasterPage() {
     }
     if (!formData.generic_id) {
       toast.error("Select a Generic Medication or create one");
-      return;
-    }
-    const codeExists = medications.some((m) => m.code?.toLowerCase() === formData.code.toLowerCase());
-    if (codeExists) {
-      toast.error("Medication code must be unique");
-      return;
-    }
-    const brandExistsForGeneric = medications.some(
-      (m) =>
-        (m.generic?.id ? String(m.generic.id) : "") === formData.generic_id &&
-        m.name.trim().toLowerCase() === formData.name.trim().toLowerCase()
-    );
-    if (brandExistsForGeneric) {
-      toast.error("Brand name must be unique for the selected generic");
       return;
     }
 
@@ -251,23 +248,6 @@ export default function DrugMasterPage() {
       toast.error("Select a Generic Medication");
       return;
     }
-    const codeExists = medications.some(
-      (m) => m.id !== editingMedication.id && m.code?.toLowerCase() === editFormData.code.toLowerCase()
-    );
-    if (codeExists) {
-      toast.error("Medication code must be unique");
-      return;
-    }
-    const brandExistsForGeneric = medications.some(
-      (m) =>
-        m.id !== editingMedication.id &&
-        (m.generic?.id ? String(m.generic.id) : "") === editFormData.generic_id &&
-        m.name.trim().toLowerCase() === editFormData.name.trim().toLowerCase()
-    );
-    if (brandExistsForGeneric) {
-      toast.error("Brand name must be unique for the selected generic");
-      return;
-    }
 
     try {
       const updated = await pharmacyService.updateMedication(editingMedication.id, {
@@ -304,20 +284,6 @@ export default function DrugMasterPage() {
       }
     }
   };
-
-  const filteredMedications = useMemo(() => {
-    return medications.filter(
-      (med) =>
-        med.name.toLowerCase().includes(drugSearchQuery.toLowerCase()) ||
-        med.code.toLowerCase().includes(drugSearchQuery.toLowerCase()) ||
-        (med.generic?.name || med.generic_name || "").toLowerCase().includes(drugSearchQuery.toLowerCase())
-    );
-  }, [medications, drugSearchQuery]);
-
-  const paginatedMedications = useMemo(() => {
-    const start = (drugCurrentPage - 1) * drugItemsPerPage;
-    return filteredMedications.slice(start, start + drugItemsPerPage);
-  }, [filteredMedications, drugCurrentPage, drugItemsPerPage]);
 
   const addStrengthOptions = useMemo(() => {
     const opts = [...MEDICATION_STRENGTHS];
@@ -379,7 +345,6 @@ export default function DrugMasterPage() {
                 value={drugSearchQuery}
                 onChange={(e) => {
                   setDrugSearchQuery(e.target.value);
-                  setDrugCurrentPage(1);
                 }}
                 className="pl-10"
               />
@@ -395,8 +360,8 @@ export default function DrugMasterPage() {
                 <p>Loading medications...</p>
               </CardContent>
             </Card>
-          ) : paginatedMedications.length > 0 ? (
-            paginatedMedications.map((med) => (
+          ) : medications.length > 0 ? (
+            medications.map((med) => (
               <Card key={med.id} className="border-l-4 border-l-violet-500 hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between gap-4">
@@ -461,11 +426,11 @@ export default function DrugMasterPage() {
           )}
         </div>
 
-        {filteredMedications.length > 0 && (
+        {medicationsTotal > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={drugCurrentPage}
-              totalItems={filteredMedications.length}
+              totalItems={medicationsTotal}
               itemsPerPage={drugItemsPerPage}
               onPageChange={setDrugCurrentPage}
               onItemsPerPageChange={(newSize) => {

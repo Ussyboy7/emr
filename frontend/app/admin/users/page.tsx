@@ -117,7 +117,7 @@ export default function UserManagementPage() {
 
   const loadRoles = useCallback(async () => {
     try {
-      const rolesResponse = await adminService.getRoles({ page_size: 1000 });
+      const rolesResponse = await adminService.getRoles({ page_size: 200 });
       // Include inactive roles too so a user's currently-assigned role always appears/selects correctly.
       // (If we filter to active-only, the Select will show empty even though the assignment exists.)
       setAccessRoles(rolesResponse.results || []);

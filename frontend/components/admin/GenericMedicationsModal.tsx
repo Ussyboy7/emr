@@ -84,7 +84,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
       setLoading(true);
       const response = await pharmacyService.getGenerics({
         page: 1,
-        page_size: 10000,
+        page_size: 500,
       });
       setGenerics(response.results || []);
     } catch (err) {

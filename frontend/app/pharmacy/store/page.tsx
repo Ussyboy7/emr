@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
@@ -31,6 +32,35 @@ interface MedicationWithStock {
   storeQuantity: number;
   minimumStock: number;
   batches: MedicationInventory[];
+  batchCount?: number;
+  nearestExpiry?: string;
+}
+
+function mapStoreStockRow(
+  row: Medication & {
+    store_quantity?: string | number;
+    nearest_expiry?: string | null;
+    batch_count?: number;
+  }
+): MedicationWithStock {
+  const sq = Number(row.store_quantity ?? 0);
+  const packSize =
+    typeof row.pack_size === "number" && row.pack_size > 0 ? row.pack_size : 10;
+  return {
+    id: row.id,
+    name: row.name || "Unknown",
+    generic: row.generic,
+    generic_name: row.generic_name || row.generic?.name || "",
+    strength: row.strength || "",
+    form: row.form || "",
+    category: row.category || "",
+    packSize,
+    storeQuantity: sq,
+    minimumStock: Number(row.min_stock_level ?? 0),
+    batches: [],
+    batchCount: typeof row.batch_count === "number" ? row.batch_count : 0,
+    nearestExpiry: row.nearest_expiry || "",
+  };
 }
 
 const adjustmentReasons = [
@@ -96,12 +126,16 @@ export default function WarehouseStorePage() {
   const [bulkProgress, setBulkProgress] = useState({ processed: 0, total: 0 });
   const [inventoryCurrentPage, setInventoryCurrentPage] = useState(1);
   const [inventoryItemsPerPage, setInventoryItemsPerPage] = useState(10);
-
-
-
-  useEffect(() => {
-    loadStoreInventory();
-  }, []);
+  const [inventoryTotalCount, setInventoryTotalCount] = useState(0);
+  const debouncedInventorySearch = useDebouncedValue(inventorySearchQuery, 300);
+  const [storeStats, setStoreStats] = useState({
+    totalMedications: 0,
+    outOfStock: 0,
+    lowStock: 0,
+    expiringSoon: 0,
+    expired: 0,
+    totalUnits: 0,
+  });
 
   const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
     if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
@@ -109,72 +143,73 @@ export default function WarehouseStorePage() {
     return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
   };
 
-  const loadStoreInventory = async () => {
+  const loadStoreStats = useCallback(async () => {
+    try {
+      const s = await pharmacyService.getStoreStockStats({ location: PHARMACY_LOCATIONS.STORE });
+      setStoreStats({
+        totalMedications: s.total_medications ?? 0,
+        outOfStock: s.out_of_stock ?? 0,
+        lowStock: s.low_stock ?? 0,
+        expiringSoon: s.near_expiry ?? 0,
+        expired: s.expired ?? 0,
+        totalUnits: Number(s.total_units ?? 0),
+      });
+    } catch (e) {
+      console.error("Error loading store stats:", e);
+    }
+  }, []);
+
+  const loadStorePage = useCallback(async () => {
     try {
       setInventoryLoading(true);
-      const [inventoryResponse, medicationsResponse] = await Promise.all([
-        pharmacyService.getInventory({
-          page: 1,
-          page_size: 10000,
-          location: PHARMACY_LOCATIONS.STORE,
-        }),
-        pharmacyService.getMedications({ page: 1, page_size: 10000 }),
-      ]);
-
-      const grouped = new Map<number, MedicationWithStock>();
-
-      inventoryResponse.results.forEach((item) => {
-        const medId = typeof item.medication === "number" ? item.medication : (item.medication as any)?.id;
-        if (!medId) return;
-
-        const medication = (typeof item.medication === "object" ? item.medication : {}) as any;
-        if (!grouped.has(medId)) {
-          grouped.set(medId, {
-            id: medId,
-            name: item.medication_name || medication?.name || "Unknown",
-            generic: medication?.generic,
-            generic_name: medication?.generic?.name || medication?.generic_name,
-            strength: medication?.strength || "",
-            form: medication?.form || "",
-            category: medication?.category || "",
-            packSize: (typeof medication?.pack_size === "number" && medication.pack_size > 0) ? medication.pack_size : 10,
-            storeQuantity: 0,
-            minimumStock: Number(medication?.min_stock_level ?? 0),
-            batches: [],
-          });
-        }
-
-        const med = grouped.get(medId)!;
-        med.storeQuantity += Number(item.quantity || 0);
-        med.batches.push(item);
+      const res = await pharmacyService.getStoreStockSummary({
+        location: PHARMACY_LOCATIONS.STORE,
+        page: inventoryCurrentPage,
+        page_size: inventoryItemsPerPage,
+        search: debouncedInventorySearch.trim() || undefined,
+        category: categoryFilter === "All Categories" ? undefined : categoryFilter,
+        stock_status: stockFilter === "all" ? undefined : stockFilter,
       });
-
-      // Ensure medications from Drug Master always appear, even without stock batches.
-      medicationsResponse.results.forEach((med: any) => {
-        if (!med?.id || grouped.has(med.id)) return;
-        grouped.set(med.id, {
-          id: med.id,
-          name: med.name || "Unknown",
-          generic: med.generic,
-          generic_name: med.generic_name || med.generic?.name || "",
-          strength: med.strength || "",
-          form: med.form || "",
-          category: med.category || "",
-          packSize: (typeof med.pack_size === "number" && med.pack_size > 0) ? med.pack_size : 10,
-          storeQuantity: 0,
-          minimumStock: Number(med.min_stock_level ?? 0),
-          batches: [],
-        });
-      });
-
-      setStoreInventory(Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name)));
+      setStoreInventory((res.results || []).map((r) => mapStoreStockRow(r as Medication & {
+        store_quantity?: string | number;
+        nearest_expiry?: string | null;
+        batch_count?: number;
+      })));
+      setInventoryTotalCount(typeof res.count === "number" ? res.count : (res.results || []).length);
     } catch (err) {
       console.error("Error loading store inventory:", err);
       toast.error("Failed to load central store inventory");
     } finally {
       setInventoryLoading(false);
     }
-  };
+  }, [
+    inventoryCurrentPage,
+    inventoryItemsPerPage,
+    debouncedInventorySearch,
+    categoryFilter,
+    stockFilter,
+  ]);
+
+  useEffect(() => {
+    void loadStoreStats();
+  }, [loadStoreStats]);
+
+  useEffect(() => {
+    void loadStorePage();
+  }, [loadStorePage]);
+
+  useEffect(() => {
+    setInventoryCurrentPage(1);
+  }, [debouncedInventorySearch, categoryFilter, stockFilter, inventoryItemsPerPage]);
+
+  const fetchBatchesForMedication = useCallback(async (med: MedicationWithStock) => {
+    const res = await pharmacyService.getInventory({
+      medication: String(med.id),
+      location: PHARMACY_LOCATIONS.STORE,
+      page_size: 500,
+    });
+    return res.results || [];
+  }, []);
 
   const categories = useMemo(() => {
     return MEDICATION_CATEGORIES;
@@ -189,12 +224,14 @@ export default function WarehouseStorePage() {
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
-  const getNearestExpiryDate = (batches: MedicationInventory[]) => {
-    if (!batches || batches.length === 0) return "";
-    const sorted = batches
-      .slice()
-      .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
-    return sorted[0]?.expiry_date || "";
+  const getNearestExpiryForMedication = (med: MedicationWithStock) => {
+    if (med.batches?.length) {
+      const sorted = med.batches
+        .slice()
+        .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
+      return sorted[0]?.expiry_date || "";
+    }
+    return med.nearestExpiry || "";
   };
 
   const getStockStatus = (med: MedicationWithStock) => {
@@ -216,76 +253,20 @@ export default function WarehouseStorePage() {
     }
   };
 
-  useEffect(() => {
-    if (inventoryCurrentPage !== 1) setInventoryCurrentPage(1);
-  }, [inventorySearchQuery, categoryFilter, stockFilter]);
-
-  const filteredInventory = useMemo(() => {
-    const q = inventorySearchQuery.trim().toLowerCase();
-    return storeInventory.filter((med) => {
-      const matchesSearch =
-        !q ||
-        med.name.toLowerCase().includes(q) ||
-        (med.generic_name || "").toLowerCase().includes(q);
-
-      const matchesCategory = categoryFilter === "All Categories" || (med.category || "") === categoryFilter;
-
-      const status = getStockStatus(med);
-      const matchesStock =
-        stockFilter === "all" ||
-        (stockFilter === "out" && status === "Out of Stock") ||
-        (stockFilter === "low" && status === "Low Stock") ||
-        (stockFilter === "near_expiry" &&
-          med.storeQuantity > 0 &&
-          (() => {
-            const nearestExpiry = getNearestExpiryDate(med.batches);
-            const days = getDaysUntilExpiry(nearestExpiry);
-            return days >= 0 && days <= EXPIRY_WARNING_DAYS;
-          })()) ||
-        (stockFilter === "normal" && status === "In Stock");
-
-      return matchesSearch && matchesCategory && matchesStock;
-    });
-  }, [storeInventory, inventorySearchQuery, categoryFilter, stockFilter]);
-
-  const paginatedInventory = useMemo(() => {
-    const start = (inventoryCurrentPage - 1) * inventoryItemsPerPage;
-    return filteredInventory.slice(start, start + inventoryItemsPerPage);
-  }, [filteredInventory, inventoryCurrentPage, inventoryItemsPerPage]);
-
-  const stats = useMemo(() => {
-    const outOfStock = storeInventory.filter((m) => m.storeQuantity === 0).length;
-    const lowStock = storeInventory.filter((m) => m.storeQuantity > 0 && m.storeQuantity <= m.minimumStock).length;
-    const expiringSoon = storeInventory.filter((m) => {
-      if (m.storeQuantity <= 0) return false;
-      const nearestExpiry = getNearestExpiryDate(m.batches);
-      const days = getDaysUntilExpiry(nearestExpiry);
-      return days >= 0 && days <= EXPIRY_WARNING_DAYS;
-    }).length;
-    const expired = storeInventory.filter((m) => {
-      if (m.storeQuantity <= 0) return false;
-      const nearestExpiry = getNearestExpiryDate(m.batches);
-      const days = getDaysUntilExpiry(nearestExpiry);
-      return days < 0;
-    }).length;
-    return {
-      totalMedications: storeInventory.length,
-      outOfStock,
-      lowStock,
-      expiringSoon,
-      expired,
-      totalUnits: storeInventory.reduce((sum, m) => sum + m.storeQuantity, 0),
-    };
-  }, [storeInventory]);
-
-  const handleViewDetails = (med: MedicationWithStock) => {
+  const handleViewDetails = async (med: MedicationWithStock) => {
     setSelectedMedication(med);
     setShowDetailsModal(true);
+    if (!med.batches?.length && (med.batchCount ?? 0) > 0) {
+      const batches = await fetchBatchesForMedication(med);
+      setSelectedMedication((prev) => (prev?.id === med.id ? { ...prev, batches } : prev));
+    }
   };
 
-  const handleViewBatches = (med: MedicationWithStock) => {
-    setSelectedMedication(med);
+  const handleViewBatches = async (med: MedicationWithStock) => {
+    setSelectedMedication({ ...med, batches: [] });
     setShowBatchesModal(true);
+    const batches = await fetchBatchesForMedication(med);
+    setSelectedMedication((prev) => (prev?.id === med.id ? { ...prev, batches } : prev));
   };
 
   const openReceive = () => {
@@ -362,7 +343,7 @@ export default function WarehouseStorePage() {
       setShowAdjustBatchModal(false);
       setSelectedBatch(null);
       setAdjustmentForm({ type: "decrease", quantity: 0, reason: "", notes: "" });
-      await loadStoreInventory();
+      await Promise.all([loadStorePage(), loadStoreStats()]);
     } catch (e: any) {
       toast.error(e?.message || "Failed to adjust batch");
     } finally {
@@ -402,7 +383,7 @@ export default function WarehouseStorePage() {
       toast.success(`Received ${packs} packs (${quantityInUnits.toLocaleString()} units)`);
       setShowReceiveModal(false);
       setShowDetailsModal(false);
-      await loadStoreInventory();
+      await Promise.all([loadStorePage(), loadStoreStats()]);
     } catch (e: any) {
       toast.error(e?.message || "Failed to receive stock");
     } finally {
@@ -523,7 +504,7 @@ export default function WarehouseStorePage() {
     }
     setBulkErrors(errors);
     setBulkUploading(false);
-    await loadStoreInventory();
+    await Promise.all([loadStorePage(), loadStoreStats()]);
     if (errors.length) toast.error(`Bulk upload completed with ${errors.length} error(s)`);
     else toast.success("Bulk upload completed");
   };
@@ -564,23 +545,23 @@ export default function WarehouseStorePage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Total Items</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-violet-600">{stats.totalMedications}</p>
+                    <p className="text-2xl sm:text-3xl font-bold text-violet-600">{storeStats.totalMedications}</p>
                   </div>
                   <Package className="h-6 w-6 text-violet-500" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className={stats.outOfStock > 0 ? "border-red-200 dark:border-red-800" : ""}>
+            <Card className={storeStats.outOfStock > 0 ? "border-red-200 dark:border-red-800" : ""}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Out of Stock</p>
-                    <p className={`text-2xl sm:text-3xl font-bold ${stats.outOfStock > 0 ? "text-red-600" : "text-green-600"}`}>
-                      {stats.outOfStock}
+                    <p className={`text-2xl sm:text-3xl font-bold ${storeStats.outOfStock > 0 ? "text-red-600" : "text-green-600"}`}>
+                      {storeStats.outOfStock}
                     </p>
                   </div>
-                  <XCircle className={`h-6 w-6 ${stats.outOfStock > 0 ? "text-red-500" : "text-green-500"}`} />
+                  <XCircle className={`h-6 w-6 ${storeStats.outOfStock > 0 ? "text-red-500" : "text-green-500"}`} />
                 </div>
               </CardContent>
             </Card>
@@ -590,11 +571,11 @@ export default function WarehouseStorePage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Low Stock</p>
-                    <p className={`text-2xl sm:text-3xl font-bold ${stats.lowStock > 0 ? "text-amber-600" : "text-green-600"}`}>
-                      {stats.lowStock}
+                    <p className={`text-2xl sm:text-3xl font-bold ${storeStats.lowStock > 0 ? "text-amber-600" : "text-green-600"}`}>
+                      {storeStats.lowStock}
                     </p>
                   </div>
-                  <AlertTriangle className={`h-6 w-6 ${stats.lowStock > 0 ? "text-amber-500" : "text-green-500"}`} />
+                  <AlertTriangle className={`h-6 w-6 ${storeStats.lowStock > 0 ? "text-amber-500" : "text-green-500"}`} />
                 </div>
               </CardContent>
             </Card>
@@ -604,7 +585,7 @@ export default function WarehouseStorePage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Total Units</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.totalUnits.toLocaleString()}</p>
+                    <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{storeStats.totalUnits.toLocaleString()}</p>
                   </div>
                   <TrendingUp className="h-6 w-6 text-emerald-500" />
                 </div>
@@ -612,7 +593,7 @@ export default function WarehouseStorePage() {
             </Card>
           </div>
 
-          {(stats.outOfStock > 0 || stats.lowStock > 0 || stats.expiringSoon > 0 || stats.expired > 0) && (
+          {(storeStats.outOfStock > 0 || storeStats.lowStock > 0 || storeStats.expiringSoon > 0 || storeStats.expired > 0) && (
             <Card className="bg-gradient-to-r from-amber-50 to-red-50 dark:from-amber-900/20 dark:to-red-900/20 border-amber-200 dark:border-amber-800">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -621,15 +602,15 @@ export default function WarehouseStorePage() {
                   <div>
                     <p className="font-medium text-amber-800 dark:text-amber-400">Stock Alerts</p>
                     <p className="text-sm text-amber-700 dark:text-amber-500">
-                      {stats.outOfStock > 0 && `${stats.outOfStock} item(s) out of stock. `}
-                      {stats.lowStock > 0 && `${stats.lowStock} item(s) running low. `}
-                      {stats.expiringSoon > 0 && `${stats.expiringSoon} item(s) near expiry (<= ${EXPIRY_WARNING_DAYS} days). `}
-                      {stats.expired > 0 && `${stats.expired} item(s) already expired. `}
+                      {storeStats.outOfStock > 0 && `${storeStats.outOfStock} item(s) out of stock. `}
+                      {storeStats.lowStock > 0 && `${storeStats.lowStock} item(s) running low. `}
+                      {storeStats.expiringSoon > 0 && `${storeStats.expiringSoon} item(s) near expiry (<= ${EXPIRY_WARNING_DAYS} days). `}
+                      {storeStats.expired > 0 && `${storeStats.expired} item(s) already expired. `}
                       Consider restocking soon.
                     </p>
                   </div>
                 </div>
-                  {stats.expiringSoon > 0 && (
+                  {storeStats.expiringSoon > 0 && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -701,10 +682,10 @@ export default function WarehouseStorePage() {
                   <p>Loading central store inventory...</p>
                 </CardContent>
               </Card>
-            ) : paginatedInventory.length > 0 ? (
-              paginatedInventory.map((med) => {
+            ) : storeInventory.length > 0 ? (
+              storeInventory.map((med) => {
                 const stockStatus = getStockStatus(med);
-                const nearestExpiry = getNearestExpiryDate(med.batches);
+                const nearestExpiry = getNearestExpiryForMedication(med);
                 const daysUntilExpiry = nearestExpiry ? getDaysUntilExpiry(nearestExpiry) : 9999;
 
                 return (
@@ -775,7 +756,7 @@ export default function WarehouseStorePage() {
                                 med.generic_name,
                                 med.category,
                                 med.form,
-                                `${med.batches.length} batch(es)`,
+                                `${med.batchCount ?? med.batches.length} batch(es)`,
                               ])}
                             </span>
                             {nearestExpiry && (
@@ -805,11 +786,11 @@ export default function WarehouseStorePage() {
             )}
           </div>
 
-          {filteredInventory.length > 0 && (
+          {inventoryTotalCount > 0 && (
             <Card className="p-4">
               <StandardPagination
                 currentPage={inventoryCurrentPage}
-                totalItems={filteredInventory.length}
+                totalItems={inventoryTotalCount}
                 itemsPerPage={inventoryItemsPerPage}
                 onPageChange={setInventoryCurrentPage}
                 onItemsPerPageChange={(newSize) => {
@@ -893,10 +874,10 @@ export default function WarehouseStorePage() {
 
                   <div className="bg-muted/50 rounded-lg p-4">
                     <h4 className="font-medium mb-2">Expiry Information</h4>
-                    {getNearestExpiryDate(selectedMedication.batches) ? (
+                    {getNearestExpiryForMedication(selectedMedication) ? (
                       <p className="text-sm">
                         <span className="text-muted-foreground">Expiry Date:</span>{" "}
-                        <span className="font-medium">{getNearestExpiryDate(selectedMedication.batches)}</span>
+                        <span className="font-medium">{getNearestExpiryForMedication(selectedMedication)}</span>
                       </p>
                     ) : null}
                   </div>

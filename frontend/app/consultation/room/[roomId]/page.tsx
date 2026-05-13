@@ -2158,7 +2158,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       try {
         setLoadingRadiologyTemplates(true);
         setRadiologyTemplatesError(null);
-        const templates = await radiologyService.getTemplates({ page_size: 1000 });
+        const templates = await radiologyService.getTemplates({ page_size: 200 });
         setRadiologyTemplates(templates.results || []);
       } catch (err: any) {
         debugConsultationRoom('Failed to load radiology templates:', err);

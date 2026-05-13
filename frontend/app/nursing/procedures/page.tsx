@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,8 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api-client';
-import { excludeWardInstructionOrdersForProceduresQueue } from '@/lib/nursing-procedure-queue';
-import { patientService, wardService } from '@/lib/services';
+import { wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -272,9 +272,102 @@ function procedureSummaryLine(procedure: Procedure): string {
   return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
 }
 
+function nursingOrderToProcedure(order: any): Procedure {
+  const typeMap: Record<string, Procedure['type']> = {
+    injection: 'injection',
+    dressing: 'dressing',
+    wound_care: 'dressing',
+    medication: 'medication',
+    'iv infusion': 'injection',
+    'ward admission': 'ward_admission',
+    'observation admission': 'ward_admission',
+    ward_admission: 'ward_admission',
+    observation_admission: 'ward_admission',
+  };
+  const procedureType = typeMap[String(order.order_type || '').toLowerCase()] || 'medication';
+
+  const priorityMap: Record<string, Procedure['priority']> = {
+    urgent: 'Emergency',
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+  };
+  const priority = priorityMap[String(order.priority || '').toLowerCase()] || 'Medium';
+
+  const allergies = Array.isArray(order.patient_allergies)
+    ? order.patient_allergies.map((a: unknown) => String(a))
+    : [];
+
+  const description = order.description || '';
+  let parsedWard = '';
+  let details: Procedure['details'] = {};
+
+  if (procedureType === 'ward_admission') {
+    const wardMatch = description.match(/to\s+([^.,;]+)/i);
+    if (wardMatch?.[1]) {
+      parsedWard = wardMatch[1].trim();
+    }
+    const diagPcMatch = description.match(/Diagnosis:\s*(.+?)\.\s*Presenting complaint:\s*(.+?)(?:\s*\.|$)/i);
+    if (diagPcMatch) {
+      const diag = diagPcMatch[1].trim();
+      const pc = diagPcMatch[2].trim();
+      details.admissionDiagnosis = diag && diag.toLowerCase() !== 'n/a' ? diag : undefined;
+      details.presentingComplaint = pc && pc.toLowerCase() !== 'n/a' ? pc : undefined;
+    }
+  } else {
+    details = parseProcedureDetails(procedureType, description, order.frequency || '');
+  }
+
+  const visitRaw = order.visit;
+  const visitId =
+    typeof visitRaw === 'number'
+      ? visitRaw
+      : visitRaw && typeof visitRaw === 'object' && visitRaw.id != null
+        ? Number(visitRaw.id)
+        : undefined;
+  const sessionRaw = order.consultation_session;
+  const consultationSessionId =
+    typeof sessionRaw === 'number'
+      ? sessionRaw
+      : sessionRaw && typeof sessionRaw === 'object' && sessionRaw.id != null
+        ? Number(sessionRaw.id)
+        : undefined;
+
+  return {
+    id: String(order.id),
+    visitId: visitId != null && Number.isFinite(visitId) ? visitId : undefined,
+    consultationSessionId:
+      consultationSessionId != null && Number.isFinite(consultationSessionId)
+        ? consultationSessionId
+        : undefined,
+    type: procedureType,
+    status: order.status === 'completed' ? 'completed' : 'pending',
+    patientName: order.patient_name ?? '',
+    patientId: order.patient_patient_id ?? '',
+    personalNumber: order.patient_personal_number ?? '',
+    age: order.patient_age ?? 0,
+    gender: order.patient_gender ?? '',
+    ward: parsedWard,
+    orderedAt: order.ordered_at,
+    completedAt: order.completed_at || order.updated_at || undefined,
+    orderedBy: order.ordered_by_name || 'Unknown',
+    priority,
+    allergies,
+    details,
+    description,
+  };
+}
+
 // ==================== MAIN COMPONENT ====================
 export default function ProceduresQueuePage() {
   const [procedures, setProcedures] = useState<Procedure[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [queueStats, setQueueStats] = useState({
+    pending: 0,
+    emergency: 0,
+    injections: 0,
+    wardAdmissions: 0,
+  });
   const [wards, setWards] = useState<any[]>([]);
   const [wardSearch, setWardSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -283,6 +376,7 @@ export default function ProceduresQueuePage() {
   useAuthRedirect(authError);
   const { currentUser } = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [typeFilter, setTypeFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -293,6 +387,15 @@ export default function ProceduresQueuePage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  const hasActiveFilters =
+    debouncedSearch.trim() !== '' ||
+    typeFilter !== 'all' ||
+    priorityFilter !== 'all' ||
+    genderFilter !== 'all' ||
+    Boolean(dateRange.from) ||
+    Boolean(dateRange.to) ||
+    dateFilter !== 'all';
 
   // Dialog states
   const [isPerformDialogOpen, setIsPerformDialogOpen] = useState(false);
@@ -352,53 +455,47 @@ export default function ProceduresQueuePage() {
     return true;
   }, [selectedProcedure, paperSpec]);
   
-  // Load nursing orders and wards from API
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const wardsPromise = wardService
-          .getWards({ status: 'active' })
-          .then((wardsResponse) => {
-            setWards(wardsResponse.results || []);
-          })
-          .catch((wardError) => {
-            // No invented data: surface the failure instead of silently
-            // populating the picker with ghost wards that don't exist on
-            // the server. The admin user is expected to fix the API
-            // (auth, network, missing data) rather than carry on with
-            // hard-coded ids that may collide with real ward records.
-            console.error('Failed to load wards:', wardError);
-            toast.error('Could not load wards. The ward picker will be empty until the wards API is reachable.');
-            setWards([]);
-          });
-
-        // Load wards and queue concurrently to reduce first-render latency.
-        await Promise.all([wardsPromise, loadOrders()]);
-      } catch (err) {
-        console.error('Error loading nursing orders:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load procedures queue. Please try again.');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    loadData();
+    wardService
+      .getWards({ status: 'active' })
+      .then((wardsResponse) => {
+        setWards(wardsResponse.results || []);
+      })
+      .catch((wardError) => {
+        console.error('Failed to load wards:', wardError);
+        toast.error('Could not load wards. The ward picker will be empty until the wards API is reachable.');
+        setWards([]);
+      });
   }, []);
 
-  // ==================== STATS ====================
-  const stats = useMemo(() => ({
-    pending: procedures.filter(p => p.status === 'pending').length,
-    emergency: procedures.filter(p => p.priority === 'Emergency').length,
-    injections: procedures.filter(p => p.type === 'injection').length,
-    wardAdmissions: procedures.filter(p => p.type === 'ward_admission').length,
-  }), [procedures]);
+  const loadQueueStats = useCallback(async () => {
+    try {
+      const base: Record<string, string> = {
+        procedures_queue: '1',
+        status: 'pending',
+        page: '1',
+        page_size: '1',
+      };
+      const fetchCount = async (extra: Record<string, string>) => {
+        const qs = new URLSearchParams({ ...base, ...extra });
+        const res = await apiFetch<{ count?: number }>(`/nursing/orders/?${qs.toString()}`);
+        return typeof res.count === 'number' ? res.count : 0;
+      };
+      const [pending, emergency, injections, wardAdmissions] = await Promise.all([
+        fetchCount({}),
+        fetchCount({ priority: 'urgent' }),
+        fetchCount({ queue_type: 'injection' }),
+        fetchCount({ queue_type: 'ward_admission' }),
+      ]);
+      setQueueStats({ pending, emergency, injections, wardAdmissions });
+    } catch (e) {
+      console.error('Failed to load procedure queue stats:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadQueueStats();
+  }, [loadQueueStats]);
 
   const getCompletedIconStyle = (type: Procedure['type']) => {
     // Use module/type colors (same as typeConfig palettes)
@@ -415,73 +512,81 @@ export default function ProceduresQueuePage() {
     }
   };
 
-  // ==================== FILTERING & SORTING ====================
-  const filteredProcedures = useMemo(() => {
-    return procedures
-      .filter(p => {
-        const matchesSearch = p.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                             p.patientId.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesType = typeFilter === 'all' || p.type === typeFilter;
-        const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
-        const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
-        
-        // Date filter (filter by ordered date)
-        if (dateRange.from || dateRange.to) {
-          const dateSource = (p.status === 'completed' && p.completedAt) ? p.completedAt : p.orderedAt;
-          const orderedDate = new Date(dateSource);
-          if (Number.isNaN(orderedDate.getTime())) return false;
-          if (dateRange.from) {
-            const from = new Date(`${dateRange.from}T00:00:00`);
-            if (orderedDate < from) return false;
-          }
-          if (dateRange.to) {
-            const to = new Date(`${dateRange.to}T23:59:59.999`);
-            if (orderedDate > to) return false;
-          }
-        } else if (dateFilter !== 'all') {
-          const dateSource = (p.status === 'completed' && p.completedAt) ? p.completedAt : p.orderedAt;
-          const orderedDate = new Date(dateSource);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          
-          if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
-          if (dateFilter === 'week') {
-            const weekAgo = new Date(today);
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            if (orderedDate < weekAgo) return false;
-          }
-          if (dateFilter === 'month') {
-            const monthAgo = new Date(today);
-            monthAgo.setMonth(monthAgo.getMonth() - 1);
-            if (orderedDate < monthAgo) return false;
-          }
-        }
-        
-        return matchesSearch && matchesType && matchesPriority && matchesGender;
-      })
-      .sort((a, b) => {
-        // Sort by priority first
-        const order = { 'Emergency': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
-        if (order[a.priority] !== order[b.priority]) {
-          return order[a.priority] - order[b.priority];
-        }
-        // Then by time (oldest first)
-        const aTime = new Date((a.status === 'completed' && a.completedAt) ? a.completedAt : a.orderedAt).getTime();
-        const bTime = new Date((b.status === 'completed' && b.completedAt) ? b.completedAt : b.orderedAt).getTime();
-        return aTime - bTime;
-      });
-  }, [procedures, searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+  const loadOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const qs = new URLSearchParams();
+      qs.set('procedures_queue', '1');
+      qs.set('status', 'pending');
+      qs.set('page', String(currentPage));
+      qs.set('page_size', String(itemsPerPage));
+      const q = debouncedSearch.trim();
+      if (q) qs.set('search', q);
+      if (typeFilter !== 'all') qs.set('queue_type', typeFilter);
+      if (priorityFilter !== 'all') {
+        const pm: Record<string, string> = {
+          Emergency: 'urgent',
+          High: 'high',
+          Medium: 'medium',
+          Low: 'low',
+        };
+        const apiPri = pm[priorityFilter];
+        if (apiPri) qs.set('priority', apiPri);
+      }
+      if (genderFilter !== 'all') {
+        qs.set('patient_gender', genderFilter.toLowerCase());
+      }
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) qs.set('ordered_at_after', dateRange.from);
+        if (dateRange.to) qs.set('ordered_at_before', dateRange.to);
+      } else if (dateFilter !== 'all') {
+        qs.set('date_filter', dateFilter);
+      }
+      const ordersResult = await apiFetch<{ results: any[]; count?: number }>(
+        `/nursing/orders/?${qs.toString()}`
+      );
+      const rows = (ordersResult.results || []).map(nursingOrderToProcedure);
+      setProcedures(rows);
+      setTotalCount(typeof ordersResult.count === 'number' ? ordersResult.count : rows.length);
+    } catch (err) {
+      console.error('Error loading orders:', err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        setError('Failed to load procedures queue. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    currentPage,
+    itemsPerPage,
+    debouncedSearch,
+    typeFilter,
+    priorityFilter,
+    genderFilter,
+    dateFilter,
+    dateRange.from,
+    dateRange.to,
+  ]);
 
-  // Paginated procedures
-  const paginatedProcedures = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredProcedures.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredProcedures, currentPage, itemsPerPage]);
+  useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
 
-  // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+  }, [
+    debouncedSearch,
+    typeFilter,
+    priorityFilter,
+    dateFilter,
+    genderFilter,
+    dateRange.from,
+    dateRange.to,
+    itemsPerPage,
+  ]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -489,111 +594,6 @@ export default function ProceduresQueuePage() {
   };
 
   // ==================== HANDLERS ====================
-  const loadOrders = async () => {
-    try {
-      const qs = new URLSearchParams();
-      qs.set('status', 'pending');
-      qs.set('page_size', '1000');
-      const ordersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?${qs.toString()}`);
-      const orders = excludeWardInstructionOrdersForProceduresQueue(ordersResult.results || []);
-
-          const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
-        try {
-          const [patient, history] = await Promise.all([
-            patientService.getPatient(order.patient),
-            patientService.getPatientHistory(order.patient).catch((historyErr) => {
-              // If history fetch fails, continue without allergies
-              console.warn(`Could not load allergies for patient ${order.patient}:`, historyErr);
-              return null;
-            }),
-          ]);
-
-          // Load patient allergies from medical history
-          let allergies: string[] = [];
-          if (history && history.allergies) {
-            allergies = Array.isArray(history.allergies)
-              ? history.allergies
-              : typeof history.allergies === 'string'
-                ? history.allergies.split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a)
-                : [];
-          }
-          
-          const typeMap: Record<string, Procedure['type']> = {
-            'injection': 'injection',
-            'dressing': 'dressing',
-            'wound_care': 'dressing',
-            'medication': 'medication',
-            'iv infusion': 'injection',
-            'ward admission': 'ward_admission',
-            'observation admission': 'ward_admission',
-            'ward_admission': 'ward_admission',
-            'observation_admission': 'ward_admission',
-          };
-          
-          const procedureType = typeMap[order.order_type?.toLowerCase()] || 'medication';
-          
-          const priorityMap: Record<string, Procedure['priority']> = {
-            'urgent': 'Emergency',
-            'high': 'High',
-            'medium': 'Medium',
-            'low': 'Low',
-          };
-          
-          const description = order.description || '';
-          let parsedWard = '';
-          let details: Procedure['details'] = {};
-
-          if (procedureType === 'ward_admission') {
-            const wardMatch = description.match(/to\s+([^.,;]+)/i);
-            if (wardMatch?.[1]) {
-              parsedWard = wardMatch[1].trim();
-            }
-            const diagPcMatch = description.match(/Diagnosis:\s*(.+?)\.\s*Presenting complaint:\s*(.+?)(?:\s*\.|$)/i);
-            if (diagPcMatch) {
-              const diag = diagPcMatch[1].trim();
-              const pc = diagPcMatch[2].trim();
-              details.admissionDiagnosis = diag && diag.toLowerCase() !== 'n/a' ? diag : undefined;
-              details.presentingComplaint = pc && pc.toLowerCase() !== 'n/a' ? pc : undefined;
-            }
-          } else {
-            details = parseProcedureDetails(procedureType, description, order.frequency || '');
-          }
-          
-          return {
-            id: String(order.id),
-            visitId: typeof order.visit === 'number' ? order.visit : undefined,
-            consultationSessionId: typeof order.consultation_session === 'number' ? order.consultation_session : undefined,
-            type: procedureType,
-            status: (order.status === 'completed' ? 'completed' : 'pending'),
-            patientName: patient.full_name ?? '',
-            patientId: patient.patient_id || '',
-            personalNumber: patient.personal_number || '',
-            age: patient.age || 0,
-            gender: patient.gender || '',
-            ward: parsedWard,
-            orderedAt: order.ordered_at,
-            completedAt: order.completed_at || order.updated_at || undefined,
-            orderedBy: order.ordered_by_name || 'Unknown',
-            priority: priorityMap[order.priority] || 'Medium',
-            allergies,
-            details,
-            description,
-          } as Procedure;
-        } catch (err) {
-          return null;
-        }
-      }));
-      
-      const validProcedures = transformedProcedures.filter((p): p is Procedure => p !== null);
-      setProcedures(validProcedures);
-      return validProcedures;
-    } catch (err) {
-      console.error('Error loading orders:', err);
-      throw err;
-    }
-  };
-  
-
   const openPerformDialog = (procedure: Procedure) => {
     resetForms();
     setSelectedProcedure(procedure);
@@ -920,9 +920,9 @@ export default function ProceduresQueuePage() {
       });
       console.log('Order updated:', orderResponse);
 
-      // Remove from local state
-      setProcedures(prev => prev.filter(p => p.id !== selectedProcedure.id));
-      console.log('Removed from local state, procedure ID:', selectedProcedure.id);
+      void loadOrders();
+      void loadQueueStats();
+      console.log('Refreshed queue after procedure ID:', selectedProcedure.id);
       
       const typeLabel = getTypeConfig(selectedProcedure.type).label;
       toast.success(`${typeLabel} completed for ${selectedProcedure.patientName}`, {
@@ -980,7 +980,7 @@ export default function ProceduresQueuePage() {
           <Card>
             <CardContent className="p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
-              <p className="text-2xl sm:text-3xl font-bold text-rose-500">{stats.pending}</p>
+              <p className="text-2xl sm:text-3xl font-bold text-rose-500">{queueStats.pending}</p>
             </CardContent>
           </Card>
           <Card>
@@ -988,7 +988,7 @@ export default function ProceduresQueuePage() {
               <div className="p-2 rounded-lg bg-rose-500/10"><AlertTriangle className="h-4 w-4 text-rose-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Emergency</p>
-                <p className="text-xl font-bold text-rose-500">{stats.emergency}</p>
+                <p className="text-xl font-bold text-rose-500">{queueStats.emergency}</p>
               </div>
             </CardContent>
           </Card>
@@ -997,7 +997,7 @@ export default function ProceduresQueuePage() {
               <div className="p-2 rounded-lg bg-emerald-500/10"><Syringe className="h-4 w-4 text-emerald-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Injections</p>
-                <p className="text-xl font-bold text-emerald-500">{stats.injections}</p>
+                <p className="text-xl font-bold text-emerald-500">{queueStats.injections}</p>
               </div>
             </CardContent>
           </Card>
@@ -1006,7 +1006,7 @@ export default function ProceduresQueuePage() {
               <div className="p-2 rounded-lg bg-cyan-500/10"><Building2 className="h-4 w-4 text-cyan-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Observation Admits</p>
-                <p className="text-xl font-bold text-cyan-500">{stats.wardAdmissions}</p>
+                <p className="text-xl font-bold text-cyan-500">{queueStats.wardAdmissions}</p>
               </div>
             </CardContent>
           </Card>
@@ -1065,7 +1065,7 @@ export default function ProceduresQueuePage() {
         </Card>
 
         {/* Queue List */}
-        {filteredProcedures.length === 0 ? (
+        {!loading && totalCount === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <CheckCircle2 className="h-16 w-16 text-emerald-500 mb-4" />
@@ -1073,15 +1073,23 @@ export default function ProceduresQueuePage() {
                 All caught up!
               </h3>
               <p className="text-muted-foreground text-center">
-                {procedures.length === 0
-                  ? 'No pending procedures found'
-                  : 'No pending procedures match your current filters'}
+                {hasActiveFilters
+                  ? 'No pending procedures match your current filters'
+                  : 'No pending procedures found'}
               </p>
             </CardContent>
           </Card>
         ) : (
           <div className="space-y-3">
-            {paginatedProcedures.map((procedure) => {
+            {loading && procedures.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center text-muted-foreground">
+                  <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
+                  <p>Loading procedures queue…</p>
+                </CardContent>
+              </Card>
+            ) : null}
+            {procedures.map((procedure) => {
               const typeConfig = getTypeConfig(procedure.type);
               const TypeIcon = typeConfig.icon;
               
@@ -1170,11 +1178,11 @@ export default function ProceduresQueuePage() {
         )}
 
         {/* Pagination */}
-        {filteredProcedures.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredProcedures.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

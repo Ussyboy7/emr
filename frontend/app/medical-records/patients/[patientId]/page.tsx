@@ -475,7 +475,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
       // Load imaging
       try {
-        const imagingOrders = await radiologyService.getOrders({ patient: numericPatientId.toString(), page_size: 1000 });
+        const imagingOrders = await radiologyService.getOrders({ patient: numericPatientId.toString(), page_size: 200 });
         const items = (imagingOrders?.results || []).flatMap((order: any) => {
           const studies = Array.isArray(order.studies) ? order.studies : [];
           return studies.map((study: any) => ({
@@ -538,7 +538,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       try {
         const certificates = await medicalCertificateService.getCertificates({
           patient: numericPatientId.toString(),
-          page_size: 1000,
+          page_size: 200,
         });
         setCertificateHistory(certificates?.results || []);
       } catch (err) {

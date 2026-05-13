@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+import React, { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -26,6 +26,7 @@ import { loadConsultationReportSession, type ConsultationReportSession } from '@
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
@@ -192,6 +193,7 @@ export default function ConsultationHistoryPage() {
   const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("today");
   const [clinicFilter, setClinicFilter] = useState("all");
@@ -199,6 +201,7 @@ export default function ConsultationHistoryPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [totalCount, setTotalCount] = useState(0);
   const [statsData, setStatsData] = useState({
     today: 0,
     thisWeek: 0,
@@ -321,18 +324,20 @@ export default function ConsultationHistoryPage() {
         const { date, start_date, end_date } = buildDateParams();
         
         // Backend expects status: 'active' | 'completed' | 'cancelled' (not 'in-progress')
-        // Load all for date range (like Nursing Pool Queue) - search is client-side
         const apiStatus = statusFilter === 'all' ? undefined : statusFilter === 'in-progress' ? 'active' : statusFilter === 'completed' ? 'completed' : statusFilter;
         const sessionsResult = await consultationService.getSessions({
-          page: 1,
-          page_size: dateFilter === "month" ? 1000 : 500,
+          page: currentPage,
+          page_size: itemsPerPage,
           status: apiStatus,
           clinic: clinicFilter !== "all" ? clinicFilter : undefined,
           date,
           start_date,
           end_date,
+          search: debouncedSearchQuery.trim() || undefined,
+          ordering: '-started_at',
         });
         const sessions = sessionsResult.results || [];
+        setTotalCount(typeof sessionsResult.count === 'number' ? sessionsResult.count : sessions.length);
         
         // Transform sessions to consultation records
         const transformedConsultations = await Promise.all(sessions.map(async (session: any) => {
@@ -426,7 +431,7 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [statusFilter, clinicFilter, buildDateParams]);
+  }, [statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, debouncedSearchQuery]);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -479,40 +484,10 @@ export default function ConsultationHistoryPage() {
     loadStats();
   }, [clinicFilter, buildDateParams]);
 
-  // Client-side filter and pagination (same as Nursing Pool Queue)
-  const filteredConsultations = useMemo(() => {
-    const searchLower = searchQuery.toLowerCase().trim();
-    if (!searchLower) return consultations;
-    return consultations.filter(
-      (c) =>
-        (c.patient && c.patient.toLowerCase().includes(searchLower)) ||
-        (c.patientId && String(c.patientId).toLowerCase().includes(searchLower)) ||
-        (c.visitId != null && String(c.visitId).toLowerCase().includes(searchLower)) ||
-        (c.visitDisplayId && c.visitDisplayId.toLowerCase().includes(searchLower)) ||
-        (c.doctor && c.doctor.toLowerCase().includes(searchLower)) ||
-        (c.clinic && c.clinic.toLowerCase().includes(searchLower))
-    );
-  }, [consultations, searchQuery]);
-
-  const sortedConsultations = useMemo(
-    () =>
-      [...filteredConsultations].sort((a, b) => {
-        const keyA = `${a.date}T${a.time || "00:00"}`;
-        const keyB = `${b.date}T${b.time || "00:00"}`;
-        return new Date(keyB).getTime() - new Date(keyA).getTime();
-      }),
-    [filteredConsultations]
-  );
-
-  const paginatedConsultations = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return sortedConsultations.slice(start, start + itemsPerPage);
-  }, [sortedConsultations, currentPage, itemsPerPage]);
-
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change (debounced search aligns with fetch)
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
 
   const stats = statsData;
 
@@ -1320,7 +1295,7 @@ export default function ConsultationHistoryPage() {
         </Card>
 
         {/* Results */}
-        {paginatedConsultations.length === 0 ? (
+        {consultations.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
               <History className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -1349,7 +1324,7 @@ export default function ConsultationHistoryPage() {
           </Card>
         ) : (
           <div className="space-y-2">
-            {paginatedConsultations.map((c) => {
+            {consultations.map((c) => {
               const isEditable = canEditConsultation(c);
               const isCompleted = c.status === "Completed";
               const borderColor = isEditable
@@ -1446,11 +1421,11 @@ export default function ConsultationHistoryPage() {
         )}
 
         {/* Pagination */}
-        {paginatedConsultations.length > 0 && (
+        {consultations.length > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={sortedConsultations.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

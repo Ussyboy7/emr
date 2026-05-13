@@ -400,6 +400,7 @@ class PharmacyService {
    */
   async getMedications(params?: {
     form?: string;
+    category?: string;
     search?: string;
     page?: number;
     page_size?: number;
@@ -416,6 +417,55 @@ class PharmacyService {
   async getMedication(id: number): Promise<Medication> {
     const res = await apiFetch<Medication>(`/v1/pharmacy/medications/${id}/?__ts=${Date.now()}`);
     return normalizeMedication(res);
+  }
+
+  /**
+   * Central store medications with aggregated stock (paginated).
+   */
+  async getStoreStockSummary(params: {
+    location?: string;
+    page?: number;
+    page_size?: number;
+    search?: string;
+    category?: string;
+    stock_status?: string;
+  }): Promise<{
+    results: Array<
+      Medication & {
+        store_quantity?: string | number;
+        nearest_expiry?: string | null;
+        batch_count?: number;
+      }
+    >;
+    count: number;
+  }> {
+    const query = buildQueryString({ ...(params || {}), __ts: Date.now() } as any);
+    const res = await apiFetch<{
+      results: Array<
+        Medication & {
+          store_quantity?: string | number;
+          nearest_expiry?: string | null;
+          batch_count?: number;
+        }
+      >;
+      count: number;
+    }>(`/v1/pharmacy/medications/store-stock-summary/${query}`);
+    return {
+      ...res,
+      results: (res.results || []).map((m) => normalizeMedication(m as Medication)),
+    };
+  }
+
+  async getStoreStockStats(params?: { location?: string }): Promise<{
+    total_medications: number;
+    out_of_stock: number;
+    low_stock: number;
+    near_expiry: number;
+    expired: number;
+    total_units: string | number;
+  }> {
+    const query = buildQueryString({ ...(params || {}), __ts: Date.now() } as any);
+    return apiFetch(`/v1/pharmacy/medications/store-stock-stats/${query}`);
   }
 
   /**
@@ -547,6 +597,74 @@ class PharmacyService {
         return medItem;
       }),
     } as typeof normalized;
+  }
+
+  /**
+   * Lightweight inventory stats (counts + total units).
+   *
+   * Implemented via small paginated requests to avoid huge page_size.
+   */
+  async getInventoryStats(params: {
+    location: string;
+    expiring_within_days?: number;
+    medication__category?: string;
+    stock_status?: string;
+    search?: string;
+  }): Promise<{
+    total: number;
+    out_of_stock: number;
+    low_stock: number;
+    expiring_soon: number;
+    expired: number;
+    total_units: string | number;
+  }> {
+    const base = {
+      page: 1,
+      page_size: 1,
+      location: params.location,
+      search: params.search || undefined,
+      medication__category: params.medication__category || undefined,
+    } as const;
+
+    const [totalRes, outRes, lowRes, expSoonRes, expiredRes] = await Promise.all([
+      this.getInventory({ ...base }),
+      this.getInventory({ ...base, stock_status: 'out' }),
+      this.getInventory({ ...base, stock_status: 'low' }),
+      this.getInventory({ ...base, stock_status: 'near_expiry' }),
+      this.getInventory({ ...base, stock_status: 'expired' }),
+    ]);
+
+    // Sum units across pages to avoid huge single-page fetches.
+    const unitsPageSize = 200;
+    const firstUnitsPage = await this.getInventory({ ...base, page_size: unitsPageSize });
+    let total_units = (firstUnitsPage.results || []).reduce(
+      (acc, row) => acc + Number((row as any).quantity || 0),
+      0,
+    );
+    const totalRows = firstUnitsPage.count ?? (firstUnitsPage.results || []).length;
+    const totalPages = Math.ceil(totalRows / unitsPageSize);
+    if (totalPages > 1) {
+      const extraPages = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, i) =>
+          this.getInventory({ ...base, page_size: unitsPageSize, page: i + 2 }),
+        ),
+      );
+      for (const p of extraPages) {
+        total_units += (p.results || []).reduce(
+          (acc, row) => acc + Number((row as any).quantity || 0),
+          0,
+        );
+      }
+    }
+
+    return {
+      total: totalRes.count ?? 0,
+      out_of_stock: outRes.count ?? 0,
+      low_stock: lowRes.count ?? 0,
+      expiring_soon: expSoonRes.count ?? 0,
+      expired: expiredRes.count ?? 0,
+      total_units,
+    };
   }
 
   /**

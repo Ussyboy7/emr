@@ -51,7 +51,6 @@ const categories = MEDICATION_CATEGORIES;
 export default function NursingInventoryPage() {
   const location = PHARMACY_LOCATIONS.WARD_CARE;
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
-  const [allInventoryForStats, setAllInventoryForStats] = useState<MedicationInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,12 +61,41 @@ export default function NursingInventoryPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
+  const [stats, setStats] = useState({
+    total: 0,
+    outOfStock: 0,
+    lowStock: 0,
+    totalUnits: 0,
+    expiringSoon: 0,
+    expired: 0,
+  });
+
   const [showViewModal, setShowViewModal] = useState(false);
   const [showBatchesModal, setShowBatchesModal] = useState(false);
   const [selectedMedication, setSelectedMedication] = useState<MedicationInventoryItem | null>(null);
 
+  const loadWardCareStats = async () => {
+    try {
+      const s = await pharmacyService.getInventoryStats({
+        location,
+        expiring_within_days: 90,
+      });
+      setStats({
+        total: s.total ?? 0,
+        outOfStock: s.out_of_stock ?? 0,
+        lowStock: s.low_stock ?? 0,
+        totalUnits: Number(s.total_units ?? 0),
+        expiringSoon: s.expiring_soon ?? 0,
+        expired: s.expired ?? 0,
+      });
+    } catch (err) {
+      console.error('Error loading ward care inventory stats:', err);
+      // Keep previous stats; don't block the inventory list.
+    }
+  };
+
   useEffect(() => {
-    loadAllInventoryForStats();
+    void loadWardCareStats();
   }, []);
 
   useEffect(() => {
@@ -117,15 +145,6 @@ export default function NursingInventoryPage() {
     });
   };
 
-  const loadAllInventoryForStats = async () => {
-    try {
-      const response = await pharmacyService.getInventory({ page: 1, page_size: 10000, location });
-      setAllInventoryForStats(transformInventoryItems(response.results));
-    } catch (err) {
-      console.error('Error loading ward care inventory stats:', err);
-    }
-  };
-
   const loadInventory = async () => {
     try {
       setLoading(true);
@@ -149,28 +168,7 @@ export default function NursingInventoryPage() {
     }
   };
 
-  const getExpiringItems = useMemo(() => {
-    const today = new Date();
-    const ninetyDaysFromNow = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
-    return allInventoryForStats.filter(med => {
-      const expiry = new Date(med.expiryDate);
-      return expiry <= ninetyDaysFromNow && expiry >= today;
-    });
-  }, [allInventoryForStats]);
-
-  const getExpiredItems = useMemo(() => {
-    const today = new Date();
-    return allInventoryForStats.filter(med => new Date(med.expiryDate) < today);
-  }, [allInventoryForStats]);
-
-  const stats = useMemo(() => ({
-    total: allInventoryForStats.length,
-    outOfStock: allInventoryForStats.filter(m => m.currentStock === 0).length,
-    lowStock: allInventoryForStats.filter(m => m.currentStock > 0 && m.currentStock <= m.minimumStock).length,
-    totalUnits: allInventoryForStats.reduce((sum, m) => sum + m.currentStock, 0),
-    expiringSoon: getExpiringItems.length,
-    expired: getExpiredItems.length,
-  }), [allInventoryForStats, getExpiringItems, getExpiredItems]);
+  // Stats are loaded from the server (cheap counts) instead of fetching all inventory.
 
   const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
     if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
@@ -220,7 +218,7 @@ export default function NursingInventoryPage() {
                 <p className="text-muted-foreground mt-1">Ward Care stock received from Central Store</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => { loadInventory(); loadAllInventoryForStats(); }}>
+            <Button variant="outline" size="sm" onClick={() => { loadInventory(); void loadWardCareStats(); }}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>

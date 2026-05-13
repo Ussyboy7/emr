@@ -107,7 +107,7 @@ class LabTemplateViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = LabTemplateSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['sample_type', 'is_active', 'code']
+    filterset_fields = ['sample_type', 'is_active', 'code', 'category']
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'code']
     ordering = ['name']

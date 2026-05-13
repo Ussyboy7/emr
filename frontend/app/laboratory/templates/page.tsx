@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -97,15 +98,27 @@ const categories = ['All', 'chemistry', 'hematology', 'microbiology', 'serology'
 
 export default function TestTemplatesPage() {
   const [templates, setTemplates] = useState<TestTemplate[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('all');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  const [stats, setStats] = useState({
+    total: 0,
+    active: 0,
+    chemistry: 0,
+    hematology: 0,
+    microbiology: 0,
+    serology: 0,
+    toxicology: 0,
+  });
 
   // Dialog states
   const [selectedTemplate, setSelectedTemplate] = useState<TestTemplate | null>(null);
@@ -135,28 +148,50 @@ export default function TestTemplatesPage() {
     name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric', required: false
   });
 
-  const filteredTemplates = useMemo(() => templates.filter(t => {
-    const matchesSearch = t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.code.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === 'All' || t.category === categoryFilter;
-    const matchesStatus = statusFilter === 'all' || t.status.toLowerCase() === statusFilter;
-    return matchesSearch && matchesCategory && matchesStatus;
-  }), [templates, searchQuery, categoryFilter, statusFilter]);
+  const loadTemplateStats = useCallback(async () => {
+    try {
+      const base = { page: 1, page_size: 1 } as const;
+      const cats = ['chemistry', 'hematology', 'microbiology', 'serology', 'toxicology'] as const;
+      const [totalRes, activeRes, ...catRes] = await Promise.all([
+        labService.getTemplates({ ...base }),
+        labService.getTemplates({ ...base, is_active: true }),
+        ...cats.map((c) => labService.getTemplates({ ...base, category: c })),
+      ]);
+      setStats({
+        total: totalRes.count ?? 0,
+        active: activeRes.count ?? 0,
+        chemistry: catRes[0]?.count ?? 0,
+        hematology: catRes[1]?.count ?? 0,
+        microbiology: catRes[2]?.count ?? 0,
+        serology: catRes[3]?.count ?? 0,
+        toxicology: catRes[4]?.count ?? 0,
+      });
+    } catch {
+      /* keep previous */
+    }
+  }, []);
 
-  // Paginated templates
-  const paginatedTemplates = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredTemplates.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredTemplates, currentPage, itemsPerPage]);
+  useEffect(() => {
+    void loadTemplateStats();
+  }, [loadTemplateStats]);
 
-  // Load templates function - memoized
   const loadTemplates = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await labService.getTemplates({ page_size: 500 });
-      const transformed = response.results.map(transformTemplate);
+      let is_active: boolean | undefined;
+      if (statusFilter === 'active') is_active = true;
+      else if (statusFilter === 'inactive') is_active = false;
+      const response = await labService.getTemplates({
+        page: currentPage,
+        page_size: itemsPerPage,
+        search: debouncedSearch.trim() || undefined,
+        category: categoryFilter !== 'All' ? categoryFilter : undefined,
+        is_active,
+      });
+      const transformed = (response.results || []).map(transformTemplate);
       setTemplates(transformed);
+      setTotalCount(typeof response.count === 'number' ? response.count : transformed.length);
     } catch (err: any) {
       setError(err.message || 'Failed to load templates');
       toast.error('Failed to load templates. Please try again.');
@@ -164,28 +199,15 @@ export default function TestTemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, statusFilter]);
 
-  // Load templates from API on mount
   useEffect(() => {
-    loadTemplates();
+    void loadTemplates();
   }, [loadTemplates]);
 
-  // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, categoryFilter, statusFilter]);
-
-  const stats = {
-    total: templates.length,
-    active: templates.filter(t => t.status === 'Active').length,
-    // Top 5 categories by usage
-    chemistry: templates.filter(t => t.category === 'chemistry').length,
-    hematology: templates.filter(t => t.category === 'hematology').length,
-    microbiology: templates.filter(t => t.category === 'microbiology').length,
-    serology: templates.filter(t => t.category === 'serology').length,
-    toxicology: templates.filter(t => t.category === 'toxicology').length,
-  };
+  }, [debouncedSearch, categoryFilter, statusFilter, itemsPerPage]);
 
   const getCategoryBadge = (category: string) => {
     switch (category) {
@@ -286,10 +308,10 @@ export default function TestTemplatesPage() {
         turnaround_time: formData.turnaroundTime,
       };
 
-      const created = await labService.createTemplate(templateData);
-      const transformed = transformTemplate(created);
-      setTemplates(prev => [...prev, transformed]);
+      await labService.createTemplate(templateData);
       toast.success(`Template "${formData.name}" created`);
+      void loadTemplates();
+      void loadTemplateStats();
       setIsCreateDialogOpen(false);
       resetForm();
     } catch (err: any) {
@@ -337,9 +359,9 @@ export default function TestTemplatesPage() {
         turnaround_time: formData.turnaroundTime,
       };
 
-      const updated = await labService.updateTemplate(templateId, templateData);
-      const transformed = transformTemplate(updated);
-      setTemplates(prev => prev.map(t => t.id === selectedTemplate.id ? transformed : t));
+      await labService.updateTemplate(templateId, templateData);
+      void loadTemplates();
+      void loadTemplateStats();
       toast.success(`Template "${formData.name}" updated`);
       setIsEditDialogOpen(false);
       resetForm();
@@ -363,7 +385,8 @@ export default function TestTemplatesPage() {
       }
 
       await labService.deleteTemplate(templateId);
-      setTemplates(prev => prev.filter(t => t.id !== selectedTemplate.id));
+      void loadTemplates();
+      void loadTemplateStats();
       toast.success(`Template "${selectedTemplate.name}" deleted`);
       setIsDeleteDialogOpen(false);
     } catch (err: any) {
@@ -397,9 +420,9 @@ export default function TestTemplatesPage() {
         is_active: false, // Start as inactive
       };
 
-      const created = await labService.createTemplate(duplicateData);
-      const transformed = transformTemplate(created);
-      setTemplates(prev => [...prev, transformed]);
+      await labService.createTemplate(duplicateData);
+      void loadTemplates();
+      void loadTemplateStats();
       toast.success(`Template duplicated`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to duplicate template');
@@ -418,9 +441,9 @@ export default function TestTemplatesPage() {
       }
 
       const newStatus = template.status === 'Active' ? false : true;
-      const updated = await labService.updateTemplate(templateId, { is_active: newStatus });
-      const transformed = transformTemplate(updated);
-      setTemplates(prev => prev.map(t => t.id === template.id ? transformed : t));
+      await labService.updateTemplate(templateId, { is_active: newStatus });
+      void loadTemplates();
+      void loadTemplateStats();
       toast.success(`Template ${template.status === 'Active' ? 'deactivated' : 'activated'}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update template status');
@@ -554,13 +577,13 @@ export default function TestTemplatesPage() {
               <p className="text-red-600 dark:text-red-400">{error}</p>
               <Button variant="outline" className="mt-4" onClick={loadTemplates}>Retry</Button>
             </CardContent></Card>
-          ) : filteredTemplates.length === 0 ? (
+          ) : templates.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No templates found</p>
             </CardContent></Card>
           ) : (
-            paginatedTemplates.map(template => (
+            templates.map(template => (
               <Card key={template.id} className={`border-l-4 hover:shadow-md transition-shadow ${
                 template.status === 'Inactive' ? 'border-l-gray-400 opacity-60' :
                 template.category === 'chemistry' ? 'border-l-amber-500' :
@@ -634,14 +657,17 @@ export default function TestTemplatesPage() {
         </div>
 
         {/* Pagination */}
-        {filteredTemplates.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredTemplates.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
+              onItemsPerPageChange={(n) => {
+                setItemsPerPage(n);
+                setCurrentPage(1);
+              }}
               itemName="templates"
             />
           </Card>

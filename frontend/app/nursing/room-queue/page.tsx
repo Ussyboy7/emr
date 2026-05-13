@@ -76,12 +76,12 @@ export default function RoomQueuePage() {
         setError(null);
         
         // Load rooms
-        const roomsResult = await roomService.getRooms({ page_size: 1000 });
+        const roomsResult = await roomService.getRooms({ page_size: 200 });
         
         // Load active consultation sessions to determine room status and current patients
         let activeSessions: any[] = [];
         try {
-          const sessionsResult = await apiFetch<{ results: any[] }>('/consultation/sessions/?status=active&page_size=1000');
+          const sessionsResult = await apiFetch<{ results: any[] }>('/consultation/sessions/?status=active&page_size=200');
           activeSessions = sessionsResult.results || [];
         } catch (sessionErr) {
           console.warn('Could not load active sessions:', sessionErr);

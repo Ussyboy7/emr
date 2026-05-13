@@ -146,6 +146,13 @@ class AdminService {
     return apiFetch<{ results: User[]; count: number }>(`/accounts/users/${query}`);
   }
 
+  async getUserStats(): Promise<{
+    total_active: number;
+    by_system_role: Record<string, number>;
+  }> {
+    return apiFetch('/accounts/users/stats/');
+  }
+
   /**
    * Get a single user
    */
@@ -223,7 +230,7 @@ class AdminService {
    * Get role assignments for a user.
    */
   async getUserRoleAssignments(userId: number): Promise<UserRoleAssignment[]> {
-    const query = buildQueryString({ user: userId, page_size: 1000 } as any);
+    const query = buildQueryString({ user: userId, page_size: 200 } as any);
     const res = await apiFetch<{ results: UserRoleAssignment[] }>(`/permissions/user-roles/${query}`);
     return res.results || [];
   }
@@ -267,6 +274,8 @@ class AdminService {
    */
   async getRoles(params?: {
     type?: string;
+    /** Maps to backend grouped role types (system / clinical / administrative / custom). */
+    type_group?: string;
     is_active?: boolean;
     search?: string;
     page?: number;
@@ -534,6 +543,10 @@ class AdminService {
     return apiFetch<{ results: AuditLog[]; count: number }>(`/audit/logs/${query}`);
   }
 
+  async getAuditModules(): Promise<{ results: string[] }> {
+    return apiFetch<{ results: string[] }>(`/audit/logs/modules/`);
+  }
+
   /**
    * Get audit log statistics
    */
@@ -631,10 +644,10 @@ class AdminService {
   }> {
     // Load all data in parallel
     const [usersResponse, rolesResponse, clinicsResponse, roomsResponse, auditResponse, metricsResponse] = await Promise.all([
-      this.getUsers({ page_size: 1000 }),
-      this.getRoles({ page_size: 1000 }),
-      this.getClinics({ page_size: 1000 }),
-      this.getRooms({ page_size: 1000 }), // Use the existing getRooms method
+      this.getUsers({ page_size: 200 }),
+      this.getRoles({ page_size: 200 }),
+      this.getClinics({ page_size: 200 }),
+      this.getRooms({ page_size: 200 }), // Use the existing getRooms method
       this.getAuditLogs({ page_size: 10 }),
       apiFetch('/common/metrics/').catch(() => ({})), // Fetch metrics, fallback to empty object
     ]);

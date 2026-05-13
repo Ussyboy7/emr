@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -69,15 +70,26 @@ const categories = ['All', 'xray', 'ct', 'mri', 'ultrasound', 'mammography', 'fl
 
 export default function RadiologyTemplatesPage() {
   const [templates, setTemplates] = useState<RadiologyTemplate[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('all');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  const [stats, setStats] = useState({
+    total: 0,
+    active: 0,
+    xray: 0,
+    ultrasound: 0,
+    mri: 0,
+    ct: 0,
+  });
 
   // Dialog states
   const [selectedTemplate, setSelectedTemplate] = useState<RadiologyTemplate | null>(null);
@@ -94,31 +106,51 @@ export default function RadiologyTemplatesPage() {
     preparation_required: '', indications: '', contraindications: '', turnaround_time: ''
   });
 
-  const filteredTemplates = useMemo(() => templates.filter(t => {
-    const matchesSearch = t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (t.body_part && t.body_part.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesCategory = categoryFilter === 'All' || t.category === categoryFilter;
-    const matchesStatus = statusFilter === 'all' ||
-      (statusFilter === 'active' && t.is_active) ||
-      (statusFilter === 'inactive' && !t.is_active);
-    return matchesSearch && matchesCategory && matchesStatus;
-  }), [templates, searchQuery, categoryFilter, statusFilter]);
+  const loadTemplateStats = useCallback(async () => {
+    try {
+      const base = { page: 1, page_size: 1 } as const;
+      const [totalRes, activeRes, xrayRes, usRes, mriRes, ctRes] = await Promise.all([
+        radiologyService.getTemplates({ ...base }),
+        radiologyService.getTemplates({ ...base, is_active: true }),
+        radiologyService.getTemplates({ ...base, category: 'xray' }),
+        radiologyService.getTemplates({ ...base, category: 'ultrasound' }),
+        radiologyService.getTemplates({ ...base, category: 'mri' }),
+        radiologyService.getTemplates({ ...base, category: 'ct' }),
+      ]);
+      setStats({
+        total: totalRes.count ?? 0,
+        active: activeRes.count ?? 0,
+        xray: xrayRes.count ?? 0,
+        ultrasound: usRes.count ?? 0,
+        mri: mriRes.count ?? 0,
+        ct: ctRes.count ?? 0,
+      });
+    } catch {
+      /* keep */
+    }
+  }, []);
 
-  // Paginated templates
-  const paginatedTemplates = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredTemplates.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredTemplates, currentPage, itemsPerPage]);
+  useEffect(() => {
+    void loadTemplateStats();
+  }, [loadTemplateStats]);
 
-  // Load templates function - memoized
   const loadTemplates = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const apiTemplates = await radiologyService.getTemplates({ page_size: 1000 });
-      const transformed = apiTemplates.results.map(transformTemplate);
+      let is_active: boolean | undefined;
+      if (statusFilter === 'active') is_active = true;
+      else if (statusFilter === 'inactive') is_active = false;
+      const apiTemplates = await radiologyService.getTemplates({
+        page: currentPage,
+        page_size: itemsPerPage,
+        search: debouncedSearch.trim() || undefined,
+        category: categoryFilter !== 'All' ? categoryFilter : undefined,
+        is_active,
+      });
+      const transformed = (apiTemplates.results || []).map(transformTemplate);
       setTemplates(transformed);
+      setTotalCount(typeof apiTemplates.count === 'number' ? apiTemplates.count : transformed.length);
     } catch (err: any) {
       setError(err.message || 'Failed to load templates');
       toast.error('Failed to load templates. Please try again.');
@@ -126,27 +158,15 @@ export default function RadiologyTemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, statusFilter]);
 
-  // Load templates from API on mount
   useEffect(() => {
-    loadTemplates();
+    void loadTemplates();
   }, [loadTemplates]);
 
-  // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, categoryFilter, statusFilter]);
-
-  const stats = {
-    total: templates.length,
-    active: templates.filter(t => t.is_active).length,
-    // Top categories by usage - include doppler as ultrasound
-    xray: templates.filter(t => t.category === 'xray').length,
-    ultrasound: templates.filter(t => t.category === 'ultrasound' || t.category === 'doppler').length,
-    mri: templates.filter(t => t.category === 'mri').length,
-    ct: templates.filter(t => t.category === 'ct-scan').length,
-  };
+  }, [debouncedSearch, categoryFilter, statusFilter, itemsPerPage]);
 
   const getCategoryBadge = (category: string) => {
     switch (category) {
@@ -190,10 +210,10 @@ export default function RadiologyTemplatesPage() {
         is_active: true,
       };
 
-      const created = await radiologyService.createTemplate(templateData as any);
-      const transformed = transformTemplate(created);
-      setTemplates(prev => [...prev, transformed]);
+      await radiologyService.createTemplate(templateData as any);
       toast.success(`Template "${formData.name}" created`);
+      void loadTemplates();
+      void loadTemplateStats();
       setIsCreateDialogOpen(false);
       resetForm();
     } catch (err: any) {
@@ -231,10 +251,10 @@ export default function RadiologyTemplatesPage() {
         is_active: selectedTemplate.is_active,
       };
 
-      const updated = await radiologyService.updateTemplate(templateId, templateData as any);
-      const transformed = transformTemplate(updated);
-      setTemplates(prev => prev.map(t => t.id === selectedTemplate.id ? transformed : t));
+      await radiologyService.updateTemplate(templateId, templateData as any);
       toast.success(`Template "${formData.name}" updated`);
+      void loadTemplates();
+      void loadTemplateStats();
       setIsEditDialogOpen(false);
       resetForm();
     } catch (err: any) {
@@ -257,8 +277,9 @@ export default function RadiologyTemplatesPage() {
       }
 
       await radiologyService.deleteTemplate(templateId);
-      setTemplates(prev => prev.filter(t => t.id !== selectedTemplate.id));
       toast.success(`Template "${selectedTemplate.name}" deleted`);
+      void loadTemplates();
+      void loadTemplateStats();
       setIsDeleteDialogOpen(false);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete template');
@@ -298,10 +319,10 @@ export default function RadiologyTemplatesPage() {
         is_active: false, // Start as inactive
       };
 
-      const created = await radiologyService.createTemplate(duplicateData);
-      const transformed = transformTemplate(created);
-      setTemplates(prev => [...prev, transformed]);
+      await radiologyService.createTemplate(duplicateData);
       toast.success(`Template duplicated`);
+      void loadTemplates();
+      void loadTemplateStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to duplicate template');
       console.error('Error duplicating template:', err);
@@ -318,10 +339,10 @@ export default function RadiologyTemplatesPage() {
         return;
       }
 
-      const updated = await radiologyService.toggleTemplateStatus(templateId);
-      const transformed = transformTemplate(updated);
-      setTemplates(prev => prev.map(t => t.id === template.id ? transformed : t));
+      await radiologyService.toggleTemplateStatus(templateId);
       toast.success(`Template ${template.is_active ? 'deactivated' : 'activated'}`);
+      void loadTemplates();
+      void loadTemplateStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update template status');
       console.error('Error toggling template status:', err);
@@ -484,13 +505,13 @@ export default function RadiologyTemplatesPage() {
               <p className="text-red-600 dark:text-red-400">{error}</p>
               <Button variant="outline" className="mt-4" onClick={loadTemplates}>Retry</Button>
             </CardContent></Card>
-          ) : filteredTemplates.length === 0 ? (
+          ) : totalCount === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No templates found</p>
             </CardContent></Card>
           ) : (
-            paginatedTemplates.map(template => (
+            templates.map(template => (
               <Card key={template.id} className={`border-l-4 hover:shadow-md transition-shadow ${
                 !template.is_active ? 'border-l-gray-400 opacity-60' :
                 template.category === 'xray' ? 'border-l-blue-500' :
@@ -577,11 +598,11 @@ export default function RadiologyTemplatesPage() {
         </div>
 
         {/* Pagination */}
-        {filteredTemplates.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredTemplates.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

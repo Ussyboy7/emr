@@ -61,19 +61,14 @@ export default function AuditTrailPage() {
   useEffect(() => {
     const loadModules = async () => {
       try {
-        // Get unique modules from all logs (we'll need to fetch more to get all modules)
-        // For now, fetch a larger sample to get modules
-        const modulesResponse = await adminService.getAuditLogs({ page_size: 1000 });
+        const res = await adminService.getAuditModules();
         const uniqueModules = new Set<string>(['All Modules']);
-        modulesResponse.results.forEach((log: ApiAuditLog) => {
-          if (log.module) {
-            // Convert module names to display format
-            const moduleName = log.module
-              .split('_')
-              .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-              .join(' ');
-            uniqueModules.add(moduleName);
-          }
+        (res.results || []).forEach((m) => {
+          const moduleName = String(m || '')
+            .split('_')
+            .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+          if (moduleName.trim()) uniqueModules.add(moduleName);
         });
         setModules(Array.from(uniqueModules).sort());
       } catch (err) {

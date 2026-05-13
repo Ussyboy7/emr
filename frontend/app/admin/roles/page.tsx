@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,17 @@ interface SystemRole {
 const pageModules = [...new Set(ALL_PAGE_PERMISSIONS.map((p) => p.module))];
 const roleTypes = ['All Types', 'System', 'Clinical', 'Administrative', 'Custom'];
 
+function mapTypeFilterToTypeGroup(typeFilter: string): string | undefined {
+  if (typeFilter === 'all') return undefined;
+  const m: Record<string, string> = {
+    System: 'system',
+    Clinical: 'clinical',
+    Administrative: 'administrative',
+    Custom: 'custom',
+  };
+  return m[typeFilter];
+}
+
 export default function RolesPermissionsPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,9 +79,34 @@ export default function RolesPermissionsPage() {
     is_active: true,
   });
 
-  // Load roles and system roles from API
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [totalCount, setTotalCount] = useState(0);
+  const [roleStats, setRoleStats] = useState({
+    total: 0,
+    active: 0,
+    clinical: 0,
+    totalUsers: 0,
+  });
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    type: 'Clinical' as Role['type'],
+    permissions: [] as string[],
+    isActive: true,
+  });
+
   useEffect(() => {
-    loadRoles();
     loadAllSystemRoles();
   }, []);
 
@@ -119,20 +156,42 @@ export default function RolesPermissionsPage() {
     };
   };
 
-  const loadRoles = async () => {
+  const loadRoleStats = useCallback(async () => {
+    try {
+      const base = { page: 1, page_size: 1 } as const;
+      const [t, a, c, ur] = await Promise.all([
+        adminService.getRoles({ ...base }),
+        adminService.getRoles({ ...base, is_active: true }),
+        adminService.getRoles({ ...base, type_group: 'clinical' }),
+        apiFetch<{ unique_users?: number; assignments?: number }>(
+          '/permissions/user-roles/summary/'
+        ),
+      ]);
+      setRoleStats({
+        total: t.count ?? 0,
+        active: a.count ?? 0,
+        clinical: c.count ?? 0,
+        totalUsers: ur.unique_users ?? 0,
+      });
+    } catch (e) {
+      console.error('Error loading role stats:', e);
+    }
+  }, []);
+
+  const loadRoles = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      const typeGroup = mapTypeFilterToTypeGroup(typeFilter);
       const response = await adminService.getRoles({
         page: currentPage,
         page_size: itemsPerPage,
-        search: searchQuery || undefined,
-        type: typeFilter !== 'all' ? typeFilter : undefined,
-        is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
+        search: debouncedSearch.trim() || undefined,
+        type_group: typeGroup,
+        is_active: statusFilter !== 'all' ? statusFilter === 'Active' : undefined,
       });
-      setTotalCount(response.count || response.results.length);
-      
-      // Transform API roles to frontend format
+      setTotalCount(response.count ?? response.results.length);
+
       const transformedRoles: Role[] = response.results.map((role: ApiRole) => ({
         id: role.id.toString(),
         name: role.name,
@@ -144,7 +203,7 @@ export default function RolesPermissionsPage() {
         createdAt: role.created_at?.split('T')[0] || '',
         updatedAt: role.updated_at?.split('T')[0] || '',
       }));
-      
+
       setRoles(transformedRoles);
     } catch (err: any) {
       setError(err.message || 'Failed to load roles');
@@ -153,40 +212,19 @@ export default function RolesPermissionsPage() {
     } finally {
       setLoading(false);
     }
-  };
-  const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
-  const [totalCount, setTotalCount] = useState(0);
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState({ name: '', description: '', type: 'Clinical' as Role['type'], permissions: [] as string[], isActive: true });
+  }, [currentPage, itemsPerPage, debouncedSearch, typeFilter, statusFilter]);
 
-  const filteredRoles = useMemo(() => {
-    return roles.filter(r => {
-      const matchesSearch = r.name.toLowerCase().includes(searchQuery.toLowerCase()) || r.description.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesType = typeFilter === 'all' || r.type === typeFilter;
-      const matchesStatus = statusFilter === 'all' || (statusFilter === 'Active' ? r.isActive : !r.isActive);
-      return matchesSearch && matchesType && matchesStatus;
-    });
-  }, [roles, searchQuery, typeFilter, statusFilter]);
+  useEffect(() => {
+    void loadRoleStats();
+  }, [loadRoleStats]);
 
-  // Use filtered roles directly (server-side pagination when no client-side filters)
-  const paginatedRoles = filteredRoles;
+  useEffect(() => {
+    void loadRoles();
+  }, [loadRoles]);
 
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, typeFilter, statusFilter, itemsPerPage]);
-
-  const stats = useMemo(() => ({
-    total: roles.length, active: roles.filter(r => r.isActive).length,
-    clinical: roles.filter(r => r.type === 'Clinical').length,
-    totalUsers: roles.reduce((acc, r) => acc + r.userCount, 0),
-  }), [roles]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, typeFilter, statusFilter, itemsPerPage]);
 
   const getRoleIcon = (type: string) => {
     switch (type) {
@@ -330,7 +368,7 @@ export default function RolesPermissionsPage() {
       toast.success(`Role "${formData.name}" created`);
       setIsCreateDialogOpen(false);
       resetForm();
-      await loadRoles(); // Reload roles
+      await Promise.all([loadRoles(), loadRoleStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create role');
       console.error('Error creating role:', err);
@@ -357,7 +395,7 @@ export default function RolesPermissionsPage() {
       setIsEditDialogOpen(false);
       setSelectedRole(null);
       resetForm();
-      await loadRoles(); // Reload roles
+      await Promise.all([loadRoles(), loadRoleStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update role');
       console.error('Error updating role:', err);
@@ -376,7 +414,7 @@ export default function RolesPermissionsPage() {
       toast.success(`Role "${selectedRole.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedRole(null);
-      await loadRoles(); // Reload roles
+      await Promise.all([loadRoles(), loadRoleStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete role');
       console.error('Error deleting role:', err);
@@ -397,10 +435,10 @@ export default function RolesPermissionsPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Roles</p><p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.total}</p></div><Shield className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Roles</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Clinical Roles</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.clinical}</p></div><Stethoscope className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Users with Roles</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalUsers}</p></div><Users className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Roles</p><p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{roleStats.total}</p></div><Shield className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Roles</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{roleStats.active}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Clinical Roles</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{roleStats.clinical}</p></div><Stethoscope className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Users with Roles</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{roleStats.totalUsers}</p></div><Users className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
         </div>
 
         {/* Main Content Tabs */}
@@ -500,8 +538,15 @@ export default function RolesPermissionsPage() {
                 <Button variant="outline" className="mt-4" onClick={loadRoles}>Retry</Button>
               </CardContent>
             </Card>
+          ) : roles.length === 0 ? (
+            <Card>
+              <CardContent className="p-8 text-center text-muted-foreground">
+                <Shield className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No roles found</p>
+              </CardContent>
+            </Card>
           ) : (
-            paginatedRoles.map(role => {
+            roles.map((role) => {
             const permsByModule = getPermissionsByModule(role.permissions);
             const borderColor = role.type === 'Clinical' ? 'border-l-emerald-500' : role.type === 'Administrative' ? 'border-l-blue-500' : role.type === 'System' ? 'border-l-purple-500' : 'border-l-amber-500';
             return (
@@ -566,15 +611,16 @@ export default function RolesPermissionsPage() {
           )}
         </div>
 
-        {filteredRoles.length === 0 && (
-          <Card><CardContent className="p-8 text-center text-muted-foreground">
-            <Shield className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No roles found</p>
-          </CardContent></Card>
-        )}
-        {filteredRoles.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
-            <StandardPagination currentPage={currentPage} totalItems={filteredRoles.length} itemsPerPage={itemsPerPage} onPageChange={setCurrentPage} onItemsPerPageChange={setItemsPerPage} itemName="roles" />
+            <StandardPagination
+              currentPage={currentPage}
+              totalItems={totalCount}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={setItemsPerPage}
+              itemName="roles"
+            />
           </Card>
         )}
           </TabsContent>

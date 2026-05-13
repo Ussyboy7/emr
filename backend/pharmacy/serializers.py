@@ -156,6 +156,23 @@ class MedicationSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_at"]
 
 
+class StoreMedicationStockRowSerializer(MedicationSerializer):
+    """Medication row with central-store aggregates (annotation fields)."""
+
+    store_quantity = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, coerce_to_string=False
+    )
+    nearest_expiry = serializers.DateField(read_only=True, allow_null=True)
+    batch_count = serializers.IntegerField(read_only=True)
+
+    class Meta(MedicationSerializer.Meta):
+        fields = list(MedicationSerializer.Meta.fields) + [
+            "store_quantity",
+            "nearest_expiry",
+            "batch_count",
+        ]
+
+
 class MedicationInventorySerializer(serializers.ModelSerializer):
     """Serializer for MedicationInventory model."""
 

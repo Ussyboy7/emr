@@ -335,7 +335,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         radiologyService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
         physioService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
         wardService.getAdmissions({ patient: numericId }).catch(() => ({ results: [] })),
-        medicalCertificateService.getCertificates({ patient: numericId.toString(), page_size: 1000 }).catch(() => ({ results: [] })),
+        medicalCertificateService.getCertificates({ patient: numericId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
       ]);
 
       if (apiPatient.category === 'employee' || apiPatient.category === 'retiree') {

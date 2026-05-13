@@ -14,7 +14,23 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q, F, Avg, DurationField, ExpressionWrapper
+from django.db.models import (
+    Q,
+    F,
+    Avg,
+    DurationField,
+    ExpressionWrapper,
+    Sum,
+    Min,
+    Count,
+    OuterRef,
+    Subquery,
+    Value,
+    DecimalField,
+    DateField,
+    IntegerField,
+)
+from django.db.models.functions import Coalesce
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from decimal import Decimal, InvalidOperation
@@ -24,6 +40,7 @@ from .models import GenericMedication, Medication, MedicationInventory, Prescrip
 from .serializers import (
     GenericMedicationSerializer,
     MedicationSerializer,
+    StoreMedicationStockRowSerializer,
     MedicationInventorySerializer,
     DispensaryReceiptLineSerializer,
     PrescriptionSerializer,
@@ -227,6 +244,130 @@ class MedicationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Medication.objects.filter(is_active=True)
 
+    def _annotate_store_stock(self, queryset, location: str):
+        loc = (location or "Store").strip()
+        inv_base = MedicationInventory.objects.filter(
+            medication_id=OuterRef("pk"),
+            location__iexact=loc,
+        )
+        store_quantity = Coalesce(
+            Subquery(
+                inv_base.values("medication_id")
+                .annotate(t=Sum("quantity"))
+                .values("t")[:1],
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+            Value(Decimal("0")),
+        )
+        nearest_expiry = Subquery(
+            inv_base.filter(quantity__gt=0)
+            .values("medication_id")
+            .annotate(m=Min("expiry_date"))
+            .values("m")[:1],
+            output_field=DateField(),
+        )
+        batch_count = Coalesce(
+            Subquery(
+                inv_base.values("medication_id")
+                .annotate(c=Count("id"))
+                .values("c")[:1],
+                output_field=IntegerField(),
+            ),
+            Value(0),
+        )
+        return queryset.annotate(
+            store_quantity=store_quantity,
+            nearest_expiry=nearest_expiry,
+            batch_count=batch_count,
+        )
+
+    def _store_stock_summary_queryset(self, request, location: str):
+        qs = Medication.objects.filter(is_active=True).select_related("generic")
+        qs = self._annotate_store_stock(qs, location)
+        stock_status = (request.query_params.get("stock_status") or "all").strip().lower()
+        today = timezone.now().date()
+        threshold = today + timedelta(days=180)
+        if stock_status == "out":
+            qs = qs.filter(store_quantity=0)
+        elif stock_status == "low":
+            qs = qs.filter(
+                store_quantity__gt=0,
+                store_quantity__lte=F("min_stock_level"),
+            )
+        elif stock_status == "near_expiry":
+            qs = qs.filter(
+                store_quantity__gt=0,
+                nearest_expiry__isnull=False,
+                nearest_expiry__lte=threshold,
+                nearest_expiry__gte=today,
+            )
+        elif stock_status == "normal":
+            qs = qs.filter(store_quantity__gt=F("min_stock_level"))
+        elif stock_status == "expired":
+            qs = qs.filter(store_quantity__gt=0, nearest_expiry__lt=today)
+
+        cat = (request.query_params.get("category") or "").strip()
+        if cat and cat.lower() not in ("all categories", "all"):
+            qs = qs.filter(category=cat)
+
+        term = (request.query_params.get("search") or "").strip()
+        if term:
+            qs = qs.filter(
+                Q(name__icontains=term)
+                | Q(generic_name__icontains=term)
+                | Q(generic__name__icontains=term)
+            )
+        return qs
+
+    @action(detail=False, methods=["get"], url_path="store-stock-summary")
+    def store_stock_summary(self, request):
+        location = (request.query_params.get("location") or "Store").strip()
+        qs = self._store_stock_summary_queryset(request, location).order_by("name")
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            ser = StoreMedicationStockRowSerializer(page, many=True)
+            return self.get_paginated_response(ser.data)
+        ser = StoreMedicationStockRowSerializer(qs, many=True)
+        return Response(ser.data)
+
+    @action(detail=False, methods=["get"], url_path="store-stock-stats")
+    def store_stock_stats(self, request):
+        location = (request.query_params.get("location") or "Store").strip()
+        base = Medication.objects.filter(is_active=True).select_related("generic")
+        base = self._annotate_store_stock(base, location)
+        today = timezone.now().date()
+        threshold = today + timedelta(days=180)
+        total_units = (
+            MedicationInventory.objects.filter(location__iexact=location).aggregate(
+                s=Sum("quantity")
+            )["s"]
+            or Decimal("0")
+        )
+
+        def cnt(extra_q):
+            return base.filter(extra_q).count()
+
+        return Response(
+            {
+                "total_medications": base.count(),
+                "out_of_stock": cnt(Q(store_quantity=0)),
+                "low_stock": cnt(
+                    Q(store_quantity__gt=0)
+                    & Q(store_quantity__lte=F("min_stock_level"))
+                ),
+                "near_expiry": cnt(
+                    Q(store_quantity__gt=0)
+                    & Q(nearest_expiry__isnull=False)
+                    & Q(nearest_expiry__lte=threshold)
+                    & Q(nearest_expiry__gte=today)
+                ),
+                "expired": cnt(
+                    Q(store_quantity__gt=0) & Q(nearest_expiry__lt=today)
+                ),
+                "total_units": str(total_units),
+            }
+        )
+
     def create(self, request, *args, **kwargs):
         from django.db import IntegrityError
         from rest_framework.exceptions import ValidationError
@@ -268,7 +409,7 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['medication', 'location', 'medication__category', 'medication__generic']
-    search_fields = ['medication__name', 'batch_number']
+    search_fields = ['medication__name', 'medication__generic__name', 'batch_number']
     ordering_fields = ['expiry_date', 'created_at']
     ordering = ['expiry_date']
 
@@ -278,7 +419,8 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self._is_dispensary_request():
-            return DispensaryReceiptLine.objects.filter(quantity_remaining__gt=0).select_related(
+            # List view applies quantity filters in _list_dispensary_receipts (incl. zero-qty "out").
+            return DispensaryReceiptLine.objects.all().select_related(
                 'medication', 'medication__generic', 'request', 'issue', 'issue__request',
                 'stock_issue_line', 'stock_issue_line__source_inventory_item'
             ).order_by('received_at')
@@ -297,6 +439,17 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
                 )
             elif stock_status == 'over':
                 queryset = queryset.filter(quantity__gt=F('max_stock_level'))
+            elif stock_status == 'near_expiry':
+                today = timezone.now().date()
+                threshold = today + timedelta(days=180)
+                queryset = queryset.filter(
+                    quantity__gt=0,
+                    expiry_date__lte=threshold,
+                    expiry_date__gte=today,
+                )
+            elif stock_status == 'expired':
+                today = timezone.now().date()
+                queryset = queryset.filter(quantity__gt=0, expiry_date__lt=today)
         return queryset
 
     def list(self, request, *args, **kwargs):
@@ -325,12 +478,25 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
         if category:
             queryset = queryset.filter(medication__category=category)
         stock_status = request.query_params.get('stock_status')
-        if stock_status == 'out':
+        if not stock_status or stock_status == 'all':
+            queryset = queryset.filter(quantity_remaining__gt=0)
+        elif stock_status == 'out':
             queryset = queryset.filter(quantity_remaining=0)
         elif stock_status == 'low':
             queryset = queryset.filter(quantity_remaining__gt=0, quantity_remaining__lte=F('medication__min_stock_level'))
         elif stock_status == 'normal':
             queryset = queryset.filter(quantity_remaining__gt=F('medication__min_stock_level'))
+        elif stock_status == 'near_expiry':
+            today = timezone.now().date()
+            threshold = today + timedelta(days=180)
+            queryset = queryset.filter(
+                quantity_remaining__gt=0,
+                expiry_date__lte=threshold,
+                expiry_date__gte=today,
+            )
+        elif stock_status == 'expired':
+            today = timezone.now().date()
+            queryset = queryset.filter(quantity_remaining__gt=0, expiry_date__lt=today)
         queryset = queryset.order_by('received_at')
         page = self.paginate_queryset(queryset)
         if page is not None:

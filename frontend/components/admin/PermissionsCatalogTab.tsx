@@ -106,7 +106,7 @@ export function PermissionsCatalogTab() {
     setLoading(true);
     setError(null);
     try {
-      const response = await adminService.getRoles({ page_size: 1000 });
+      const response = await adminService.getRoles({ page_size: 200 });
       const transformed: RoleLite[] = (response.results || []).map((r) => ({
         id: r.id,
         name: r.name,

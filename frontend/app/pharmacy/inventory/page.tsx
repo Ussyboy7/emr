@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -55,10 +56,10 @@ const EXPIRY_WARNING_DAYS = 180;
 export default function InventoryPage() {
   const location = PHARMACY_LOCATIONS.DISPENSARY;
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
-  const [allInventoryForStats, setAllInventoryForStats] = useState<MedicationInventoryItem[]>([]); // All inventory for stats calculation
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [stockFilter, setStockFilter] = useState('all');
 
@@ -66,35 +67,73 @@ export default function InventoryPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [stats, setStats] = useState({
+    total: 0,
+    outOfStock: 0,
+    lowStock: 0,
+    nearExpiry: 0,
+    expired: 0,
+  });
 
-  // Load all inventory for stats (separate from paginated data)
-  useEffect(() => {
-    loadAllInventoryForStats();
-  }, []);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showBatchesModal, setShowBatchesModal] = useState(false);
+  const [selectedMedication, setSelectedMedication] = useState<MedicationInventoryItem | null>(null);
 
-  // Load inventory from API
-  useEffect(() => {
-    loadInventory();
-  }, [currentPage, itemsPerPage, searchQuery, categoryFilter, stockFilter]);
-
-  // Load all inventory for stats calculation
-  const loadAllInventoryForStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
-      const [inventoryResponse, medicationsResponse] = await Promise.all([
-        pharmacyService.getInventory({
-          page: 1,
-          page_size: 10000, // Load a large number for stats
-          location,
-        }),
-        pharmacyService.getMedications({ page: 1, page_size: 10000 }),
+      const base = { location, page: 1, page_size: 1 } as const;
+      const [totalRes, outRes, lowRes, nearRes, expiredRes] = await Promise.all([
+        pharmacyService.getInventory({ ...base }),
+        pharmacyService.getInventory({ ...base, stock_status: 'out' }),
+        pharmacyService.getInventory({ ...base, stock_status: 'low' }),
+        pharmacyService.getInventory({ ...base, stock_status: 'near_expiry' }),
+        pharmacyService.getInventory({ ...base, stock_status: 'expired' }),
       ]);
-      const transformed = transformInventoryItems(inventoryResponse.results);
-      const merged = mergeWithDrugMaster(transformed, medicationsResponse.results || []);
-      setAllInventoryForStats(merged);
+      setStats({
+        total: totalRes.count ?? 0,
+        outOfStock: outRes.count ?? 0,
+        lowStock: lowRes.count ?? 0,
+        nearExpiry: nearRes.count ?? 0,
+        expired: expiredRes.count ?? 0,
+      });
     } catch (err) {
-      console.error('Error loading all inventory for stats:', err);
+      console.error('Error loading dispensary inventory stats:', err);
     }
-  };
+  }, [location]);
+
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats]);
+
+  const loadInventory = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const inventoryResponse = await pharmacyService.getInventory({
+        page: currentPage,
+        page_size: itemsPerPage,
+        location,
+        search: debouncedSearch.trim() || undefined,
+        medication__category:
+          categoryFilter !== 'All Categories' ? categoryFilter : undefined,
+        stock_status: stockFilter !== 'all' ? stockFilter : undefined,
+      });
+
+      const transformed = transformInventoryItems(inventoryResponse.results);
+      setTotalCount(typeof inventoryResponse.count === 'number' ? inventoryResponse.count : transformed.length);
+      setInventory(transformed);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load inventory');
+      console.error('Error loading inventory:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, stockFilter, location]);
+
+  useEffect(() => {
+    void loadInventory();
+  }, [loadInventory]);
 
   // Transform inventory items helper function
   const transformInventoryItems = (results: any[]): MedicationInventoryItem[] => {
@@ -141,101 +180,6 @@ export default function InventoryPage() {
     });
   };
 
-  const mergeWithDrugMaster = (items: MedicationInventoryItem[], medications: any[]): MedicationInventoryItem[] => {
-    const merged = [...items];
-    const existingMedicationIds = new Set(
-      items
-        .map((it) => it.medicationId)
-        .filter((id): id is number => typeof id === 'number' && !Number.isNaN(id))
-    );
-
-    medications.forEach((med: any) => {
-      const medId = typeof med?.id === 'number' ? med.id : Number(med?.id);
-      if (!medId || Number.isNaN(medId) || existingMedicationIds.has(medId)) return;
-
-      merged.push({
-        id: `master-${medId}`,
-        medicationId: medId,
-        name: med.name || 'Unknown',
-        genericName: med.generic_name || med.generic?.name || '',
-        category: med.category || 'All Categories',
-        strength: med.strength || '',
-        dosageForm: med.form || med.dosage_form || '',
-        packSize: med.pack_size || 10,
-        manufacturer: med.manufacturer || '',
-        currentStock: 0,
-        minimumStock: Number(med.min_stock_level ?? 0),
-        lastRestocked: '',
-        expiryDate: '',
-        batches: [],
-      });
-    });
-
-    return merged;
-  };
-
-  const loadInventory = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Load full inventory for this location, then merge with drug master to include zero-stock items.
-      const [inventoryResponse, medicationsResponse] = await Promise.all([
-        pharmacyService.getInventory({
-          page: 1,
-          page_size: 10000,
-          location,
-        }),
-        pharmacyService.getMedications({ page: 1, page_size: 10000 }),
-      ]);
-
-      const transformed = transformInventoryItems(inventoryResponse.results);
-      const merged = mergeWithDrugMaster(transformed, medicationsResponse.results || []);
-
-      const q = searchQuery.trim().toLowerCase();
-      const filtered = merged.filter((med) => {
-        const matchesSearch =
-          !q ||
-          med.name.toLowerCase().includes(q) ||
-          med.genericName.toLowerCase().includes(q);
-
-        const matchesCategory =
-          categoryFilter === 'All Categories' || med.category === categoryFilter;
-
-        const status = med.currentStock === 0 ? 'out' : med.currentStock <= med.minimumStock ? 'low' : 'normal';
-        const matchesStock =
-          stockFilter === 'all' ||
-          (stockFilter === 'out' && status === 'out') ||
-          (stockFilter === 'low' && status === 'low') ||
-          (stockFilter === 'near_expiry' &&
-            med.currentStock > 0 &&
-            (() => {
-              const days = getDaysUntilExpiry(med.expiryDate);
-              return days >= 0 && days <= EXPIRY_WARNING_DAYS;
-            })()) ||
-          (stockFilter === 'normal' && status === 'normal');
-
-        return matchesSearch && matchesCategory && matchesStock;
-      });
-
-      const start = (currentPage - 1) * itemsPerPage;
-      const paginated = filtered.slice(start, start + itemsPerPage);
-
-      setTotalCount(filtered.length);
-      setInventory(paginated);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load inventory');
-      console.error('Error loading inventory:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Modal states
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [showBatchesModal, setShowBatchesModal] = useState(false);
-  const [selectedMedication, setSelectedMedication] = useState<MedicationInventoryItem | null>(null);
-  
   // Filter inventory (backend handles filtering now)
   const filteredInventory = inventory;
 
@@ -247,39 +191,7 @@ export default function InventoryPage() {
     if (currentPage !== 1) {
       setCurrentPage(1);
     }
-  }, [searchQuery, categoryFilter, stockFilter]);
-
-  // Check for expiring soon items (within configured threshold) - use allInventoryForStats
-  const getExpiringItems = useMemo(() => {
-    const today = new Date();
-    const thresholdDate = new Date(today.getTime() + EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000);
-    return allInventoryForStats.filter(med => {
-      if (med.currentStock <= 0 || !med.expiryDate) return false;
-      const expiry = new Date(med.expiryDate);
-      if (Number.isNaN(expiry.getTime())) return false;
-      return expiry <= thresholdDate && expiry >= today;
-    });
-  }, [allInventoryForStats]);
-
-  const getExpiredItems = useMemo(() => {
-    const today = new Date();
-    return allInventoryForStats.filter(med => {
-      if (med.currentStock <= 0 || !med.expiryDate) return false;
-      const expiry = new Date(med.expiryDate);
-      if (Number.isNaN(expiry.getTime())) return false;
-      return expiry < today;
-    });
-  }, [allInventoryForStats]);
-
-  // Stats - use allInventoryForStats to show everything in store, not just current page
-  const stats = useMemo(() => ({
-    total: allInventoryForStats.length,
-    outOfStock: allInventoryForStats.filter(m => m.currentStock === 0).length,
-    lowStock: allInventoryForStats.filter(m => m.currentStock > 0 && m.currentStock <= m.minimumStock).length,
-    totalValue: allInventoryForStats.reduce((sum, m) => sum + m.currentStock, 0),
-    expiringSoon: getExpiringItems.length,
-    expired: getExpiredItems.length,
-  }), [allInventoryForStats, getExpiringItems, getExpiredItems]);
+  }, [debouncedSearch, categoryFilter, stockFilter]);
   
   const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
     if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
@@ -352,7 +264,7 @@ export default function InventoryPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Items</p>
+                  <p className="text-sm text-muted-foreground">Batch lines (in stock)</p>
                   <p className="text-2xl sm:text-3xl font-bold text-violet-600">{stats.total}</p>
                 </div>
                 <Package className="h-6 w-6 text-violet-500" />
@@ -391,8 +303,8 @@ export default function InventoryPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Units</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.totalValue.toLocaleString()}</p>
+                  <p className="text-sm text-muted-foreground">Near expiry (≤{EXPIRY_WARNING_DAYS}d)</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.nearExpiry}</p>
                 </div>
                 <TrendingUp className="h-6 w-6 text-emerald-500" />
               </div>
@@ -401,7 +313,7 @@ export default function InventoryPage() {
         </div>
 
         {/* Alerts Banner */}
-        {(stats.outOfStock > 0 || stats.lowStock > 0 || stats.expiringSoon > 0 || stats.expired > 0) && (
+        {(stats.outOfStock > 0 || stats.lowStock > 0 || stats.nearExpiry > 0 || stats.expired > 0) && (
           <Card className="bg-gradient-to-r from-amber-50 to-red-50 dark:from-amber-900/20 dark:to-red-900/20 border-amber-200 dark:border-amber-800">
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
@@ -412,13 +324,13 @@ export default function InventoryPage() {
                     <p className="text-sm text-amber-700 dark:text-amber-500">
                       {stats.outOfStock > 0 && `${stats.outOfStock} item(s) out of stock. `}
                       {stats.lowStock > 0 && `${stats.lowStock} item(s) running low. `}
-                      {stats.expiringSoon > 0 && `${stats.expiringSoon} item(s) near expiry (<= ${EXPIRY_WARNING_DAYS} days). `}
-                      {stats.expired > 0 && `${stats.expired} item(s) already expired. `}
+                      {stats.nearExpiry > 0 && `${stats.nearExpiry} batch line(s) near expiry (<= ${EXPIRY_WARNING_DAYS} days). `}
+                      {stats.expired > 0 && `${stats.expired} batch line(s) already expired. `}
                       Consider restocking soon.
                     </p>
                   </div>
                 </div>
-                {stats.expiringSoon > 0 && (
+                {stats.nearExpiry > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -577,13 +489,11 @@ export default function InventoryPage() {
         </div>
 
         {/* Pagination */}
-        {filteredInventory.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={searchQuery || categoryFilter !== 'All Categories' || stockFilter !== 'all' 
-                ? filteredInventory.length 
-                : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {
