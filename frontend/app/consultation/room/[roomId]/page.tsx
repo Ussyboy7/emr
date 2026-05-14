@@ -1389,11 +1389,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     setLoadingPausedSessions(true);
     try {
-      const doctorId = currentUser?.id ? Number(currentUser.id) : undefined;
+      // Room view: list all paused sessions in this room. Do not filter by doctor —
+      // when currentUser hydrates late, adding doctor=N would flip count (e.g. 9 → 0).
       const resp = await consultationService.getSessions({
         room: numericRoomId,
         status: 'paused',
-        ...(doctorId ? { doctor: doctorId } : {}),
         page: 1,
         page_size: 100,
       });
@@ -1404,7 +1404,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     } finally {
       setLoadingPausedSessions(false);
     }
-  }, [roomId, currentUser?.id]);
+  }, [roomId]);
   
   // Refresh queue only (no full-page loading). `silent` = background poll (no toasts / queue button state).
   const refreshQueueData = useCallback(async (options?: { silent?: boolean }) => {
@@ -9054,6 +9054,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </div>
                           <p className="text-sm text-muted-foreground mt-1">
                             Session #{ps.session_id} • {ps.patient_id || 'No patient ID'} • Active time: {minutes} min
+                            {ps.doctor_name ? ` • ${ps.doctor_name}` : ''}
                           </p>
                           <p className="text-xs text-muted-foreground mt-1">
                             Started: {formatDate(ps.started_at)} {formatTime(ps.started_at)}
