@@ -26,6 +26,7 @@ import { loadConsultationReportSession, type ConsultationReportSession } from '@
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
@@ -192,6 +193,10 @@ export default function ConsultationHistoryPage() {
   const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  /** Debounced for API only — input stays instant; ~350ms cuts request spam vs typing. */
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 350);
+  const searchDebouncing =
+    searchQuery.trim() !== debouncedSearchQuery.trim();
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("today");
   const [clinicFilter, setClinicFilter] = useState("all");
@@ -331,7 +336,7 @@ export default function ConsultationHistoryPage() {
           date,
           start_date,
           end_date,
-          search: searchQuery.trim() || undefined,
+          search: debouncedSearchQuery.trim() || undefined,
           ordering: '-started_at',
         });
         const sessions = sessionsResult.results || [];
@@ -429,7 +434,7 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, searchQuery]);
+  }, [statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, debouncedSearchQuery]);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -485,7 +490,7 @@ export default function ConsultationHistoryPage() {
   // Reset to page 1 when filters change (same pattern as Lab Orders)
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
 
   const stats = statsData;
 
@@ -1242,8 +1247,14 @@ export default function ConsultationHistoryPage() {
                   placeholder="Search by patient name, visit ID, or patient ID..." 
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
-                  className="pl-10" 
+                  className={searchDebouncing ? "pl-10 pr-10" : "pl-10"} 
                 />
+                {searchDebouncing ? (
+                  <Loader2
+                    className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground"
+                    aria-label="Updating search"
+                  />
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -1292,9 +1303,9 @@ export default function ConsultationHistoryPage() {
             <Card>
               <CardContent className="py-12 text-center">
                 <History className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                {searchQuery.trim() ? (
+                {(debouncedSearchQuery.trim() || searchQuery.trim()) ? (
                   <>
-                    <p className="text-lg font-medium mb-1">No consultations found for &quot;{searchQuery.trim()}&quot;</p>
+                    <p className="text-lg font-medium mb-1">No consultations found for &quot;{debouncedSearchQuery.trim() || searchQuery.trim()}&quot;</p>
                     <p className="text-sm text-muted-foreground">Try adjusting your search terms or filters</p>
                   </>
                 ) : statusFilter !== "all" ? (

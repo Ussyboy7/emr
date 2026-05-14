@@ -589,6 +589,23 @@ export default function ResultsVerificationPage() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  const toggleSelectAll = () => {
+    const visibleIds = paginatedResults.map(r => r.id);
+    const allSelected = visibleIds.every(id => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedIds(prev => {
+        const existing = new Set(prev);
+        visibleIds.forEach(id => existing.add(id));
+        return Array.from(existing);
+      });
+    }
+  };
+
+  const allIdsSelected = paginatedResults.length > 0 && paginatedResults.every(r => selectedIds.includes(r.id));
+  const someIdsSelected = selectedIds.length > 0 && !allIdsSelected;
+
   const openViewDialog = (result: LabResult) => { setSelectedResult(result); setIsViewDialogOpen(true); };
   const openVerifyDialog = (result: LabResult) => { setSelectedResult(result); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
   const openRejectDialog = (result: LabResult) => { setSelectedResult(result); setRejectionReason(''); setIsRejectDialogOpen(true); };
@@ -718,6 +735,17 @@ export default function ResultsVerificationPage() {
             )}
 
             {/* Pending Results List */}
+        {!loading && !error && paginatedResults.length > 0 && (
+          <div className="flex items-center gap-2 px-1 py-2 border rounded-lg bg-background">
+            <Checkbox
+              checked={allIdsSelected}
+              onCheckedChange={toggleSelectAll}
+            />
+            <span className="text-xs font-medium text-muted-foreground">
+              {allIdsSelected ? `${paginatedResults.length} selected` : someIdsSelected ? `${selectedIds.length} selected` : 'Select All'}
+            </span>
+          </div>
+        )}
         <div className="space-y-3">
           {loading ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">

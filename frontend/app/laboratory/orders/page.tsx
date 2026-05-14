@@ -48,7 +48,7 @@ const formatDate = (dateString: string | undefined): string => {
   try {
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'Invalid Date';
-    return date.toLocaleDateString();
+    return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
   } catch {
     return 'Invalid Date';
   }
@@ -2444,7 +2444,7 @@ export default function LabOrdersPage() {
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-muted-foreground">
                           {test.lab_number && <span className="font-mono text-blue-600 dark:text-blue-400">Lab ID: {test.lab_number}</span>}
-                          {test.collectedBy && <span className={test.lab_number ? " ml-2" : ""}>Collected by {test.collectedBy} {test.collectedAt && `at ${formatTime(test.collectedAt)}`}</span>}
+                          {test.collectedBy && <span className={test.lab_number ? " ml-2" : ""}>Collected by {test.collectedBy} {test.collectedAt && `on ${formatDate(test.collectedAt)} at ${formatTime(test.collectedAt)}`}</span>}
                           {/* Extract collection method from notes if available */}
                           {(() => {
                             const notes = test.notes || '';
