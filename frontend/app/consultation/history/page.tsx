@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -192,8 +192,11 @@ export default function ConsultationHistoryPage() {
   const { currentUser } = useCurrentUser();
   const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
+  /** After first list load, refetches use this instead of replacing the whole page (see Manage Patients). */
+  const [listRefreshing, setListRefreshing] = useState(false);
+  const initialListFetchDoneRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 450);
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("today");
   const [clinicFilter, setClinicFilter] = useState("all");
@@ -319,7 +322,11 @@ export default function ConsultationHistoryPage() {
   useEffect(() => {
     const loadConsultations = async () => {
       try {
-        setLoading(true);
+        if (!initialListFetchDoneRef.current) {
+          setLoading(true);
+        } else {
+          setListRefreshing(true);
+        }
 
         const { date, start_date, end_date } = buildDateParams();
         
@@ -427,6 +434,8 @@ export default function ConsultationHistoryPage() {
         }
       } finally {
         setLoading(false);
+        setListRefreshing(false);
+        initialListFetchDoneRef.current = true;
       }
     };
     
@@ -1161,7 +1170,8 @@ export default function ConsultationHistoryPage() {
     }
   };
 
-  if (loading) {
+  // Full-page shell only on first load — filter/search refetches keep the page mounted (like Patients / Lab Orders).
+  if (loading && !initialListFetchDoneRef.current) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-[80vh]">
@@ -1257,8 +1267,14 @@ export default function ConsultationHistoryPage() {
                   placeholder="Search by patient name, visit ID, or patient ID..." 
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
-                  className="pl-10" 
+                  className="pl-10 pr-10" 
                 />
+                {listRefreshing ? (
+                  <Loader2
+                    className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground"
+                    aria-label="Refreshing results"
+                  />
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -1296,12 +1312,12 @@ export default function ConsultationHistoryPage() {
 
         {/* Results */}
         {consultations.length === 0 ? (
-          <Card>
+          <Card className={listRefreshing ? "opacity-70 pointer-events-none transition-opacity" : ""}>
             <CardContent className="py-12 text-center">
               <History className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              {searchQuery ? (
+              {(debouncedSearchQuery.trim() || searchQuery.trim()) ? (
                 <>
-                  <p className="text-lg font-medium mb-1">No consultations found for "{searchQuery}"</p>
+                  <p className="text-lg font-medium mb-1">No consultations found for &quot;{debouncedSearchQuery.trim() || searchQuery.trim()}&quot;</p>
                   <p className="text-sm text-muted-foreground">Try adjusting your search terms or filters</p>
                 </>
               ) : statusFilter !== "all" ? (
