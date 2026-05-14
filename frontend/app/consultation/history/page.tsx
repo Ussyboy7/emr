@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import React, { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -26,7 +26,6 @@ import { loadConsultationReportSession, type ConsultationReportSession } from '@
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
@@ -192,11 +191,7 @@ export default function ConsultationHistoryPage() {
   const { currentUser } = useCurrentUser();
   const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
-  /** After first list load, refetches use this instead of replacing the whole page (see Manage Patients). */
-  const [listRefreshing, setListRefreshing] = useState(false);
-  const initialListFetchDoneRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearchQuery = useDebouncedValue(searchQuery, 450);
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("today");
   const [clinicFilter, setClinicFilter] = useState("all");
@@ -322,11 +317,7 @@ export default function ConsultationHistoryPage() {
   useEffect(() => {
     const loadConsultations = async () => {
       try {
-        if (!initialListFetchDoneRef.current) {
-          setLoading(true);
-        } else {
-          setListRefreshing(true);
-        }
+        setLoading(true);
 
         const { date, start_date, end_date } = buildDateParams();
         
@@ -340,7 +331,7 @@ export default function ConsultationHistoryPage() {
           date,
           start_date,
           end_date,
-          search: debouncedSearchQuery.trim() || undefined,
+          search: searchQuery.trim() || undefined,
           ordering: '-started_at',
         });
         const sessions = sessionsResult.results || [];
@@ -434,13 +425,11 @@ export default function ConsultationHistoryPage() {
         }
       } finally {
         setLoading(false);
-        setListRefreshing(false);
-        initialListFetchDoneRef.current = true;
       }
     };
     
     loadConsultations();
-  }, [statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, debouncedSearchQuery]);
+  }, [statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, searchQuery]);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -493,10 +482,10 @@ export default function ConsultationHistoryPage() {
     loadStats();
   }, [clinicFilter, buildDateParams]);
 
-  // Reset to page 1 when filters change (debounced search aligns with fetch)
+  // Reset to page 1 when filters change (same pattern as Lab Orders)
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
+  }, [searchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
 
   const stats = statsData;
 
@@ -1170,20 +1159,6 @@ export default function ConsultationHistoryPage() {
     }
   };
 
-  // Full-page shell only on first load — filter/search refetches keep the page mounted (like Patients / Lab Orders).
-  if (loading && !initialListFetchDoneRef.current) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-[80vh]">
-          <div className="text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-emerald-500 mx-auto mb-4" />
-            <p className="text-muted-foreground">Loading consultation history...</p>
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -1267,14 +1242,8 @@ export default function ConsultationHistoryPage() {
                   placeholder="Search by patient name, visit ID, or patient ID..." 
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
-                  className="pl-10 pr-10" 
+                  className="pl-10" 
                 />
-                {listRefreshing ? (
-                  <Loader2
-                    className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground"
-                    aria-label="Refreshing results"
-                  />
-                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -1310,37 +1279,44 @@ export default function ConsultationHistoryPage() {
           </CardContent>
         </Card>
 
-        {/* Results */}
-        {consultations.length === 0 ? (
-          <Card className={listRefreshing ? "opacity-70 pointer-events-none transition-opacity" : ""}>
-            <CardContent className="py-12 text-center">
-              <History className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              {(debouncedSearchQuery.trim() || searchQuery.trim()) ? (
-                <>
-                  <p className="text-lg font-medium mb-1">No consultations found for &quot;{debouncedSearchQuery.trim() || searchQuery.trim()}&quot;</p>
-                  <p className="text-sm text-muted-foreground">Try adjusting your search terms or filters</p>
-                </>
-              ) : statusFilter !== "all" ? (
-                <>
-                  <p className="text-lg font-medium mb-1">No {statusFilter.replace("-", " ")} consultations</p>
-                  <p className="text-sm text-muted-foreground">Try selecting "All Status" to see all consultations</p>
-                </>
-              ) : dateFilter !== "all" ? (
-                <>
-                  <p className="text-lg font-medium mb-1">No consultations for {dateFilter}</p>
-                  <p className="text-sm text-muted-foreground">Try selecting "All Time" to see all consultations</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-lg font-medium mb-1">No consultations found</p>
-                  <p className="text-sm text-muted-foreground">Consultations will appear here once patients are seen</p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {consultations.map((c) => {
+        {/* Results — Lab Orders pattern: list area shows spinner while loading; header/filters stay mounted */}
+        <div className="space-y-2">
+          {loading ? (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
+                <p>Loading consultations...</p>
+              </CardContent>
+            </Card>
+          ) : consultations.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <History className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                {searchQuery.trim() ? (
+                  <>
+                    <p className="text-lg font-medium mb-1">No consultations found for &quot;{searchQuery.trim()}&quot;</p>
+                    <p className="text-sm text-muted-foreground">Try adjusting your search terms or filters</p>
+                  </>
+                ) : statusFilter !== "all" ? (
+                  <>
+                    <p className="text-lg font-medium mb-1">No {statusFilter.replace("-", " ")} consultations</p>
+                    <p className="text-sm text-muted-foreground">Try selecting "All Status" to see all consultations</p>
+                  </>
+                ) : dateFilter !== "all" ? (
+                  <>
+                    <p className="text-lg font-medium mb-1">No consultations for {dateFilter}</p>
+                    <p className="text-sm text-muted-foreground">Try selecting "All Time" to see all consultations</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-lg font-medium mb-1">No consultations found</p>
+                    <p className="text-sm text-muted-foreground">Consultations will appear here once patients are seen</p>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            consultations.map((c) => {
               const isEditable = canEditConsultation(c);
               const isCompleted = c.status === "Completed";
               const borderColor = isEditable
@@ -1432,12 +1408,12 @@ export default function ConsultationHistoryPage() {
                   </CardContent>
                 </Card>
               );
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
 
         {/* Pagination */}
-        {consultations.length > 0 && (
+        {!loading && consultations.length > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
