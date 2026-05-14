@@ -1620,7 +1620,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     };
   
   // Function to restore active session with robust error handling
-  const restoreActiveSession = async (sessionId: number, options: { silent?: boolean } = {}) => {
+  const restoreActiveSession = async (
+    sessionId: number,
+    options: { silent?: boolean; minimal?: boolean } = {},
+  ) => {
     try {
       // Check if session is still valid and active
       const session: ConsultationSession = await consultationService.getSession(sessionId);
@@ -1724,7 +1727,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const elapsedSinceResume = Math.max(0, Math.floor((now.getTime() - resumedAt.getTime()) / 1000));
       const minutes = Math.floor((baseSeconds + elapsedSinceResume) / 60);
       setSessionDuration(minutes);
-      
+
+      // Fast path: opening from queue / POST resume — skip dozens of visit/order fetches that block "Starting...".
+      if (options.minimal) {
+        setMedicalNotes({
+          presentationComplaint: session.presentation_complaint || '',
+          historyOfPresentIllness: session.history_of_presenting_illness || '',
+          physicalExamination: session.physical_examination || '',
+          assessment: session.assessment || '',
+          plan: session.plan || '',
+        });
+        setSelectedSession({ ...session });
+        setDiagnoses([]);
+        setPrescriptions([]);
+        setLabOrders([]);
+        setNursingOrders([]);
+        setRadiologyOrders([]);
+        setPhysioOrders([]);
+        const pid = typeof session.patient === 'number' ? session.patient : parseInt(String(session.patient), 10);
+        if (!Number.isNaN(pid)) {
+          void loadPatientHistory(pid);
+        }
+        if (!options.silent) {
+          toast.success(`Session ready — ${restoredPatient.name || 'patient'}`);
+        }
+        debugConsultationRoom('Session restored (minimal)');
+        return true;
+      }
+
       // Enrich session with related data
       const enrichedSession: any = { ...session };
 
@@ -2425,9 +2455,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         if (existingSessions.results && existingSessions.results.length > 0) {
           const existingSession = existingSessions.results[0];
-          await restoreActiveSession(existingSession.id);
+          const restored = await restoreActiveSession(existingSession.id, { minimal: true });
           await loadPausedSessions();
-          toast.success(`Resumed existing active session with ${patient.name}`);
+          if (restored) {
+            toast.success(`Resumed existing active session with ${patient.name}`);
+          } else {
+            toast.error(
+              'Could not open the active session in this room. Refresh the page, or complete the session from Consultation History if it is stuck.',
+            );
+          }
           return;
         }
       } catch (checkError) {
@@ -2475,9 +2511,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       // Handle case where backend returns resumed=true (shouldn't happen with our check, but safety)
       if (sessionData?.resumed) {
-        await restoreActiveSession(sessionData.id);
+        const restored = await restoreActiveSession(sessionData.id, { minimal: true });
         await loadPausedSessions();
-        toast.success(`Resumed active session with ${patient.name}`);
+        if (restored) {
+          toast.success(`Resumed active session with ${patient.name}`);
+        } else {
+          toast.error(
+            'Could not resume the session in this room. Refresh the page, or complete the session from Consultation History if it is stuck.',
+          );
+        }
         return;
       }
       
