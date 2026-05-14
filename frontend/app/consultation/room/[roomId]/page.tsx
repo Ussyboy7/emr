@@ -1622,20 +1622,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Function to restore active session with robust error handling
   const restoreActiveSession = async (
     sessionId: number,
-    options: { silent?: boolean; minimal?: boolean } = {},
+    options: { silent?: boolean; minimal?: boolean; reassignRoomIfNeeded?: boolean } = {},
   ) => {
     try {
       // Check if session is still valid and active
-      const session: ConsultationSession = await consultationService.getSession(sessionId);
+      let session: ConsultationSession = await consultationService.getSession(sessionId);
+
+      const sessionRoomIdOf = (s: ConsultationSession) =>
+        typeof s.room === 'object' ? Number((s.room as { id?: number }).id) : Number(s.room);
+
+      // Same visit can resume from backend while session.room still points at another room.
+      // When explicitly allowed, move the active session to this room once so we continue one row.
+      const currentRoomId = Number.parseInt(roomId, 10);
+      let status = String(session.status || '').toLowerCase();
+      let sessionRoomId = sessionRoomIdOf(session);
+      let isSameRoom = Number.isFinite(currentRoomId) ? sessionRoomId === currentRoomId : true;
+      if (
+        options.reassignRoomIfNeeded &&
+        status === 'active' &&
+        !isSameRoom &&
+        Number.isFinite(currentRoomId)
+      ) {
+        try {
+          await consultationService.updateSession(sessionId, { room: currentRoomId });
+          session = await consultationService.getSession(sessionId);
+          status = String(session.status || '').toLowerCase();
+          sessionRoomId = sessionRoomIdOf(session);
+          isSameRoom = Number.isFinite(currentRoomId) ? sessionRoomId === currentRoomId : true;
+        } catch (reassignErr) {
+          console.warn('Could not move consultation session to current room:', reassignErr);
+        }
+      }
 
       // Verify session is still active and belongs to this room.
       // Some API responses can serialize room as string/object; normalize first.
-      const status = String(session.status || '').toLowerCase();
-      const currentRoomId = Number.parseInt(roomId, 10);
-      const sessionRoomId = typeof session.room === 'object'
-        ? Number((session.room as any)?.id)
-        : Number(session.room);
-      const isSameRoom = Number.isFinite(currentRoomId) ? sessionRoomId === currentRoomId : true;
       if (status !== 'active' || !isSameRoom) {
         if (!options.silent) {
           console.warn(`Session ${sessionId} is no longer active or in wrong room`);
@@ -2459,11 +2479,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           await loadPausedSessions();
           if (restored) {
             toast.success(`Resumed existing active session with ${patient.name}`);
-          } else {
-            toast.error(
-              'Could not open the active session in this room. Refresh the page, or complete the session from Consultation History if it is stuck.',
-            );
+            return;
           }
+          toast.error(
+            'Could not resume this consultation in the current room. Refresh the page and try again.',
+          );
           return;
         }
       } catch (checkError) {
@@ -2509,17 +2529,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         }),
       });
 
-      // Handle case where backend returns resumed=true (shouldn't happen with our check, but safety)
+      // Backend returns resumed when an active session already exists for this visit (GET above is room-scoped).
       if (sessionData?.resumed) {
         const restored = await restoreActiveSession(sessionData.id, { minimal: true });
         await loadPausedSessions();
         if (restored) {
           toast.success(`Resumed active session with ${patient.name}`);
-        } else {
-          toast.error(
-            'Could not resume the session in this room. Refresh the page, or complete the session from Consultation History if it is stuck.',
-          );
+          return;
         }
+        toast.error(
+          'Could not open this consultation. Refresh the page and try again. If another room still shows this visit active, open that room or ask an administrator.',
+        );
         return;
       }
       

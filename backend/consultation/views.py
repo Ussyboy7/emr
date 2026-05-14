@@ -153,6 +153,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
 
         existing_session = self._find_existing_active_session(data)
         if existing_session:
+            existing_session = self._sync_resumed_session_room_to_request(existing_session, data)
             payload = self.get_serializer(existing_session).data
             payload['resumed'] = True
             return Response(payload, status=status.HTTP_200_OK)
@@ -168,6 +169,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         except IntegrityError:
             existing_session = self._find_existing_active_session(data)
             if existing_session:
+                existing_session = self._sync_resumed_session_room_to_request(existing_session, data)
                 payload = self.get_serializer(existing_session).data
                 payload['resumed'] = True
                 return Response(payload, status=status.HTTP_200_OK)
@@ -214,7 +216,39 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
                 .first()
             )
         return None
-    
+
+    def _sync_resumed_session_room_to_request(self, existing_session, data):
+        """
+        Resume is keyed by visit (or patient+room). The same visit can be opened from
+        a different consultation room URL; move the active row to the requested room so
+        the client and DB stay consistent with uniq_active_consult_session_per_patient_room.
+        """
+        new_room = data.get('room')
+        if not new_room:
+            return existing_session
+        target_room_id = getattr(new_room, 'pk', new_room)
+        if existing_session.room_id == target_room_id:
+            return existing_session
+        conflict = (
+            ConsultationSession.objects.filter(
+                patient_id=existing_session.patient_id,
+                room_id=target_room_id,
+                status='active',
+            )
+            .exclude(pk=existing_session.pk)
+            .exists()
+        )
+        if conflict:
+            logger.warning(
+                'Cannot move resumed consultation session %s to room %s: patient already has another active session there',
+                existing_session.pk,
+                target_room_id,
+            )
+            return existing_session
+        existing_session.room = new_room
+        existing_session.save(update_fields=['room'])
+        return existing_session
+
     def perform_create(self, serializer):
         """Create consultation session and log audit."""
         # Set the doctor field using multiple fallback strategies
