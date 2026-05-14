@@ -503,6 +503,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [selectedWardAdmission, setSelectedWardAdmission] = useState<WardAdmission | null>(null);
   const [isEnding, setIsEnding] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
+  /** Synchronous guard — React state for `isStartingSession` can lag behind rapid clicks. */
+  const isStartingSessionRef = useRef(false);
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpReason, setFollowUpReason] = useState("");
@@ -2062,10 +2064,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       toast.success(`Restored active session with ${restoredPatient.name}`);
       debugConsultationRoom('Session restored successfully');
+      return true;
     } catch (err: any) {
       console.error('Error restoring active session:', err);
       toast.error('Failed to restore active session. You may need to start a new session.');
       // Don't throw - allow the page to load normally
+      return false;
     }
   };
 
@@ -2358,7 +2362,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     confirmSwitch = false,
     startOpts?: { skipPausedDuplicateCheck?: boolean },
   ) => {
-    if (isStartingSession) return;
+    if (isStartingSessionRef.current) return;
+    isStartingSessionRef.current = true;
     setIsStartingSession(true);
     try {
       // Check if there's already an active session
@@ -2501,37 +2506,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setFollowUpDate("");
       setFollowUpReason("");
       
-      // Load medical history for the patient
-      try {
-        const history = await patientService.getPatientHistory(numericPatientId);
-        setMedicalHistory({
-          allergies: Array.isArray(history.allergies) ? history.allergies : [],
-          diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
-          surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
-          familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
-          socialHistory: {
-            smoking: history.social_history?.smoking || '',
-            alcohol: history.social_history?.alcohol || '',
-            exercise: history.social_history?.exercise || '',
-            occupation: history.social_history?.occupation || '',
-          },
-        });
-      } catch (historyErr) {
-        console.warn('Could not load medical history:', historyErr);
-        setMedicalHistory({
-          allergies: [],
-          diagnoses: [],
-          surgicalHistory: [],
-          familyHistory: [],
-          socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
-        });
-      }
-      
+      // Load allergies / structured history in background — must not block session open or "Starting..."
+      void (async () => {
+        try {
+          const history = await patientService.getPatientHistory(numericPatientId);
+          setMedicalHistory({
+            allergies: Array.isArray(history.allergies) ? history.allergies : [],
+            diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
+            surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
+            familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
+            socialHistory: {
+              smoking: history.social_history?.smoking || '',
+              alcohol: history.social_history?.alcohol || '',
+              exercise: history.social_history?.exercise || '',
+              occupation: history.social_history?.occupation || '',
+            },
+          });
+        } catch (historyErr) {
+          console.warn('Could not load medical history:', historyErr);
+          setMedicalHistory({
+            allergies: [],
+            diagnoses: [],
+            surgicalHistory: [],
+            familyHistory: [],
+            socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
+          });
+        }
+      })();
+
       toast.success(`Session started with ${patient.name}`);
     } catch (err: any) {
       console.error('Error starting session:', err);
       toast.error(err.message || 'Failed to start consultation session');
     } finally {
+      isStartingSessionRef.current = false;
       setIsStartingSession(false);
     }
   };
