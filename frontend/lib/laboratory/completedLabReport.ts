@@ -1,9 +1,89 @@
+import { toast } from 'sonner';
 import { transformPriority } from '@/lib/services/transformers';
+import { apiFetch } from '@/lib/api-client';
 import {
   buildOrderedLabResultViewRows,
   deriveOverallStatus,
   type ResultStatus,
 } from '@/lib/laboratory/template-utils';
+
+/** Resolve uploaded result file URLs consistently across lab modules. */
+export function resolveLabResultFileUrl(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  if (s.startsWith('http')) return s;
+  const apiBase = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+  const path = s.startsWith('/') ? s : `/${s}`;
+  if (apiBase) return `${apiBase}${path}`;
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}${path}`;
+  }
+  return s;
+}
+
+/** Official NPA lab report PDF (``LabResult.id`` only). */
+export async function downloadOfficialLabReportPdf(params: {
+  labResultId: string;
+  patientId?: string;
+  testCode?: string;
+  patientName?: string;
+}): Promise<void> {
+  const { labResultId, patientId = 'patient', testCode = 'lab', patientName } = params;
+  if (!labResultId) {
+    throw new Error('Missing lab result id');
+  }
+  const blob = await apiFetch<Blob>(`/laboratory/verification/${labResultId}/download_report/`, {
+    responseType: 'blob',
+  });
+  const filename = `lab_report_${patientId}_${testCode}_${labResultId}.pdf`;
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+  if (patientName) {
+    toast.success(`Downloaded lab report for ${patientName}`);
+  }
+}
+
+/** Print the same official PDF used for download. */
+export async function printOfficialLabReportPdf(labResultId: string): Promise<void> {
+  if (!labResultId) {
+    throw new Error('Missing lab result id');
+  }
+  const blob = await apiFetch<Blob>(`/laboratory/verification/${labResultId}/download_report/`, {
+    responseType: 'blob',
+  });
+  const printUrl = URL.createObjectURL(blob);
+  const printWindow = window.open(printUrl, '_blank');
+  if (!printWindow) {
+    URL.revokeObjectURL(printUrl);
+    throw new Error('Failed to open print window. Please allow popups.');
+  }
+  setTimeout(() => {
+    try {
+      printWindow.focus();
+      printWindow.print();
+    } finally {
+      URL.revokeObjectURL(printUrl);
+    }
+  }, 700);
+}
+
+export function downloadPartnerResultFile(url: string, filename?: string) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || displayNameFromLabResultFileUrl(url);
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 
 export interface CompletedTestResultRow {
   parameter: string;
@@ -19,7 +99,10 @@ export interface CompletedTestResultRow {
 
 /** Shape used by Laboratory Completed Tests and shared Lab Report dialog */
 export interface CompletedTest {
+  /** LabTest.id — display / list keys */
   id: string;
+  /** LabResult.id — required for PDF download (never use ``id`` for download_report). */
+  labResultId: string;
   orderId: string;
   patient: { id: string; name: string; age: number | null; gender: string };
   doctor: { id: string; name: string; specialty: string };
@@ -89,26 +172,14 @@ export function transformApiRowToCompletedTest(
 
   const rf = test.result_file;
   const resultFileExists = (test as any)?.result_file_exists !== false;
-  const resultFileUrl =
-    rf && typeof rf === 'string'
-      ? rf.startsWith('http')
-        ? rf
-        : typeof window !== 'undefined'
-          ? `${window.location.origin}${rf}`
-          : rf
-      : null;
+  const resultFileUrl = rf && typeof rf === 'string' ? resolveLabResultFileUrl(rf) : null;
 
   const normalRangeObj: Record<string, any> | undefined =
     (test as any)?.template_normal_range || (test as any)?.template?.normal_range;
 
   const resultPayload = (test.results || {}) as Record<string, any>;
 
-  const toAbs = (raw: string) => {
-    const s = String(raw);
-    if (s.startsWith('http')) return s;
-    if (typeof window === 'undefined') return s;
-    return s.startsWith('/') ? `${window.location.origin}${s}` : `${window.location.origin}/${s}`;
-  };
+  const toAbs = (raw: string) => resolveLabResultFileUrl(raw) || String(raw);
 
   const processedResults = buildOrderedLabResultViewRows(resultPayload, normalRangeObj, {
     resultAttachments: (test as any).result_attachments,
@@ -135,8 +206,18 @@ export function transformApiRowToCompletedTest(
 
   const doctorIdRaw = (test as any).lab_order?.doctor?.id ?? (doctorDetails as any)?.id;
 
+  const labResultId =
+    listMode === 'verification'
+      ? (row as any).id != null
+        ? String((row as any).id)
+        : ''
+      : (test as any).lab_result_id != null
+        ? String((test as any).lab_result_id)
+        : '';
+
   return {
     id: (test as any).id != null ? String((test as any).id) : '',
+    labResultId,
     orderId,
     patient: {
       id: patientId,

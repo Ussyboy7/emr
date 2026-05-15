@@ -1003,6 +1003,7 @@ class LabTestViewSet(viewsets.ModelViewSet):
             'processed_by',
             'verified_by',
             'rejected_by',
+            'result_record',
         )
 
         # Filter by status if provided
@@ -1184,7 +1185,7 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
     def download_report(self, request, pk=None):
         """Download lab result as PDF report (uses standardized NPA PDF house style)."""
         # Do not rely on list filters (status/date/search) for detail download.
-        # Some frontend callers pass LabResult.id while others pass LabTest.id.
+        # Frontend must pass LabResult.id (see CompletedTest.labResultId).
         base_qs = LabResult.objects.select_related(
             'test',
             'order',
@@ -1198,9 +1199,10 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
             'test__processed_by',
             'test__verified_by',
         )
-        result = base_qs.filter(pk=pk).first() or base_qs.filter(test_id=pk).first()
-        if result is None:
-            result = get_object_or_404(base_qs, pk=pk)
+        # ``pk`` must be ``LabResult.id``. Do not fall back to ``test_id=pk``:
+        # LabResult and LabTest use separate auto-increment PKs, so the same
+        # number can refer to two different patients (wrong PDF if we OR them).
+        result = get_object_or_404(base_qs, pk=pk)
 
         from common.pdf import (
             NPADocument,

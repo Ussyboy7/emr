@@ -33,11 +33,11 @@ import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
+import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
 import {
-  buildOrderedLabResultViewRows,
-  deriveOverallStatus,
-  type ResultStatus,
-} from '@/lib/laboratory/template-utils';
+  transformApiRowToCompletedTest,
+  type CompletedTest,
+} from '@/lib/laboratory/completedLabReport';
 import { getOrganizationLabHeader } from '@/lib/constants/organization';
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { getVisitServiceClinicsDisplay, joinDisplayParts } from '@/lib/utils/clinic-utils';
@@ -268,7 +268,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
 
   // Lab / Imaging / Physio / Ward view dialogs
-  const [selectedLab, setSelectedLab] = useState<any>(null);
+  const [selectedLabReport, setSelectedLabReport] = useState<CompletedTest | null>(null);
   const [selectedImaging, setSelectedImaging] = useState<any>(null);
   const [selectedPhysio, setSelectedPhysio] = useState<any>(null);
   const [selectedPhysioSessions, setSelectedPhysioSessions] = useState<any[]>([]);
@@ -957,273 +957,12 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           onClose={() => { setIsVitalsDetailModalOpen(false); setSelectedVital(null); }}
         />
 
-        <Dialog open={!!selectedLab} onOpenChange={(open) => { if (!open) setSelectedLab(null); }}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Lab Report</DialogTitle>
-              <DialogDescription>{selectedLab ? `${selectedLab?.name ?? ''} - ${selectedLab?.order_details?.patient_details?.name ?? selectedLab?.order_details?.patient_name ?? ''}` : ''}</DialogDescription>
-            </DialogHeader>
-            {selectedLab && (() => {
-              const orderDetails = selectedLab.order_details || {};
-              const patientDetails = orderDetails.patient_details || {};
-              const doctorDetails = orderDetails.doctor_details || {};
-              const normalRangeObj: Record<string, any> | undefined = selectedLab?.template_normal_range;
-
-              const processedResults = buildOrderedLabResultViewRows(
-                (selectedLab.results || {}) as Record<string, any>,
-                normalRangeObj,
-                {
-                  resultAttachments: selectedLab.result_attachments,
-                  resolveFileUrl: (raw) => {
-                    const s = String(raw);
-                    if (s.startsWith('http')) return s;
-                    return s.startsWith('/') ? `${window.location.origin}${s}` : `${window.location.origin}/${s}`;
-                  },
-                }
-              );
-              const overallStatus: ResultStatus = deriveOverallStatus(processedResults);
-
-              const orderedAt = selectedLab.created_at || selectedLab.collected_at || '';
-              const completedAt = selectedLab.processed_at || selectedLab.verified_at || '';
-              const verifiedAt = selectedLab.verified_at || '';
-              const turnaroundMs =
-                orderedAt && completedAt ? new Date(completedAt).getTime() - new Date(orderedAt).getTime() : 0;
-              const turnaroundHours = turnaroundMs > 0 ? Math.floor(turnaroundMs / 3600000) : 0;
-              const turnaroundMins = turnaroundMs > 0 ? Math.floor((turnaroundMs % 3600000) / 60000) : 0;
-              const turnaroundTime = turnaroundMs > 0 ? (turnaroundHours > 0 ? `${turnaroundHours}h ${turnaroundMins}m` : `${turnaroundMins}m`) : '';
-
-              const resultFileUrl = selectedLab.result_file ? (
-                String(selectedLab.result_file).startsWith('http') ? String(selectedLab.result_file) : `${window.location.origin}${selectedLab.result_file}`
-              ) : null;
-
-              const handlePrint = () => {
-                try {
-                  const content = document.getElementById('lab-report-print-root');
-                  if (!content) return;
-                  const w = window.open('', '_blank', 'noopener,noreferrer');
-                  if (!w) return;
-                  w.document.open();
-                  w.document.write(`
-                    <html>
-                      <head>
-                        <title>Lab Report</title>
-                        <style>
-                          body { font-family: Arial, sans-serif; margin: 24px; }
-                          table { width: 100%; border-collapse: collapse; }
-                          th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; }
-                          th { background: #f5f5f5; text-align: left; }
-                          h2 { margin: 0 0 4px 0; }
-                        </style>
-                      </head>
-                      <body>${content.innerHTML}</body>
-                    </html>
-                  `);
-                  w.document.close();
-                  w.focus();
-                  w.print();
-                } catch {
-                  toast.error('Unable to print lab report');
-                }
-              };
-
-              const handleDownloadPdf = () => {
-                if (resultFileUrl) {
-                  const link = document.createElement('a');
-                  link.href = resultFileUrl;
-                  link.download = `lab_result_${selectedLab.id}.pdf`;
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                  return;
-                }
-                handlePrint();
-              };
-
-              return (
-                <div className="space-y-6 py-4">
-                  <div id="lab-report-print-root">
-                    <div className="text-center p-4 border-b">
-                      <h2 className="text-xl font-bold">LABORATORY REPORT</h2>
-                      <p className="text-sm text-muted-foreground">{getOrganizationLabHeader()}</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Patient Name</p>
-                        <p className="font-medium">{patientDetails?.name ?? orderDetails?.patient_name ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Age / Gender</p>
-                        <p className="font-medium">{patientDetails?.age != null ? `${patientDetails.age} years` : ''} / {patientDetails?.gender ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Ordering Doctor</p>
-                        <p className="font-medium">{doctorDetails?.name ?? orderDetails?.doctor_name ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Order ID</p>
-                        <p className="font-medium">{orderDetails?.order_id ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Test Name</p>
-                        <p className="font-medium">{selectedLab.name} ({selectedLab.code})</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Clinic</p>
-                        <p className="font-medium">{orderDetails?.clinic ?? ''}</p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3 className="font-semibold mb-3 flex items-center gap-2">
-                        <TestTube className="h-4 w-4 text-amber-500" />
-                        Test Results
-                        {processedResults.length > 0 && (
-                          <Badge variant="outline" className={getOverallStatusBadge(overallStatus)}>{overallStatus}</Badge>
-                        )}
-                      </h3>
-
-                      {processedResults.length > 0 ? (
-                        <>
-                          {resultFileUrl && (
-                            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <FileText className="h-4 w-4 text-blue-600" />
-                                  <span className="text-sm font-medium text-blue-800 dark:text-blue-200">Additional Result File Available</span>
-                                </div>
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => { window.open(resultFileUrl, '_blank'); }}
-                                    className="text-blue-600 hover:text-blue-800"
-                                  >
-                                    <Download className="h-3 w-3 mr-1" />
-                                    View
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={handleDownloadPdf}
-                                    className="text-blue-600 hover:text-blue-800"
-                                  >
-                                    <Download className="h-3 w-3 mr-1" />
-                                    Download
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="overflow-x-auto border rounded-lg">
-                            <table className="w-full text-sm">
-                              <thead><tr className="border-b bg-muted/50">
-                                <th className="text-left p-3 font-medium">Parameter</th>
-                                <th className="text-left p-3 font-medium">Result</th>
-                                <th className="text-left p-3 font-medium">Unit</th>
-                                <th className="text-left p-3 font-medium">Normal Range</th>
-                                <th className="text-left p-3 font-medium">Status</th>
-                              </tr></thead>
-                              <tbody>
-                                {processedResults.map((r) => (
-                                  <tr key={r.parameter} className="border-b">
-                                    <td className="p-3 font-medium">{r.parameter}</td>
-                                    <td className={`p-3 ${getResultStatusColor(r.status)}`}>{r.value || 'Pending'}</td>
-                                    <td className="p-3 text-muted-foreground">{r.unit}</td>
-                                    <td className="p-3 text-muted-foreground">{r.normalRange}</td>
-                                    <td className="p-3">
-                                      {r.status === 'Normal' ? (
-                                        <div className="h-4 w-4 rounded-full bg-emerald-500/15 border border-emerald-500/30" />
-                                      ) : (
-                                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </>
-                      ) : resultFileUrl ? (
-                        <div className="space-y-4">
-                          <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                            <div className="flex items-center gap-3 mb-2">
-                              <FileText className="h-5 w-5 text-blue-600" />
-                              <span className="font-medium text-blue-800 dark:text-blue-200">Result file available</span>
-                            </div>
-                            <p className="text-sm text-muted-foreground mb-4">
-                              Results are provided as a PDF document
-                            </p>
-                            <Button
-                              onClick={() => { window.open(resultFileUrl, '_blank'); }}
-                              className="bg-blue-600 hover:bg-blue-700"
-                            >
-                              <Download className="h-4 w-4 mr-2" />
-                              View PDF
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-8 text-center border rounded-lg">
-                          <div className="flex flex-col items-center gap-3">
-                            <TestTube className="h-8 w-8 text-amber-500" />
-                            <div>
-                              <p className="font-medium text-amber-800 dark:text-amber-200">No Results Available</p>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                Test results have not been entered or uploaded yet.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Ordered</p>
-                        <p className="font-medium">{orderedAt ? `${formatDate(orderedAt)} ${formatTime(orderedAt)}` : ''}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Completed</p>
-                        <p className="font-medium">{completedAt ? `${formatDate(completedAt)} ${formatTime(completedAt)}` : ''}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Verified</p>
-                        <p className="font-medium">{verifiedAt ? `${formatDate(verifiedAt)} ${formatTime(verifiedAt)}` : ''}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Turnaround Time</p>
-                        <p className="font-medium">{turnaroundTime}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Performed By</p>
-                        <p className="font-medium">{selectedLab.processed_by_name || selectedLab.processed_by || ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Verified By</p>
-                        <p className="font-medium">{selectedLab.verified_by_name || selectedLab.verified_by || ''}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2">
-                    <Button variant="outline" onClick={() => setSelectedLab(null)}>Close</Button>
-                    <Button variant="outline" onClick={handlePrint}>
-                      <Printer className="h-4 w-4 mr-2" />Print
-                    </Button>
-                    <Button onClick={handleDownloadPdf}>
-                      <Download className="h-4 w-4 mr-2" />Download PDF
-                    </Button>
-                  </div>
-                </div>
-              );
-            })()}
-          </DialogContent>
-        </Dialog>
+        <LabCompletedReportDialog
+          open={!!selectedLabReport}
+          onOpenChange={(open) => { if (!open) setSelectedLabReport(null); }}
+          test={selectedLabReport}
+          hideLabWorkflowActions
+        />
 
         {/* Imaging View Dialog */}
         <Dialog open={!!selectedImaging} onOpenChange={(open) => { if (!open) setSelectedImaging(null); }}>
@@ -2329,7 +2068,13 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={() => { setSelectedLab(lab); }}>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedLabReport(transformApiRowToCompletedTest(lab, 'tests'));
+                                }}
+                              >
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>

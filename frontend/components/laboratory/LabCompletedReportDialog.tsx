@@ -11,10 +11,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { apiFetch } from '@/lib/api-client';
-import { Download, Eye, FileText, FlaskConical } from 'lucide-react';
+import { Download, Eye, FileText, FlaskConical, Printer } from 'lucide-react';
 import {
   displayNameFromLabResultFileUrl,
+  downloadOfficialLabReportPdf,
+  downloadPartnerResultFile,
+  printOfficialLabReportPdf,
   type CompletedTest,
 } from '@/lib/laboratory/completedLabReport';
 
@@ -45,17 +47,6 @@ function getResultStatusColor(status: string) {
   }
 }
 
-function downloadResultFile(url: string, filename: string) {
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-}
-
 export interface LabCompletedReportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -71,91 +62,48 @@ export function LabCompletedReportDialog({
   hideLabWorkflowActions = false,
 }: LabCompletedReportDialogProps) {
   const hasUsableResultFile = Boolean(test?.result_file && test?.result_file_exists !== false);
+  const canUseOfficialPdf = Boolean(test?.labResultId);
 
   const hasRowAttachments = test?.results.some((r) => Boolean(r.attachment?.url)) ?? false;
 
   const handlePrint = async () => {
     if (!test) return;
+    if (!test.labResultId) {
+      toast.error('Cannot print: missing result id. Refresh the list and try again.');
+      return;
+    }
     toast.info(`Printing result for ${test.patient.name}...`);
-
-    // Always print the same backend-generated report used for downloads.
     try {
-      let printUrl: string | null = null;
-      let revokeAfterPrint = false;
-
-      if (hasUsableResultFile && test.result_file) {
-        printUrl = test.result_file;
-      } else {
-        const blob = await apiFetch<Blob>(
-          `/laboratory/verification/${test.id}/download_report/`,
-          { responseType: 'blob' }
-        );
-        printUrl = URL.createObjectURL(blob);
-        revokeAfterPrint = true;
-      }
-
-      const printWindow = window.open(printUrl, '_blank');
-      if (!printWindow) {
-        if (revokeAfterPrint && printUrl) URL.revokeObjectURL(printUrl);
-        toast.error('Failed to open print window. Please allow popups.');
-        return;
-      }
-
-      // Give browser time to load PDF before printing.
-      setTimeout(() => {
-        try {
-          printWindow.focus();
-          printWindow.print();
-        } finally {
-          if (revokeAfterPrint && printUrl) URL.revokeObjectURL(printUrl);
-        }
-      }, 700);
+      await printOfficialLabReportPdf(test.labResultId);
     } catch (error) {
       console.error('Print error:', error);
       toast.error((error as Error)?.message || 'Failed to print lab report');
     }
   };
 
-  const handleFooterDownload = () => {
+  const handleFooterDownload = async () => {
     if (!test) return;
-
-    // If there's an uploaded PDF file, download it
-    if (hasUsableResultFile && test.result_file) {
-      const name = displayNameFromLabResultFileUrl(test.result_file);
-      downloadResultFile(test.result_file, name);
-      toast.success(`Downloaded result for ${test.patient.name}`);
+    if (!test.labResultId) {
+      toast.error('Cannot download PDF: missing result id. Refresh the list and try again.');
       return;
     }
-
-    // Otherwise, generate and download a PDF report
-    generateAndDownloadPDFReport();
-  };
-
-  const generateAndDownloadPDFReport = async () => {
-    if (!test) return;
-
     try {
-      const blob = await apiFetch<Blob>(
-        `/laboratory/verification/${test.id}/download_report/`,
-        { responseType: 'blob' }
-      );
-      const filename = `lab_report_${test.patient.id}_${test.testCode}_${test.id}.pdf`;
-
-      // Create and download the file
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success(`Downloaded lab report for ${test.patient.name}`);
+      await downloadOfficialLabReportPdf({
+        labResultId: test.labResultId,
+        patientId: test.patient.id,
+        testCode: test.testCode,
+        patientName: test.patient.name,
+      });
     } catch (error) {
       console.error('Error downloading PDF report:', error);
       toast.error('Failed to download PDF report');
     }
+  };
+
+  const handleDownloadPartnerFile = () => {
+    if (!test?.result_file) return;
+    downloadPartnerResultFile(test.result_file, getPdfDisplayName(test) || undefined);
+    toast.success(`Downloaded attachment for ${test.patient.name}`);
   };
 
   return (
@@ -220,31 +168,35 @@ export function LabCompletedReportDialog({
                       <div className="flex items-start gap-3 min-w-0">
                         <FileText className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Report PDF</p>
+                          <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                            Partner / scanned report (optional)
+                          </p>
                           <p className="text-xs text-muted-foreground truncate" title={pdfDisplayName}>
                             {pdfDisplayName}
                           </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Official PDF below matches the results table.
+                          </p>
                         </div>
                       </div>
-                      {/* Inline button is "View", not "Download", so the only
-                          true download in this dialog is the footer button.
-                          Matches the View PDF pattern used in the verification
-                          dialog — opens the partner-supplied result file in a
-                          new tab so the user can read it before deciding to
-                          save a copy. */}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          if (test.result_file) {
-                            window.open(test.result_file, '_blank', 'noopener,noreferrer');
-                          }
-                        }}
-                        className="shrink-0"
-                      >
-                        <Eye className="h-3.5 w-3.5 mr-1" />
-                        View
-                      </Button>
+                      <div className="flex shrink-0 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (test.result_file) {
+                              window.open(test.result_file, '_blank', 'noopener,noreferrer');
+                            }
+                          }}
+                        >
+                          <Eye className="h-3.5 w-3.5 mr-1" />
+                          View
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={handleDownloadPartnerFile}>
+                          <Download className="h-3.5 w-3.5 mr-1" />
+                          Attachment
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ) : null;
@@ -271,9 +223,7 @@ export function LabCompletedReportDialog({
                             {result.value || '—'}
                           </td>
                           <td className="p-3 text-muted-foreground">{result.unit || '—'}</td>
-                          <td className="p-3 text-muted-foreground">
-                            {result.normalRange || '—'}
-                          </td>
+                          <td className="p-3 text-muted-foreground">{result.normalRange || '—'}</td>
                           <td className="p-3">
                             {result.status !== 'Normal' && (
                               <Badge variant="outline" className={getResultStatusColor(result.status)}>
@@ -318,11 +268,7 @@ export function LabCompletedReportDialog({
                         </p>
                         {!hideLabWorkflowActions && (
                           <div className="flex gap-2 mt-3 justify-center">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onOpenChange(false)}
-                            >
+                            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
                               Close
                             </Button>
                           </div>
@@ -350,7 +296,11 @@ export function LabCompletedReportDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button onClick={handleFooterDownload} disabled={!test}>
+          <Button variant="outline" onClick={handlePrint} disabled={!test || !canUseOfficialPdf}>
+            <Printer className="h-4 w-4 mr-2" />
+            Print
+          </Button>
+          <Button onClick={handleFooterDownload} disabled={!test || !canUseOfficialPdf}>
             <Download className="h-4 w-4 mr-2" />
             Download PDF
           </Button>

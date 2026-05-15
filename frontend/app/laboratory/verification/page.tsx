@@ -27,6 +27,10 @@ import {
   type ResultStatus,
 } from '@/lib/laboratory/template-utils';
 import {
+  downloadOfficialLabReportPdf,
+  resolveLabResultFileUrl,
+} from '@/lib/laboratory/completedLabReport';
+import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
   Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, Send, Download
 } from 'lucide-react';
@@ -170,20 +174,10 @@ const transformResult = (
   if (testDetails?.result_file) {
     const fileField = testDetails.result_file;
     if (typeof fileField === 'string') {
-      // If it's already a full URL, use it; otherwise construct it
-      resultFileUrl = fileField.startsWith('http')
-        ? fileField
-        : fileField.startsWith('/')
-          ? `${process.env.NEXT_PUBLIC_API_URL}${fileField}`
-          : `${process.env.NEXT_PUBLIC_API_URL}/media/${fileField}`;
+      resultFileUrl = resolveLabResultFileUrl(fileField) || undefined;
     } else if (fileField) {
-      // If it's an object, try to get URL or name
-      resultFileUrl = fileField.url || fileField.name || undefined;
-      if (resultFileUrl && !resultFileUrl.startsWith('http')) {
-        resultFileUrl = resultFileUrl.startsWith('/')
-          ? `${process.env.NEXT_PUBLIC_API_URL}${resultFileUrl}`
-          : `${process.env.NEXT_PUBLIC_API_URL}/media/${resultFileUrl}`;
-      }
+      const raw = fileField.url || fileField.name || undefined;
+      resultFileUrl = raw ? resolveLabResultFileUrl(raw) || undefined : undefined;
     }
   }
 
@@ -562,23 +556,12 @@ export default function ResultsVerificationPage() {
 
   const downloadResult = async (result: LabResult) => {
     try {
-      const blob = await apiFetch<Blob>(
-        `/laboratory/verification/${result.id}/download_report/`,
-        { responseType: 'blob' }
-      );
-      const filename = `lab_result_${result.patient.id}_${result.testCode}_${result.id}.pdf`;
-
-      // Create and download the file
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success(`Downloaded lab report for ${result.patient.name}`);
+      await downloadOfficialLabReportPdf({
+        labResultId: result.id,
+        patientId: result.patient.id,
+        testCode: result.testCode,
+        patientName: result.patient.name,
+      });
     } catch (error) {
       console.error('Error downloading PDF report:', error);
       toast.error('Failed to download PDF report');
@@ -1082,6 +1065,15 @@ export default function ResultsVerificationPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
+              {selectedResult?.status === LAB_TEST_STATUS.VERIFIED && (
+                <Button
+                  variant="outline"
+                  onClick={() => selectedResult && downloadResult(selectedResult)}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download PDF
+                </Button>
+              )}
               {isSelectedResultMutable && (
                 <>
                   <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openRejectDialog(selectedResult); }} className="text-rose-600">
