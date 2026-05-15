@@ -1084,12 +1084,12 @@ export default function PhysioPoolQueuePage() {
             </Tooltip>
           </div>
 
-          {/* Filters & Tabs */}
+          {/* Filters & Tabs — Lab Orders style */}
           <Card>
             <CardContent className="p-4">
               <div className="flex flex-col gap-4">
                 <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as PhysioOrdersTab)} className="w-full">
-                  <TabsList className="flex flex-wrap h-auto gap-1">
+                  <TabsList>
                     <TabsTrigger value="pending">Pending ({stats.pending})</TabsTrigger>
                     <TabsTrigger value="scheduled">Scheduled ({stats.scheduled})</TabsTrigger>
                     <TabsTrigger value="in_progress">In Progress ({stats.inProgress})</TabsTrigger>
@@ -1098,8 +1098,8 @@ export default function PhysioPoolQueuePage() {
                     <TabsTrigger value="all">All</TabsTrigger>
                   </TabsList>
                 </Tabs>
-                <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-                  <div className="relative flex-1 min-w-0">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+                  <div className="relative flex-1 min-w-[min(100%,16rem)]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       placeholder="Patient, order ID, Physio ID (e.g. PHY-000002)…"
@@ -1108,10 +1108,10 @@ export default function PhysioPoolQueuePage() {
                       className="pl-10"
                     />
                   </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 lg:flex-none">
+                  <div className="flex flex-wrap items-center gap-2">
                     <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
                     <Select value={dateFilter} onValueChange={setDateFilter}>
-                      <SelectTrigger className="w-full sm:w-[120px]"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Time</SelectItem>
                         <SelectItem value="today">Today</SelectItem>
@@ -2474,7 +2474,7 @@ export default function PhysioPoolQueuePage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </div>
+          </div>{/* end container */}
       </DashboardLayout>
     </TooltipProvider>
   );
