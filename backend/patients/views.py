@@ -23,7 +23,7 @@ from .serializers import (
     MedicalCertificateSerializer,
 )
 from audit.services import AuditService
-from .workflow import close_visit_workflow
+from .workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
 
 
 class PatientPagination(PageNumberPagination):
@@ -504,6 +504,29 @@ class VisitViewSet(viewsets.ModelViewSet):
         old_status = old_instance.status
 
         visit = serializer.save()
+
+        if old_status != visit.status and visit.status in ('completed', 'cancelled'):
+            terminal = 'completed' if visit.status == 'completed' else 'cancelled'
+            summary = finalize_consultation_artifacts_for_visit(
+                visit,
+                session_terminal_status=terminal,
+            )
+            if summary['sessions_updated'] or summary['queue_items_deactivated']:
+                AuditService.log_activity(
+                    user=self.request.user,
+                    action='update',
+                    object_type='visit',
+                    object_id=str(visit.id),
+                    module='medical_records',
+                    object_repr=f'Visit {visit.visit_id}',
+                    description=(
+                        f'Synced consultation queue/session rows after visit status '
+                        f'{old_status} -> {visit.status}: {summary}'
+                    ),
+                    old_values={'status': old_status},
+                    new_values={'status': visit.status, **summary},
+                    request=self.request,
+                )
 
         try:
             new_status = visit.status

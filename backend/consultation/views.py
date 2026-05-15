@@ -1,7 +1,8 @@
-"""
-Views for the Consultation app.
-"""
+from __future__ import annotations
+
 import logging
+from typing import Optional
+
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q
@@ -44,7 +45,7 @@ from .serializers import (
     PresentingComplaintSerializer,
 )
 from audit.services import AuditService
-from patients.workflow import close_visit_workflow
+from patients.workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
 
 
 class ReferralFacilityViewSet(viewsets.ModelViewSet):
@@ -151,6 +152,10 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        paused_block = self._paused_session_blocks_new_create(data)
+        if paused_block is not None:
+            return paused_block
+
         existing_session = self._find_existing_active_session(data)
         if existing_session:
             existing_session = self._sync_resumed_session_room_to_request(existing_session, data)
@@ -217,6 +222,35 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             )
         return None
 
+    def _paused_session_blocks_new_create(self, data) -> Optional[Response]:
+        """Block POST /sessions/ while paused rows exist for the same visit or patient+room."""
+        visit = data.get('visit')
+        patient = data.get('patient')
+        room = data.get('room')
+        paused_ids: list[int] = []
+        if visit:
+            paused_ids.extend(
+                ConsultationSession.objects.filter(visit=visit, status='paused').values_list('id', flat=True)
+            )
+        if patient and room:
+            qs = ConsultationSession.objects.filter(patient=patient, room=room, status='paused')
+            if visit:
+                qs = qs.exclude(visit=visit)
+            paused_ids.extend(qs.values_list('id', flat=True))
+        paused_ids = sorted(set(paused_ids))
+        if not paused_ids:
+            return None
+        return Response(
+            {
+                'detail': (
+                    'Paused consultation session(s) exist for this visit or for this patient in this room. '
+                    'Resume or end them before starting a new session.'
+                ),
+                'paused_session_ids': paused_ids[:50],
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
     def _sync_resumed_session_room_to_request(self, existing_session, data):
         """
         Resume is keyed by visit (or patient+room). The same visit can be opened from
@@ -268,12 +302,11 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         session = self.get_object()
         old_status = session.status
         old_ended_at = session.ended_at
-        visit = session.visit
-        old_visit_status = visit.status if visit else None
 
         updated = serializer.save()
 
         if old_status != updated.status and updated.status == "completed":
+            vref = updated.visit
             fields_to_update = []
             if not updated.ended_at:
                 updated.ended_at = timezone.now()
@@ -292,18 +325,19 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
                 queue_item.called_at = updated.ended_at
                 queue_item.save(update_fields=["is_active", "called_at"])
 
-            if visit and visit.status != "completed":
-                visit.status = "completed"
-                visit.save(update_fields=["status"])
+            if vref and vref.status != "completed":
+                old_vs = vref.status
+                vref.status = "completed"
+                vref.save(update_fields=["status"])
                 AuditService.log_activity(
                     user=self.request.user,
                     action="update",
                     object_type="visit",
-                    object_id=str(visit.id),
+                    object_id=str(vref.id),
                     module="consultation",
-                    object_repr=f"Visit {visit.visit_id}",
-                    description=f"Marked visit {visit.visit_id} as completed after consultation status update",
-                    old_values={"status": old_visit_status},
+                    object_repr=f"Visit {vref.visit_id}",
+                    description=f"Marked visit {vref.visit_id} as completed after consultation status update",
+                    old_values={"status": old_vs},
                     new_values={"status": "completed"},
                     request=self.request,
                 )
@@ -320,6 +354,25 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
                 new_values={"status": "completed", "ended_at": str(updated.ended_at) if updated.ended_at else None},
                 request=self.request,
             )
+
+            if vref and vref.status == "completed":
+                fin = finalize_consultation_artifacts_for_visit(vref, session_terminal_status="completed")
+                if fin["sessions_updated"] or fin["queue_items_deactivated"]:
+                    AuditService.log_activity(
+                        user=self.request.user,
+                        action="update",
+                        object_type="visit",
+                        object_id=str(vref.id),
+                        module="consultation",
+                        object_repr=f"Visit {vref.visit_id}",
+                        description=(
+                            "Synced other open consultation sessions/queue after session PATCH completed: "
+                            f"{fin}"
+                        ),
+                        old_values={"status": "completed"},
+                        new_values=fin,
+                        request=self.request,
+                    )
 
     def _find_doctor_for_session(self, data):
         """Find appropriate doctor for consultation session using multiple strategies."""
@@ -341,18 +394,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         # Only use the requesting user who performed the consultation
         # No fallback to other doctors - the actual performer is recorded
         return None
-        AuditService.log_activity(
-            user=self.request.user,
-            action='create',
-            object_type='consultation_session',
-            object_id=str(session.id),
-            module='consultation',
-            object_repr=f'Session {session.session_id}',
-            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
-            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
-            request=self.request,
-        )
-    
+
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
         """End a consultation session and log audit."""
@@ -393,6 +435,20 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
                 new_values={'status': 'completed'},
                 request=self.request,
             )
+            fin = finalize_consultation_artifacts_for_visit(visit, session_terminal_status="completed")
+            if fin["sessions_updated"] or fin["queue_items_deactivated"]:
+                AuditService.log_activity(
+                    user=self.request.user,
+                    action='update',
+                    object_type='visit',
+                    object_id=str(visit.id),
+                    module='consultation',
+                    object_repr=f'Visit {visit.visit_id}',
+                    description=f'Closed sibling open sessions/queue after primary session end: {fin}',
+                    old_values={'status': 'completed'},
+                    new_values=fin,
+                    request=self.request,
+                )
 
         AuditService.log_activity(
             user=self.request.user,
