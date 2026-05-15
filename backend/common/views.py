@@ -433,43 +433,25 @@ class SystemMetricsView(views.APIView):
 class LiveDashboardView(views.APIView):
     """Lightweight payload for the admin dashboard's 30 s auto-poll.
 
-    Returning the full ``getDashboardStats()`` aggregate every 30 s is
-    overkill — it pulls 1000 users, 1000 roles, 1000 rooms, the audit
-    log, etc. just to update an "online now" count and three uptime
-    numbers. This endpoint exposes only the data that actually changes
-    on each tick:
-
-    * ``onlineNow`` — single ``COUNT`` against ``User`` using the
-      same 15-minute window as the frontend calculation.
+    * ``onlineNow`` — active users with recent ``last_activity`` (see
+      ``accounts.presence``; login alone does not count).
     * ``systemHealth`` — process uptime, DB ping, MEDIA_ROOT check.
-    * ``serverTime`` — useful for a future "last refreshed N s ago"
-      label rendered against the server clock.
-
-    The full dashboard fetch still runs on initial load and on a
-    user-triggered Refresh so all the other KPIs stay accurate.
-    """
+    * ``serverTime`` — server clock for refresh labels.
+  """
 
     permission_classes = [IsAuthenticated]
 
-    ONLINE_WINDOW = timedelta(minutes=15)
-
     def get(self, request):
-        from accounts.models import User  # local import to avoid a circular boot dep
-
-        cutoff = timezone.now() - self.ONLINE_WINDOW
-        online_now = User.objects.filter(is_active=True).filter(
-            Q(last_activity__gte=cutoff) | Q(last_login__gte=cutoff)
-        ).count()
+        from accounts.presence import count_online_users, presence_window_seconds
 
         try:
             system_health = _collect_system_health()
         except Exception:
-            # Never let a probe failure break the live tick — the rest
-            # of the dashboard still uses the previous good payload.
             system_health = []
 
         return Response({
-            'onlineNow': online_now,
+            'onlineNow': count_online_users(),
+            'presenceWindowSeconds': presence_window_seconds(),
             'systemHealth': system_health,
             'serverTime': timezone.now().isoformat(),
         })

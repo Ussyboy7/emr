@@ -566,11 +566,13 @@ class AdminService {
    */
   async getDashboardLive(): Promise<{
     onlineNow: number;
+    presenceWindowSeconds: number;
     systemHealth: Record<string, unknown>[];
     serverTime: string;
   }> {
     return apiFetch<{
       onlineNow: number;
+      presenceWindowSeconds: number;
       systemHealth: Record<string, unknown>[];
       serverTime: string;
     }>('/common/dashboard/live/');
@@ -614,6 +616,7 @@ class AdminService {
     activeUsers: number;
     inactiveUsers: number;
     onlineNow: number;
+    presenceWindowSeconds: number;
     totalRoles: number;
     /** Roles that have at least one user assigned. */
     rolesInUse: number;
@@ -642,14 +645,30 @@ class AdminService {
     /** Per-key data source: 'live' (real measurement) or 'sample' (placeholder). */
     metricSources?: Record<string, 'live' | 'sample'>;
   }> {
-    // Load all data in parallel
-    const [usersResponse, rolesResponse, clinicsResponse, roomsResponse, auditResponse, metricsResponse] = await Promise.all([
-      this.getUsers({ page_size: 200 }),
+    // Load all data in parallel (online count from server presence, not client filters)
+    const [
+      usersResponse,
+      activeUsersResponse,
+      rolesResponse,
+      clinicsResponse,
+      roomsResponse,
+      auditResponse,
+      metricsResponse,
+      livePresence,
+    ] = await Promise.all([
+      this.getUsers({ page_size: 500 }),
+      this.getUsers({ page_size: 1, is_active: true }),
       this.getRoles({ page_size: 200 }),
       this.getClinics({ page_size: 200 }),
-      this.getRooms({ page_size: 200 }), // Use the existing getRooms method
+      this.getRooms({ page_size: 200 }),
       this.getAuditLogs({ page_size: 10 }),
-      apiFetch('/common/metrics/').catch(() => ({})), // Fetch metrics, fallback to empty object
+      apiFetch('/common/metrics/').catch(() => ({})),
+      this.getDashboardLive().catch(() => ({
+        onlineNow: 0,
+        presenceWindowSeconds: 120,
+        systemHealth: [],
+        serverTime: new Date().toISOString(),
+      })),
     ]);
 
     const users = usersResponse.results;
@@ -658,31 +677,19 @@ class AdminService {
     const rooms = roomsResponse.results;
     const auditLogs = auditResponse.results;
 
-    // Calculate stats
-    const totalUsers = users.length;
-    const activeUsers = users.filter(u => u.is_active).length;
-    const inactiveUsers = totalUsers - activeUsers;
+    const totalUsers = usersResponse.count ?? users.length;
+    const activeUsers = activeUsersResponse.count ?? users.filter(u => u.is_active).length;
+    const inactiveUsers = Math.max(0, totalUsers - activeUsers);
+    const onlineNow = livePresence.onlineNow;
+    const presenceWindowSeconds = livePresence.presenceWindowSeconds ?? 120;
 
-    /** Users with API activity or login within this window (see JWTAuthenticationWithActivity + last_login on login). */
-    const ONLINE_WINDOW_MS = 15 * 60 * 1000;
-    const nowMs = Date.now();
-    const onlineNow = users.filter((u: User) => {
-      if (!u.is_active) return false;
-      const candidates: string[] = [];
-      if (u.last_activity) candidates.push(u.last_activity);
-      if (u.last_login) candidates.push(u.last_login);
-      if (candidates.length === 0) return false;
-      const newest = Math.max(...candidates.map((t) => new Date(t).getTime()));
-      return Number.isFinite(newest) && nowMs - newest <= ONLINE_WINDOW_MS;
-    }).length;
-
-    const totalRoles = roles.length;
+    const totalRoles = rolesResponse.count ?? roles.length;
     // RoleSerializer exposes ``user_count`` (count of UserRole rows
     // pointing at that Role). A role is "in use" if at least one
     // user is assigned to it — gives the dashboard a non-trivial
     // subtext alongside the other KPI cards.
     const rolesInUse = roles.filter((r: Role) => (r.user_count ?? 0) > 0).length;
-    const totalClinics = clinics.length;
+    const totalClinics = clinicsResponse.count ?? clinics.length;
     const activeClinics = clinics.filter(c => c.is_active).length;
     // ``count`` is the full server total — robust past the 1000-row
     // page_size we request. ``rooms.length`` would silently cap.
@@ -701,21 +708,30 @@ class AdminService {
     // Users by role with proper role mapping
     const roleCounts: Record<string, number> = {};
     const roleDisplayNames: Record<string, string> = {
-      'superuser': 'System Administrator',
-      'admin': 'System Administrator',
-      'doctor': 'Medical Doctor',
-      'nurse': 'Nursing Officer',
-      'lab_tech': 'Laboratory Scientist',
-      'pharmacist': 'Pharmacist',
-      'radiologist': 'Radiologist',
-      'physiotherapist': 'Physiotherapist',
-      'records': 'Medical Records Officer',
-      'medical_records': 'Medical Records Officer',
+      superuser: 'System Administrator',
+      admin: 'System Administrator',
+      doctor: 'Medical Doctor',
+      nurse: 'Nursing Officer',
+      lab_tech: 'Laboratory Scientist',
+      pharmacist: 'Pharmacist',
+      radiologist: 'Radiologist',
+      physiotherapist: 'Physiotherapist',
+      records: 'Medical Records Officer',
+      medical_records: 'Medical Records Officer',
+      optometrist: 'Optometrist',
+      ophthalmologist: 'Ophthalmologist',
+    };
+    const formatRoleLabel = (role: string) => {
+      if (roleDisplayNames[role]) return roleDisplayNames[role];
+      if (role === 'No Role') return role;
+      return role
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
     };
 
     users.forEach(user => {
       const role = user.system_role || 'No Role';
-      const displayRole = roleDisplayNames[role] || role;
+      const displayRole = formatRoleLabel(role);
       roleCounts[displayRole] = (roleCounts[displayRole] || 0) + 1;
     });
 
@@ -790,6 +806,7 @@ class AdminService {
       activeUsers,
       inactiveUsers,
       onlineNow,
+      presenceWindowSeconds,
       totalRoles,
       rolesInUse,
       totalClinics,

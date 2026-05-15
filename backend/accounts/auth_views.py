@@ -38,8 +38,10 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 if user is not None:
                     from django.utils import timezone
 
-                    user.last_login = timezone.now()
-                    user.save(update_fields=["last_login"])
+                    now = timezone.now()
+                    user.last_login = now
+                    user.last_activity = now
+                    user.save(update_fields=["last_login", "last_activity"])
 
                     AuditService.log_activity(
                         user=user,

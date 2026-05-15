@@ -165,6 +165,8 @@ class PhysioService {
     visit?: number;
     consultation_session?: number;
     referral_source?: string;
+    ordered_at_after?: string;
+    ordered_at_before?: string;
     search?: string;
     page?: number;
     page_size?: number;

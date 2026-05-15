@@ -1,155 +1,162 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { DashboardLayout } from '@/components/shared/DashboardLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, FileText, Search, Plus, Users, Activity, Clock, CheckCircle2, UserCheck, ArrowRight, Link as LinkIcon, AlertCircle } from 'lucide-react';
-import Link from 'next/link';
-import { patientService, visitService, type Visit } from '@/lib/services';
-import { isAuthenticationError } from '@/lib/auth-errors';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Loader2,
+  FileText,
+  Search,
+  Plus,
+  Users,
+  Activity,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  Calendar,
+} from "lucide-react";
+import Link from "next/link";
+import { patientService, visitService, type Visit } from "@/lib/services";
+import { isAuthenticationError } from "@/lib/auth-errors";
+import { useAuthRedirect } from "@/hooks/use-auth-redirect";
+import { useServerToday } from "@/hooks/use-server-today";
 import {
   getVisitServiceClinicsDisplay,
   joinDisplayParts,
-} from '@/lib/utils/clinic-utils';
-import { getServerToday } from '@/lib/utils/serverTime';
-import { formatLocalYmd } from '@/lib/laboratory/constants';
+} from "@/lib/utils/clinic-utils";
+import { toast } from "sonner";
 
 interface PatientData {
   id: number;
   full_name: string;
   patient_id: string;
-  status?: string;
   age?: number;
   age_display?: string;
   gender?: string;
-  date_of_birth?: string;
+}
+
+interface VisitDayStats {
+  visitsToday: number;
+  inProgress: number;
+  scheduled: number;
+  completed: number;
 }
 
 export default function MedicalRecordsPage() {
+  const router = useRouter();
+  const serverToday = useServerToday();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
+  const [authError, setAuthError] = useState<unknown>(null);
   useAuthRedirect(authError);
-  
+
   const [totalPatients, setTotalPatients] = useState(0);
-  const [activeVisitsToday, setActiveVisitsToday] = useState(0);
-  const [scheduledToday, setScheduledToday] = useState(0);
-  const [completedToday, setCompletedToday] = useState(0);
+  const [visitStats, setVisitStats] = useState<VisitDayStats>({
+    visitsToday: 0,
+    inProgress: 0,
+    scheduled: 0,
+    completed: 0,
+  });
   const [activeVisits, setActiveVisits] = useState<Visit[]>([]);
+  const [scheduledVisits, setScheduledVisits] = useState<Visit[]>([]);
   const [recentPatients, setRecentPatients] = useState<PatientData[]>([]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Get today's date from the server so stats align with the server
-        // calendar (falls back to the client's local date on failure).
-        let today: string;
-        try {
-          today = await getServerToday();
-        } catch {
-          today = formatLocalYmd(new Date());
-        }
+  const loadDashboard = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-        // Fetch total patients count
-        try {
-          const patientsResult = await patientService.getPatients({ page_size: 1 });
-          setTotalPatients(patientsResult.count || 0);
-        } catch (err) {
-          console.error('Error fetching total patients:', err);
-          setTotalPatients(0);
-        }
+      const visitBase = {
+        date: serverToday,
+        page: 1,
+        page_size: 1,
+      };
 
-        // Fetch visits for today
-        try {
-          const visitsResult = await visitService.getVisits({ 
-            date: today,
-            page_size: 100 
-          });
+      const [
+        patientCounts,
+        visitsTodayRes,
+        scheduledRes,
+        inProgressRes,
+        completedRes,
+        inProgressListRes,
+        scheduledListRes,
+        recentPatientsRes,
+      ] = await Promise.all([
+        patientService.getPatientCounts().catch(() => ({ total: 0 })),
+        visitService.getVisits(visitBase),
+        visitService.getVisits({ ...visitBase, status: "scheduled" }),
+        visitService.getVisits({ ...visitBase, status: "in_progress" }),
+        visitService.getVisits({ ...visitBase, status: "completed" }),
+        visitService.getVisits({ date: serverToday, status: "in_progress", page: 1, page_size: 5 }),
+        visitService.getVisits({ date: serverToday, status: "scheduled", page: 1, page_size: 4 }),
+        patientService.getPatients({ page: 1, page_size: 5, ordering: "-created_at" }),
+      ]);
 
-          const visits = visitsResult.results || [];
-
-          // Count visits by status
-          const active = visits.filter(v => v.status === 'in_progress' || v.status === 'waiting').length;
-          const scheduled = visits.filter(v => v.status === 'scheduled').length;
-          const completed = visits.filter(v => v.status === 'completed').length;
-
-          setActiveVisitsToday(active);
-          setScheduledToday(scheduled);
-          setCompletedToday(completed);
-
-          // Get active visits (in_progress and waiting)
-          const activeVisitsList = visits
-            .filter(v => v.status === 'in_progress' || v.status === 'waiting')
-            .slice(0, 3);
-
-          setActiveVisits(activeVisitsList);
-        } catch (err) {
-          console.error('Error fetching visits:', err);
-          if (isAuthenticationError(err)) {
-            setAuthError(err);
-          } else {
-            setError('Failed to load visit data');
-          }
-          setActiveVisitsToday(0);
-          setScheduledToday(0);
-          setCompletedToday(0);
-        }
-
-        // Fetch recent patients
-        try {
-          const patientsResult = await patientService.getPatients({ 
-            page_size: 10
-          });
-          
-          const patients = patientsResult.results || [];
-          const recentPatientsData: PatientData[] = patients.slice(0, 5).map(p => ({
-            id: p.id,
-            full_name: p.full_name ?? '',
-            patient_id: p.patient_id,
-            status: 'Active',
-            age: p.age,
-            age_display: p.age_display,
-            gender: p.gender,
-            date_of_birth: p.date_of_birth,
-          }));
-          setRecentPatients(recentPatientsData);
-        } catch (err) {
-          console.error('Error fetching recent patients:', err);
-          setRecentPatients([]);
-        }
-
-      } catch (err) {
-        console.error('Error in fetchData:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load medical records data');
-        }
-      } finally {
-        setLoading(false);
+      setTotalPatients(patientCounts.total ?? 0);
+      setVisitStats({
+        visitsToday: visitsTodayRes.count ?? 0,
+        scheduled: scheduledRes.count ?? 0,
+        inProgress: inProgressRes.count ?? 0,
+        completed: completedRes.count ?? 0,
+      });
+      setActiveVisits(inProgressListRes.results ?? []);
+      setScheduledVisits(scheduledListRes.results ?? []);
+      setRecentPatients(
+        (recentPatientsRes.results ?? []).map((p) => ({
+          id: p.id,
+          full_name: p.full_name ?? "",
+          patient_id: p.patient_id,
+          age: p.age,
+          age_display: p.age_display,
+          gender: p.gender,
+        })),
+      );
+    } catch (err) {
+      console.error("Error loading medical records dashboard:", err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        setError("Failed to load medical records data");
+        toast.error("Failed to load medical records dashboard. Please try again.");
       }
-    };
+    } finally {
+      setLoading(false);
+    }
+  }, [serverToday]);
 
-    fetchData();
-  }, []);
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  const hasActiveWork = visitStats.inProgress > 0 || visitStats.scheduled > 0;
+
+  const pendingVisits = useMemo(() => {
+    const seen = new Set<number>();
+    const merged: Visit[] = [];
+    for (const v of [...activeVisits, ...scheduledVisits]) {
+      if (seen.has(v.id)) continue;
+      seen.add(v.id);
+      merged.push(v);
+    }
+    return merged.slice(0, 5);
+  }, [activeVisits, scheduledVisits]);
 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Error Alert */}
         {error && (
           <Card className="border-red-500/50 bg-red-500/10">
             <CardContent className="p-4 flex items-center gap-3">
               <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
               <div>
                 <p className="font-medium text-red-700 dark:text-red-400">{error}</p>
-                <p className="text-sm text-red-600 dark:text-red-300 mt-1">Please refresh the page or contact support if the issue persists.</p>
+                <p className="text-sm text-red-600 dark:text-red-300 mt-1">
+                  Try reloading the page or contact support if the issue persists.
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -165,13 +172,15 @@ export default function MedicalRecordsPage() {
                 </div>
                 <div className="min-w-0">
                   <h1 className="text-xl sm:text-2xl font-bold">Medical Records Department</h1>
-                  <p className="text-sm sm:text-base text-blue-100 dark:text-blue-200">Digital medical records management and patient documentation</p>
+                  <p className="text-sm sm:text-base text-blue-100 dark:text-blue-200">
+                    Digital medical records management and patient documentation
+                  </p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="bg-white text-blue-600 hover:bg-blue-50 dark:bg-white dark:text-blue-600 dark:hover:bg-blue-50 shadow-md"
-                  onClick={() => window.location.href = '/medical-records/patients/new'}
+                  onClick={() => router.push("/medical-records/patients/new")}
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Register Patient
@@ -179,7 +188,7 @@ export default function MedicalRecordsPage() {
                 <Button
                   variant="outline"
                   className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => window.location.href = '/medical-records/patients'}
+                  onClick={() => router.push("/medical-records/patients")}
                 >
                   <Search className="h-4 w-4 mr-2" />
                   Find Patient
@@ -193,102 +202,82 @@ export default function MedicalRecordsPage() {
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Clock className="h-5 w-5 text-blue-500 dark:text-blue-400" />
-            Today's Overview
+            Today&apos;s Overview
+            {!loading && (
+              <span className="text-xs font-normal text-muted-foreground">({serverToday})</span>
+            )}
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <Card key={i}>
                   <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Loading...</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                          <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
-                        </div>
-                      </div>
+                    <p className="text-sm text-muted-foreground">Loading...</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
                     </div>
                   </CardContent>
                 </Card>
               ))
             ) : (
               <>
-                <Card className={`border-l-4 ${totalPatients > 0 ? 'border-l-blue-500' : 'border-l-green-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Total Patients</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Users className={`h-5 w-5 ${totalPatients > 0 ? 'text-blue-500 dark:text-blue-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${totalPatients > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400'}`}>{totalPatients}</p>
-                        </div>
-                        {totalPatients === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No patients registered</p>
-                        ) : (
-                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">Registered patients</p>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className={`border-l-4 ${activeVisitsToday === 0 ? 'border-l-green-500' : 'border-l-blue-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Active Visits</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Activity className={`h-5 w-5 ${activeVisitsToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${activeVisitsToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{activeVisitsToday}</p>
-                        </div>
-                        {activeVisitsToday === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No active visits</p>
-                        ) : (
-                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">Currently in consultation</p>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className={`border-l-4 ${scheduledToday === 0 ? 'border-l-green-500' : 'border-l-amber-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Scheduled Today</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Clock className={`h-5 w-5 ${scheduledToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${scheduledToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{scheduledToday}</p>
-                        </div>
-                        {scheduledToday === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No scheduled visits</p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className={`border-l-4 ${completedToday === 0 ? 'border-l-green-500' : 'border-l-emerald-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Completed Today</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <CheckCircle2 className={`h-5 w-5 ${completedToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${completedToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{completedToday}</p>
-                        </div>
-                        {completedToday === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No completed visits</p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <OverviewCard
+                  label="Total Patients"
+                  value={totalPatients}
+                  icon={Users}
+                  tone="registry"
+                  emptyHint="No patients registered"
+                  activeHint="All registered patients"
+                />
+                <OverviewCard
+                  label="Visits Today"
+                  value={visitStats.visitsToday}
+                  icon={Calendar}
+                  tone="blue"
+                  emptyHint="No visits today"
+                  activeHint="Visits dated today"
+                />
+                <OverviewCard
+                  label="In Progress"
+                  value={visitStats.inProgress}
+                  icon={Activity}
+                  tone="blue"
+                  emptyHint="None in progress"
+                  activeHint="Active visits today"
+                />
+                <OverviewCard
+                  label="Completed Today"
+                  value={visitStats.completed}
+                  icon={CheckCircle2}
+                  tone="emerald"
+                  emptyHint="None completed yet"
+                  activeHint="Visits completed today"
+                />
               </>
             )}
           </div>
         </div>
+
+        {/* Secondary row: scheduled (common workflow) */}
+        {!loading && visitStats.scheduled > 0 && (
+          <Card className="border-l-4 border-l-amber-500">
+            <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Clock className="h-5 w-5 text-amber-500" />
+                <div>
+                  <p className="font-medium text-sm">
+                    {visitStats.scheduled} scheduled visit{visitStats.scheduled !== 1 ? "s" : ""} today
+                  </p>
+                  <p className="text-xs text-muted-foreground">Awaiting check-in or start</p>
+                </div>
+              </div>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/medical-records/visits">View visits</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Quick Actions */}
         <div>
@@ -297,25 +286,38 @@ export default function MedicalRecordsPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => window.location.href = '/medical-records/patients/new'} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white border-l-4 border-l-white/20">
-              <div className="flex items-center gap-2">
-                <UserCheck className="h-5 w-5 sm:h-6 sm:w-6" />
-              </div>
+            <Button
+              onClick={() => router.push("/medical-records/patients/new")}
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white border-l-4 border-l-white/20"
+            >
+              <Plus className="h-5 w-5 sm:h-6 sm:w-6" />
               <span className="text-xs sm:text-sm font-medium">Register Patient</span>
               <span className="text-[10px] sm:text-xs opacity-90">Create new patient records</span>
             </Button>
-            <Button onClick={() => window.location.href = '/medical-records/patients'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
+            <Button
+              onClick={() => router.push("/medical-records/patients")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500"
+            >
               <Search className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
               <span className="text-xs sm:text-sm font-medium">Patient Search</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Find patients by name/ID</span>
             </Button>
-            <Button onClick={() => window.location.href = '/medical-records/visits/new'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-green-500">
+            <Button
+              onClick={() => router.push("/medical-records/visits/new")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-green-500"
+            >
               <Plus className="h-5 w-5 sm:h-6 sm:w-6 text-green-500 dark:text-green-400" />
               <span className="text-xs sm:text-sm font-medium">Start New Visit</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Create patient consultations</span>
             </Button>
-            <Button onClick={() => window.location.href = '/medical-records/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
-              <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-purple-500 dark:text-purple-400" />
+            <Button
+              onClick={() => router.push("/medical-records/reports")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500"
+            >
+              <FileText className="h-5 w-5 sm:h-6 sm:w-6 text-purple-500 dark:text-purple-400" />
               <span className="text-xs sm:text-sm font-medium">View Reports</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Medical certificates & reports</span>
             </Button>
@@ -323,16 +325,25 @@ export default function MedicalRecordsPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Active Visits */}
+          {/* Active / scheduled visits */}
           <div className="lg:col-span-2">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
-                  Active Visits Today
+                  Visits Needing Attention
                 </CardTitle>
-                <Badge variant="default" className={activeVisitsToday > 0 ? "bg-blue-500/10 text-blue-700 border-blue-500/20" : "bg-green-500/10 text-green-700 border-green-500/20"}>
-                  {activeVisitsToday > 0 ? `${activeVisitsToday} Active` : "All Clear"}
+                <Badge
+                  variant="default"
+                  className={
+                    hasActiveWork
+                      ? "bg-blue-500/10 text-blue-700 border-blue-500/20"
+                      : "bg-green-500/10 text-green-700 border-green-500/20"
+                  }
+                >
+                  {hasActiveWork
+                    ? `${visitStats.inProgress + visitStats.scheduled} open`
+                    : "All Clear"}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -340,47 +351,45 @@ export default function MedicalRecordsPage() {
                   <div className="flex items-center justify-center p-8">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                   </div>
-                ) : activeVisits.length > 0 ? (
+                ) : pendingVisits.length > 0 ? (
                   <div className="space-y-2">
-                    {activeVisits.map((visit) => (
-                      <div key={visit.id} className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm">{visit.patient_name ?? ''}</p>
-                          {(() => {
-                            const sub = joinDisplayParts([
-                              visit.visit_type && visit.visit_type.charAt(0).toUpperCase() + visit.visit_type.slice(1).toLowerCase(),
-                              getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
-                            ]);
-                            return sub ? (
-                              <p className="text-xs text-muted-foreground">{sub}</p>
-                            ) : null;
-                          })()}
-                        </div>
-                        <Badge variant="outline" className={
-                          visit.status === 'in_progress' ? 'border-blue-500 text-blue-600' : 'border-amber-500 text-amber-600'
-                        }>
-                          {visit.status === 'in_progress' ? 'In Progress' : 'Waiting'}
-                        </Badge>
-                      </div>
+                    {visitStats.scheduled > 0 && (
+                      <TaskRow
+                        title="Scheduled visits"
+                        description={`${visitStats.scheduled} visit${visitStats.scheduled !== 1 ? "s" : ""} booked for today`}
+                        href="/medical-records/visits"
+                      />
+                    )}
+                    {visitStats.inProgress > 0 && (
+                      <TaskRow
+                        title="In progress"
+                        description={`${visitStats.inProgress} visit${visitStats.inProgress !== 1 ? "s" : ""} underway`}
+                        href="/medical-records/visits"
+                      />
+                    )}
+                    {pendingVisits.map((visit) => (
+                      <VisitRow key={visit.id} visit={visit} />
                     ))}
                   </div>
                 ) : (
                   <div className="text-center py-8">
                     <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
                     <p className="text-muted-foreground text-sm mb-2">No active visits</p>
-                    <p className="text-xs text-muted-foreground">All patients have been processed or are in consultation.</p>
+                    <p className="text-xs text-muted-foreground">
+                      All patients have been processed or are in consultation.
+                    </p>
                   </div>
                 )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Recent Patients */}
+          {/* Recent registrations */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Users className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
-                Recent Patients
+                Recently Registered
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -391,16 +400,19 @@ export default function MedicalRecordsPage() {
               ) : recentPatients.length > 0 ? (
                 <div className="space-y-3">
                   {recentPatients.map((patient) => (
-                    <Link key={patient.id} href={`/medical-records/patients/${patient.id}`} className="block">
-                      <div className="p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                        <p className="font-medium text-sm">{patient.full_name ?? ''}</p>
-                        <p className="text-xs text-muted-foreground">
-                          ID: {patient.patient_id}
-                        </p>
+                    <Link
+                      key={patient.id}
+                      href={`/medical-records/patients/${patient.id}`}
+                      className="block"
+                    >
+                      <div className="p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
+                        <p className="font-medium text-sm">{patient.full_name}</p>
+                        <p className="text-xs text-muted-foreground">ID: {patient.patient_id}</p>
                         {(patient.age_display || patient.age != null || patient.gender) && (
                           <p className="text-xs text-muted-foreground mt-1">
                             {joinDisplayParts([
-                              patient.age_display || (patient.age != null ? `${patient.age} years` : ''),
+                              patient.age_display ||
+                                (patient.age != null ? `${patient.age} years` : ""),
                               patient.gender,
                             ])}
                           </p>
@@ -408,11 +420,19 @@ export default function MedicalRecordsPage() {
                       </div>
                     </Link>
                   ))}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-blue-600"
+                    onClick={() => router.push("/medical-records/patients")}
+                  >
+                    View all patients
+                  </Button>
                 </div>
               ) : (
                 <div className="text-center py-8">
                   <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-                  <p className="text-muted-foreground text-sm mb-2">No recent patients</p>
+                  <p className="text-muted-foreground text-sm mb-2">No patients yet</p>
                   <p className="text-xs text-muted-foreground">Start by registering a new patient</p>
                 </div>
               )}
@@ -421,5 +441,134 @@ export default function MedicalRecordsPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+type OverviewTone = "registry" | "blue" | "amber" | "emerald";
+
+function OverviewCard({
+  label,
+  value,
+  icon: Icon,
+  tone,
+  emptyHint,
+  activeHint,
+}: {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: OverviewTone;
+  emptyHint: string;
+  activeHint: string;
+}) {
+  const styles: Record<OverviewTone, { border: string; icon: string; text: string }> = {
+    registry: {
+      border: "border-l-blue-500",
+      icon: "text-blue-500 dark:text-blue-400",
+      text: "text-blue-600 dark:text-blue-400",
+    },
+    blue: {
+      border: "border-l-blue-500",
+      icon: "text-blue-500 dark:text-blue-400",
+      text: "text-blue-600 dark:text-blue-400",
+    },
+    amber: {
+      border: "border-l-amber-500",
+      icon: "text-amber-500 dark:text-amber-400",
+      text: "text-amber-600 dark:text-amber-400",
+    },
+    emerald: {
+      border: "border-l-emerald-500",
+      icon: "text-emerald-500 dark:text-emerald-400",
+      text: "text-emerald-600 dark:text-emerald-400",
+    },
+  };
+
+  const isRegistry = tone === "registry";
+  const active = isRegistry ? value > 0 : value > 0;
+  const s = styles[tone];
+
+  return (
+    <Card className={`border-l-4 ${active || isRegistry ? s.border : "border-l-green-500"}`}>
+      <CardContent className="p-4">
+        <p className="text-sm text-muted-foreground">{label}</p>
+        <div className="flex items-center gap-2 mt-1">
+          <Icon
+            className={`h-5 w-5 ${active || isRegistry ? s.icon : "text-green-500 dark:text-green-400"}`}
+          />
+          <p
+            className={`text-2xl sm:text-3xl font-bold ${
+              active || isRegistry ? s.text : "text-green-600 dark:text-green-400"
+            }`}
+          >
+            {value}
+          </p>
+        </div>
+        <p
+          className={`text-xs mt-1 ${
+            active || isRegistry ? "text-muted-foreground" : "text-green-600 dark:text-green-400"
+          }`}
+        >
+          {active || isRegistry ? activeHint : emptyHint}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TaskRow({
+  title,
+  description,
+  href,
+}: {
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <div className="flex items-center justify-between p-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20">
+      <div className="min-w-0">
+        <p className="font-medium text-sm text-blue-900 dark:text-blue-100">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Button asChild size="sm" variant="outline" className="shrink-0 ml-2">
+        <Link href={href}>View</Link>
+      </Button>
+    </div>
+  );
+}
+
+function VisitRow({ visit }: { visit: Visit }) {
+  const sub = joinDisplayParts([
+    visit.visit_type &&
+      visit.visit_type.charAt(0).toUpperCase() + visit.visit_type.slice(1).replace(/_/g, " "),
+    getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
+  ]);
+
+  return (
+    <div className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-sm truncate">{visit.patient_name ?? "Patient"}</p>
+        {sub ? <p className="text-xs text-muted-foreground truncate">{sub}</p> : null}
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Badge
+          variant="outline"
+          className={
+            visit.status === "in_progress"
+              ? "border-blue-500 text-blue-600"
+              : "border-amber-500 text-amber-600"
+          }
+        >
+          {visit.status === "in_progress" ? "In Progress" : "Scheduled"}
+        </Badge>
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/medical-records/visits">
+            Open
+            <ArrowRight className="h-4 w-4 ml-1" />
+          </Link>
+        </Button>
+      </div>
+    </div>
   );
 }

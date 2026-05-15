@@ -78,14 +78,11 @@ export default function AdminDashboardPage() {
     responseTimeSample: undefined as number | undefined,
     backupStatus: { status: 'unknown' } as BackupStatus,
   });
+  const [presenceWindowSeconds, setPresenceWindowSeconds] = useState(120);
   const [metricSources, setMetricSources] = useState<Record<string, 'live' | 'sample'>>({});
 
-  // Auto-poll cadence for "live" feel on Online Now / system health.
-  // 30s is cheap (one fan-out hit on /api/v1/users/?page_size=1000 etc.)
-  // and matches the 5-min activity bump granularity well enough that
-  // users see a sign-in tick over within a minute. We skip the tick
-  // entirely when the tab is in the background so we don't burn cycles
-  // for a dashboard nobody is watching.
+  // Auto-poll hits the slim /common/dashboard/live/ endpoint every 30s.
+  // Backend bumps last_activity at most every 30s per user on API calls.
   const POLL_INTERVAL_MS = 30_000;
   const isMountedRef = useRef(true);
   const inFlightRef = useRef(false);
@@ -186,6 +183,9 @@ export default function AdminDashboardPage() {
       const live = await adminService.getDashboardLive();
       if (!isMountedRef.current) return;
       setSystemStats(prev => ({ ...prev, onlineNow: live.onlineNow }));
+      if (live.presenceWindowSeconds) {
+        setPresenceWindowSeconds(live.presenceWindowSeconds);
+      }
       const iconMap: Record<string, any> = {
         'Server': Server,
         'Database': Database,
@@ -226,6 +226,9 @@ export default function AdminDashboardPage() {
         availableRooms: stats.availableRooms,
         occupiedRooms: stats.occupiedRooms,
       });
+      if (stats.presenceWindowSeconds) {
+        setPresenceWindowSeconds(stats.presenceWindowSeconds);
+      }
       
       setPerformanceMetrics({
         responseTimeMs: stats.responseTimeMs,
@@ -334,9 +337,10 @@ export default function AdminDashboardPage() {
   };
 
   const totalUsers = usersByRole.reduce((sum, r) => sum + r.count, 0);
-  const displayedOnlineNow = currentUser?.active
-    ? Math.max(systemStats.onlineNow, 1)
-    : systemStats.onlineNow;
+  const presenceWindowLabel =
+    presenceWindowSeconds < 60
+      ? `last ${presenceWindowSeconds}s`
+      : `last ${Math.round(presenceWindowSeconds / 60)} min`;
   const backupStatus = performanceMetrics.backupStatus;
   // The backend returns status="unknown" + message="No backup files found"
   // when it successfully checked all backup dirs and they were empty.
@@ -417,8 +421,8 @@ export default function AdminDashboardPage() {
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                 </span>
                 <span className="text-sm text-slate-300">
-                  {displayedOnlineNow} online now
-                  <span className="text-slate-500"> (API activity or login in last 15 min)</span>
+                  {systemStats.onlineNow} online now
+                  <span className="text-slate-500"> (recent API activity · {presenceWindowLabel})</span>
                 </span>
               </div>
               <div className="hidden h-4 w-px bg-slate-600 sm:block" />
@@ -586,12 +590,12 @@ export default function AdminDashboardPage() {
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                     </span>
                   </div>
-                  <p className="text-2xl font-bold text-green-500">{displayedOnlineNow}</p>
+                  <p className="text-2xl font-bold text-green-500">{systemStats.onlineNow}</p>
                 </div>
                 <Activity className="h-8 w-8 text-green-500/50" />
               </div>
               <div className="mt-2 text-[11px] text-muted-foreground">
-                Last 15 min · live
+                {presenceWindowLabel} · live
               </div>
             </CardContent>
           </Card>
@@ -762,8 +766,8 @@ export default function AdminDashboardPage() {
                       Backups, staff licenses expiring soon, and other items that need an admin&rsquo;s attention.
                     </p>
                   </div>
-                  <Link href="/admin/audit">
-                    <Button variant="ghost" size="sm">View All <ChevronRight className="h-4 w-4 ml-1" /></Button>
+                  <Link href="/admin/settings">
+                    <Button variant="ghost" size="sm">Settings <ChevronRight className="h-4 w-4 ml-1" /></Button>
                   </Link>
                 </div>
               </CardHeader>
@@ -789,20 +793,24 @@ export default function AdminDashboardPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-muted/20">
+                    <Link
+                      href="/admin/settings"
+                      className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors"
+                    >
                       <Activity className={`h-5 w-5 flex-shrink-0 ${getStatusColor(backupStatus.status || "unknown")}`} />
                       <div className="flex-1">
                         <p className="text-sm font-medium text-foreground">Backup status</p>
                         <p className="text-xs text-muted-foreground">{backupDescription}</p>
                       </div>
                       <Badge className={`text-[10px] shrink-0 ${backupBadgeVariant}`}>{backupLabel}</Badge>
-                    </div>
+                    </Link>
 
                     {expiringLicenses.length > 0 ? (
                       expiringLicenses.slice(0, 3).map((lic, idx) => (
-                        <div
+                        <Link
                           key={`${lic.name}-${lic.expires}-${idx}`}
-                          className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10"
+                          href="/admin/users"
+                          className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10 hover:bg-amber-500/10 transition-colors"
                         >
                           <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
                           <div className="flex-1 min-w-0">
@@ -812,7 +820,7 @@ export default function AdminDashboardPage() {
                             </p>
                           </div>
                           <span className="text-xs text-amber-600 dark:text-amber-400 whitespace-nowrap">Warning</span>
-                        </div>
+                        </Link>
                       ))
                     ) : (
                       <div className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-muted/20">

@@ -174,6 +174,7 @@ class PatientService {
     location?: string;
     principal_staff?: number;
     search?: string;
+    ordering?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: Patient[]; count: number; next?: string; previous?: string }> {

@@ -1,127 +1,93 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { DashboardLayout } from '@/components/shared/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import {
-  Heart, Thermometer, Syringe, ClipboardList, Users,
-  Clock, CheckCircle2, Activity, ArrowRight, DoorOpen, FileCheck,
-  AlertTriangle, Zap, UserCheck, Pill, Stethoscope,
-  Loader2, TrendingUp, FileText, BarChart3
-} from 'lucide-react';
-import { nursingService } from '@/lib/services';
+  Heart,
+  Thermometer,
+  ClipboardList,
+  Users,
+  Clock,
+  CheckCircle2,
+  Activity,
+  ArrowRight,
+  AlertTriangle,
+  UserCheck,
+  Loader2,
+  BarChart3,
+  DoorOpen,
+} from "lucide-react";
+import { useAuthRedirect } from "@/hooks/use-auth-redirect";
+import { isAuthenticationError } from "@/lib/auth-errors";
+import { useServerToday } from "@/hooks/use-server-today";
+import {
+  nursingService,
+  type NursingDashboardData,
+  type NursingPendingTask,
+  type NursingPoolDashboardMetrics,
+} from "@/lib/services/nursing-service";
 
-// Default empty state
-const defaultStats = {
-  activePatients: 0,
+const defaultMetrics: NursingPoolDashboardMetrics = {
+  totalInPool: 0,
   pendingVitals: 0,
-  medicationsDue: 0,
-  assessmentsToday: 0,
-  pendingTasks: 0
+  readyForConsultation: 0,
+  sentToRoom: 0,
+};
+
+const defaultDashboard: NursingDashboardData = {
+  metrics: defaultMetrics,
+  roomQueueCount: 0,
+  poolQueueCount: 0,
+  pendingTasks: [],
+  recentActivities: [],
+  criticalAlerts: [],
 };
 
 export default function NursingDashboardPage() {
   const router = useRouter();
+  const serverToday = useServerToday();
+  const [authError, setAuthError] = useState<unknown>(null);
+  useAuthRedirect(authError);
+
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState(defaultStats);
-  const [criticalAlerts, setCriticalAlerts] = useState<any[]>([]);
-  const [recentActivities, setRecentActivities] = useState<any[]>([]);
-  const [poolQueueCount, setPoolQueueCount] = useState(0);
-  const [roomQueueCount, setRoomQueueCount] = useState(0);
+  const [dashboard, setDashboard] = useState<NursingDashboardData>(defaultDashboard);
 
-  // Load nursing dashboard data
-  useEffect(() => {
-    const loadDashboardData = async () => {
-      try {
-        setLoading(true);
-
-        // Load data from multiple API endpoints in parallel
-        const [
-          statsResponse,
-          alertsResponse,
-          activitiesResponse,
-          poolQueueResponse,
-          roomQueueResponse
-        ] = await Promise.allSettled([
-          nursingService.getStats(),
-          nursingService.getCriticalAlerts(),
-          nursingService.getRecentActivities({ limit: 5 }),
-          nursingService.getPoolQueueCount(),
-          nursingService.getRoomQueueCount()
-        ]);
-
-        // Process stats
-        if (statsResponse.status === 'fulfilled') {
-          setStats(statsResponse.value);
-        } else {
-          console.error('Failed to load nursing stats:', statsResponse.reason);
-          // Keep default stats on error
-        }
-
-        // Process critical alerts
-        if (alertsResponse.status === 'fulfilled') {
-          setCriticalAlerts(alertsResponse.value?.results || []);
-        } else {
-          console.error('Failed to load critical alerts:', alertsResponse.reason);
-          setCriticalAlerts([]);
-        }
-
-        // Process recent activities
-        if (activitiesResponse.status === 'fulfilled') {
-          setRecentActivities(activitiesResponse.value?.results || []);
-        } else {
-          console.error('Failed to load recent activities:', activitiesResponse.reason);
-          setRecentActivities([]);
-        }
-
-        // Process queue counts
-        if (poolQueueResponse.status === 'fulfilled') {
-          setPoolQueueCount(poolQueueResponse.value?.count || 0);
-        } else {
-          console.error('Failed to load pool queue count:', poolQueueResponse.reason);
-          setPoolQueueCount(0);
-        }
-
-        if (roomQueueResponse.status === 'fulfilled') {
-          setRoomQueueCount(roomQueueResponse.value?.count || 0);
-        } else {
-          console.error('Failed to load room queue count:', roomQueueResponse.reason);
-          setRoomQueueCount(0);
-        }
-
-      } catch (error) {
-        console.error('Error loading nursing dashboard data:', error);
-        toast.error('Failed to load dashboard data');
-      } finally {
-        setLoading(false);
+  const loadDashboard = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await nursingService.getDashboardData(serverToday);
+      setDashboard(data);
+    } catch (error) {
+      console.error("Error loading nursing dashboard:", error);
+      if (isAuthenticationError(error)) {
+        setAuthError(error);
+      } else {
+        toast.error("Failed to load nursing dashboard. Please try again.");
       }
-    };
+    } finally {
+      setLoading(false);
+    }
+  }, [serverToday]);
 
-    loadDashboardData();
-  }, []);
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
-  // Calculate trend data based on real data
-  const trends = useMemo(() => {
-    // In a real implementation, this would compare current data with historical data
-    // For now, we'll calculate simple trends based on the current values
-    const calculateTrend = (currentValue: number, baseline: number = 10) => {
-      if (currentValue === 0) return { value: 0, isPositive: true };
-      const change = Math.round(((currentValue - baseline) / Math.max(baseline, 1)) * 100);
-      return { value: Math.abs(change), isPositive: change >= 0 };
-    };
+  const { metrics, pendingTasks, recentActivities, criticalAlerts, poolQueueCount, roomQueueCount } =
+    dashboard;
 
-    return {
-      activePatients: calculateTrend(stats.activePatients, 8),
-      pendingVitals: calculateTrend(stats.pendingVitals, 12), // Lower is better for pending items
-      medicationsDue: calculateTrend(stats.medicationsDue, 10),
-      assessmentsToday: calculateTrend(stats.assessmentsToday, 4)
-    };
-  }, [stats]);
+  const activeWorkCount = useMemo(
+    () => metrics.pendingVitals + metrics.readyForConsultation,
+    [metrics.pendingVitals, metrics.readyForConsultation],
+  );
+
+  const hasPendingTasks = activeWorkCount > 0 || pendingTasks.length > 0;
 
   return (
     <DashboardLayout>
@@ -136,13 +102,15 @@ export default function NursingDashboardPage() {
                 </div>
                 <div className="min-w-0">
                   <h1 className="text-xl sm:text-2xl font-bold">Nursing Department</h1>
-                  <p className="text-sm sm:text-base text-rose-100">Digital nursing documentation and patient care management</p>
+                  <p className="text-sm sm:text-base text-rose-100">
+                    Digital nursing documentation and patient care management
+                  </p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="bg-white text-rose-600 hover:bg-rose-50 shadow-md"
-                  onClick={() => router.push('/nursing/patient-vitals')}
+                  onClick={() => router.push("/nursing/patient-vitals")}
                 >
                   <Activity className="h-4 w-4 mr-2" />
                   Record Vitals
@@ -150,7 +118,7 @@ export default function NursingDashboardPage() {
                 <Button
                   variant="outline"
                   className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => router.push('/nursing/analytics')}
+                  onClick={() => router.push("/nursing/analytics")}
                 >
                   <BarChart3 className="h-4 w-4 mr-2" />
                   Analytics
@@ -158,7 +126,7 @@ export default function NursingDashboardPage() {
                 <Button
                   variant="outline"
                   className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => router.push('/nursing/pool-queue')}
+                  onClick={() => router.push("/nursing/pool-queue")}
                 >
                   <Users className="h-4 w-4 mr-2" />
                   Patient Pool
@@ -168,115 +136,62 @@ export default function NursingDashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Today's Overview */}
+        {/* Today's Overview — aligned with Pool Queue metrics */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Clock className="h-5 w-5 text-blue-500 dark:text-blue-400" />
-            Today's Overview
+            Today&apos;s Overview
+            {!loading && (
+              <span className="text-xs font-normal text-muted-foreground">({serverToday})</span>
+            )}
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <Card key={i}>
                   <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Loading...</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                          <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
-                        </div>
-                      </div>
+                    <p className="text-sm text-muted-foreground">Loading...</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
                     </div>
                   </CardContent>
                 </Card>
               ))
             ) : (
               <>
-                <Card className={`border-l-4 ${stats.activePatients > 0 ? 'border-l-rose-500' : 'border-l-green-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Active Patients</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Users className={`h-5 w-5 ${stats.activePatients > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${stats.activePatients > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-green-600 dark:text-green-400'}`}>{stats.activePatients}</p>
-                        </div>
-                        {stats.activePatients === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All caught up!</p>
-                        ) : trends.activePatients.value !== 0 && (
-                          <div className={`flex items-center text-xs mt-1 ${trends.activePatients.isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            <TrendingUp className={`h-3 w-3 mr-1 ${!trends.activePatients.isPositive ? 'rotate-180' : ''}`} />
-                            {Math.abs(trends.activePatients.value)}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className={`border-l-4 ${stats.pendingVitals === 0 ? 'border-l-green-500' : 'border-l-amber-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Vitals Pending</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Thermometer className={`h-5 w-5 ${stats.pendingVitals === 0 ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${stats.pendingVitals === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{stats.pendingVitals}</p>
-                        </div>
-                        {stats.pendingVitals === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All vitals recorded</p>
-                        ) : trends.pendingVitals.value !== 0 && (
-                          <div className={`flex items-center text-xs mt-1 ${trends.pendingVitals.isPositive ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                            <TrendingUp className={`h-3 w-3 mr-1 ${trends.pendingVitals.isPositive ? '' : 'rotate-180'}`} />
-                            {Math.abs(trends.pendingVitals.value)}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className={`border-l-4 ${stats.medicationsDue === 0 ? 'border-l-green-500' : 'border-l-blue-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Medications Due</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Syringe className={`h-5 w-5 ${stats.medicationsDue === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${stats.medicationsDue === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.medicationsDue}</p>
-                        </div>
-                        {stats.medicationsDue === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All medications administered</p>
-                        ) : trends.medicationsDue.value !== 0 && (
-                          <div className={`flex items-center text-xs mt-1 ${trends.medicationsDue.isPositive ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                            <TrendingUp className={`h-3 w-3 mr-1 ${trends.medicationsDue.isPositive ? '' : 'rotate-180'}`} />
-                            {Math.abs(trends.medicationsDue.value)}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className={`border-l-4 ${stats.assessmentsToday === 0 ? 'border-l-green-500' : 'border-l-emerald-500'}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Assessments Due</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <ClipboardList className={`h-5 w-5 ${stats.assessmentsToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${stats.assessmentsToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{stats.assessmentsToday}</p>
-                        </div>
-                        {stats.assessmentsToday === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All assessments completed</p>
-                        ) : trends.assessmentsToday.value !== 0 && (
-                          <div className={`flex items-center text-xs mt-1 ${trends.assessmentsToday.isPositive ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                            <TrendingUp className={`h-3 w-3 mr-1 ${trends.assessmentsToday.isPositive ? '' : 'rotate-180'}`} />
-                            {Math.abs(trends.assessmentsToday.value)}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <OverviewCard
+                  label="In Pool Today"
+                  value={metrics.totalInPool}
+                  icon={Users}
+                  activeTone="rose"
+                  emptyHint="No patients in pool"
+                  activeHint="Visits in nursing workflow"
+                />
+                <OverviewCard
+                  label="Pending Vitals"
+                  value={metrics.pendingVitals}
+                  icon={Thermometer}
+                  activeTone="amber"
+                  emptyHint="All vitals recorded"
+                  activeHint="Awaiting first vitals"
+                />
+                <OverviewCard
+                  label="Ready for Consultation"
+                  value={metrics.readyForConsultation}
+                  icon={UserCheck}
+                  activeTone="emerald"
+                  emptyHint="None ready yet"
+                  activeHint="Can send to room"
+                />
+                <OverviewCard
+                  label="Sent to Rooms"
+                  value={metrics.sentToRoom}
+                  icon={DoorOpen}
+                  activeTone="violet"
+                  emptyHint="None sent to rooms"
+                  activeHint="In consultation queue"
+                />
               </>
             )}
           </div>
@@ -286,27 +201,27 @@ export default function NursingDashboardPage() {
         {!loading && criticalAlerts.length > 0 && (
           <div>
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-red-500" />
-              Critical Alerts
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Attention Needed
             </h2>
             <div className="space-y-2">
               {criticalAlerts.map((alert) => (
-                <Card key={alert.id} className={`border-l-4 ${alert.priority === 'high' ? 'border-l-red-500 bg-red-50 dark:bg-red-900/10' : 'border-l-amber-500 bg-amber-50 dark:bg-amber-900/10'}`}>
+                <Card
+                  key={alert.id}
+                  className="border-l-4 border-l-amber-500 bg-amber-50 dark:bg-amber-950/20"
+                >
                   <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <div className={`p-2 rounded-full ${alert.priority === 'high' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
-                          <AlertTriangle className={`h-4 w-4 ${alert.priority === 'high' ? 'text-red-600' : 'text-amber-600'}`} />
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">{alert.patient} (Room {alert.room})</p>
-                          <p className="text-sm text-muted-foreground">{alert.alert}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{alert.time}</p>
-                        </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm">{alert.patient}</p>
+                        <p className="text-sm text-muted-foreground">{alert.alert}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {alert.room} · {alert.time}
+                        </p>
                       </div>
-                      <Badge variant={alert.priority === 'high' ? 'destructive' : 'secondary'} className="text-xs">
-                        {alert.priority.toUpperCase()}
-                      </Badge>
+                      <Button asChild size="sm" variant="outline">
+                        <Link href="/nursing/patient-vitals">Record</Link>
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -322,7 +237,10 @@ export default function NursingDashboardPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            <Button onClick={() => router.push('/nursing/pool-queue')} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white border-l-4 border-l-white/20">
+            <Button
+              onClick={() => router.push("/nursing/pool-queue")}
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white border-l-4 border-l-white/20"
+            >
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 sm:h-6 sm:w-6" />
                 {poolQueueCount > 0 && (
@@ -334,19 +252,31 @@ export default function NursingDashboardPage() {
               <span className="text-xs sm:text-sm font-medium">Pool Queue</span>
               <span className="text-[10px] sm:text-xs opacity-90">Patient assignments</span>
             </Button>
-            <Button onClick={() => router.push('/nursing/patient-vitals')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-rose-500">
+            <Button
+              onClick={() => router.push("/nursing/patient-vitals")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-rose-500"
+            >
               <Thermometer className="h-5 w-5 sm:h-6 sm:w-6 text-rose-500 dark:text-rose-400" />
               <span className="text-xs sm:text-sm font-medium">Record Vitals</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Patient monitoring</span>
             </Button>
-            <Button onClick={() => router.push('/nursing/procedures')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-blue-500">
-              <Syringe className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-xs sm:text-sm font-medium">Administer Meds</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Medication tasks</span>
+            <Button
+              onClick={() => router.push("/nursing/procedures")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-blue-500"
+            >
+              <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
+              <span className="text-xs sm:text-sm font-medium">Procedures</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Nursing orders & tasks</span>
             </Button>
-            <Button onClick={() => router.push('/nursing/room-queue')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-emerald-500">
+            <Button
+              onClick={() => router.push("/nursing/room-queue")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-emerald-500"
+            >
               <div className="flex items-center gap-2">
-                <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
+                <DoorOpen className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
                 {roomQueueCount > 0 && (
                   <Badge variant="outline" className="text-xs px-2 py-0.5">
                     {roomQueueCount}
@@ -356,7 +286,11 @@ export default function NursingDashboardPage() {
               <span className="text-xs sm:text-sm font-medium">Room Queue</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Room assignments</span>
             </Button>
-            <Button onClick={() => router.push('/nursing/analytics')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-violet-500">
+            <Button
+              onClick={() => router.push("/nursing/analytics")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-violet-500"
+            >
               <BarChart3 className="h-5 w-5 sm:h-6 sm:w-6 text-violet-500 dark:text-violet-400" />
               <span className="text-xs sm:text-sm font-medium">Analytics</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Pool metrics</span>
@@ -373,8 +307,17 @@ export default function NursingDashboardPage() {
                   <Clock className="h-5 w-5 text-amber-500 dark:text-amber-400" />
                   Pending Tasks
                 </CardTitle>
-                <Badge variant={stats.pendingTasks === 0 ? "default" : "outline"} className={stats.pendingTasks === 0 ? "bg-green-500/10 text-green-700 border-green-500/20" : "border-amber-500/50 text-amber-600 dark:text-amber-400"}>
-                  {stats.pendingTasks === 0 ? "✓ All Complete" : `${stats.pendingTasks} pending`}
+                <Badge
+                  variant="default"
+                  className={
+                    hasPendingTasks
+                      ? "bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300"
+                      : "bg-green-500/10 text-green-700 border-green-500/20"
+                  }
+                >
+                  {hasPendingTasks
+                    ? `${Math.max(pendingTasks.length, activeWorkCount)} open`
+                    : "✓ All Complete"}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -382,17 +325,42 @@ export default function NursingDashboardPage() {
                   <div className="flex items-center justify-center p-8">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                   </div>
-                ) : stats.pendingTasks > 0 ? (
-                  <div className="text-center py-8">
-                    <ClipboardList className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-                    <p className="text-muted-foreground text-sm mb-2">You have {stats.pendingTasks} pending tasks</p>
-                    <p className="text-xs text-muted-foreground">Check your assignments for details</p>
-                  </div>
-                ) : (
+                ) : !hasPendingTasks ? (
                   <div className="text-center py-8">
                     <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
                     <p className="text-muted-foreground text-sm mb-2">All tasks completed!</p>
-                    <p className="text-xs text-muted-foreground">Great work staying on top of patient care.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Great work staying on top of patient care.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {metrics.pendingVitals > 0 && (
+                      <TaskRow
+                        title="Pending vitals"
+                        description={`${metrics.pendingVitals} patient${metrics.pendingVitals !== 1 ? "s" : ""} need initial vitals`}
+                        tone="amber"
+                        icon={Thermometer}
+                        href="/nursing/pool-queue"
+                      />
+                    )}
+                    {metrics.readyForConsultation > 0 && (
+                      <TaskRow
+                        title="Ready for consultation"
+                        description={`${metrics.readyForConsultation} patient${metrics.readyForConsultation !== 1 ? "s" : ""} ready for room assignment`}
+                        tone="emerald"
+                        icon={UserCheck}
+                        href="/nursing/pool-queue"
+                      />
+                    )}
+                    {pendingTasks.map((task) => (
+                      <PendingPatientRow key={task.visitId} task={task} />
+                    ))}
+                    {pendingTasks.length === 0 && metrics.totalInPool > 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-2">
+                        Open the pool queue to manage today&apos;s patients.
+                      </p>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -412,43 +380,227 @@ export default function NursingDashboardPage() {
                 <div className="flex items-center justify-center p-8">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : recentActivities.length > 0 ? (
-                recentActivities.slice(0, 5).map((activity, i) => (
-                  <div key={i} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                    <div className={`p-2 rounded-full ${activity.status === 'completed' ? 'bg-green-500/10' : 'bg-blue-500/10'}`}>
-                      {activity.type === 'vitals' && <Thermometer className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
-                      {activity.type === 'medication' && <Syringe className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
-                      {activity.type === 'assessment' && <ClipboardList className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
-                      {activity.type === 'procedure' && <Stethoscope className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
-                      {activity.type === 'note' && <FileText className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
-                      {!['vitals', 'medication', 'assessment', 'procedure', 'note'].includes(activity.type) && (
-                        <CheckCircle2 className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-foreground text-sm">{activity.patient}</p>
-                        <Badge variant={activity.status === 'completed' ? 'default' : 'secondary'} className={`text-xs px-2 py-0.5 ${activity.status === 'completed' ? 'bg-green-500/10 text-green-700 border-green-500/20' : ''}`}>
-                          {activity.status === 'completed' ? '✓ Completed' : '⏳ In Progress'}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">{activity.action}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5 opacity-75">{activity.time}</p>
-                    </div>
-                  </div>
-                ))
-              ) : (
+              ) : recentActivities.length === 0 ? (
                 <div className="text-center py-8">
                   <Activity className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-                  <p className="text-muted-foreground text-sm mb-2">No recent activity</p>
-                  <p className="text-xs text-muted-foreground">Activity will appear here as you work</p>
+                  <p className="text-muted-foreground text-sm mb-2">No activity today</p>
+                  <p className="text-xs text-muted-foreground">
+                    Vitals and room assignments will appear here
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {recentActivities.map((activity) => (
+                    <button
+                      key={activity.id}
+                      type="button"
+                      className="w-full flex items-start gap-3 text-left rounded-lg p-2 hover:bg-muted/50 transition-colors"
+                      onClick={() => router.push(activity.href)}
+                    >
+                      <div
+                        className={`p-2 rounded-full shrink-0 ${
+                          activity.status === "completed"
+                            ? "bg-green-500/10"
+                            : "bg-blue-500/10"
+                        }`}
+                      >
+                        {activity.type === "vitals" ? (
+                          <Thermometer
+                            className={`h-4 w-4 ${
+                              activity.status === "completed" ? "text-green-500" : "text-blue-500"
+                            }`}
+                          />
+                        ) : (
+                          <DoorOpen
+                            className={`h-4 w-4 ${
+                              activity.status === "completed" ? "text-green-500" : "text-blue-500"
+                            }`}
+                          />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm truncate">{activity.patient}</p>
+                        <p className="text-xs text-muted-foreground">{activity.action}</p>
+                        <p className="text-[10px] text-muted-foreground/80">{activity.time}</p>
+                      </div>
+                    </button>
+                  ))}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-rose-600"
+                    onClick={() => router.push("/nursing/patient-vitals")}
+                  >
+                    View vitals history
+                  </Button>
                 </div>
               )}
             </CardContent>
           </Card>
         </div>
-
       </div>
     </DashboardLayout>
+  );
+}
+
+type Tone = "rose" | "amber" | "emerald" | "violet";
+
+function OverviewCard({
+  label,
+  value,
+  icon: Icon,
+  activeTone,
+  emptyHint,
+  activeHint,
+}: {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ className?: string }>;
+  activeTone: Tone;
+  emptyHint: string;
+  activeHint: string;
+}) {
+  const tones: Record<Tone, { border: string; icon: string; text: string }> = {
+    rose: {
+      border: "border-l-rose-500",
+      icon: "text-rose-500 dark:text-rose-400",
+      text: "text-rose-600 dark:text-rose-400",
+    },
+    amber: {
+      border: "border-l-amber-500",
+      icon: "text-amber-500 dark:text-amber-400",
+      text: "text-amber-600 dark:text-amber-400",
+    },
+    emerald: {
+      border: "border-l-emerald-500",
+      icon: "text-emerald-500 dark:text-emerald-400",
+      text: "text-emerald-600 dark:text-emerald-400",
+    },
+    violet: {
+      border: "border-l-violet-500",
+      icon: "text-violet-500 dark:text-violet-400",
+      text: "text-violet-600 dark:text-violet-400",
+    },
+  };
+  const active = value > 0;
+  const t = tones[activeTone];
+
+  return (
+    <Card className={`border-l-4 ${active ? t.border : "border-l-green-500"}`}>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <Icon
+                className={`h-5 w-5 ${active ? t.icon : "text-green-500 dark:text-green-400"}`}
+              />
+              <p
+                className={`text-2xl sm:text-3xl font-bold ${
+                  active ? t.text : "text-green-600 dark:text-green-400"
+                }`}
+              >
+                {value}
+              </p>
+            </div>
+            <p
+              className={`text-xs mt-1 ${
+                active ? "text-muted-foreground" : "text-green-600 dark:text-green-400"
+              }`}
+            >
+              {active ? activeHint : emptyHint}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+type TaskTone = "amber" | "emerald" | "blue";
+
+function TaskRow({
+  title,
+  description,
+  tone,
+  icon: Icon,
+  href,
+}: {
+  title: string;
+  description: string;
+  tone: TaskTone;
+  icon: React.ComponentType<{ className?: string }>;
+  href: string;
+}) {
+  const styles: Record<TaskTone, { border: string; bg: string; icon: string; text: string; btn: string }> =
+    {
+      amber: {
+        border: "border-amber-200 dark:border-amber-800",
+        bg: "bg-amber-50 dark:bg-amber-950/20",
+        icon: "text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30",
+        text: "text-amber-900 dark:text-amber-100",
+        btn: "border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300",
+      },
+      emerald: {
+        border: "border-emerald-200 dark:border-emerald-800",
+        bg: "bg-emerald-50 dark:bg-emerald-950/20",
+        icon: "text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30",
+        text: "text-emerald-900 dark:text-emerald-100",
+        btn: "border-emerald-300 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:text-emerald-300",
+      },
+      blue: {
+        border: "border-blue-200 dark:border-blue-800",
+        bg: "bg-blue-50 dark:bg-blue-950/20",
+        icon: "text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30",
+        text: "text-blue-900 dark:text-blue-100",
+        btn: "border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300",
+      },
+    };
+  const s = styles[tone];
+
+  return (
+    <div className={`flex items-center justify-between p-3 rounded-lg border ${s.border} ${s.bg}`}>
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${s.icon}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <p className={`font-medium text-sm ${s.text}`}>{title}</p>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <Button asChild size="sm" variant="outline" className={`shrink-0 ml-2 ${s.btn}`}>
+        <Link href={href}>View</Link>
+      </Button>
+    </div>
+  );
+}
+
+function PendingPatientRow({ task }: { task: NursingPendingTask }) {
+  const segmentLabel =
+    task.segment === "pending_vitals"
+      ? "Pending vitals"
+      : task.segment === "vitals_incomplete"
+        ? "Incomplete vitals"
+        : "Ready";
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+      <div className="min-w-0">
+        <p className="font-medium truncate">{task.patientName}</p>
+        <p className="text-xs text-muted-foreground truncate">{task.subtitle}</p>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Badge variant="outline" className="text-xs capitalize">
+          {segmentLabel}
+        </Badge>
+        <Button asChild variant="ghost" size="sm">
+          <Link href={task.href}>
+            Open
+            <ArrowRight className="h-4 w-4 ml-1" />
+          </Link>
+        </Button>
+      </div>
+    </div>
   );
 }
