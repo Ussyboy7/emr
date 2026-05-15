@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { safeAsync } from '@/lib/utils/error-handling';
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
@@ -29,9 +30,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { roomService } from '@/lib/services';
+import {
+  roomService,
+  patientService,
+  consultationService,
+  type ConsultationSession,
+  type ConsultationStats,
+} from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
-import { patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 
@@ -72,6 +78,66 @@ interface ConsultationRoom {
   totalConsultationsToday: number;
   averageConsultationTime: number;
   queue: { patient_id: string; position: number }[];
+}
+
+type RoomFilter = "all" | "available" | "occupied";
+
+function localISODate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function sessionRoomIdKey(session: ConsultationSession): string | null {
+  const r = session.room as unknown;
+  if (typeof r === "number" && !Number.isNaN(r)) return String(r);
+  if (r && typeof r === "object" && "id" in r) {
+    const id = (r as { id: unknown }).id;
+    if (typeof id === "number") return String(id);
+    if (typeof id === "string") return id;
+  }
+  return null;
+}
+
+function buildRoomCompletedTodayMap(
+  sessions: ConsultationSession[],
+): Record<string, { completed: number; avgMinutes: number }> {
+  const acc: Record<string, { completed: number; totalMin: number }> = {};
+  for (const s of sessions) {
+    const rid = sessionRoomIdKey(s);
+    if (!rid) continue;
+    if (!acc[rid]) acc[rid] = { completed: 0, totalMin: 0 };
+    if (s.status === "completed" && s.ended_at && s.started_at) {
+      const ms = new Date(s.ended_at).getTime() - new Date(s.started_at).getTime();
+      const min = ms > 0 ? ms / 60000 : 0;
+      acc[rid].completed += 1;
+      acc[rid].totalMin += min;
+    }
+  }
+  const out: Record<string, { completed: number; avgMinutes: number }> = {};
+  for (const k of Object.keys(acc)) {
+    const { completed, totalMin } = acc[k];
+    out[k] = {
+      completed,
+      avgMinutes: completed > 0 ? Math.round((totalMin / completed) * 10) / 10 : 0,
+    };
+  }
+  return out;
+}
+
+function globalCompletedAvgMinutes(sessions: ConsultationSession[]): number {
+  const done = sessions.filter((s) => s.status === "completed" && s.ended_at && s.started_at);
+  if (!done.length) return 0;
+  const sum = done.reduce((acc, s) => {
+    const ms = new Date(s.ended_at!).getTime() - new Date(s.started_at).getTime();
+    return acc + (ms > 0 ? ms / 60000 : 0);
+  }, 0);
+  return Math.round((sum / done.length) * 10) / 10;
+}
+
+function totalCompletedFromRoomMap(
+  map: Record<string, { completed: number; avgMinutes: number }>,
+): number {
+  return Object.values(map).reduce((a, v) => a + v.completed, 0);
 }
 
 // Consultation rooms and patient data will be loaded from API
@@ -123,7 +189,26 @@ const StartConsultation = () => {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
+  const [roomFilter, setRoomFilter] = useState<RoomFilter>("all");
+  const [overviewStats, setOverviewStats] = useState({
+    openConsultations: 0,
+    completedToday: 0,
+    avgTodayMinutes: 0,
+    queueCount: 0,
+  });
   useAuthRedirect(authError);
+
+  const applyRoomFilter = (f: RoomFilter) => {
+    setRoomFilter(f);
+    setSelectedRoom((prev) => {
+      if (!prev) return prev;
+      const r = consultationRooms.find((x) => x.id === prev);
+      if (!r) return "";
+      if (f === "available" && r.status !== "available") return "";
+      if (f === "occupied" && r.status === "available") return "";
+      return prev;
+    });
+  };
 
   // Load rooms and queue from API
   useEffect(() => {
@@ -131,15 +216,46 @@ const StartConsultation = () => {
       try {
         setLoadingRooms(true);
         setError(null);
-        
-        // Load rooms
-        const roomsResult = await roomService.getRooms({ page_size: 200 });
-        
-        // Load queue items to get patient counts per room
-        const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=200');
+
+        const todayStr = localISODate();
+
+        const emptySessions = (): { results: ConsultationSession[]; count: number } => ({
+          results: [],
+          count: 0,
+        });
+
+        const [roomsResult, queueResult, statsRes, activeRes, pausedRes, todaySessionsRes] =
+          await Promise.all([
+            roomService.getRooms({ page_size: 200 }),
+            apiFetch<{ results: any[] }>("/consultation/queue/?is_active=true&page_size=200"),
+            consultationService.getStats().catch((): ConsultationStats | null => null),
+            consultationService.getSessions({ status: "active", page_size: 1 }).catch(emptySessions),
+            consultationService.getSessions({ status: "paused", page_size: 1 }).catch(emptySessions),
+            consultationService
+              .getSessions({ date: todayStr, page_size: 500 })
+              .catch(emptySessions),
+          ]);
+
         const queueItems = queueResult.results || [];
-        
-        
+        const roomTodayMap = buildRoomCompletedTodayMap(todaySessionsRes.results);
+        const stats = statsRes;
+
+        const openConsultations = (activeRes.count ?? 0) + (pausedRes.count ?? 0);
+        const completedFromSessions = totalCompletedFromRoomMap(roomTodayMap);
+        const completedToday =
+          stats?.completed_today ?? stats?.today?.completed ?? completedFromSessions;
+        const avgTodayMinutes =
+          stats?.today?.avg_duration ??
+          (completedFromSessions > 0 ? globalCompletedAvgMinutes(todaySessionsRes.results) : 0);
+        const queueCount = stats?.queue_count ?? queueItems.length;
+
+        setOverviewStats({
+          openConsultations,
+          completedToday,
+          avgTodayMinutes,
+          queueCount,
+        });
+
         // Group queue items by room
         const queueByRoom: Record<string, any[]> = {};
         queueItems.forEach((item: any) => {
@@ -149,50 +265,51 @@ const StartConsultation = () => {
           }
           queueByRoom[roomId].push(item);
         });
-        
+
         // Transform rooms with queue data
         const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
           const roomQueue = queueByRoom[String(room.id)] || [];
           const sortedQueue = roomQueue.sort((a, b) => {
-            // Sort by priority (lower number = higher priority), then by queued_at
             if (a.priority !== b.priority) {
               return a.priority - b.priority;
             }
             return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
           });
-          
+
+          const todayForRoom = roomTodayMap[String(room.id)];
+
           return {
             id: String(room.id),
             name: room.name,
-            status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
+            status: room.status?.toLowerCase() === "active" ? ("available" as const) : ("occupied" as const),
             currentPatient: sortedQueue.length > 0 ? sortedQueue[0].patient_name : undefined,
             startTime: undefined,
             doctor: room.assigned_doctor || undefined,
             specialtyFocus: room.specialty || undefined,
-            totalConsultationsToday: 0, // Could be calculated from visits
-            averageConsultationTime: 0,
+            totalConsultationsToday: todayForRoom?.completed ?? 0,
+            averageConsultationTime: todayForRoom?.avgMinutes ?? 0,
             queue: sortedQueue
-              .filter((item: any) => item.patient != null) // Filter out items without patient IDs
+              .filter((item: any) => item.patient != null)
               .map((item: any, index: number) => ({
                 patient_id: String(item.patient),
                 position: index + 1,
               })),
           };
         });
-        
+
         setConsultationRooms(transformedRooms);
       } catch (err) {
-        console.error('Error loading consultation rooms:', err);
+        console.error("Error loading consultation rooms:", err);
         if (isAuthenticationError(err)) {
           setAuthError(err);
         } else {
-          setError('Failed to load consultation rooms. Please try again.');
+          setError("Failed to load consultation rooms. Please try again.");
         }
       } finally {
         setLoadingRooms(false);
       }
     };
-    
+
     loadRooms();
   }, []);
 
@@ -466,21 +583,10 @@ const StartConsultation = () => {
     }
   };
 
-  const confirmStartConsultation = async () => {
-    setIsLoading(true);
-
-    try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      toast.success("Entering consultation room...");
-
-      // Navigate to consultation room
-      router.push(`/consultation/room/${selectedRoom}`);
-    } catch (error) {
-      toast.error("Failed to start consultation");
-      setIsLoading(false);
-    }
+  const confirmStartConsultation = () => {
+    setShowConfirmDialog(false);
+    toast.success("Entering consultation room...");
+    router.push(`/consultation/room/${selectedRoom}`);
   };
 
   const handleRoomSelect = (roomId: string, status: ConsultationRoom["status"]) => {
@@ -491,6 +597,17 @@ const StartConsultation = () => {
 
   const selectedRoomData = consultationRooms.find((room) => room.id === selectedRoom);
   const availableRooms = consultationRooms.filter((room) => room.status === "available");
+  const occupiedRoomsCount = consultationRooms.length - availableRooms.length;
+
+  const filteredRooms = useMemo(() => {
+    if (roomFilter === "available") {
+      return consultationRooms.filter((r) => r.status === "available");
+    }
+    if (roomFilter === "occupied") {
+      return consultationRooms.filter((r) => r.status !== "available");
+    }
+    return consultationRooms;
+  }, [consultationRooms, roomFilter]);
 
   if (loadingRooms) {
     return (
@@ -558,7 +675,12 @@ const StartConsultation = () => {
                     {availableRooms.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {availableRooms.length === 1 ? 'room ready' : 'rooms ready'}
+                    {availableRooms.length === 1 ? "room ready" : "rooms ready"}
+                    {occupiedRoomsCount > 0 && (
+                      <span className="block text-[11px] opacity-90">
+                        {occupiedRoomsCount} not available for assignment
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center">
@@ -568,17 +690,17 @@ const StartConsultation = () => {
             </CardContent>
           </Card>
 
-          {/* Occupied Rooms */}
+          {/* Open consultations (active + paused sessions) */}
           <Card className="border-l-4 border-l-red-500 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground font-medium">Active Sessions</p>
+                  <p className="text-sm text-muted-foreground font-medium">Open consultations</p>
                   <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">
-                    {consultationRooms.length - availableRooms.length}
+                    {overviewStats.openConsultations}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    consultations in progress
+                    Active or paused sessions (all rooms)
                   </p>
                 </div>
                 <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
@@ -595,7 +717,7 @@ const StartConsultation = () => {
                 <div>
                   <p className="text-sm text-muted-foreground font-medium">Patients Waiting</p>
                   <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">
-                    {consultationRooms.reduce((acc, room) => acc + room.queue.length, 0)}
+                    {overviewStats.queueCount}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     across all rooms
@@ -615,10 +737,15 @@ const StartConsultation = () => {
                 <div>
                   <p className="text-sm text-muted-foreground font-medium">Today's Sessions</p>
                   <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">
-                    {consultationRooms.reduce((acc, room) => acc + room.totalConsultationsToday, 0)}
+                    {overviewStats.completedToday}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     completed today
+                    {overviewStats.avgTodayMinutes > 0 && (
+                      <span className="block">
+                        Org avg: {overviewStats.avgTodayMinutes.toFixed(1)} min
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
@@ -638,32 +765,76 @@ const StartConsultation = () => {
               </div>
               <div className="flex gap-2">
                 <Badge
-                  className="cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-900/30 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => applyRoomFilter("all")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      applyRoomFilter("all");
+                    }
+                  }}
+                  className={cn(
+                    "cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-900/30 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400",
+                    roomFilter === "all" &&
+                      "ring-2 ring-emerald-600 dark:ring-emerald-400 ring-offset-2 ring-offset-background",
+                  )}
                 >
                   All ({consultationRooms.length})
                 </Badge>
                 <Badge
-                  className="cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/30 bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => applyRoomFilter("available")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      applyRoomFilter("available");
+                    }
+                  }}
+                  className={cn(
+                    "cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/30 bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400",
+                    roomFilter === "available" &&
+                      "ring-2 ring-green-600 dark:ring-green-400 ring-offset-2 ring-offset-background",
+                  )}
                 >
                   Available ({availableRooms.length})
                 </Badge>
                 <Badge
-                  className="cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => applyRoomFilter("occupied")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      applyRoomFilter("occupied");
+                    }
+                  }}
+                  className={cn(
+                    "cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400",
+                    roomFilter === "occupied" &&
+                      "ring-2 ring-red-600 dark:ring-red-400 ring-offset-2 ring-offset-background",
+                  )}
                 >
-                  Occupied ({consultationRooms.length - availableRooms.length})
+                  Occupied ({occupiedRoomsCount})
                 </Badge>
               </div>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Users className="h-4 w-4" />
-              <span>{consultationRooms.reduce((acc, room) => acc + room.queue.length, 0)} patients waiting</span>
+              <span>{overviewStats.queueCount} patients waiting</span>
             </div>
           </div>
         </div>
 
         {/* Room Grid */}
-        <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 mb-6">
-          {consultationRooms.map((room) => (
+        {filteredRooms.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-muted-foreground/30 p-12 text-center text-muted-foreground mb-6">
+            No rooms match this filter.
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 mb-6">
+            {filteredRooms.map((room) => (
             <Card
               key={room.id}
               className={`cursor-pointer transition-all duration-200 hover:shadow-lg border-2 h-80 flex flex-col ${
@@ -779,15 +950,20 @@ const StartConsultation = () => {
                   {/* Room Stats */}
                   <div className="pt-2 border-t border-border mt-auto">
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Today: {room.totalConsultationsToday} sessions</span>
-                      <span>Avg: {room.averageConsultationTime}min</span>
+                      <span>Today: {room.totalConsultationsToday} completed</span>
+                      <span>
+                        {room.averageConsultationTime > 0
+                          ? `Avg: ${room.averageConsultationTime} min`
+                          : "Avg: —"}
+                      </span>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Enhanced Action Buttons */}
         <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/10 dark:to-teal-900/10 rounded-lg p-6 -mx-6 -mb-6 mt-6">
