@@ -506,9 +506,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [showEndDialog, setShowEndDialog] = useState(false);
   const [showSwitchPatientDialog, setShowSwitchPatientDialog] = useState(false);
   const [pendingSwitchPatient, setPendingSwitchPatient] = useState<Patient | null>(null);
-  const [showRoomQueueDialog, setShowRoomQueueDialog] = useState(false);
-  const [loadingRoomQueueDialog, setLoadingRoomQueueDialog] = useState(false);
-  const [showPausedSessionsDialog, setShowPausedSessionsDialog] = useState(false);
+  const [showRoomPatientsDialog, setShowRoomPatientsDialog] = useState(false);
+  const [roomPatientsDialogTab, setRoomPatientsDialogTab] = useState<'waiting' | 'paused'>('waiting');
+  const [loadingRoomPatientsDialog, setLoadingRoomPatientsDialog] = useState(false);
   const [pausedSessions, setPausedSessions] = useState<ConsultationSession[]>([]);
   const [pausedSessionsTotalCount, setPausedSessionsTotalCount] = useState<number | null>(null);
   const [loadingPausedSessions, setLoadingPausedSessions] = useState(false);
@@ -1549,16 +1549,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   }, [roomId, loadPausedSessions]);
 
   useEffect(() => {
-    if (!showRoomQueueDialog) return;
+    if (!showRoomPatientsDialog) return;
     let cancelled = false;
-    setLoadingRoomQueueDialog(true);
+    setLoadingRoomPatientsDialog(true);
     void refreshQueueData({ silent: true }).finally(() => {
-      if (!cancelled) setLoadingRoomQueueDialog(false);
+      if (!cancelled) setLoadingRoomPatientsDialog(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [showRoomQueueDialog, refreshQueueData]);
+  }, [showRoomPatientsDialog, refreshQueueData]);
+
+  const openRoomPatientsDialog = (tab: 'waiting' | 'paused' = 'waiting') => {
+    setRoomPatientsDialogTab(tab);
+    setShowRoomPatientsDialog(true);
+  };
   
   const loadRoomData = async () => {
     try {
@@ -2475,8 +2480,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           setPendingSwitchPatient(patient);
           // Avoid modal stacking race: close queue dialog first, then open switch dialog.
           const openSwitchDialog = () => setShowSwitchPatientDialog(true);
-          if (showRoomQueueDialog) {
-            setShowRoomQueueDialog(false);
+          if (showRoomPatientsDialog) {
+            setShowRoomPatientsDialog(false);
             if (typeof window !== 'undefined') {
               window.setTimeout(openSwitchDialog, 0);
             } else {
@@ -2669,11 +2674,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     await handleStartSession(targetPatient, true);
   };
 
-  const openPausedSessionsDialog = async () => {
-    setShowPausedSessionsDialog(true);
-    await loadPausedSessions();
-  };
-
   const handleResumePausedSession = async (pausedSession: ConsultationSession) => {
     if (!pausedSession?.id || isResumingPausedSession || endingPausedSessionId != null) return;
     setIsResumingPausedSession(true);
@@ -2687,7 +2687,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         throw new Error('Session resumed but could not be restored. Please retry.');
       }
       await loadPausedSessions();
-      setShowPausedSessionsDialog(false);
+      setShowRoomPatientsDialog(false);
       toast.success(`Resumed session with ${pausedSession.patient_name || 'patient'}`);
     } catch (err: any) {
       console.error('Error resuming paused session:', err);
@@ -2703,7 +2703,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const label = pausedSession.patient_name || `session ${pausedSession.session_id}`;
     if (
       !window.confirm(
-        `End consultation for ${label}?\n\nThis marks the session as completed and removes it from Paused Sessions. If a visit is linked, it may be marked completed too.`
+        `End consultation for ${label}?\n\nThis marks the session as completed and removes it from the Paused tab. If a visit is linked, it may be marked completed too.`
       )
     ) {
       return;
@@ -2754,7 +2754,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       await handleStartSession(patient, confirmSwitch, { skipPausedDuplicateCheck: true });
     } catch (err: any) {
       console.error('End paused & start new failed:', err);
-      toast.error(err?.message || 'Could not end paused session(s). Try Paused Sessions or try again.');
+      toast.error(err?.message || 'Could not end paused session(s). Try Queue → Paused or try again.');
     } finally {
       setIsEndingPausedForNewStart(false);
     }
@@ -4931,11 +4931,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
-                onClick={openPausedSessionsDialog}
-                title="Paused sessions are consultations you put on hold. They are not counted in the waiting queue."
+                onClick={() => openRoomPatientsDialog('waiting')}
+                title={`Waiting: ${roomQueueWaitingCount}, paused: ${pausedSessions.length}`}
               >
-                <History className="mr-2 h-4 w-4" />
-                Paused Sessions ({pausedSessions.length})
+                <Users className="mr-2 h-4 w-4" />
+                Queue
+                {(roomQueueWaitingCount > 0 || pausedSessions.length > 0) && (
+                  <span className="ml-1.5 tabular-nums text-muted-foreground font-normal text-xs">
+                    {roomQueueWaitingCount > 0 && `W${roomQueueWaitingCount}`}
+                    {roomQueueWaitingCount > 0 && pausedSessions.length > 0 && '·'}
+                    {pausedSessions.length > 0 && `P${pausedSessions.length}`}
+                  </span>
+                )}
               </Button>
               <Button variant="outline" onClick={() => router.push("/consultation/start")}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
@@ -5059,22 +5066,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={openPausedSessionsDialog}
-              title="Paused sessions are consultations you put on hold. They are not counted in the waiting queue."
+              onClick={() => openRoomPatientsDialog('waiting')}
+              title={`Waiting: ${roomQueueWaitingCount}, paused: ${pausedSessions.length}`}
             >
-              <History className="mr-2 h-4 w-4" />
-              Paused Sessions ({pausedSessions.length})
-            </Button>
-            <Button variant="outline" onClick={() => setShowRoomQueueDialog(true)}>
               <Users className="mr-2 h-4 w-4" />
-              Room Queue ({patients.length})
+              Queue
+              {(roomQueueWaitingCount > 0 || pausedSessions.length > 0) && (
+                <span className="ml-1.5 tabular-nums text-muted-foreground font-normal text-xs">
+                  {roomQueueWaitingCount > 0 && `W${roomQueueWaitingCount}`}
+                  {roomQueueWaitingCount > 0 && pausedSessions.length > 0 && '·'}
+                  {pausedSessions.length > 0 && `P${pausedSessions.length}`}
+                </span>
+              )}
             </Button>
             <Button variant="secondary" onClick={handleEndSessionNotSeen} disabled={isMarkingLeft}>
               {isMarkingLeft ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserX className="mr-2 h-4 w-4" />}
-              End as Not Seen
+              Not seen
             </Button>
             <Button variant="destructive" onClick={() => setShowEndDialog(true)}>
-              End Session
+              End session
             </Button>
           </div>
         </div>
@@ -8938,7 +8948,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <br />
                 We will pause this session and start/resume consultation with <strong>{pendingSwitchPatient?.name || 'the selected patient'}</strong>.
                 <br />
-                You can resume the paused session later from <strong>Paused Sessions</strong>.
+                You can resume the paused session later from <strong>Queue → Paused</strong>.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -9056,332 +9066,321 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
-        {/* Paused Sessions Dialog */}
-        <Dialog open={showPausedSessionsDialog} onOpenChange={setShowPausedSessionsDialog}>
-          <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[85vh] overflow-y-auto gap-3 p-4 sm:p-5">
-            <DialogHeader className="space-y-1">
-              <DialogTitle className="flex items-center gap-2 text-base">
-                <History className="h-4 w-4 text-amber-500 shrink-0" />
-                Paused Sessions — {room?.name || 'Consultation Room'}
-              </DialogTitle>
-              <DialogDescription className="text-xs leading-snug">
-                Paused consultations for this room (all providers). Oldest first—not the waiting queue.
-              </DialogDescription>
-            </DialogHeader>
-
-            {!loadingPausedSessions && pausedSessionsSorted.length > 0 && (
-              <div className="text-[11px] text-muted-foreground -mt-1 space-y-0.5">
-                <p>
-                  {pausedSessionsSorted.length}
-                  {pausedSessionsTotalCount != null ? ` of ${pausedSessionsTotalCount}` : ''} paused, oldest first
-                </p>
-                {pausedSessionsListIncomplete && (
-                  <p className="text-amber-700 dark:text-amber-400 font-medium">
-                    Not all rows shown—contact an administrator for the full list.
-                  </p>
-                )}
-                {!pausedSessionsListIncomplete && pausedSessionsUnknownTotal && (
-                  <p>Up to {PAUSED_SESSIONS_LIST_PAGE_SIZE} rows per load.</p>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-2 mt-1">
-              {loadingPausedSessions ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin" />
-                  <p className="text-xs">Loading paused sessions…</p>
-                </div>
-              ) : pausedSessionsSorted.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm font-medium">No paused sessions</p>
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {pausedSessionsSorted.map((ps) => {
-                    const activeSeconds =
-                      Number((ps as any).active_seconds ?? (ps as any).active_duration_seconds ?? 0) || 0;
-                    const minutes = Math.floor(activeSeconds / 60);
-                    const displayName = ps.patient_name || `Patient #${ps.patient}`;
-                    const isEndingThis = endingPausedSessionId === ps.id;
-
-                    return (
-                      <div
-                        key={ps.id}
-                        className="rounded-md border border-amber-500/40 bg-amber-50/50 dark:bg-amber-900/10 px-2.5 py-2"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-amber-600 text-white text-xs font-semibold">
-                            {initialsFromQueueDisplayName(displayName)}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span className="text-sm font-medium truncate max-w-[220px] sm:max-w-none">
-                                {displayName}
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className="h-4 px-1 text-[10px] bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300"
-                              >
-                                Paused
-                              </Badge>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                              #{ps.session_id}
-                              <span className="mx-1">·</span>
-                              {ps.patient_id || '—'}
-                              <span className="mx-1">·</span>
-                              {minutes}m active
-                              {ps.doctor_name && (
-                                <>
-                                  <span className="mx-1">·</span>
-                                  {ps.doctor_name}
-                                </>
-                              )}
-                              <span className="mx-1">·</span>
-                              {formatDate(ps.started_at)} {formatTime(ps.started_at)}
-                            </p>
-                          </div>
-
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            <Button
-                              size="sm"
-                              className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
-                              onClick={() => handleResumePausedSession(ps)}
-                              disabled={isResumingPausedSession || endingPausedSessionId != null}
-                            >
-                              {isResumingPausedSession ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <>
-                                  <Play className="h-3 w-3 mr-1" />
-                                  Resume
-                                </>
-                              )}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => handleEndPausedSession(ps)}
-                              disabled={isResumingPausedSession || endingPausedSessionId != null}
-                              title="End consultation"
-                            >
-                              {isEndingThis ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                'End'
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <DialogFooter className="pt-1 sm:pt-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="default"
-                onClick={() => setShowPausedSessionsDialog(false)}
-              >
-                Close
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-        {/* Room Queue Dialog */}
-        <Dialog open={showRoomQueueDialog} onOpenChange={setShowRoomQueueDialog}>
-          <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[85vh] overflow-y-auto gap-3 p-4 sm:p-5">
+        {/* Room patients: waiting queue + paused sessions */}
+        <Dialog open={showRoomPatientsDialog} onOpenChange={setShowRoomPatientsDialog}>
+          <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[88vh] overflow-y-auto gap-3 p-5 sm:p-6">
             <DialogHeader className="space-y-1">
               <DialogTitle className="flex items-center gap-2 text-base">
                 <Users className="h-4 w-4 text-emerald-500 shrink-0" />
-                Room Queue — {room?.name || 'Consultation Room'}
+                Queue — {room?.name || 'Consultation Room'}
               </DialogTitle>
               <DialogDescription className="text-xs leading-snug">
-                Active queue for this room. Wait time is from queued at.
+                Waiting and paused for this room. Tab counts: waiting · paused.
               </DialogDescription>
             </DialogHeader>
 
-            {!loadingRoomQueueDialog && patients.length > 0 && (
-              <p className="text-[11px] text-muted-foreground -mt-1">
-                {roomQueueWaitingCount} waiting
-                {roomQueueDialogEntries.some((e) => e.isInConsultation)
-                  ? ` · ${roomQueueDialogEntries.filter((e) => e.isInConsultation).length} in consult`
-                  : ''}
-              </p>
-            )}
+            <Tabs
+              value={roomPatientsDialogTab}
+              onValueChange={(v) => setRoomPatientsDialogTab(v as 'waiting' | 'paused')}
+              className="w-full"
+            >
+              <TabsList className="grid w-full grid-cols-2 h-9">
+                <TabsTrigger value="waiting" className="text-xs sm:text-sm">
+                  Waiting ({roomQueueWaitingCount})
+                </TabsTrigger>
+                <TabsTrigger value="paused" className="text-xs sm:text-sm">
+                  Paused ({pausedSessionsSorted.length})
+                </TabsTrigger>
+              </TabsList>
 
-            <div className="space-y-2 mt-1">
-              {loadingRoomQueueDialog ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin" />
-                  <p className="text-xs">Loading queue…</p>
-                </div>
-              ) : patients.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm font-medium">Queue is empty</p>
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {roomQueueDialogEntries.map(({ patient, isInConsultation, waitingPosition }) => {
-                    const priorityColor =
-                      patient.priority === 'Emergency' ? 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20' :
-                      patient.priority === 'High' ? 'border-orange-500/50 text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20' :
-                      patient.priority === 'Medium' ? 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20' :
-                      'border-gray-500/50 text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20';
+              <TabsContent value="waiting" className="mt-3 space-y-2 focus-visible:outline-none">
+                {!loadingRoomPatientsDialog && patients.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {roomQueueWaitingCount} waiting
+                    {roomQueueDialogEntries.some((e) => e.isInConsultation)
+                      ? ` · ${roomQueueDialogEntries.filter((e) => e.isInConsultation).length} in consult (queue row not cleared)`
+                      : ''}
+                    . Wait time is from queued at.
+                  </p>
+                )}
+                {loadingRoomPatientsDialog ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin" />
+                    <p className="text-xs">Loading…</p>
+                  </div>
+                ) : patients.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm font-medium">Queue is empty</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-[58vh] overflow-y-auto pr-1">
+                    {roomQueueDialogEntries.map(({ patient, isInConsultation, waitingPosition }) => {
+                      const priorityColor =
+                        patient.priority === 'Emergency' ? 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20' :
+                        patient.priority === 'High' ? 'border-orange-500/50 text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20' :
+                        patient.priority === 'Medium' ? 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20' :
+                        'border-gray-500/50 text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20';
 
-                    const waitLabel = isInConsultation
-                      ? null
-                      : patient.waitTime >= 60
-                        ? `${Math.floor(patient.waitTime / 60)}h ${patient.waitTime % 60}m`
-                        : `${patient.waitTime}m`;
+                      const waitLabel = isInConsultation
+                        ? null
+                        : patient.waitTime >= 60
+                          ? `${Math.floor(patient.waitTime / 60)}h ${patient.waitTime % 60}m`
+                          : `${patient.waitTime}m`;
 
-                    const waitColor =
-                      patient.waitTime > 120 ? 'text-red-600 dark:text-red-400' :
-                      patient.waitTime > 60 ? 'text-amber-600 dark:text-amber-400' :
-                      'text-green-600 dark:text-green-400';
+                      const waitColor =
+                        patient.waitTime > 120 ? 'text-red-600 dark:text-red-400' :
+                        patient.waitTime > 60 ? 'text-amber-600 dark:text-amber-400' :
+                        'text-green-600 dark:text-green-400';
 
-                    return (
-                      <div
-                        key={patient.id}
-                        className={`rounded-md border px-2.5 py-2 transition-colors ${
-                          isInConsultation
-                            ? 'border-emerald-500/80 bg-emerald-50/80 dark:bg-emerald-900/15'
-                            : 'border-border hover:bg-muted/40'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <div
-                            className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-white text-xs font-semibold ${
-                              isInConsultation ? 'bg-emerald-600' : 'bg-blue-600'
-                            }`}
-                          >
-                            {initialsFromQueueDisplayName(patient.name)}
-                          </div>
+                      return (
+                        <div
+                          key={patient.id}
+                          className={`rounded-md border px-2.5 py-2 transition-colors ${
+                            isInConsultation
+                              ? 'border-emerald-500/80 bg-emerald-50/80 dark:bg-emerald-900/15'
+                              : 'border-border hover:bg-muted/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-white text-xs font-semibold ${
+                                isInConsultation ? 'bg-emerald-600' : 'bg-blue-600'
+                              }`}
+                            >
+                              {initialsFromQueueDisplayName(patient.name)}
+                            </div>
 
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span className="text-sm font-medium truncate max-w-[220px] sm:max-w-none">
-                                {patient.name}
-                              </span>
-                              {isInConsultation && (
-                                <Badge variant="outline" className="h-4 px-1 text-[10px] bg-emerald-600 text-white border-0">
-                                  In consult
-                                </Badge>
-                              )}
-                              <Badge variant="outline" className={`h-4 px-1 text-[10px] ${priorityColor}`}>
-                                {patient.priority}
-                              </Badge>
-                              {patient.clinics?.map((clinic: string, idx: number) => {
-                                const isCompleted = patient.completedClinics?.includes(clinic);
-                                return (
-                                  <Badge
-                                    key={idx}
-                                    variant="outline"
-                                    className={`h-4 px-1 text-[10px] ${
-                                      isCompleted
-                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
-                                        : 'bg-blue-500/10 border-blue-500/30 text-blue-600'
-                                    }`}
-                                  >
-                                    {clinic}{isCompleted ? ' ✓' : ''}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="text-sm font-medium truncate max-w-[220px] sm:max-w-none">
+                                  {patient.name}
+                                </span>
+                                {isInConsultation && (
+                                  <Badge variant="outline" className="h-4 px-1 text-[10px] bg-emerald-600 text-white border-0">
+                                    In consult
                                   </Badge>
-                                );
-                              })}
+                                )}
+                                <Badge variant="outline" className={`h-4 px-1 text-[10px] ${priorityColor}`}>
+                                  {patient.priority}
+                                </Badge>
+                                {patient.clinics?.map((clinic: string, idx: number) => {
+                                  const isCompleted = patient.completedClinics?.includes(clinic);
+                                  return (
+                                    <Badge
+                                      key={idx}
+                                      variant="outline"
+                                      className={`h-4 px-1 text-[10px] ${
+                                        isCompleted
+                                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
+                                          : 'bg-blue-500/10 border-blue-500/30 text-blue-600'
+                                      }`}
+                                    >
+                                      {clinic}{isCompleted ? ' ✓' : ''}
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                                {patient.patientId}
+                                <span className="mx-1">·</span>
+                                {patient.age}y {patient.gender}
+                                {waitLabel != null && (
+                                  <>
+                                    <span className="mx-1">·</span>
+                                    <span className={`font-medium ${waitColor}`}>{waitLabel}</span>
+                                  </>
+                                )}
+                                {patient.vitals?.temperature && (
+                                  <>
+                                    <span className="mx-1">·</span>
+                                    {patient.vitals.temperature}°C
+                                  </>
+                                )}
+                                {patient.vitals?.heartRate && (
+                                  <>
+                                    <span className="mx-1">·</span>
+                                    {patient.vitals.heartRate} bpm
+                                  </>
+                                )}
+                              </p>
                             </div>
-                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                              {patient.patientId}
-                              <span className="mx-1">·</span>
-                              {patient.age}y {patient.gender}
-                              {waitLabel != null && (
-                                <>
-                                  <span className="mx-1">·</span>
-                                  <span className={`font-medium ${waitColor}`}>{waitLabel}</span>
-                                </>
-                              )}
-                              {patient.vitals?.temperature && (
-                                <>
-                                  <span className="mx-1">·</span>
-                                  {patient.vitals.temperature}°C
-                                </>
-                              )}
-                              {patient.vitals?.heartRate && (
-                                <>
-                                  <span className="mx-1">·</span>
-                                  {patient.vitals.heartRate} bpm
-                                </>
-                              )}
-                            </p>
-                          </div>
 
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            <div className="text-right min-w-[2.25rem]">
-                              {isInConsultation ? (
-                                <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                                  Active
-                                </span>
-                              ) : (
-                                <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 leading-none">
-                                  #{waitingPosition}
-                                </span>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              <div className="text-right min-w-[2.25rem]">
+                                {isInConsultation ? (
+                                  <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                                    Active
+                                  </span>
+                                ) : (
+                                  <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 leading-none">
+                                    #{waitingPosition}
+                                  </span>
+                                )}
+                              </div>
+                              {!isInConsultation && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                    onClick={() => handleStartSession(patient)}
+                                    disabled={isStartingSession}
+                                  >
+                                    {isStartingSession ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <>
+                                        <Stethoscope className="h-3 w-3 mr-1" />
+                                        Start
+                                      </>
+                                    )}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                    onClick={() => handleMarkQueuePatientLeft(patient)}
+                                    disabled={isMarkingLeft}
+                                    title="Mark left"
+                                  >
+                                    {isMarkingLeft ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <UserX className="h-3 w-3" />
+                                    )}
+                                  </Button>
+                                </>
                               )}
                             </div>
-                            {!isInConsultation && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
-                                  onClick={() => handleStartSession(patient)}
-                                  disabled={isStartingSession}
-                                >
-                                  {isStartingSession ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <>
-                                      <Stethoscope className="h-3 w-3 mr-1" />
-                                      Start
-                                    </>
-                                  )}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                                  onClick={() => handleMarkQueuePatientLeft(patient)}
-                                  disabled={isMarkingLeft}
-                                  title="Mark left"
-                                >
-                                  {isMarkingLeft ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <UserX className="h-3 w-3" />
-                                  )}
-                                </Button>
-                              </>
-                            )}
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="paused" className="mt-3 space-y-2 focus-visible:outline-none">
+                {!loadingRoomPatientsDialog && pausedSessionsSorted.length > 0 && (
+                  <div className="text-[11px] text-muted-foreground space-y-0.5">
+                    <p>
+                      {pausedSessionsSorted.length}
+                      {pausedSessionsTotalCount != null ? ` of ${pausedSessionsTotalCount}` : ''} paused, oldest first (all providers).
+                    </p>
+                    {pausedSessionsListIncomplete && (
+                      <p className="text-amber-700 dark:text-amber-400 font-medium">
+                        Not all rows shown—contact an administrator for the full list.
+                      </p>
+                    )}
+                    {!pausedSessionsListIncomplete && pausedSessionsUnknownTotal && (
+                      <p>Up to {PAUSED_SESSIONS_LIST_PAGE_SIZE} rows per load.</p>
+                    )}
+                  </div>
+                )}
+                {loadingRoomPatientsDialog ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin" />
+                    <p className="text-xs">Loading…</p>
+                  </div>
+                ) : pausedSessionsSorted.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm font-medium">No paused sessions</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-[58vh] overflow-y-auto pr-1">
+                    {pausedSessionsSorted.map((ps) => {
+                      const activeSeconds =
+                        Number((ps as any).active_seconds ?? (ps as any).active_duration_seconds ?? 0) || 0;
+                      const minutes = Math.floor(activeSeconds / 60);
+                      const displayName = ps.patient_name || `Patient #${ps.patient}`;
+                      const isEndingThis = endingPausedSessionId === ps.id;
+
+                      return (
+                        <div
+                          key={ps.id}
+                          className="rounded-md border border-amber-500/40 bg-amber-50/50 dark:bg-amber-900/10 px-2.5 py-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-amber-600 text-white text-xs font-semibold">
+                              {initialsFromQueueDisplayName(displayName)}
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="text-sm font-medium truncate max-w-[220px] sm:max-w-none">
+                                  {displayName}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className="h-4 px-1 text-[10px] bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300"
+                                >
+                                  Paused
+                                </Badge>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                                #{ps.session_id}
+                                <span className="mx-1">·</span>
+                                {ps.patient_id || '—'}
+                                <span className="mx-1">·</span>
+                                {minutes}m active
+                                {ps.doctor_name && (
+                                  <>
+                                    <span className="mx-1">·</span>
+                                    {ps.doctor_name}
+                                  </>
+                                )}
+                                <span className="mx-1">·</span>
+                                {formatDate(ps.started_at)} {formatTime(ps.started_at)}
+                              </p>
+                            </div>
+
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              <Button
+                                size="sm"
+                                className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                onClick={() => handleResumePausedSession(ps)}
+                                disabled={isResumingPausedSession || endingPausedSessionId != null}
+                              >
+                                {isResumingPausedSession ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <>
+                                    <Play className="h-3 w-3 mr-1" />
+                                    Resume
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => handleEndPausedSession(ps)}
+                                disabled={isResumingPausedSession || endingPausedSessionId != null}
+                                title="End consultation"
+                              >
+                                {isEndingThis ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  'End'
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
 
             <DialogFooter className="pt-1 sm:pt-2">
               <Button
                 type="button"
                 size="sm"
                 variant="default"
-                onClick={() => setShowRoomQueueDialog(false)}
+                onClick={() => setShowRoomPatientsDialog(false)}
               >
                 Close
               </Button>
@@ -9392,12 +9391,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <DialogContent className="w-[95vw] sm:max-w-[540px]">
             <DialogHeader>
               <DialogTitle>
-                {leftWorkflowTarget?.kind === 'session' ? 'End as Not Seen' : 'Mark Queue Patient as Left'}
+                {leftWorkflowTarget?.kind === 'session' ? 'End as not seen' : 'Mark queue patient as left'}
               </DialogTitle>
               <DialogDescription>
                 {leftWorkflowTarget?.kind === 'session'
-                  ? `This will cancel the active workflow for ${currentPatient?.name || 'this patient'}.`
-                  : `This will remove ${leftWorkflowTarget?.kind === 'queue' ? leftWorkflowTarget.patient.name : 'this patient'} from active workflow.`}
+                  ? `This will close the consultation for ${currentPatient?.name || 'this patient'} without marking it as completed.`
+                  : `This will remove ${leftWorkflowTarget?.kind === 'queue' ? leftWorkflowTarget.patient.name : 'this patient'} from the active queue.`}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2 py-2">
