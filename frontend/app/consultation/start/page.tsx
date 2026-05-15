@@ -67,12 +67,20 @@ interface Patient {
   phone?: string;
 }
 
+type RoomCardStatus = "free" | "in_consult" | "paused" | "unavailable";
+
 interface ConsultationRoom {
   id: string;
   name: string;
-  status: "available" | "occupied";
-  currentPatient?: string;
-  startTime?: string;
+  /** UI state from open sessions + facility status */
+  cardStatus: RoomCardStatus;
+  facilityStatus: "active" | "inactive" | "maintenance";
+  openSession?: {
+    id: number;
+    status: "active" | "paused";
+    patientName: string;
+    startedAt: string;
+  };
   doctor?: string;
   specialtyFocus?: string;
   totalConsultationsToday: number;
@@ -80,7 +88,7 @@ interface ConsultationRoom {
   queue: { patient_id: string; position: number }[];
 }
 
-type RoomFilter = "all" | "available" | "occupied";
+type RoomFilter = "all" | "free" | "in_use";
 
 function localISODate(): string {
   const d = new Date();
@@ -96,6 +104,54 @@ function sessionRoomIdKey(session: ConsultationSession): string | null {
     if (typeof id === "string") return id;
   }
   return null;
+}
+
+function buildOpenSessionsByRoom(
+  activeSessions: ConsultationSession[],
+  pausedSessions: ConsultationSession[],
+): Map<string, ConsultationSession> {
+  const byRoom = new Map<string, ConsultationSession>();
+  for (const s of pausedSessions) {
+    const rid = sessionRoomIdKey(s);
+    if (rid) byRoom.set(rid, s);
+  }
+  for (const s of activeSessions) {
+    const rid = sessionRoomIdKey(s);
+    if (rid) byRoom.set(rid, s);
+  }
+  return byRoom;
+}
+
+function isRoomOperational(room: { status?: string; is_active?: boolean }): boolean {
+  const facility = (room.status?.toLowerCase() || "active") as ConsultationRoom["facilityStatus"];
+  return facility === "active" && room.is_active !== false;
+}
+
+function resolveCardStatus(
+  operational: boolean,
+  openSession?: ConsultationSession,
+): RoomCardStatus {
+  if (!operational) return "unavailable";
+  if (openSession?.status === "active") return "in_consult";
+  if (openSession?.status === "paused") return "paused";
+  return "free";
+}
+
+function roomCardStatusLabel(status: RoomCardStatus): string {
+  switch (status) {
+    case "free":
+      return "Free";
+    case "in_consult":
+      return "In consult";
+    case "paused":
+      return "Paused";
+    case "unavailable":
+      return "Unavailable";
+  }
+}
+
+function canSelectRoom(status: RoomCardStatus): boolean {
+  return status !== "unavailable";
 }
 
 function buildRoomCompletedTodayMap(
@@ -142,23 +198,31 @@ function totalCompletedFromRoomMap(
 
 // Consultation rooms and patient data will be loaded from API
 
-const getStatusColor = (status: ConsultationRoom["status"]): string => {
+const getStatusColor = (status: RoomCardStatus): string => {
   switch (status) {
-    case "available":
+    case "free":
       return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800";
-    case "occupied":
+    case "in_consult":
       return "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800";
+    case "paused":
+      return "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800";
+    case "unavailable":
+      return "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700";
     default:
       return "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300";
   }
 };
 
-const getStatusIcon = (status: ConsultationRoom["status"]): string => {
+const getStatusIcon = (status: RoomCardStatus): string => {
   switch (status) {
-    case "available":
+    case "free":
       return "✓";
-    case "occupied":
-      return "⚫";
+    case "in_consult":
+      return "●";
+    case "paused":
+      return "⏸";
+    case "unavailable":
+      return "—";
     default:
       return "";
   }
@@ -195,6 +259,7 @@ const StartConsultation = () => {
     completedToday: 0,
     avgTodayMinutes: 0,
     queueCount: 0,
+    unmatchedOpenSessions: 0,
   });
   useAuthRedirect(authError);
 
@@ -204,8 +269,8 @@ const StartConsultation = () => {
       if (!prev) return prev;
       const r = consultationRooms.find((x) => x.id === prev);
       if (!r) return "";
-      if (f === "available" && r.status !== "available") return "";
-      if (f === "occupied" && r.status === "available") return "";
+      if (f === "free" && r.cardStatus !== "free") return "";
+      if (f === "in_use" && r.cardStatus !== "in_consult" && r.cardStatus !== "paused") return "";
       return prev;
     });
   };
@@ -229,8 +294,8 @@ const StartConsultation = () => {
             roomService.getRooms({ page_size: 200 }),
             apiFetch<{ results: any[] }>("/consultation/queue/?is_active=true&page_size=200"),
             consultationService.getStats().catch((): ConsultationStats | null => null),
-            consultationService.getSessions({ status: "active", page_size: 1 }).catch(emptySessions),
-            consultationService.getSessions({ status: "paused", page_size: 1 }).catch(emptySessions),
+            consultationService.getSessions({ status: "active", page_size: 500 }).catch(emptySessions),
+            consultationService.getSessions({ status: "paused", page_size: 500 }).catch(emptySessions),
             consultationService
               .getSessions({ date: todayStr, page_size: 500 })
               .catch(emptySessions),
@@ -240,7 +305,11 @@ const StartConsultation = () => {
         const roomTodayMap = buildRoomCompletedTodayMap(todaySessionsRes.results);
         const stats = statsRes;
 
-        const openConsultations = (activeRes.count ?? 0) + (pausedRes.count ?? 0);
+        const activeSessions = activeRes.results || [];
+        const pausedSessions = pausedRes.results || [];
+        const openSessionsByRoom = buildOpenSessionsByRoom(activeSessions, pausedSessions);
+        const openConsultations = (activeRes.count ?? activeSessions.length) + (pausedRes.count ?? pausedSessions.length);
+
         const completedFromSessions = totalCompletedFromRoomMap(roomTodayMap);
         const completedToday =
           stats?.completed_today ?? stats?.today?.completed ?? completedFromSessions;
@@ -248,13 +317,6 @@ const StartConsultation = () => {
           stats?.today?.avg_duration ??
           (completedFromSessions > 0 ? globalCompletedAvgMinutes(todaySessionsRes.results) : 0);
         const queueCount = stats?.queue_count ?? queueItems.length;
-
-        setOverviewStats({
-          openConsultations,
-          completedToday,
-          avgTodayMinutes,
-          queueCount,
-        });
 
         // Group queue items by room
         const queueByRoom: Record<string, any[]> = {};
@@ -266,35 +328,58 @@ const StartConsultation = () => {
           queueByRoom[roomId].push(item);
         });
 
-        // Transform rooms with queue data
+        // Transform rooms with queue + open session data
         const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
-          const roomQueue = queueByRoom[String(room.id)] || [];
-          const sortedQueue = roomQueue.sort((a, b) => {
+          const roomId = String(room.id);
+          const roomQueue = queueByRoom[roomId] || [];
+          const sortedQueue = roomQueue.sort((a: { priority: number; queued_at: string }, b: { priority: number; queued_at: string }) => {
             if (a.priority !== b.priority) {
               return a.priority - b.priority;
             }
             return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
           });
 
-          const todayForRoom = roomTodayMap[String(room.id)];
+          const todayForRoom = roomTodayMap[roomId];
+          const facilityStatus = (room.status?.toLowerCase() || "active") as ConsultationRoom["facilityStatus"];
+          const operational = isRoomOperational(room);
+          const openSessionRow = openSessionsByRoom.get(roomId);
+          const cardStatus = resolveCardStatus(operational, openSessionRow);
 
           return {
-            id: String(room.id),
+            id: roomId,
             name: room.name,
-            status: room.status?.toLowerCase() === "active" ? ("available" as const) : ("occupied" as const),
-            currentPatient: sortedQueue.length > 0 ? sortedQueue[0].patient_name : undefined,
-            startTime: undefined,
+            cardStatus,
+            facilityStatus,
+            openSession: openSessionRow
+              ? {
+                  id: openSessionRow.id,
+                  status: openSessionRow.status === "paused" ? "paused" : "active",
+                  patientName: openSessionRow.patient_name || "Patient",
+                  startedAt: openSessionRow.started_at,
+                }
+              : undefined,
             doctor: room.assigned_doctor || undefined,
             specialtyFocus: room.specialty || undefined,
             totalConsultationsToday: todayForRoom?.completed ?? 0,
             averageConsultationTime: todayForRoom?.avgMinutes ?? 0,
             queue: sortedQueue
-              .filter((item: any) => item.patient != null)
-              .map((item: any, index: number) => ({
+              .filter((item: { patient: unknown }) => item.patient != null)
+              .map((item: { patient: unknown }, index: number) => ({
                 patient_id: String(item.patient),
                 position: index + 1,
               })),
           };
+        });
+
+        const roomsWithMappedSession = transformedRooms.filter((r) => r.openSession).length;
+        const unmatchedOpenSessions = Math.max(0, openConsultations - roomsWithMappedSession);
+
+        setOverviewStats({
+          openConsultations,
+          completedToday,
+          avgTodayMinutes,
+          queueCount,
+          unmatchedOpenSessions,
         });
 
         setConsultationRooms(transformedRooms);
@@ -545,9 +630,9 @@ const StartConsultation = () => {
     setShowConfirmDialog(true);
   };
 
-  const handleDoubleClickRoom = async (roomId: string, roomStatus: string) => {
-    if (roomStatus !== "available") {
-      toast.error("This room is not available for consultation");
+  const handleDoubleClickRoom = async (roomId: string, cardStatus: RoomCardStatus) => {
+    if (!canSelectRoom(cardStatus)) {
+      toast.error("This room is unavailable (inactive or maintenance)");
       return;
     }
 
@@ -589,22 +674,25 @@ const StartConsultation = () => {
     router.push(`/consultation/room/${selectedRoom}`);
   };
 
-  const handleRoomSelect = (roomId: string, status: ConsultationRoom["status"]) => {
-    if (status === "available") {
+  const handleRoomSelect = (roomId: string, cardStatus: RoomCardStatus) => {
+    if (canSelectRoom(cardStatus)) {
       setSelectedRoom(roomId);
     }
   };
 
   const selectedRoomData = consultationRooms.find((room) => room.id === selectedRoom);
-  const availableRooms = consultationRooms.filter((room) => room.status === "available");
-  const occupiedRoomsCount = consultationRooms.length - availableRooms.length;
+  const operationalRooms = consultationRooms.filter((r) => r.cardStatus !== "unavailable");
+  const freeRooms = consultationRooms.filter((r) => r.cardStatus === "free");
+  const inUseRooms = consultationRooms.filter(
+    (r) => r.cardStatus === "in_consult" || r.cardStatus === "paused",
+  );
 
   const filteredRooms = useMemo(() => {
-    if (roomFilter === "available") {
-      return consultationRooms.filter((r) => r.status === "available");
+    if (roomFilter === "free") {
+      return consultationRooms.filter((r) => r.cardStatus === "free");
     }
-    if (roomFilter === "occupied") {
-      return consultationRooms.filter((r) => r.status !== "available");
+    if (roomFilter === "in_use") {
+      return consultationRooms.filter((r) => r.cardStatus === "in_consult" || r.cardStatus === "paused");
     }
     return consultationRooms;
   }, [consultationRooms, roomFilter]);
@@ -649,14 +737,36 @@ const StartConsultation = () => {
             Select a consultation room to begin your session
           </p>
           <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 p-2 rounded-md border border-blue-200 dark:border-blue-800 inline-block">
-            💡 <strong>Quick Start:</strong> Double-click any available room to start consultation immediately!
+            💡 <strong>Quick Start:</strong> Double-click a free room to enter immediately, or any in-use room to continue or resume.
           </div>
-          {availableRooms.length === 0 && (
+          {overviewStats.unmatchedOpenSessions > 0 && (
+            <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-amber-900 dark:text-amber-200 text-sm">
+                  <strong>{overviewStats.unmatchedOpenSessions}</strong> active or paused session
+                  {overviewStats.unmatchedOpenSessions !== 1 ? "s are" : " is"} not linked to a room on this list.
+                  Open the consultation room or end stale sessions from Queue → Paused.
+                </p>
+              </div>
+            </div>
+          )}
+          {operationalRooms.length > 0 && freeRooms.length === 0 && inUseRooms.length > 0 && (
             <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <div className="flex items-center">
                 <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mr-2" />
                 <p className="text-yellow-800 dark:text-yellow-300 text-sm">
-                  No rooms are currently available. Please wait for a room to become free.
+                  All operational rooms are in use or paused. Select a room to continue, or wait for one to become free.
+                </p>
+              </div>
+            </div>
+          )}
+          {operationalRooms.length === 0 && (
+            <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <div className="flex items-center">
+                <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mr-2" />
+                <p className="text-yellow-800 dark:text-yellow-300 text-sm">
+                  No operational rooms. Rooms may be inactive or under maintenance.
                 </p>
               </div>
             </div>
@@ -665,20 +775,20 @@ const StartConsultation = () => {
 
         {/* Enhanced Stats Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
-          {/* Available Rooms */}
+          {/* Operational / free rooms */}
           <Card className="border-l-4 border-l-emerald-500 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground font-medium">Available Rooms</p>
+                  <p className="text-sm text-muted-foreground font-medium">Operational rooms</p>
                   <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
-                    {availableRooms.length}
+                    {operationalRooms.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {availableRooms.length === 1 ? "room ready" : "rooms ready"}
-                    {occupiedRoomsCount > 0 && (
+                    {freeRooms.length} free for new consult
+                    {inUseRooms.length > 0 && (
                       <span className="block text-[11px] opacity-90">
-                        {occupiedRoomsCount} not available for assignment
+                        {inUseRooms.length} in use or paused
                       </span>
                     )}
                   </p>
@@ -690,17 +800,17 @@ const StartConsultation = () => {
             </CardContent>
           </Card>
 
-          {/* Open consultations (active + paused sessions) */}
+          {/* Active + paused sessions */}
           <Card className="border-l-4 border-l-red-500 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground font-medium">Open consultations</p>
+                  <p className="text-sm text-muted-foreground font-medium">Active & paused</p>
                   <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">
                     {overviewStats.openConsultations}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Active or paused sessions (all rooms)
+                    Open sessions across all rooms
                   </p>
                 </div>
                 <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
@@ -785,38 +895,38 @@ const StartConsultation = () => {
                 <Badge
                   role="button"
                   tabIndex={0}
-                  onClick={() => applyRoomFilter("available")}
+                  onClick={() => applyRoomFilter("free")}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      applyRoomFilter("available");
+                      applyRoomFilter("free");
                     }
                   }}
                   className={cn(
                     "cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/30 bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400",
-                    roomFilter === "available" &&
+                    roomFilter === "free" &&
                       "ring-2 ring-green-600 dark:ring-green-400 ring-offset-2 ring-offset-background",
                   )}
                 >
-                  Available ({availableRooms.length})
+                  Free ({freeRooms.length})
                 </Badge>
                 <Badge
                   role="button"
                   tabIndex={0}
-                  onClick={() => applyRoomFilter("occupied")}
+                  onClick={() => applyRoomFilter("in_use")}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      applyRoomFilter("occupied");
+                      applyRoomFilter("in_use");
                     }
                   }}
                   className={cn(
                     "cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400",
-                    roomFilter === "occupied" &&
+                    roomFilter === "in_use" &&
                       "ring-2 ring-red-600 dark:ring-red-400 ring-offset-2 ring-offset-background",
                   )}
                 >
-                  Occupied ({occupiedRoomsCount})
+                  In use ({inUseRooms.length})
                 </Badge>
               </div>
             </div>
@@ -842,12 +952,12 @@ const StartConsultation = () => {
                   ? "ring-2 ring-emerald-500 border-emerald-500 shadow-md"
                   : "border-border"
               } ${
-                room.status !== "available"
+                !canSelectRoom(room.cardStatus)
                   ? "opacity-60 cursor-not-allowed"
                   : "hover:border-emerald-300"
               }`}
-              onClick={() => handleRoomSelect(room.id, room.status)}
-              onDoubleClick={() => handleDoubleClickRoom(room.id, room.status)}
+              onClick={() => handleRoomSelect(room.id, room.cardStatus)}
+              onDoubleClick={() => handleDoubleClickRoom(room.id, room.cardStatus)}
             >
               <CardHeader className="pb-3 flex-shrink-0">
                 <div className="flex items-center justify-between">
@@ -855,9 +965,9 @@ const StartConsultation = () => {
                     <MapPin className="h-5 w-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
                     <CardTitle className="text-lg font-semibold">{room.name}</CardTitle>
                   </div>
-                  <Badge className={`${getStatusColor(room.status)} font-medium capitalize`}>
-                    <span aria-hidden="true">{getStatusIcon(room.status)}</span>
-                    {room.status}
+                  <Badge className={`${getStatusColor(room.cardStatus)} font-medium`}>
+                    <span aria-hidden="true" className="mr-1">{getStatusIcon(room.cardStatus)}</span>
+                    {roomCardStatusLabel(room.cardStatus)}
                   </Badge>
                 </div>
               </CardHeader>
@@ -882,32 +992,62 @@ const StartConsultation = () => {
                     </div>
                   </div>
 
-                  {/* Current Patient */}
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 min-h-[60px] flex flex-col justify-center">
-                    {room.status === "occupied" && room.currentPatient ? (
+                  {/* Open session */}
+                  <div
+                    className={`rounded-lg p-3 min-h-[60px] flex flex-col justify-center border ${
+                      room.cardStatus === "unavailable"
+                        ? "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
+                        : room.openSession?.status === "paused"
+                          ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+                          : room.openSession?.status === "active"
+                            ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                            : "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
+                    }`}
+                  >
+                    {room.cardStatus === "unavailable" ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                        Room {room.facilityStatus === "maintenance" ? "under maintenance" : "inactive"}
+                      </p>
+                    ) : room.openSession ? (
                       <>
-                        <div className="text-xs font-semibold text-blue-800 dark:text-blue-300 mb-1">
-                          Currently Consulting
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-blue-900 dark:text-blue-200">
+                        <p
+                          className={`text-xs font-semibold mb-1 ${
+                            room.openSession.status === "paused"
+                              ? "text-amber-800 dark:text-amber-300"
+                              : "text-blue-800 dark:text-blue-300"
+                          }`}
+                        >
+                          {room.openSession.status === "paused" ? "Session paused" : "In consultation"}
+                        </p>
+                        <div
+                          className={`flex items-center gap-2 text-sm ${
+                            room.openSession.status === "paused"
+                              ? "text-amber-900 dark:text-amber-200"
+                              : "text-blue-900 dark:text-blue-200"
+                          }`}
+                        >
                           <Stethoscope className="h-4 w-4 flex-shrink-0" />
-                          <span className="truncate">{room.currentPatient}</span>
+                          <span className="truncate">{room.openSession.patientName}</span>
                         </div>
-                        {room.startTime && (
-                          <div className="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            Started:{" "}
-                            {new Date(room.startTime).toLocaleTimeString("en-US", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </div>
-                        )}
+                        <div
+                          className={`text-xs mt-1 flex items-center gap-1 ${
+                            room.openSession.status === "paused"
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-blue-600 dark:text-blue-400"
+                          }`}
+                        >
+                          <Clock className="h-3 w-3" />
+                          Started:{" "}
+                          {new Date(room.openSession.startedAt).toLocaleTimeString("en-US", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
                       </>
                     ) : (
-                      <div className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
                         No active consultation
-                      </div>
+                      </p>
                     )}
                   </div>
 
@@ -970,7 +1110,12 @@ const StartConsultation = () => {
           <div className="flex flex-col sm:flex-row justify-center gap-4">
             <Button
               onClick={handleStartConsultation}
-              disabled={!selectedRoom || isLoading || availableRooms.length === 0}
+              disabled={
+                !selectedRoom ||
+                isLoading ||
+                !selectedRoomData ||
+                !canSelectRoom(selectedRoomData.cardStatus)
+              }
               size="lg"
               className="min-w-48 font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-lg border-0 h-12"
             >
@@ -982,9 +1127,13 @@ const StartConsultation = () => {
               <span className="text-base">
                 {isLoading
                   ? "Starting..."
-                  : selectedPatient
-                    ? "Start Consultation"
-                    : "Enter Room"}
+                  : selectedRoomData?.openSession
+                    ? selectedRoomData.openSession.status === "paused"
+                      ? "Resume session"
+                      : "Continue session"
+                    : selectedPatient
+                      ? "Start Consultation"
+                      : "Enter Room"}
               </span>
             </Button>
             <Button
@@ -999,7 +1148,7 @@ const StartConsultation = () => {
           </div>
 
           {/* Quick Status */}
-          {!selectedRoom && availableRooms.length > 0 && (
+          {!selectedRoom && operationalRooms.length > 0 && (
             <div className="mt-4 text-center">
               <p className="text-sm text-muted-foreground">
                 💡 Select a room above to get started
@@ -1032,7 +1181,16 @@ const StartConsultation = () => {
               <span className="font-medium text-emerald-600 dark:text-emerald-400">
                 {selectedRoomData?.name}
               </span>
-              {selectedPatient ? (
+              {selectedRoomData?.openSession ? (
+                <>
+                  {" "}
+                  |{" "}
+                  <span className="font-medium text-blue-600 dark:text-blue-400">
+                    {selectedRoomData.openSession.status === "paused" ? "Paused: " : "In consult: "}
+                    {selectedRoomData.openSession.patientName}
+                  </span>
+                </>
+              ) : selectedPatient ? (
                 <>
                   {" "}
                   | Next Patient:{" "}
