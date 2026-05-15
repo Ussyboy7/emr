@@ -1622,45 +1622,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Function to restore active session with robust error handling
   const restoreActiveSession = async (
     sessionId: number,
-    options: { silent?: boolean; minimal?: boolean; reassignRoomIfNeeded?: boolean } = {},
+    options: { silent?: boolean; minimal?: boolean } = {},
   ) => {
     try {
-      // Check if session is still valid and active
-      let session: ConsultationSession = await consultationService.getSession(sessionId);
+      const session: ConsultationSession = await consultationService.getSession(sessionId);
 
       const sessionRoomIdOf = (s: ConsultationSession) =>
         typeof s.room === 'object' ? Number((s.room as { id?: number }).id) : Number(s.room);
 
-      // Same visit can resume from backend while session.room still points at another room.
-      // When explicitly allowed, move the active session to this room once so we continue one row.
       const currentRoomId = Number.parseInt(roomId, 10);
-      let status = String(session.status || '').toLowerCase();
-      let sessionRoomId = sessionRoomIdOf(session);
-      let isSameRoom = Number.isFinite(currentRoomId) ? sessionRoomId === currentRoomId : true;
-      if (
-        options.reassignRoomIfNeeded &&
-        status === 'active' &&
-        !isSameRoom &&
-        Number.isFinite(currentRoomId)
-      ) {
-        try {
-          await consultationService.updateSession(sessionId, { room: currentRoomId });
-          session = await consultationService.getSession(sessionId);
-          status = String(session.status || '').toLowerCase();
-          sessionRoomId = sessionRoomIdOf(session);
-          isSameRoom = Number.isFinite(currentRoomId) ? sessionRoomId === currentRoomId : true;
-        } catch (reassignErr) {
-          console.warn('Could not move consultation session to current room:', reassignErr);
-        }
-      }
+      const status = String(session.status || '').toLowerCase();
+      const sessionRoomId = sessionRoomIdOf(session);
+      const isSameRoom = Number.isFinite(currentRoomId) ? sessionRoomId === currentRoomId : true;
 
-      // Verify session is still active and belongs to this room.
-      // Some API responses can serialize room as string/object; normalize first.
       if (status !== 'active' || !isSameRoom) {
         if (!options.silent) {
           console.warn(`Session ${sessionId} is no longer active or in wrong room`);
         }
-        // Clear local session state if invalid
         clearSessionState();
         return false;
       }
@@ -2487,8 +2465,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           return;
         }
       } catch (checkError) {
-        console.warn('Error checking for existing sessions:', checkError);
-        // Continue with session creation if check fails
+        console.error('Error checking for existing sessions:', checkError);
+        toast.error('Could not verify consultation status. Try again.');
+        return;
       }
 
       if (!startOpts?.skipPausedDuplicateCheck) {
@@ -2506,6 +2485,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             return Number.isFinite(rid) && rid === numericRoomId;
           });
           if (pausedForRoom.length > 0) {
+            // One paused row: continue that session immediately (avoids a hidden modal blocking "Start Session").
+            if (pausedForRoom.length === 1) {
+              await handleResumePausedSession(pausedForRoom[0]);
+              return;
+            }
             setPausedDuplicateStartDialog({
               patient,
               sessions: pausedForRoom,
@@ -2514,7 +2498,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             return;
           }
         } catch (pausedCheckErr) {
-          console.warn('Error checking for paused sessions:', pausedCheckErr);
+          console.error('Error checking for paused sessions:', pausedCheckErr);
+          toast.error('Could not check paused consultations. Try again.');
+          return;
         }
       }
 
@@ -2627,13 +2613,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         await consultationService.pauseSession(sessionId);
       }
       await consultationService.resumeSession(pausedSession.id);
-      let restored = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        restored = (await restoreActiveSession(pausedSession.id, { silent: attempt < 2 })) ?? false;
-        if (restored) break;
-        // Small backoff to avoid race between resume response and session read.
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
+      const restored = (await restoreActiveSession(pausedSession.id, { minimal: true })) ?? false;
       if (!restored) {
         throw new Error('Session resumed but could not be restored. Please retry.');
       }
