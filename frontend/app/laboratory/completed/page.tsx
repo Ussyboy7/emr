@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -29,6 +30,8 @@ import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 export default function CompletedTestsPage() {
   const { names: opdClinicNames } = useOutpatientClinicTypes();
   const serverToday = useServerToday();
+  const searchParams = useSearchParams();
+  const urlHydrated = useRef(false);
   const [tests, setTests] = useState<CompletedTest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +60,16 @@ export default function CompletedTestsPage() {
   const [selectedTest, setSelectedTest] = useState<CompletedTest | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
+  // Hydrate search / date from deep links (?search=…&date=all)
+  useEffect(() => {
+    if (urlHydrated.current) return;
+    urlHydrated.current = true;
+    const urlSearch = searchParams.get('search');
+    const urlDate = searchParams.get('date');
+    if (urlSearch) setSearchQuery(urlSearch);
+    if (urlDate === 'all') setDateFilter('all');
+  }, [searchParams]);
+
   // Debounce search to prevent firing API calls per keystroke
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
@@ -81,17 +94,20 @@ export default function CompletedTestsPage() {
       let start_date: string | undefined;
       let end_date: string | undefined;
 
-      if (dateRange.from || dateRange.to) {
+      const searching = Boolean(debouncedSearchQuery.trim());
+      const allTime = dateFilter === 'all' || searching;
+
+      if (!allTime && (dateRange.from || dateRange.to)) {
         start_date = dateRange.from || undefined;
         end_date = dateRange.to || undefined;
-      } else if (dateFilter === 'today') {
+      } else if (!allTime && dateFilter === 'today') {
         date = anchorYmd;
-      } else if (dateFilter === 'week') {
+      } else if (!allTime && dateFilter === 'week') {
         const weekAgo = new Date(anchor);
         weekAgo.setDate(weekAgo.getDate() - 7);
         start_date = formatLocalYmd(weekAgo);
         end_date = anchorYmd;
-      } else if (dateFilter === 'month') {
+      } else if (!allTime && dateFilter === 'month') {
         const monthAgo = new Date(anchor);
         monthAgo.setMonth(monthAgo.getMonth() - 1);
         start_date = formatLocalYmd(monthAgo);

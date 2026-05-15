@@ -25,6 +25,7 @@ import { isAuthenticationError } from "@/lib/auth-errors";
 import { useServerToday } from "@/hooks/use-server-today";
 import { joinDisplayParts } from "@/lib/utils/clinic-utils";
 import { toast } from "sonner";
+import { RadiologyPatientFinder } from "@/components/radiology/RadiologyPatientFinder";
 
 interface RadiologyDashboardStats {
   pending: number;
@@ -149,6 +150,8 @@ export default function RadiologyPage() {
             </div>
           </CardContent>
         </Card>
+
+        <RadiologyPatientFinder />
 
         {/* Today's Overview */}
         <div>

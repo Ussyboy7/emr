@@ -136,6 +136,7 @@ export default function VisitsPage() {
     isFirstVisit: Boolean(visit.is_first_visit),
     isReturningVisit: Boolean(visit.is_returning_visit),
     patientVisitStatus: visit.patient_visit_status || '',
+    createdBy: visit.created_by_name?.trim() || '',
   });
 
   // Helper function to build date filter parameters
@@ -1143,6 +1144,12 @@ export default function VisitsPage() {
                     <p className="font-medium">{selectedVisit.time}</p>
                   </div>
                 </div>
+                {selectedVisit.createdBy ? (
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Created By</Label>
+                    <p className="font-medium">{selectedVisit.createdBy}</p>
+                  </div>
+                ) : null}
                 {selectedVisit.notes && (
                   <div className="space-y-2">
                     <Label className="text-muted-foreground">Notes / Special Instructions</Label>

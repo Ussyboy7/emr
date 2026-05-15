@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +14,15 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import {
+  findPhysioOrdersTabForOrders,
+  isValidPhysioOrdersTab,
+  orderMatchesPhysioOrdersTab,
+  PHYSIO_ORDERS_TAB_LABELS,
+  type PhysioOrdersTab,
+} from '@/lib/physiotherapy/physio-workflow-search';
 import { physioService, type PhysioOrder, type PhysioSession } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
@@ -71,7 +80,18 @@ export default function PhysioPoolQueuePage() {
   const physioId = currentUser?.id ? Number(currentUser.id) : null;
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('pending');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
+  const [activeTab, setActiveTab] = useState<PhysioOrdersTab>('pending');
+  const autoTabRef = useRef<string | null>(null);
+
+  useLabUrlSync({
+    search: searchQuery,
+    tab: activeTab,
+    defaultTab: 'pending',
+    onSearchFromUrl: setSearchQuery,
+    onTabFromUrl: (tab) => setActiveTab(tab as PhysioOrdersTab),
+    isValidTab: isValidPhysioOrdersTab,
+  });
   const [dateFilter, setDateFilter] = useState('today');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -176,30 +196,31 @@ export default function PhysioPoolQueuePage() {
         page_size: itemsPerPage,
       };
 
-      if (searchQuery) params.search = searchQuery;
+      const searching = Boolean(debouncedSearch.trim());
+      if (searching) params.search = debouncedSearch.trim();
 
-      // Push status filter to backend so pagination reflects the correct total
-      if (activeTab !== 'all') params.status = activeTab;
+      if (!searching && activeTab !== 'all') params.status = activeTab;
 
-      // Push date filter to backend
-      if (dateRange.from || dateRange.to) {
-        if (dateRange.from) params.ordered_at_after = dateRange.from;
-        if (dateRange.to) params.ordered_at_before = dateRange.to;
-      } else if (dateFilter !== 'all') {
-        const today = new Date();
-        const pad = (n: number) => String(n).padStart(2, '0');
-        const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        if (dateFilter === 'today') {
-          params.ordered_at_after = fmt(today);
-          params.ordered_at_before = fmt(today);
-        } else if (dateFilter === 'week') {
-          const from = new Date(today);
-          from.setDate(from.getDate() - 7);
-          params.ordered_at_after = fmt(from);
-        } else if (dateFilter === 'month') {
-          const from = new Date(today);
-          from.setMonth(from.getMonth() - 1);
-          params.ordered_at_after = fmt(from);
+      if (!searching) {
+        if (dateRange.from || dateRange.to) {
+          if (dateRange.from) params.ordered_at_after = dateRange.from;
+          if (dateRange.to) params.ordered_at_before = dateRange.to;
+        } else if (dateFilter !== 'all') {
+          const today = new Date();
+          const pad = (n: number) => String(n).padStart(2, '0');
+          const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+          if (dateFilter === 'today') {
+            params.ordered_at_after = fmt(today);
+            params.ordered_at_before = fmt(today);
+          } else if (dateFilter === 'week') {
+            const from = new Date(today);
+            from.setDate(from.getDate() - 7);
+            params.ordered_at_after = fmt(from);
+          } else if (dateFilter === 'month') {
+            const from = new Date(today);
+            from.setMonth(from.getMonth() - 1);
+            params.ordered_at_after = fmt(from);
+          }
         }
       }
 
@@ -219,7 +240,7 @@ export default function PhysioPoolQueuePage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, searchQuery, activeTab, dateFilter, dateRange]);
+  }, [currentPage, itemsPerPage, debouncedSearch, activeTab, dateFilter, dateRange]);
 
   useEffect(() => {
     loadOrders();
@@ -558,9 +579,28 @@ export default function PhysioPoolQueuePage() {
     return `${days}d ago`;
   };
 
-  // Backend now handles status + date filtering; client only deduplicates the search
-  // against the already-paginated page (in case backend search is narrower).
-  const filteredOrders = useMemo(() => orders, [orders]);
+  const filteredOrders = useMemo(() => {
+    if (!debouncedSearch.trim()) return orders;
+    return orders.filter((o) => orderMatchesPhysioOrdersTab(o, activeTab));
+  }, [orders, debouncedSearch, activeTab]);
+
+  useEffect(() => {
+    const q = debouncedSearch.trim();
+    if (!q || loading || orders.length === 0) {
+      autoTabRef.current = null;
+      return;
+    }
+    if (orders.some((o) => orderMatchesPhysioOrdersTab(o, activeTab))) return;
+    const next = findPhysioOrdersTabForOrders(orders);
+    if (next && next !== activeTab) {
+      const key = `${q}:${next}`;
+      if (autoTabRef.current !== key) {
+        autoTabRef.current = key;
+        setActiveTab(next);
+        toast.info(`Found in ${PHYSIO_ORDERS_TAB_LABELS[next]} — switched tab.`);
+      }
+    }
+  }, [debouncedSearch, orders, activeTab, loading]);
 
   const activeUncompletedSession = useMemo(
     () => getLatestUncompletedSession(orderSessionsList),
@@ -1048,7 +1088,7 @@ export default function PhysioPoolQueuePage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex flex-col gap-4">
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as PhysioOrdersTab)} className="w-full">
                   <TabsList className="flex flex-wrap h-auto gap-1">
                     <TabsTrigger value="pending">Pending ({stats.pending})</TabsTrigger>
                     <TabsTrigger value="scheduled">Scheduled ({stats.scheduled})</TabsTrigger>

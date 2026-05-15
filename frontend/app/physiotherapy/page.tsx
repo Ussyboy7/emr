@@ -24,6 +24,7 @@ import { isAuthenticationError } from "@/lib/auth-errors";
 import { useServerToday } from "@/hooks/use-server-today";
 import { joinDisplayParts } from "@/lib/utils/clinic-utils";
 import { toast } from "sonner";
+import { PhysiotherapyPatientFinder } from "@/components/physiotherapy/PhysiotherapyPatientFinder";
 
 interface PhysioDashboardStats {
   pending: number;
@@ -191,6 +192,8 @@ export default function PhysiotherapyPage() {
             </div>
           </CardContent>
         </Card>
+
+        <PhysiotherapyPatientFinder />
 
         {/* Today's Overview */}
         <div>

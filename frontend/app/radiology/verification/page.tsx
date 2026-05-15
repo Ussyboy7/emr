@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -19,6 +19,12 @@ import { radiologyService, type RadiologyReport as ApiRadiologyReport } from '@/
 import { RADIOLOGY_VERIFICATION_POLL_INTERVAL } from '@/lib/constants/ui';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
+import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import {
+  isValidRadiologyVerificationTab,
+  RADIOLOGY_VERIFICATION_TAB_LABELS,
+  type RadiologyVerificationTab,
+} from '@/lib/radiology/radiology-workflow-search';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority } from '@/lib/services/transformers';
 import {
@@ -197,7 +203,17 @@ export default function RadiologyVerificationPage() {
   const [verifiedBreakdown, setVerifiedBreakdown] = useState({ normal: 0, abnormal: 0, critical: 0 });
 
   // Tab state
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState<RadiologyVerificationTab>('pending');
+  const autoTabRef = useRef<string | null>(null);
+
+  useLabUrlSync({
+    search: searchQuery,
+    tab: activeTab,
+    defaultTab: 'pending',
+    onSearchFromUrl: setSearchQuery,
+    onTabFromUrl: (tab) => setActiveTab(tab as RadiologyVerificationTab),
+    isValidTab: isValidRadiologyVerificationTab,
+  });
 
   // Dialog states
   const [selectedReport, setSelectedReport] = useState<RadiologyReport | null>(null);
@@ -237,49 +253,24 @@ export default function RadiologyVerificationPage() {
   const paginatedReports = reports;
   const verifiedPaginatedReports = verifiedReports;
 
-  // Load reports from API
-  useEffect(() => {
-    loadReports();
-    // Re-run when the server anchor date resolves so filters use the correct
-    // calendar day.
-  }, [currentPage, itemsPerPage, serverToday]);
-
-  // Load verified reports when verified tab is active
-  useEffect(() => {
-    if (activeTab === 'verified') {
-      loadVerifiedReports();
-    }
-  }, [activeTab, verifiedCurrentPage, itemsPerPage, serverToday]);
-
-  // Auto-refresh every 45 seconds to show new reports for verification
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadReports();
-      if (activeTab === 'verified') {
-        loadVerifiedReports();
-      }
-    }, RADIOLOGY_VERIFICATION_POLL_INTERVAL); // Auto-refresh every 45 seconds
-
-    return () => clearInterval(interval);
-  }, [currentPage, itemsPerPage, activeTab, verifiedCurrentPage]);
-
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
     setVerifiedCurrentPage(1);
   }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
 
-  const loadReports = async () => {
+  const loadReports = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      const searching = Boolean(searchQuery.trim());
       const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
-        search: searchQuery.trim() || undefined,
+        search: searching ? searchQuery.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
-        ...buildDateQuery(dateFilter),
+        ...(searching ? {} : buildDateQuery(dateFilter)),
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
@@ -296,20 +287,21 @@ export default function RadiologyVerificationPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday]);
 
-  const loadVerifiedReports = async () => {
+  const loadVerifiedReports = useCallback(async () => {
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
+      const searching = Boolean(searchQuery.trim());
       const params: any = {
         status: 'verified',
         page: verifiedCurrentPage,
         page_size: itemsPerPage,
-        search: searchQuery.trim() || undefined,
+        search: searching ? searchQuery.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
-        ...buildDateQuery(dateFilter),
+        ...(searching ? {} : buildDateQuery(dateFilter)),
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
@@ -326,16 +318,17 @@ export default function RadiologyVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  };
+  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday]);
 
-  const loadVerificationCounts = async () => {
+  const loadVerificationCounts = useCallback(async () => {
+    const searching = Boolean(searchQuery.trim());
     const base = {
       overall_status: undefined,
       priority: priorityFilter !== 'all' ? priorityFilter.toLowerCase() : undefined,
-      search: searchQuery.trim() || undefined,
+      search: searching ? searchQuery.trim() : undefined,
       gender: genderFilter !== 'all' ? genderFilter : undefined,
       category: categoryFilter !== 'all' ? categoryFilter : undefined,
-      ...buildDateQuery(dateFilter),
+      ...(searching ? {} : buildDateQuery(dateFilter)),
     };
     const [pendingStats, verifiedStats] = await Promise.all([
       radiologyService.getVerificationStats({ ...base, status: 'reported' }),
@@ -348,11 +341,64 @@ export default function RadiologyVerificationPage() {
       abnormal: verifiedStats.abnormal || 0,
       critical: verifiedStats.critical || 0,
     });
-  };
+  }, [priorityFilter, searchQuery, genderFilter, categoryFilter, dateFilter, serverToday]);
 
   useEffect(() => {
     void loadVerificationCounts();
-  }, [priorityFilter, searchQuery, genderFilter, dateFilter, serverToday]);
+  }, [loadVerificationCounts]);
+
+  // When searching, switch tab if the current one has no matches but the other does.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      autoTabRef.current = null;
+      return;
+    }
+    const pendingEmpty = activeTab === 'pending' && !loading && reports.length === 0 && pendingCount === 0;
+    const verifiedEmpty =
+      activeTab === 'verified' && !verifiedLoading && verifiedReports.length === 0 && verifiedCount === 0;
+    if (!pendingEmpty && !verifiedEmpty) return;
+
+    let next: RadiologyVerificationTab | null = null;
+    if (activeTab === 'pending' && verifiedCount > 0) next = 'verified';
+    if (activeTab === 'verified' && pendingCount > 0) next = 'pending';
+    if (!next || next === activeTab) return;
+
+    const key = `${q}:${next}`;
+    if (autoTabRef.current === key) return;
+    autoTabRef.current = key;
+    setActiveTab(next);
+    toast.info(`Found in ${RADIOLOGY_VERIFICATION_TAB_LABELS[next]} — switched tab.`);
+  }, [
+    searchQuery,
+    activeTab,
+    loading,
+    verifiedLoading,
+    reports.length,
+    verifiedReports.length,
+    pendingCount,
+    verifiedCount,
+  ]);
+
+  useEffect(() => {
+    void loadReports();
+  }, [loadReports]);
+
+  useEffect(() => {
+    if (activeTab === 'verified') {
+      void loadVerifiedReports();
+    }
+  }, [activeTab, loadVerifiedReports]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void loadReports();
+      if (activeTab === 'verified') {
+        void loadVerifiedReports();
+      }
+    }, RADIOLOGY_VERIFICATION_POLL_INTERVAL);
+    return () => clearInterval(interval);
+  }, [loadReports, loadVerifiedReports, activeTab]);
 
   const getCategoryBadge = (category: string) => {
     const colors: Record<string, string> = {
@@ -523,7 +569,7 @@ export default function RadiologyVerificationPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RadiologyVerificationTab)} className="w-full">
                 <TabsList>
                   <TabsTrigger value="pending">Pending Review ({pendingCount})</TabsTrigger>
                   <TabsTrigger value="verified">Verified ({verifiedCount})</TabsTrigger>
@@ -585,7 +631,7 @@ export default function RadiologyVerificationPage() {
         </Card>
 
         {/* Tab Content */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RadiologyVerificationTab)} className="w-full">
           {/* Pending Review Tab */}
           <TabsContent value="pending" className="space-y-6">
 

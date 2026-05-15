@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useMemo, useEffect, useCallback } from 'react';
+import { Fragment, useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -23,6 +23,15 @@ import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import {
+  findLabOrdersTabForOrders,
+  isValidLabOrdersTab,
+  LAB_ORDERS_TAB_LABELS,
+  orderMatchesLabOrdersTab,
+  type LabOrdersTab,
+} from '@/lib/laboratory/lab-workflow-search';
 import {
   buildEntryTemplate,
   classifyValue,
@@ -338,13 +347,24 @@ export default function LabOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
   const [sortBy, setSortBy] = useState<'priority' | 'lab_id' | 'date'>('priority');
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState<LabOrdersTab>('pending');
+  const autoTabRef = useRef<string | null>(null);
+
+  useLabUrlSync({
+    search: searchQuery,
+    tab: activeTab,
+    defaultTab: 'pending',
+    onSearchFromUrl: setSearchQuery,
+    onTabFromUrl: (tab) => setActiveTab(tab as LabOrdersTab),
+    isValidTab: isValidLabOrdersTab,
+  });
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
@@ -724,7 +744,7 @@ export default function LabOrdersPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -747,8 +767,9 @@ export default function LabOrdersPage() {
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
       }
-      if (searchQuery) {
-        params.search = searchQuery.trim();
+      const searching = Boolean(debouncedSearchQuery.trim());
+      if (searching) {
+        params.search = debouncedSearchQuery.trim();
       }
       if (processingFilter !== 'all') {
         params.processing_method = processingFilter;
@@ -756,11 +777,13 @@ export default function LabOrdersPage() {
       if (sourceTypeFilter !== 'all') {
         (params as any).source_type = sourceTypeFilter;
       }
-      Object.assign(params, buildDateQuery(dateFilter, serverToday));
-      if (dateRange.from || dateRange.to) {
-        delete params.date;
-        if (dateRange.from) params.start_date = dateRange.from;
-        if (dateRange.to) params.end_date = dateRange.to;
+      if (!searching) {
+        Object.assign(params, buildDateQuery(dateFilter, serverToday));
+        if (dateRange.from || dateRange.to) {
+          delete params.date;
+          if (dateRange.from) params.start_date = dateRange.from;
+          if (dateRange.to) params.end_date = dateRange.to;
+        }
       }
 
       // On the Rework Required tab, filter the list by rejection date rather
@@ -778,14 +801,18 @@ export default function LabOrdersPage() {
         labService.getOrders(params),
         labService.getOrderStats({
           priority: priorityFilter !== 'all' ? transformToBackendPriority(priorityFilter) : undefined,
-          search: searchQuery ? searchQuery.trim() : undefined,
+          search: searching ? debouncedSearchQuery.trim() : undefined,
           processing_method: processingFilter !== 'all' ? processingFilter : undefined,
           source_type: sourceTypeFilter !== 'all' ? sourceTypeFilter : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
-          ...buildDateQuery(dateFilter, serverToday),
-          ...(dateRange.from || dateRange.to
-            ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
-            : {}),
+          ...(searching
+            ? {}
+            : {
+                ...buildDateQuery(dateFilter, serverToday),
+                ...(dateRange.from || dateRange.to
+                  ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
+                  : {}),
+              }),
         }),
       ]);
 
@@ -834,12 +861,31 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, priorityFilter, searchQuery, processingFilter, sourceTypeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab]);
+  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  // When searching, switch to the tab that actually contains matches.
+  useEffect(() => {
+    const q = debouncedSearchQuery.trim();
+    if (!q || loading || orders.length === 0) {
+      autoTabRef.current = null;
+      return;
+    }
+    if (orders.some((o) => orderMatchesLabOrdersTab(o, activeTab))) return;
+    const next = findLabOrdersTabForOrders(orders);
+    if (next && next !== activeTab) {
+      const key = `${q}:${next}`;
+      if (autoTabRef.current !== key) {
+        autoTabRef.current = key;
+        setActiveTab(next);
+        toast.info(`Found in ${LAB_ORDERS_TAB_LABELS[next]} — switched tab.`);
+      }
+    }
+  }, [debouncedSearchQuery, orders, activeTab, loading]);
 
   const pollingPaused = useMemo(
     () =>
@@ -1919,7 +1965,7 @@ export default function LabOrdersPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LabOrdersTab)} className="w-full">
                 <TabsList>
                   <TabsTrigger value="pending">Pending ({stats.pendingSamples})</TabsTrigger>
                   <TabsTrigger value="processing">Processing ({stats.processing})</TabsTrigger>

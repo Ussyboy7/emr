@@ -27,6 +27,7 @@ import { useServerToday } from '@/hooks/use-server-today';
 import { toast } from 'sonner';
 import { eyeCareService, type EyeOrder, type EyeSession } from '@/lib/services/eye-care-service';
 import { NewEyeOrderModal } from '@/components/eyecare/NewEyeOrderModal';
+import { EyecarePatientFinder } from '@/components/eyecare/EyecarePatientFinder';
 
 interface EyeDashboardStats {
   queue: number;
@@ -259,6 +260,8 @@ export default function EyeClinicPage() {
             </div>
           </CardContent>
         </Card>
+
+        <EyecarePatientFinder />
 
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">

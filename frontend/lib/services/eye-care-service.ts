@@ -270,4 +270,27 @@ export const eyeCareService = {
       method: 'DELETE',
     });
   },
+
+  async getPatientTracker(search: string): Promise<{
+    search: string;
+    results: Array<{
+      patient_name: string;
+      patient_id: string;
+      item_name: string;
+      item_code: string;
+      item_status: string;
+      item_status_display: string;
+      order_id: string | null;
+      clinic: string | null;
+      screen: 'orders' | 'completed';
+      tab: string;
+      screen_label: string;
+      tab_label: string;
+      href_screen: string;
+      is_active: boolean;
+    }>;
+  }> {
+    const query = buildQueryString({ search: search.trim() });
+    return apiFetch(`/eyecare/patient-tracker/${query}`);
+  },
 };

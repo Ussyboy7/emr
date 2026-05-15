@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,6 +16,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import {
+  findEyecareOrdersTabForOrders,
+  isValidEyecareOrdersTab,
+  orderMatchesEyecareOrdersTab,
+  EYECARE_ORDERS_TAB_LABELS,
+  type EyecareOrdersTab,
+} from '@/lib/eyecare/eyecare-workflow-search';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
@@ -166,7 +174,17 @@ export default function EyeClinicOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState<EyecareOrdersTab>('pending');
+  const autoTabRef = useRef<string | null>(null);
+
+  useLabUrlSync({
+    search: searchQuery,
+    tab: activeTab,
+    defaultTab: 'pending',
+    onSearchFromUrl: setSearchQuery,
+    onTabFromUrl: (tab) => setActiveTab(tab as EyecareOrdersTab),
+    isValidTab: isValidEyecareOrdersTab,
+  });
   const [dateFilter, setDateFilter] = useState('today');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -212,15 +230,18 @@ export default function EyeClinicOrdersPage() {
   });
 
   const buildOrdersListParams = useCallback((): Parameters<typeof eyeCareService.getOrders>[0] => {
+    const searching = Boolean(debouncedSearchQuery.trim());
     const params: Parameters<typeof eyeCareService.getOrders>[0] = {
       page: currentPage,
       page_size: itemsPerPage,
-      search: debouncedSearchQuery.trim() || undefined,
+      search: searching ? debouncedSearchQuery.trim() : undefined,
     };
-    if (activeTab !== 'all') {
+    if (!searching && activeTab !== 'all') {
       params.status_tab = activeTab as 'pending' | 'in_progress' | 'cancelled' | 'completed';
     }
-    if (dateRange.from || dateRange.to) {
+    if (searching) {
+      params.date_filter = 'all';
+    } else if (dateRange.from || dateRange.to) {
       params.date_filter = 'all';
       if (dateRange.from) params.ordered_at_after = dateRange.from;
       if (dateRange.to) params.ordered_at_before = dateRange.to;
@@ -239,10 +260,13 @@ export default function EyeClinicOrdersPage() {
   ]);
 
   const buildOrdersStatsBase = useCallback((): Parameters<typeof eyeCareService.getOrders>[0] => {
+    const searching = Boolean(debouncedSearchQuery.trim());
     const params: Parameters<typeof eyeCareService.getOrders>[0] = {
-      search: debouncedSearchQuery.trim() || undefined,
+      search: searching ? debouncedSearchQuery.trim() : undefined,
     };
-    if (dateRange.from || dateRange.to) {
+    if (searching) {
+      params.date_filter = 'all';
+    } else if (dateRange.from || dateRange.to) {
       params.date_filter = 'all';
       if (dateRange.from) params.ordered_at_after = dateRange.from;
       if (dateRange.to) params.ordered_at_before = dateRange.to;
@@ -251,6 +275,29 @@ export default function EyeClinicOrdersPage() {
     }
     return params;
   }, [debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
+
+  const filteredOrders = useMemo(() => {
+    if (!debouncedSearchQuery.trim()) return orders;
+    return orders.filter((o) => orderMatchesEyecareOrdersTab(o, activeTab));
+  }, [orders, debouncedSearchQuery, activeTab]);
+
+  useEffect(() => {
+    const q = debouncedSearchQuery.trim();
+    if (!q || loading || orders.length === 0) {
+      autoTabRef.current = null;
+      return;
+    }
+    if (orders.some((o) => orderMatchesEyecareOrdersTab(o, activeTab))) return;
+    const next = findEyecareOrdersTabForOrders(orders);
+    if (next && next !== activeTab) {
+      const key = `${q}:${next}`;
+      if (autoTabRef.current !== key) {
+        autoTabRef.current = key;
+        setActiveTab(next);
+        toast.info(`Found in ${EYECARE_ORDERS_TAB_LABELS[next]} — switched tab.`);
+      }
+    }
+  }, [debouncedSearchQuery, orders, activeTab, loading]);
 
   const loadOrders = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -951,7 +998,7 @@ export default function EyeClinicOrdersPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex flex-col gap-4">
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as EyecareOrdersTab)} className="w-full">
                   <TabsList>
                     <TabsTrigger value="pending">Pending ({stats.pending})</TabsTrigger>
                     <TabsTrigger value="in_progress">In Progress ({stats.inProgress})</TabsTrigger>
@@ -1009,13 +1056,13 @@ export default function EyeClinicOrdersPage() {
                 <p className="text-red-600 dark:text-red-400">{error}</p>
                 <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
               </CardContent></Card>
-            ) : orders.length === 0 ? (
+            ) : filteredOrders.length === 0 ? (
               <Card><CardContent className="p-8 text-center text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No orders found</p>
               </CardContent></Card>
             ) : (
-              orders.map((order) => <OrderCard key={order.id} order={order} />)
+              filteredOrders.map((order) => <OrderCard key={order.id} order={order} />)
             )}
           </div>
 

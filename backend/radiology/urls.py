@@ -5,6 +5,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import RadiologyTemplateViewSet, RadiologyOrderViewSet, RadiologyStudyViewSet, RadiologyReportViewSet, ImagingPartnerViewSet
 from .analytics_views import RadiologyAnalyticsSummaryView
+from .tracker_views import RadiologyPatientTrackerView
 
 router = DefaultRouter()
 router.register(r'imaging-partners', ImagingPartnerViewSet, basename='imaging-partner')
@@ -15,6 +16,7 @@ router.register(r'verification', RadiologyReportViewSet, basename='radiology-rep
 
 urlpatterns = [
     path('radiology/', include(router.urls)),
+    path('radiology/patient-tracker/', RadiologyPatientTrackerView.as_view(), name='radiology-patient-tracker'),
     path('radiology/analytics/summary/', RadiologyAnalyticsSummaryView.as_view(), name='radiology-analytics-summary'),
 ]
 

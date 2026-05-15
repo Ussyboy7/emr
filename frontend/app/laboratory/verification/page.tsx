@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -21,6 +21,12 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
+import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import {
+  isValidLabVerificationTab,
+  LAB_VERIFICATION_TAB_LABELS,
+  type LabVerificationTab,
+} from '@/lib/laboratory/lab-workflow-search';
 import {
   buildOrderedLabResultViewRows,
   deriveOverallStatus,
@@ -256,7 +262,17 @@ export default function ResultsVerificationPage() {
   const [pendingTotalCount, setPendingTotalCount] = useState(0);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState<LabVerificationTab>('pending');
+  const autoTabRef = useRef<string | null>(null);
+
+  useLabUrlSync({
+    search: searchQuery,
+    tab: activeTab,
+    defaultTab: 'pending',
+    onSearchFromUrl: setSearchQuery,
+    onTabFromUrl: (tab) => setActiveTab(tab as LabVerificationTab),
+    isValidTab: isValidLabVerificationTab,
+  });
 
   // Dialog states
   const [selectedResult, setSelectedResult] = useState<LabResult | null>(null);
@@ -330,10 +346,13 @@ export default function ResultsVerificationPage() {
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
       }
-      if (debouncedSearch) params.search = debouncedSearch;
+      const searching = Boolean(debouncedSearch);
+      if (searching) params.search = debouncedSearch;
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (processingFilter !== 'all') params.processing_method = processingFilter;
-      Object.assign(params, buildDateQuery(dateFilter, serverToday));
+      if (!searching) {
+        Object.assign(params, buildDateQuery(dateFilter, serverToday));
+      }
 
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
@@ -366,11 +385,14 @@ export default function ResultsVerificationPage() {
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
       }
-      if (debouncedSearch) params.search = debouncedSearch;
+      const searching = Boolean(debouncedSearch);
+      if (searching) params.search = debouncedSearch;
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (processingFilter !== 'all') params.processing_method = processingFilter;
 
-      Object.assign(params, buildDateQuery(dateFilter, serverToday));
+      if (!searching) {
+        Object.assign(params, buildDateQuery(dateFilter, serverToday));
+      }
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);
@@ -385,13 +407,14 @@ export default function ResultsVerificationPage() {
   }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter, ensureTemplateRangesMap]);
 
   const loadVerificationCounts = useCallback(async () => {
+    const searching = Boolean(debouncedSearch);
     const base = {
       overall_status: statusFilter !== 'all' ? statusFilter : undefined,
       priority: priorityFilter !== 'all' ? transformToBackendPriority(priorityFilter) : undefined,
-      search: debouncedSearch || undefined,
+      search: searching ? debouncedSearch : undefined,
       gender: genderFilter !== 'all' ? genderFilter : undefined,
       processing_method: processingFilter !== 'all' ? processingFilter : undefined,
-      ...buildDateQuery(dateFilter, serverToday),
+      ...(searching ? {} : buildDateQuery(dateFilter, serverToday)),
     } as const;
 
     const [pendingStats, verifiedStats] = await Promise.all([
@@ -418,6 +441,39 @@ export default function ResultsVerificationPage() {
       loadVerifiedResults();
     }
   }, [activeTab, loadVerifiedResults]);
+
+  // When searching, switch tab if the current one has no matches but the other does.
+  useEffect(() => {
+    const q = debouncedSearch.trim();
+    if (!q) {
+      autoTabRef.current = null;
+      return;
+    }
+    const pendingEmpty = activeTab === 'pending' && !loading && pendingResults.length === 0 && pendingTotalCount === 0;
+    const verifiedEmpty =
+      activeTab === 'verified' && !verifiedLoading && verifiedResults.length === 0 && verifiedTotalCount === 0;
+    if (!pendingEmpty && !verifiedEmpty) return;
+
+    let next: LabVerificationTab | null = null;
+    if (activeTab === 'pending' && verifiedTotalCount > 0) next = 'verified';
+    if (activeTab === 'verified' && pendingTotalCount > 0) next = 'pending';
+    if (!next || next === activeTab) return;
+
+    const key = `${q}:${next}`;
+    if (autoTabRef.current === key) return;
+    autoTabRef.current = key;
+    setActiveTab(next);
+    toast.info(`Found in ${LAB_VERIFICATION_TAB_LABELS[next]} — switched tab.`);
+  }, [
+    debouncedSearch,
+    activeTab,
+    loading,
+    verifiedLoading,
+    pendingResults.length,
+    verifiedResults.length,
+    pendingTotalCount,
+    verifiedTotalCount,
+  ]);
 
   const getOverallStatusBadge = (status: string) => {
     switch (status) {
@@ -619,7 +675,7 @@ export default function ResultsVerificationPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LabVerificationTab)} className="w-full">
                 <TabsList>
                   <TabsTrigger value="pending">Pending Review ({pendingTotalCount})</TabsTrigger>
                   <TabsTrigger value="verified">Verified ({verifiedTotalCount})</TabsTrigger>
@@ -690,7 +746,7 @@ export default function ResultsVerificationPage() {
         </Card>
 
         {/* Tab Content */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LabVerificationTab)} className="w-full">
           {/* Pending Review Tab */}
           <TabsContent value="pending" className="space-y-6">
 

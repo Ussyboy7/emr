@@ -133,6 +133,8 @@ export interface Visit {
   location?: string;
   doctor?: number;
   doctor_name?: string;
+  created_by?: number | null;
+  created_by_name?: string | null;
   clinical_notes?: string;
   is_new_registration?: boolean;
   is_first_visit?: boolean;

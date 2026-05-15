@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -30,6 +31,8 @@ import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 export default function CompletedReportsPage() {
   const serverToday = useServerToday();
+  const searchParams = useSearchParams();
+  const urlHydrated = useRef(false);
   const [reports, setReports] = useState<CompletedRadiologyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +54,15 @@ export default function CompletedReportsPage() {
   // Dialog states
   const [selectedReport, setSelectedReport] = useState<CompletedRadiologyReport | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (urlHydrated.current) return;
+    urlHydrated.current = true;
+    const urlSearch = searchParams.get('search');
+    const urlDate = searchParams.get('date');
+    if (urlSearch) setSearchQuery(urlSearch);
+    if (urlDate === 'all') setDateFilter('all');
+  }, [searchParams]);
 
   const formatDateTime = (isoString: string) => {
     const date = new Date(isoString);
@@ -106,11 +118,15 @@ export default function CompletedReportsPage() {
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
       }
-      Object.assign(params, buildDateQuery(dateFilter));
-      if (dateRange.from || dateRange.to) {
-        delete params.date;
-        if (dateRange.from) params.start_date = dateRange.from;
-        if (dateRange.to) params.end_date = dateRange.to;
+      const searching = Boolean(searchQuery.trim());
+      const allTime = dateFilter === 'all' || searching;
+      if (!allTime) {
+        Object.assign(params, buildDateQuery(dateFilter));
+        if (dateRange.from || dateRange.to) {
+          delete params.date;
+          if (dateRange.from) params.start_date = dateRange.from;
+          if (dateRange.to) params.end_date = dateRange.to;
+        }
       }
 
       const [response, statsResponse] = await Promise.all([
@@ -121,10 +137,14 @@ export default function CompletedReportsPage() {
           search: searchQuery.trim() || undefined,
           clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
-          ...buildDateQuery(dateFilter),
-          ...(dateRange.from || dateRange.to
-            ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
-            : {}),
+          ...(allTime
+            ? {}
+            : {
+                ...buildDateQuery(dateFilter),
+                ...(dateRange.from || dateRange.to
+                  ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
+                  : {}),
+              }),
         }),
       ]);
       setTotalCount(response.count || response.results.length);

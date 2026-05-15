@@ -5,6 +5,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import EyecareAnalyticsSummaryView
+from .tracker_views import EyecarePatientTrackerView
 from .viewsets import EyeOrderViewSet, EyeSessionDiagnosticFileViewSet, EyeSessionViewSet
 
 router = DefaultRouter()
@@ -17,6 +18,7 @@ router.register(
 )
 
 urlpatterns = [
+    path("eyecare/patient-tracker/", EyecarePatientTrackerView.as_view(), name="eyecare-patient-tracker"),
     path("eyecare/analytics/summary/", EyecareAnalyticsSummaryView.as_view(), name="eyecare-analytics-summary"),
     path("eyecare/", include(router.urls)),
 ]

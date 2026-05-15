@@ -11,6 +11,7 @@ import { labService } from '@/lib/services';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { getServerToday } from '@/lib/utils/serverTime';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
+import { LabPatientFinder } from '@/components/laboratory/LabPatientFinder';
 
 export default function LaboratoryPage() {
   const [loading, setLoading] = useState(true);
@@ -97,6 +98,8 @@ export default function LaboratoryPage() {
             </div>
           </CardContent>
         </Card>
+
+        <LabPatientFinder />
 
         {/* Today's Overview */}
         <div>

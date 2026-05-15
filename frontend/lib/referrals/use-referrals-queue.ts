@@ -11,41 +11,32 @@ import type { ReferralWithPatient } from "@/lib/referrals/referral-helpers";
 
 type ReferralListParams = Parameters<typeof referralService.getReferrals>[0];
 
-/** Transitional alias map: API may still emit older codes for some statuses. */
-const LEGACY_STATUS_MAP: Record<string, string> = {
-  submitted_to_records: "sent",
-  records_review: "accepted",
-  approved_for_forms: "scheduled",
-  closed: "completed",
+/** Pre-migration status codes stored in DB — map to current API filter values. */
+const LEGACY_TO_API_STATUS: Record<string, string> = {
+  sent: "submitted_to_records",
+  accepted: "records_review",
+  scheduled: "approved_for_forms",
+  completed: "closed",
 };
 
-const SUBMITTED_STATUSES = new Set(["submitted_to_records", "sent"]);
-const REVIEW_STATUSES = new Set(["records_review", "accepted"]);
-const APPROVED_STATUSES = new Set(["approved_for_forms", "scheduled"]);
+const SUBMITTED_STATUSES = ["submitted_to_records"] as const;
+const REVIEW_STATUSES = ["records_review"] as const;
+const APPROVED_STATUSES = ["approved_for_forms"] as const;
 
-function isInvalidChoiceError(error: unknown) {
-  const msg = String(
-    (error as { message?: string })?.message ||
-      (error as { apiMessage?: string })?.apiMessage ||
-      ""
-  ).toLowerCase();
-  return (
-    msg.includes("not one of the available choices") ||
-    msg.includes("select a valid choice")
-  );
+function normalizeReferralStatusForApi(status: string): string {
+  return LEGACY_TO_API_STATUS[status] ?? status;
 }
 
-/** Wrap getReferrals so a chosen `status` retries against its legacy alias. */
+/** Normalize status query params to current Referral.STATUS_CHOICES before calling the API. */
 async function getReferralsWithStatusFallback(params: ReferralListParams) {
-  try {
-    return await referralService.getReferrals(params);
-  } catch (error: unknown) {
-    const requestedStatus = params?.status;
-    if (!requestedStatus || !isInvalidChoiceError(error)) throw error;
-    const fallbackStatus = LEGACY_STATUS_MAP[requestedStatus];
-    if (!fallbackStatus) throw error;
-    return referralService.getReferrals({ ...params, status: fallbackStatus });
+  const status = params?.status;
+  if (!status) {
+    return referralService.getReferrals(params);
   }
+  return referralService.getReferrals({
+    ...params,
+    status: normalizeReferralStatusForApi(status),
+  });
 }
 
 function formatLocalYyyyMmDd(d: Date) {
@@ -236,9 +227,9 @@ export function useReferralsQueue(
             ...commonParams,
             status: undefined,
           }),
-          countForStatuses(Array.from(SUBMITTED_STATUSES)),
-          countForStatuses(Array.from(REVIEW_STATUSES)),
-          countForStatuses(Array.from(APPROVED_STATUSES)),
+          countForStatuses([...SUBMITTED_STATUSES]),
+          countForStatuses([...REVIEW_STATUSES]),
+          countForStatuses([...APPROVED_STATUSES]),
         ]);
       setStats({
         total: totalRes.count || 0,

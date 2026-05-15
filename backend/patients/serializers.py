@@ -178,7 +178,17 @@ class VisitSerializer(serializers.ModelSerializer):
     age = serializers.IntegerField(source='patient.age', read_only=True)
     gender = serializers.SerializerMethodField()
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
+    created_by_name = serializers.SerializerMethodField()
     is_new_registration = serializers.SerializerMethodField()
+
+    def get_created_by_name(self, obj):
+        user = getattr(obj, 'created_by', None)
+        if not user:
+            return None
+        try:
+            return user.get_full_name() or getattr(user, 'username', None) or str(user)
+        except (AttributeError, TypeError):
+            return str(user) if user else None
     is_first_visit = serializers.SerializerMethodField()
     is_returning_visit = serializers.SerializerMethodField()
     patient_visit_status = serializers.SerializerMethodField()
@@ -346,9 +356,9 @@ class VisitSerializer(serializers.ModelSerializer):
             'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'location_clinic', 'doctor', 'doctor_name',
             'clinical_notes', 'vitals',
             'is_new_registration', 'is_first_visit', 'is_returning_visit', 'patient_visit_status',
-            'created_at', 'updated_at',
+            'created_by', 'created_by_name', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at', 'vitals', 'age', 'gender']
+        read_only_fields = ['id', 'visit_id', 'created_by', 'created_by_name', 'created_at', 'updated_at', 'vitals', 'age', 'gender']
         extra_kwargs = {
             'clinics': {'required': False},
             'completed_clinics': {'required': False},

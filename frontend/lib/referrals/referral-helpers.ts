@@ -1,4 +1,6 @@
-import { referralService, type Referral, type ResponsibilityFormIssuance } from "@/lib/services/referral-service";
+"use client";
+
+import type { Referral, ResponsibilityFormIssuance } from "@/lib/services/referral-service";
 
 export interface ReferralWithPatient extends Referral {
   patient_name?: string;
@@ -27,7 +29,14 @@ export const REFERRAL_FACILITY_TYPE_OPTIONS = [
   { value: "specialist", label: "Specialist", color: "bg-purple-100 text-purple-800" },
 ] as const;
 
-export const REFERRAL_STATUS_OPTIONS_NO_DRAFT = REFERRAL_STATUS_OPTIONS.filter((o) => o.value !== "draft");
+export const REFERRAL_STATUS_OPTIONS_NO_DRAFT = [
+  { value: "submitted_to_records", label: "Submitted to Records", color: "bg-blue-100 text-blue-800" },
+  { value: "records_review", label: "Records Review", color: "bg-amber-100 text-amber-800" },
+  { value: "returned_for_correction", label: "Returned for Correction", color: "bg-rose-100 text-rose-800" },
+  { value: "approved_for_forms", label: "Records acknowledged", color: "bg-emerald-100 text-emerald-800" },
+  { value: "closed", label: "Closed", color: "bg-purple-100 text-purple-800" },
+  { value: "cancelled", label: "Cancelled", color: "bg-red-100 text-red-800" },
+] as const;
 
 export function toLabel(value?: string) {
   return (value || "")
@@ -72,7 +81,17 @@ export function formatPrintDate(value?: string) {
 }
 
 export function getStatusBadgeClass(status: string) {
-  const option = REFERRAL_STATUS_OPTIONS.find((opt) => opt.value === status);
+  const normalized =
+    status === "scheduled"
+      ? "approved_for_forms"
+      : status === "sent"
+        ? "submitted_to_records"
+        : status === "accepted"
+          ? "records_review"
+          : status === "completed"
+            ? "closed"
+            : status;
+  const option = REFERRAL_STATUS_OPTIONS.find((opt) => opt.value === normalized);
   return option ? option.color : "bg-gray-100 text-gray-800";
 }
 
@@ -199,6 +218,7 @@ export async function printResponsibilityForm(
   if (!form?.id) return false;
   let objectUrl: string | null = null;
   try {
+    const { referralService } = await import("@/lib/services/referral-service");
     const blob = await referralService.fetchResponsibilityFormPdf(referral.id, form.id);
     objectUrl = URL.createObjectURL(blob);
     const win = window.open(objectUrl, "_blank", "noopener,noreferrer");

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -31,6 +32,8 @@ import {
 } from 'lucide-react';
 
 export default function EyeClinicCompletedSessionsPage() {
+  const searchParams = useSearchParams();
+  const urlHydrated = useRef(false);
   const [sessions, setSessions] = useState<EyeSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +67,12 @@ export default function EyeClinicCompletedSessionsPage() {
       setError(null);
       setOtherStatusCount(0);
 
-      const completedRange = buildCompletedAtApiRange(dateFilter, dateRange);
+      const searching = Boolean(searchQuery.trim());
+      const effectiveDateFilter = searching || dateFilter === 'all' ? 'all' : dateFilter;
+      const completedRange = buildCompletedAtApiRange(
+        effectiveDateFilter,
+        searching ? { from: '', to: '' } : dateRange,
+      );
       const search = searchQuery.trim() || undefined;
       const baseList = {
         status: 'completed' as const,

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -33,6 +34,8 @@ import {
 } from 'lucide-react';
 
 export default function PhysioCompletedPage() {
+  const searchParams = useSearchParams();
+  const urlHydrated = useRef(false);
   const [sessions, setSessions] = useState<PhysioSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,13 +67,27 @@ export default function PhysioCompletedPage() {
   // Hint when 0 completed: count of sessions with other statuses (in_progress, scheduled, etc.)
   const [otherStatusCount, setOtherStatusCount] = useState<number>(0);
 
+  useEffect(() => {
+    if (urlHydrated.current) return;
+    urlHydrated.current = true;
+    const urlSearch = searchParams.get('search');
+    const urlDate = searchParams.get('date');
+    if (urlSearch) setSearchQuery(urlSearch);
+    if (urlDate === 'all') setDateFilter('all');
+  }, [searchParams]);
+
   const loadSessions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       setOtherStatusCount(0);
 
-      const completedRange = buildCompletedAtApiRange(dateFilter, dateRange);
+      const searching = Boolean(searchQuery.trim());
+      const effectiveDateFilter = searching || dateFilter === 'all' ? 'all' : dateFilter;
+      const completedRange = buildCompletedAtApiRange(
+        effectiveDateFilter,
+        searching ? { from: '', to: '' } : dateRange,
+      );
       const search = searchQuery.trim() || undefined;
       const baseList = {
         status: 'completed' as const,

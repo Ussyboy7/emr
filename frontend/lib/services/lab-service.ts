@@ -759,6 +759,30 @@ class LabService {
     });
   }
 
+  async getPatientTracker(search: string): Promise<{
+    search: string;
+    results: Array<{
+      patient_name: string;
+      patient_id: string;
+      test_name: string;
+      test_code: string;
+      test_status: string;
+      test_status_display: string;
+      lab_number: string | null;
+      order_id: string | null;
+      clinic: string | null;
+      screen: 'lab_orders' | 'verification' | 'completed';
+      tab: string;
+      screen_label: string;
+      tab_label: string;
+      href_screen: string;
+      is_active: boolean;
+    }>;
+  }> {
+    const query = buildQueryString({ search: search.trim() });
+    return apiFetch(`/laboratory/patient-tracker/${query}`);
+  }
+
   async getAnalyticsSummary(start: string, end: string): Promise<LabAnalyticsSummary> {
     const query = buildQueryString({ start, end });
     return apiFetch<LabAnalyticsSummary>(`/laboratory/analytics/summary/${query}`);

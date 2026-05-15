@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import Link from 'next/link';
@@ -17,6 +17,14 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
+import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import {
+  findRadiologyOrdersTabForOrders,
+  isValidRadiologyOrdersTab,
+  orderMatchesRadiologyOrdersTab,
+  RADIOLOGY_ORDERS_TAB_LABELS,
+  type RadiologyOrdersTab,
+} from '@/lib/radiology/radiology-workflow-search';
 import {
   adminService,
   patientService,
@@ -128,7 +136,18 @@ export default function RadiologyOrdersPage() {
   const [genderFilter, setGenderFilter] = useState('all');
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
-  const [activeTab, setActiveTab] = useState('all');
+  const [activeTab, setActiveTab] = useState<RadiologyOrdersTab>('all');
+  const autoTabRef = useRef<string | null>(null);
+
+  useLabUrlSync({
+    search: searchQuery,
+    tab: activeTab,
+    defaultTab: 'all',
+    onSearchFromUrl: setSearchQuery,
+    onTabFromUrl: (tab) => setActiveTab(tab as RadiologyOrdersTab),
+    isValidTab: isValidRadiologyOrdersTab,
+  });
+
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
@@ -826,11 +845,13 @@ export default function RadiologyOrdersPage() {
         setError(null);
       }
 
-      const dateQuery = buildDateQuery(dateFilter);
-      const rangeQuery = dateRange.from || dateRange.to
-        ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
-        : {};
-      const studyStatusByTab: Record<string, 'pending' | 'processing' | 'reported' | 'rejected' | undefined> = {
+      const searching = Boolean(debouncedSearch);
+      const dateQuery = searching ? {} : buildDateQuery(dateFilter);
+      const rangeQuery =
+        !searching && (dateRange.from || dateRange.to)
+          ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
+          : {};
+      const studyStatusByTab: Record<RadiologyOrdersTab, 'pending' | 'processing' | 'reported' | 'rejected' | undefined> = {
         pending: 'pending',
         processing: 'processing',
         results: 'reported',
@@ -838,12 +859,11 @@ export default function RadiologyOrdersPage() {
         all: undefined,
       };
       const commonFilters = {
-        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+        ...(searching ? { search: debouncedSearch } : {}),
         ...(processingFilter !== 'all' ? { processing_method: processingFilter } : {}),
         ...(priorityFilter !== 'all' ? { priority: priorityFilter } : {}),
         ...(genderFilter !== 'all' ? { gender: genderFilter as 'male' | 'female' } : {}),
         ...(sourceTypeFilter !== 'all' ? { source_type: sourceTypeFilter } : {}),
-        ...(studyStatusByTab[activeTab] ? { study_status: studyStatusByTab[activeTab] } : {}),
         ...dateQuery,
         ...rangeQuery,
       };
@@ -852,9 +872,8 @@ export default function RadiologyOrdersPage() {
       // order date so "Today" reflects today's rejections.
       const listFilters = {
         ...commonFilters,
-        ...(activeTab === 'rejected'
-          ? { date_field: 'rejected_at' as const }
-          : {}),
+        ...(searching ? {} : studyStatusByTab[activeTab] ? { study_status: studyStatusByTab[activeTab] } : {}),
+        ...(!searching && activeTab === 'rejected' ? { date_field: 'rejected_at' as const } : {}),
       };
 
       const response = await radiologyService.getOrders({
@@ -1195,7 +1214,29 @@ export default function RadiologyOrdersPage() {
     return 'pending';
   };
 
-  const paginatedOrders = orders;
+  const paginatedOrders = useMemo(() => {
+    if (!debouncedSearch.trim()) return orders;
+    return orders.filter((o) => orderMatchesRadiologyOrdersTab(o, activeTab));
+  }, [orders, debouncedSearch, activeTab]);
+
+  // When searching, switch to the tab that contains matches.
+  useEffect(() => {
+    const q = debouncedSearch.trim();
+    if (!q || loading || orders.length === 0) {
+      autoTabRef.current = null;
+      return;
+    }
+    if (orders.some((o) => orderMatchesRadiologyOrdersTab(o, activeTab))) return;
+    const next = findRadiologyOrdersTabForOrders(orders);
+    if (next && next !== activeTab) {
+      const key = `${q}:${next}`;
+      if (autoTabRef.current !== key) {
+        autoTabRef.current = key;
+        setActiveTab(next);
+        toast.info(`Found in ${RADIOLOGY_ORDERS_TAB_LABELS[next]} — switched tab.`);
+      }
+    }
+  }, [debouncedSearch, orders, activeTab, loading]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -1432,7 +1473,7 @@ export default function RadiologyOrdersPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RadiologyOrdersTab)} className="w-full">
                 <TabsList>
                   <TabsTrigger value="pending">Pending ({stats.pendingSamples})</TabsTrigger>
                   <TabsTrigger value="processing">Processing ({stats.processing})</TabsTrigger>
