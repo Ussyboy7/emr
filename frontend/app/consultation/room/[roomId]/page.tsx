@@ -117,6 +117,23 @@ const debugConsultationRoom = (...args: any[]) => {
   }
 };
 
+/** Queue card avatar: skip honorifics so names like "Mr EMENIKE …" do not render as "ME". */
+function initialsFromQueueDisplayName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const skip = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'sir', 'madam', 'master', 'mx']);
+  const sig = parts.filter((w) => !skip.has(w.replace(/\.$/i, '').toLowerCase()));
+  const words = sig.length > 0 ? sig : parts;
+  const first = words[0] || '';
+  const secondWord = words[1] || '';
+  const c1 = first.match(/[A-Za-z]/)?.[0]?.toUpperCase() ?? '';
+  const c2 = secondWord
+    ? (secondWord.match(/[A-Za-z]/)?.[0]?.toUpperCase() ?? '')
+    : (first.length > 1 && /[A-Za-z]/i.test(first[1]) ? first[1].toUpperCase() : '');
+  const out = `${c1}${c2}`.trim();
+  return out.length ? out : '?';
+}
+
 // Helper to safely access extended session properties
 const getSessionProperty = (session: ExtendedConsultationSession | null, property: keyof ExtendedConsultationSession): any[] => {
   if (!session) return [];
@@ -8996,8 +9013,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 Paused Sessions - {room?.name || 'Consultation Room'}
               </DialogTitle>
               <DialogDescription>
-                Resume continues a paused consultation. Paused sessions are separate from the waiting queue, so counts
-                can differ.
+                Paused rows are stored consultations with status <span className="font-medium text-foreground">paused</span>
+                — separate from the waiting queue, so the counts will not match. This list includes every paused session
+                for this room (all providers). Several lines for the same patient usually mean older pauses were never
+                ended; use <span className="font-medium text-foreground">End consultation</span> on stale rows after
+                checking with the clinician named on the card.
               </DialogDescription>
               <p className="text-sm text-muted-foreground">
                 If <span className="font-medium text-foreground">Resume</span> fails, use{' '}
@@ -9106,7 +9126,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 Room Queue - {room?.name || 'Consultation Room'}
               </DialogTitle>
               <DialogDescription>
-                Patients waiting in queue for this room ({patients.length} {patients.length === 1 ? 'patient' : 'patients'})
+                Active queue rows for this room (including the patient you are seeing if their queue entry was never
+                cleared). Wait time is from <span className="font-medium text-foreground">queued at</span>; it does not
+                pause while you consult.
               </DialogDescription>
             </DialogHeader>
             
@@ -9145,7 +9167,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 ? 'bg-gradient-to-br from-emerald-500 to-teal-500'
                                 : 'bg-gradient-to-br from-blue-500 to-cyan-500'
                             }`}>
-                              {patient.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                              {initialsFromQueueDisplayName(patient.name)}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
@@ -9192,6 +9214,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 </div>
                                 <div>
                                   <span className="font-medium">Wait Time:</span>{' '}
+                                  {isCurrentPatient ? (
+                                    <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                                      In consultation (queue time not shown)
+                                    </span>
+                                  ) : (
                                   <span className={`font-medium ${
                                     patient.waitTime > 120 ? 'text-red-600 dark:text-red-400' :
                                     patient.waitTime > 60 ? 'text-amber-600 dark:text-amber-400' :
@@ -9202,6 +9229,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                       : `${patient.waitTime} min`
                                     }
                                   </span>
+                                  )}
                                 </div>
                               </div>
                               {patient.vitals && (
