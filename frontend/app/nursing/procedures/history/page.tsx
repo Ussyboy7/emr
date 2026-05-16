@@ -364,46 +364,59 @@ export default function ProceduresHistoryPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Card>
-            <CardContent className="p-4 text-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Records</p>
-              <p className="text-2xl sm:text-3xl font-bold text-foreground">{historyStats.total}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-500/10"><CheckCircle2 className="h-4 w-4 text-emerald-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Today</p>
-                <p className="text-xl font-bold text-emerald-500">{historyStats.todayCount}</p>
+        <div className="grid gap-4 md:grid-cols-5">
+          <Card className="border-l-4 border-l-slate-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Records</p>
+                  <p className="text-3xl font-bold">{historyStats.total}</p>
+                </div>
+                <FileText className="h-10 w-10 text-slate-500" />
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-500/10"><Syringe className="h-4 w-4 text-emerald-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Injections</p>
-                <p className="text-xl font-bold text-emerald-500">{historyStats.injections}</p>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Today</p>
+                  <p className="text-3xl font-bold">{historyStats.todayCount}</p>
+                </div>
+                <CheckCircle2 className="h-10 w-10 text-emerald-500" />
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-violet-500/10"><Bandage className="h-4 w-4 text-violet-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Dressings</p>
-                <p className="text-xl font-bold text-violet-500">{historyStats.dressings}</p>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Injections</p>
+                  <p className="text-3xl font-bold">{historyStats.injections}</p>
+                </div>
+                <Syringe className="h-10 w-10 text-emerald-500" />
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-500/10"><Pill className="h-4 w-4 text-blue-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Medications</p>
-                <p className="text-xl font-bold text-blue-500">{historyStats.medications}</p>
+          <Card className="border-l-4 border-l-violet-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Dressings</p>
+                  <p className="text-3xl font-bold">{historyStats.dressings}</p>
+                </div>
+                <Bandage className="h-10 w-10 text-violet-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-blue-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Medications</p>
+                  <p className="text-3xl font-bold">{historyStats.medications}</p>
+                </div>
+                <Pill className="h-10 w-10 text-blue-500" />
               </div>
             </CardContent>
           </Card>

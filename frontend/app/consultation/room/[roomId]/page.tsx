@@ -717,8 +717,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const draftObservationCount = nursingOrders.filter(
     (order) => order.status === 'Draft' && order.type === 'Observation Admission'
   ).length;
-  const [injectionMedications, setInjectionMedications] = useState<Array<{ id: number; name: string; category?: string; strength?: string; generic_name?: string }>>([]);
+  const [injectionMedicationSearch, setInjectionMedicationSearch] = useState("");
+  const [injectionMedicationResults, setInjectionMedicationResults] = useState<Array<{ id: number | string; name?: string; active_ingredient?: string; category?: string; dosage_form?: string; strength?: string }>>([]);
   const [loadingInjectionMedications, setLoadingInjectionMedications] = useState(false);
+  const [showInjectionMedicationDropdown, setShowInjectionMedicationDropdown] = useState(false);
+  const [injectionSelectedIds, setInjectionSelectedIds] = useState<Set<string>>(new Set());
+  const [injectionConfigs, setInjectionConfigs] = useState<Map<string, {
+    dose: string;
+    doseUnit: string;
+    frequency: string;
+    durationDays: number | "";
+    route: string;
+    instructions: string;
+  }>>(new Map());
+  const injectionMedicationSearchRef = useRef(0);
+  const injectionMedicationDropdownRef = useRef<HTMLDivElement>(null);
 
   // Function to open physio order dialog and load sessions
   const openPhysioOrderDialog = async (order: any) => {
@@ -740,62 +753,48 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   // Load injection medications from API
   useEffect(() => {
-    const loadInjectionMedications = async () => {
+    if (!showAddNursingOrder || newNursingOrder.type !== 'Injection' || !showInjectionMedicationDropdown) {
+      setShowInjectionMedicationDropdown(false);
+      return;
+    }
+    const searchTerm = injectionMedicationSearch.trim();
+    if (!searchTerm) {
+      setInjectionMedicationResults([]);
+      return;
+    }
+    const requestId = ++injectionMedicationSearchRef.current;
+    const timeout = setTimeout(async () => {
       try {
         setLoadingInjectionMedications(true);
-        // Load injection medications more efficiently using server-side search
-        let allMedications: Array<{ id: number; name: string; category?: string; strength?: string; generic_name?: string }> = [];
-
-        // Use server-side search for injection-related medications
-        const searchTerms = ['injection', 'inj', 'vial', 'ampoule', 'syringe'];
-
-        const results = await Promise.allSettled(
-          searchTerms.map((term) =>
-            pharmacyService.getMedications({
-              search: term,
-              page_size: 30,
-            })
-          )
-        );
-
-        for (const r of results) {
-          if (r.status !== 'fulfilled') continue;
-          const meds = r.value?.results || [];
-          if (!Array.isArray(meds) || meds.length === 0) continue;
-          const newMeds = meds
-            .filter((m: any) => !allMedications.some(existing => existing.id === m.id))
-            .map((m: any) => ({
-              id: m.id,
-              name: m.name,
-              category: m.category || '',
-              strength: m.strength || '',
-              generic_name: m.generic_name || '',
-            }));
-          allMedications = [...allMedications, ...newMeds];
-          if (allMedications.length >= 50) break;
+        const res = await pharmacyService.getGenericsForPrescription({ search: searchTerm, page_size: 50 });
+        if (requestId === injectionMedicationSearchRef.current) {
+          setInjectionMedicationResults((res as any)?.results || []);
         }
-
-        // Set medications from API (empty array if none found)
-        setInjectionMedications(allMedications);
-        if (allMedications.length > 0) {
-        } else {
-          console.warn('[Nursing Orders] No injection medications found in API');
+      } catch (err: any) {
+        if (requestId === injectionMedicationSearchRef.current) {
+          console.error("Failed to search injection medications:", err);
+          toast.error(err?.message || "Failed to load medication search results");
+          setInjectionMedicationResults([]);
         }
-      } catch (err) {
-        console.error('Failed to load injection medications:', err);
-        toast.error('Failed to load injection medications. Please try again.');
-        setInjectionMedications([]);
       } finally {
-        setLoadingInjectionMedications(false);
+        if (requestId === injectionMedicationSearchRef.current) {
+          setLoadingInjectionMedications(false);
+        }
       }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [showAddNursingOrder, newNursingOrder.type, showInjectionMedicationDropdown, injectionMedicationSearch]);
+
+  useEffect(() => {
+    if (!showAddNursingOrder || newNursingOrder.type !== 'Injection' || !showInjectionMedicationDropdown) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      const el = injectionMedicationDropdownRef.current;
+      if (el && !el.contains(target)) setShowInjectionMedicationDropdown(false);
     };
-
-    if (!showAddNursingOrder) return;
-    if (newNursingOrder.type !== 'Injection') return;
-    if (injectionMedications.length > 0) return;
-
-    loadInjectionMedications();
-  }, [showAddNursingOrder, newNursingOrder.type, injectionMedications.length]);
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [showAddNursingOrder, newNursingOrder.type, showInjectionMedicationDropdown]);
 
   // Referral state
   const [referrals, setReferrals] = useState<{
@@ -1634,7 +1633,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const validPatients = transformedPatients.filter((p) => p !== null) as Patient[];
         setPatients(validPatients);
         
-        // Transform room data - statistics set to 0 (not critical for queue display)
+        // Fetch today's completed sessions for this room to compute stats
+        const todayStr = new Date().toISOString().split('T')[0];
+        const todaySessionsResult = await consultationService.getSessions({
+          room: numericRoomId,
+          status: 'completed',
+          start_date: todayStr,
+          end_date: todayStr,
+          page_size: 100,
+        }).catch(() => ({ results: [] }));
+        const completedSessions = todaySessionsResult.results || [];
+        const completedCount = completedSessions.length;
+        const durations = completedSessions
+          .map((s: any) => {
+            if (!s.started_at || !s.ended_at) return null;
+            return Math.floor((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 60000);
+          })
+          .filter((d: number | null): d is number => d !== null && d > 0);
+        const avgTime = durations.length > 0 ? Math.round(durations.reduce((a: number, b: number) => a + b, 0) / durations.length) : 0;
+
         const transformedRoom: ConsultationRoom = {
           id: String(roomData.id),
           name: roomData.name,
@@ -1643,8 +1660,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           startTime: undefined,
           doctor: (roomData as any).assigned_doctor || undefined,
           specialtyFocus: roomData.specialty || '',
-          totalConsultationsToday: 0,
-          averageConsultationTime: 0,
+          totalConsultationsToday: completedCount,
+          averageConsultationTime: avgTime,
           queue: sortedQueue.map((item: any, index: number) => ({
             patient_id: String(item.patient),
             position: index + 1,
@@ -4069,9 +4086,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       return;
     }
     
-    // Validate type-specific required fields
-    if (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) {
-      toast.error('Please select a medication for injection');
+    if (newNursingOrder.type === 'Injection' && !newNursingOrder.medication && injectionSelectedIds.size === 0) {
+      toast.error('Please select at least one medication for injection');
       return;
     }
     if (newNursingOrder.type === 'Dressing') {
@@ -4113,17 +4129,57 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
     
     const orderId = `NO-${Date.now()}`;
-    
+
+    let medication: string | undefined = newNursingOrder.medication;
+    let dosage: string | undefined = newNursingOrder.dosage;
+    let route: string | undefined = newNursingOrder.route;
+    let instructions: string = newNursingOrder.instructions;
+
+    if (newNursingOrder.type === 'Injection' && injectionSelectedIds.size > 0) {
+      const selectedMeds = injectionMedicationResults.filter((m) => injectionSelectedIds.has(m.id.toString()));
+      medication = selectedMeds.map((m) => {
+        const name = m.name || "";
+        const strength = (m.strength || "").toString().trim();
+        const dosageForm = (m.dosage_form || "").toString().trim();
+        const label = strength && dosageForm
+          ? `${name} (${strength}, ${dosageForm})`
+          : strength
+            ? `${name} (${strength})`
+            : dosageForm
+              ? `${name} (${dosageForm})`
+              : name;
+        return label;
+      }).join(" + ");
+      const doses: string[] = [];
+      const freqParts: string[] = [];
+      const durParts: string[] = [];
+      const instrParts: string[] = [];
+      injectionSelectedIds.forEach((id) => {
+        const cfg = injectionConfigs.get(id);
+        if (!cfg) return;
+        const doseText = cfg.dose ? `${cfg.dose} ${cfg.doseUnit}` : "";
+        if (doseText) doses.push(doseText);
+        if (cfg.frequency) freqParts.push(cfg.frequency);
+        if (cfg.durationDays !== "") durParts.push(`${cfg.durationDays} days`);
+        if (cfg.instructions?.trim()) instrParts.push(cfg.instructions.trim());
+      });
+      dosage = doses.join(" + ") || undefined;
+      const lastRoute = injectionConfigs.get(Array.from(injectionSelectedIds).pop()!)?.route;
+      route = lastRoute || route;
+      const combinedInstr = [...instrParts, ...(durParts.length ? [`Duration: ${durParts.join(", ")}`] : []), ...(freqParts.length ? [`Frequency: ${freqParts.join(", ")}`] : [])].filter(Boolean).join(". ");
+      instructions = combinedInstr || instructions;
+    }
+
     // Add to draft nursing orders (not sent yet)
     setNursingOrders([...nursingOrders, {
       id: orderId,
       type: newNursingOrder.type as 'Injection' | 'Dressing' | 'IV Infusion' | 'Observation Admission',
-      medication: newNursingOrder.medication || undefined,
-      dosage: newNursingOrder.dosage || undefined,
-      route: newNursingOrder.route || undefined,
+      medication: medication || undefined,
+      dosage: dosage || undefined,
+      route: route || undefined,
       woundLocation: newNursingOrder.woundLocation || undefined,
       woundType: newNursingOrder.woundType || undefined,
-      instructions: newNursingOrder.instructions,
+      instructions,
       priority: newNursingOrder.priority as 'Routine' | 'Urgent' | 'STAT',
       status: 'Draft',
       // Observation admission fields
@@ -4133,6 +4189,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }]);
     
     setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", instructions: "", priority: "Routine", ward: "", admissionDiagnosis: "", presentingComplaint: "" });
+    setInjectionSelectedIds(new Set());
+    setInjectionConfigs(new Map());
+    setInjectionMedicationSearch("");
+    setShowInjectionMedicationDropdown(false);
     setShowAddNursingOrder(false);
     toast.success("Nursing order added to draft");
   };
@@ -5198,7 +5258,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
           <div className="grid gap-4 md:grid-cols-2">
             <Card><CardHeader><CardTitle className="text-lg flex items-center gap-2"><Activity className="h-5 w-5 text-blue-600" />Today's Activity</CardTitle></CardHeader><CardContent className="space-y-3"><div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg"><span className="text-sm text-muted-foreground">Consultations Completed</span><span className="text-2xl font-bold text-blue-600 dark:text-blue-400">{room.totalConsultationsToday}</span></div><div className="flex items-center justify-between p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg"><span className="text-sm text-muted-foreground">Average Consultation Time</span><span className="text-2xl font-bold text-purple-600 dark:text-purple-400">{room.averageConsultationTime} min</span></div></CardContent></Card>
-            <Card><CardHeader><CardTitle className="text-lg flex items-center gap-2"><MapPin className="h-5 w-5 text-emerald-600" />Room Info</CardTitle></CardHeader><CardContent className="space-y-3"><div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg"><span className="text-sm text-muted-foreground">Doctor</span><span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{room.doctor}</span></div><div className="flex items-center justify-between p-3 bg-teal-50 dark:bg-teal-900/20 rounded-lg"><span className="text-sm text-muted-foreground">Specialty</span><span className="text-sm font-bold text-teal-600 dark:text-teal-400">{room.specialtyFocus || "General"}</span></div></CardContent></Card>
+            <Card><CardHeader><CardTitle className="text-lg flex items-center gap-2"><MapPin className="h-5 w-5 text-emerald-600" />Room Info</CardTitle></CardHeader><CardContent className="space-y-3"><div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg"><span className="text-sm text-muted-foreground">Doctor</span><span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{sessionActive ? (currentUser?.name || "—") : (room.doctor || "—")}</span></div><div className="flex items-center justify-between p-3 bg-teal-50 dark:bg-teal-900/20 rounded-lg"><span className="text-sm text-muted-foreground">Specialty</span><span className="text-sm font-bold text-teal-600 dark:text-teal-400">{room.specialtyFocus || "General"}</span></div></CardContent></Card>
           </div>
         </div>
         {renderRoomPatientsQueueDialog()}
@@ -5214,7 +5274,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Consultation Session</h1>
-            <p className="text-muted-foreground mt-1">Room: {room.name} • {room.doctor}</p>
+            <p className="text-muted-foreground mt-1">Room: {room.name}{room.doctor ? ` • ${room.doctor}` : ''}</p>
             <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span>Session Duration: {sessionDuration} min</span>
@@ -8153,7 +8213,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
-        <Dialog open={showAddNursingOrder} onOpenChange={setShowAddNursingOrder}>
+        <Dialog open={showAddNursingOrder} onOpenChange={(next) => {
+          setShowAddNursingOrder(next);
+          if (!next) {
+            setInjectionMedicationSearch("");
+            setShowInjectionMedicationDropdown(false);
+            setInjectionMedicationResults([]);
+            setInjectionSelectedIds(new Set());
+            setInjectionConfigs(new Map());
+          }
+        }}>
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -8181,7 +8250,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <Label>Procedure Type *</Label>
                 <Select 
                   value={newNursingOrder.type} 
-                  onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", ward: "", admissionDiagnosis: "", presentingComplaint: "" })}
+                  onValueChange={(v) => {
+                    setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", ward: "", admissionDiagnosis: "", presentingComplaint: "" });
+                    setInjectionSelectedIds(new Set());
+                    setInjectionConfigs(new Map());
+                    setInjectionMedicationSearch("");
+                    setShowInjectionMedicationDropdown(false);
+                  }}
                 >
                   <SelectTrigger><SelectValue placeholder="Select procedure type" /></SelectTrigger>
                   <SelectContent>
@@ -8277,60 +8352,267 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {newNursingOrder.type === 'Injection' && (
                 <>
                   <div className="space-y-2">
-                    <Label>Medication *</Label>
-                    <Select 
-                      value={newNursingOrder.medication} 
-                      onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, medication: v })}
-                      disabled={loadingInjectionMedications}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={loadingInjectionMedications ? "Loading medications..." : "Select medication"} />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[250px]">
-                        {injectionMedications.map(med => {
-                          // Format display name: "Name Strength" (e.g., "Diclofenac 75mg")
-                          const displayName = med.strength 
-                            ? `${med.name} ${med.strength}`.trim()
-                            : med.name;
-                          return (
-                            <SelectItem key={med.id || med.name} value={displayName}>
-                              <div className="flex items-center justify-between w-full">
-                                <span>{displayName}</span>
-                                {/* Category not available in Medication interface */}
-                              </div>
-                            </SelectItem>
-                          );
-                        })}
-                        {injectionMedications.length === 0 && !loadingInjectionMedications && (
-                          <SelectItem value="__none__" disabled>No medications available</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    {loadingInjectionMedications && (
-                      <p className="text-xs text-muted-foreground">Loading medications from database...</p>
+                    <Label>Search and Select Medications *</Label>
+                    <div className="relative" ref={injectionMedicationDropdownRef}>
+                      <Input
+                        placeholder="Search generics by name, active ingredient, category..."
+                        value={injectionMedicationSearch}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setInjectionMedicationSearch(v);
+                          if (v.trim()) setShowInjectionMedicationDropdown(true);
+                          else setShowInjectionMedicationDropdown(false);
+                        }}
+                        onFocus={() => { if (injectionMedicationSearch.trim()) setShowInjectionMedicationDropdown(true); }}
+                      />
+                      {showInjectionMedicationDropdown && injectionMedicationSearch.trim() && (
+                        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
+                          {loadingInjectionMedications ? (
+                            <div className="p-4 text-center text-sm text-muted-foreground">
+                              <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                              Loading medications...
+                            </div>
+                          ) : injectionMedicationResults.length === 0 ? (
+                            <div className="p-4 text-center text-sm text-muted-foreground">
+                              No generics found for "{injectionMedicationSearch}"
+                            </div>
+                          ) : (
+                            injectionMedicationResults.map((med) => {
+                              const id = med.id?.toString();
+                              if (!id) return null;
+                              const name = med?.name || "";
+                              const strength = (med?.strength || "").toString().trim();
+                              const dosageForm = (med?.dosage_form || "").toString().trim();
+                              const label = strength && dosageForm
+                                ? `${name} (${strength}, ${dosageForm})`
+                                : strength
+                                  ? `${name} (${strength})`
+                                  : dosageForm
+                                    ? `${name} (${dosageForm})`
+                                    : name;
+                              const subline = [med.active_ingredient, med.category]
+                                .map((v) => (v || "").trim())
+                                .filter((v) => v.length > 0)
+                                .join(" • ");
+                              const checked = injectionSelectedIds.has(id);
+                              return (
+                                <div
+                                  key={id}
+                                  className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-3"
+                                  onClick={() => {
+                                    setInjectionSelectedIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(id)) next.delete(id);
+                                      else next.add(id);
+                                      return next;
+                                    });
+                                    if (!injectionConfigs.has(id)) {
+                                      setInjectionConfigs((prev) => {
+                                        const next = new Map(prev);
+                                        next.set(id, { dose: "", doseUnit: "vial", frequency: "Once daily (OD)", durationDays: "", route: "Intramuscular (IM)", instructions: "" });
+                                        return next;
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <Checkbox checked={checked} className="mt-1" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-sm">{label}</div>
+                                    {subline ? (
+                                      <div className="text-xs text-muted-foreground mt-1">{subline}</div>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {injectionSelectedIds.size > 0 && (
+                      <div className="mt-2 space-y-2">
+                        <div className="text-sm font-medium">Selected Medications ({injectionSelectedIds.size}):</div>
+                        <div className="flex flex-wrap gap-2">
+                          {injectionMedicationResults.filter((m) => injectionSelectedIds.has(m.id.toString())).map((med) => {
+                            const id = med.id.toString();
+                            const name = med.name || "";
+                            const strength = (med.strength || "").toString().trim();
+                            const dosageForm = (med.dosage_form || "").toString().trim();
+                            const label = strength && dosageForm
+                              ? `${name} (${strength}, ${dosageForm})`
+                              : strength
+                                ? `${name} (${strength})`
+                                : dosageForm
+                                  ? `${name} (${dosageForm})`
+                                  : name;
+                            return (
+                              <Badge key={id} variant="secondary" className="flex items-center gap-1">
+                                {label}
+                                <X className="h-3 w-3 cursor-pointer" onClick={() => {
+                                  setInjectionSelectedIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(id);
+                                    return next;
+                                  });
+                                  setInjectionConfigs((prev) => {
+                                    const next = new Map(prev);
+                                    next.delete(id);
+                                    return next;
+                                  });
+                                }} />
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                        <Button variant="ghost" size="sm" className="text-xs" onClick={() => {
+                          setInjectionSelectedIds(new Set());
+                          setInjectionConfigs(new Map());
+                        }}>
+                          Clear All
+                        </Button>
+                      </div>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Dose</Label>
-                      <Input 
-                        value={newNursingOrder.dosage} 
-                        onChange={(e) => setNewNursingOrder({ ...newNursingOrder, dosage: e.target.value })}
-                        placeholder="e.g., 1 amp, 2ml"
-                      />
+
+                  {injectionSelectedIds.size > 0 && (
+                    <div className="space-y-4 border-t pt-4 mt-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-sm font-semibold">Configure Prescriptions</Label>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Set dose, frequency, duration, route, and instructions for each selected medication
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="text-xs">{injectionSelectedIds.size} medication{injectionSelectedIds.size > 1 ? 's' : ''} selected</Badge>
+                      </div>
+
+                      {injectionMedicationResults.filter((m) => injectionSelectedIds.has(m.id.toString())).map((med) => {
+                        const id = med.id.toString();
+                        const name = med.name || "";
+                        const strength = (med.strength || "").toString().trim();
+                        const dosageForm = (med.dosage_form || "").toString().trim();
+                        const label = strength && dosageForm
+                          ? `${name} (${strength}, ${dosageForm})`
+                          : strength
+                            ? `${name} (${strength})`
+                            : dosageForm
+                              ? `${name} (${dosageForm})`
+                              : name;
+                        const subline = med.active_ingredient || "";
+                        const cfg = injectionConfigs.get(id) || { dose: "", doseUnit: "vial", frequency: "Once daily (OD)", durationDays: "", route: "Intramuscular (IM)", instructions: "" };
+                        const updateCfg = (partial: Partial<typeof cfg>) => {
+                          setInjectionConfigs((prev) => {
+                            const next = new Map(prev);
+                            next.set(id, { ...cfg, ...partial });
+                            return next;
+                          });
+                        };
+                        return (
+                          <div key={id} className="rounded-lg border border-l-4 border-l-cyan-500 p-4">
+                            <div className="flex items-start justify-between mb-3">
+                              <div>
+                                <div className="font-medium text-sm">{label}</div>
+                                {subline ? (
+                                  <div className="text-xs text-muted-foreground">{subline}</div>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                                <div className="space-y-1 md:col-span-4">
+                                  <Label className="text-xs">Dose per administration</Label>
+                                  <Input
+                                    type="text"
+                                    inputMode="decimal"
+                                    min={0.1}
+                                    step={0.1}
+                                    placeholder="e.g., 1, 5"
+                                    className="h-8 text-xs"
+                                    value={cfg.dose}
+                                    onChange={(e) => updateCfg({ dose: e.target.value })}
+                                  />
+                                </div>
+                                <div className="space-y-1 md:col-span-3">
+                                  <Label className="text-xs">Dose unit <span className="text-red-500">*</span></Label>
+                                  <Select value={cfg.doseUnit} onValueChange={(v) => updateCfg({ doseUnit: v })}>
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {["vial", "ampoule", "ml", "mg", "tablet", "capsule", "drop", "patch", "puff", "tube", "bottle", "sachet"].map((u) => (
+                                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1 md:col-span-5">
+                                  <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
+                                  <Select value={cfg.frequency} onValueChange={(v) => updateCfg({ frequency: v })}>
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
+                                      <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
+                                      <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
+                                      <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
+                                      <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
+                                      <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
+                                      <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
+                                      <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
+                                      <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
+                                      <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Duration (days)</Label>
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    placeholder="e.g., 7"
+                                    className="h-8 text-xs"
+                                    value={cfg.durationDays === "" ? "" : String(cfg.durationDays)}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      updateCfg({ durationDays: value === "" ? "" : parseInt(value, 10) || "" });
+                                    }}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Route</Label>
+                                  <Select value={cfg.route} onValueChange={(v) => updateCfg({ route: v })}>
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {injectionRoutes.map((r) => (
+                                        <SelectItem key={r} value={r}>{r}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Instructions</Label>
+                                <Textarea
+                                  placeholder="e.g., Administer slowly; monitor for adverse reactions"
+                                  className="min-h-[72px] text-xs resize-y"
+                                  value={cfg.instructions}
+                                  onChange={(e) => updateCfg({ instructions: e.target.value })}
+                                  rows={3}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="space-y-2">
-                      <Label>Route</Label>
-                      <Select value={newNursingOrder.route} onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, route: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {injectionRoutes.map(route => (
-                            <SelectItem key={route} value={route}>{route}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+                  )}
                 </>
               )}
 
@@ -8450,13 +8732,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </div>
             
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddNursingOrder(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => {
+                setShowAddNursingOrder(false);
+                setInjectionMedicationSearch("");
+                setShowInjectionMedicationDropdown(false);
+                setInjectionMedicationResults([]);
+                setInjectionSelectedIds(new Set());
+                setInjectionConfigs(new Map());
+              }}>Cancel</Button>
               <Button 
                 onClick={addNursingOrder}
                 disabled={
                   !newNursingOrder.type ||
                   !newNursingOrder.instructions ||
-                  (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) ||
+                  (newNursingOrder.type === 'Injection' && !newNursingOrder.medication && injectionSelectedIds.size === 0) ||
                   (newNursingOrder.type === 'Dressing' && (!newNursingOrder.woundLocation || !newNursingOrder.woundType)) ||
                   (newNursingOrder.type === 'IV Infusion' && !newNursingOrder.medication) ||
                   (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionDiagnosis || !newNursingOrder.presentingComplaint))

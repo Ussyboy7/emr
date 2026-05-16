@@ -364,8 +364,9 @@ export default function ProceduresQueuePage() {
   const [totalCount, setTotalCount] = useState(0);
   const [queueStats, setQueueStats] = useState({
     pending: 0,
-    emergency: 0,
     injections: 0,
+    dressings: 0,
+    medications: 0,
     wardAdmissions: 0,
   });
   const [wards, setWards] = useState<any[]>([]);
@@ -404,29 +405,15 @@ export default function ProceduresQueuePage() {
 
   // Form states
   const [injectionForm, setInjectionForm] = useState(() => emptyInjectionForm());
-  const [dressingForm, setDressingForm] = useState({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
-  const [medicationForm, setMedicationForm] = useState({ site: '', notes: '' });
+  const [dressingForm, setDressingForm] = useState({ dressingType: '', woundCondition: '', observations: '' });
+  const [medicationForm, setMedicationForm] = useState({ site: '', administeredTime: '', notes: '' });
   const [wardAdmissionForm, setWardAdmissionForm] = useState({ notes: '' });
-  const [paperSpec, setPaperSpec] = useState({
-    patientStatusCategory: '',
-    staffCategory: '',
-    nurseInitials: '',
-    doctorInitials: '',
-    woundIntervention: '',
-  });
 
   const resetForms = () => {
     setInjectionForm(emptyInjectionForm());
-    setDressingForm({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
-    setMedicationForm({ site: '', notes: '' });
+    setDressingForm({ dressingType: '', woundCondition: '', observations: '' });
+    setMedicationForm({ site: '', administeredTime: '', notes: '' });
     setWardAdmissionForm({ notes: '' });
-    setPaperSpec({
-      patientStatusCategory: '',
-      staffCategory: '',
-      nurseInitials: '',
-      doctorInitials: '',
-      woundIntervention: '',
-    });
   };
 
   const injectionSiteOptionsForDialog = useMemo(() => {
@@ -442,18 +429,19 @@ export default function ProceduresQueuePage() {
     if (!injectionForm.administeredTime.trim()) return false;
     if (injectionSiteNeedsLaterality(injectionForm.site) && !injectionForm.laterality) return false;
     if (injectionForm.immediateReaction === 'yes' && !injectionForm.reactionDetail.trim()) return false;
-    if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) return false;
-    if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) return false;
     return true;
-  }, [selectedProcedure, injectionForm, injectionSiteOptionsForDialog, paperSpec]);
+  }, [selectedProcedure, injectionForm, injectionSiteOptionsForDialog]);
 
   const dressingCanComplete = useMemo(() => {
     if (!selectedProcedure || selectedProcedure.type !== 'dressing') return true;
-    if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) return false;
-    if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) return false;
-    if (!paperSpec.woundIntervention.trim()) return false;
     return true;
-  }, [selectedProcedure, paperSpec]);
+  }, [selectedProcedure]);
+
+  const medicationCanComplete = useMemo(() => {
+    if (!selectedProcedure || selectedProcedure.type !== 'medication') return true;
+    if (!medicationForm.administeredTime.trim()) return false;
+    return true;
+  }, [selectedProcedure, medicationForm.administeredTime]);
   
   useEffect(() => {
     wardService
@@ -481,13 +469,14 @@ export default function ProceduresQueuePage() {
         const res = await apiFetch<{ count?: number }>(`/nursing/orders/?${qs.toString()}`);
         return typeof res.count === 'number' ? res.count : 0;
       };
-      const [pending, emergency, injections, wardAdmissions] = await Promise.all([
+      const [pending, injections, dressings, medications, wardAdmissions] = await Promise.all([
         fetchCount({}),
-        fetchCount({ priority: 'urgent' }),
         fetchCount({ queue_type: 'injection' }),
+        fetchCount({ queue_type: 'dressing' }),
+        fetchCount({ queue_type: 'medication' }),
         fetchCount({ queue_type: 'ward_admission' }),
       ]);
-      setQueueStats({ pending, emergency, injections, wardAdmissions });
+      setQueueStats({ pending, injections, dressings, medications, wardAdmissions });
     } catch (e) {
       console.error('Failed to load procedure queue stats:', e);
     }
@@ -604,6 +593,12 @@ export default function ProceduresQueuePage() {
       const mm = String(now.getMinutes()).padStart(2, '0');
       setInjectionForm({ ...emptyInjectionForm(), administeredTime: `${hh}:${mm}` });
     }
+    if (procedure.type === 'medication') {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      setMedicationForm((prev) => ({ ...prev, administeredTime: `${hh}:${mm}` }));
+    }
   };
 
   const handleComplete = async () => {
@@ -635,31 +630,15 @@ export default function ProceduresQueuePage() {
           toast.error('Describe the immediate reaction, or set immediate reaction to None.');
           return;
         }
-        if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) {
-          toast.error('Select patient status category and staff category (paper register).');
-          return;
-        }
-        if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) {
-          toast.error('Nurse and doctor initials are required.');
+      }
+
+      if (selectedProcedure.type === 'medication') {
+        if (!medicationForm.administeredTime.trim()) {
+          toast.error('Enter the time of administration.');
           return;
         }
       }
 
-      if (selectedProcedure.type === 'dressing') {
-        if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) {
-          toast.error('Select patient status category and staff category (paper register).');
-          return;
-        }
-        if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) {
-          toast.error('Nurse and doctor initials are required.');
-          return;
-        }
-        if (!paperSpec.woundIntervention.trim()) {
-          toast.error('Select wound / procedure type (dressing, I&D, sutures, etc.).');
-          return;
-        }
-      }
-      
       // Map frontend type to backend procedure_type
       const typeMap: Record<string, string> = {
         'injection': 'injection',
@@ -717,10 +696,6 @@ export default function ProceduresQueuePage() {
         const dressingNotes = [
           dressingForm.dressingType && `Type: ${dressingForm.dressingType}`,
           dressingForm.woundCondition && `Condition: ${dressingForm.woundCondition}`,
-          dressingForm.woundSize && `Size: ${dressingForm.woundSize}`,
-          dressingForm.drainage && `Drainage: ${dressingForm.drainage}`,
-          dressingForm.painLevel && `Pain Level: ${dressingForm.painLevel}/10`,
-          dressingForm.skinCondition && `Skin: ${dressingForm.skinCondition}`,
           dressingForm.observations && `Observations: ${dressingForm.observations}`,
         ].filter(Boolean).join(' | ');
         
@@ -856,6 +831,7 @@ export default function ProceduresQueuePage() {
         description = `Medication: ${medicationDetails}`;
 
         const medicationNotes = [
+          medicationForm.administeredTime && `Administered at: ${medicationForm.administeredTime}`,
           medicationForm.site && `Site: ${medicationForm.site}`,
           medicationForm.notes && `Notes: ${medicationForm.notes}`,
         ].filter(Boolean).join(' | ');
@@ -879,11 +855,7 @@ export default function ProceduresQueuePage() {
         description,
         site: performedSite,
         notes,
-        performed_by: currentUser?.id ? Number(currentUser.id) : null,  // Add the nurse who performed it
-        patient_status_category: paperSpec.patientStatusCategory || '',
-        staff_category: paperSpec.staffCategory || '',
-        nurse_initials: paperSpec.nurseInitials.trim(),
-        doctor_initials: paperSpec.doctorInitials.trim(),
+        performed_by: currentUser?.id ? Number(currentUser.id) : null,
         medication_name:
           selectedProcedure.type === 'injection'
             ? (selectedProcedure.details.medication || '').slice(0, 200)
@@ -893,7 +865,6 @@ export default function ProceduresQueuePage() {
         dosage:
           selectedProcedure.type === 'injection' ? (selectedProcedure.details.dosage || '').slice(0, 200) : '',
         route: selectedProcedure.type === 'injection' ? (selectedProcedure.details.route || '').slice(0, 100) : '',
-        wound_intervention: selectedProcedure.type === 'dressing' ? paperSpec.woundIntervention : '',
       };
       
       // Create procedure
@@ -976,37 +947,59 @@ export default function ProceduresQueuePage() {
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Card>
-            <CardContent className="p-4 text-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
-              <p className="text-2xl sm:text-3xl font-bold text-rose-500">{queueStats.pending}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-rose-500/10"><AlertTriangle className="h-4 w-4 text-rose-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Emergency</p>
-                <p className="text-xl font-bold text-rose-500">{queueStats.emergency}</p>
+        <div className="grid gap-4 md:grid-cols-5">
+          <Card className="border-l-4 border-l-slate-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Pending</p>
+                  <p className="text-3xl font-bold">{queueStats.pending}</p>
+                </div>
+                <Clock className="h-10 w-10 text-slate-500" />
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-500/10"><Syringe className="h-4 w-4 text-emerald-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Injections</p>
-                <p className="text-xl font-bold text-emerald-500">{queueStats.injections}</p>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Injections</p>
+                  <p className="text-3xl font-bold">{queueStats.injections}</p>
+                </div>
+                <Syringe className="h-10 w-10 text-emerald-500" />
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-cyan-500/10"><Building2 className="h-4 w-4 text-cyan-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Observation Admits</p>
-                <p className="text-xl font-bold text-cyan-500">{queueStats.wardAdmissions}</p>
+          <Card className="border-l-4 border-l-violet-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Dressings</p>
+                  <p className="text-3xl font-bold">{queueStats.dressings}</p>
+                </div>
+                <Bandage className="h-10 w-10 text-violet-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-blue-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Medications</p>
+                  <p className="text-3xl font-bold">{queueStats.medications}</p>
+                </div>
+                <Pill className="h-10 w-10 text-blue-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-amber-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Observation Admits</p>
+                  <p className="text-3xl font-bold">{queueStats.wardAdmissions}</p>
+                </div>
+                <Building2 className="h-10 w-10 text-amber-500" />
               </div>
             </CardContent>
           </Card>
@@ -1144,9 +1137,9 @@ export default function ProceduresQueuePage() {
                                 }`}
                               >
                                 <TypeIcon className="h-3 w-3 mr-1" />
-                                {procedure.type === 'injection' ? 'Give' :
-                                 procedure.type === 'dressing' ? 'Do' :
-                                 procedure.type === 'ward_admission' ? 'Admit to Observation' : 'Give'}
+                                {procedure.type === 'injection' ? 'Administer' :
+                                 procedure.type === 'dressing' ? 'Perform' :
+                                 procedure.type === 'ward_admission' ? 'Admit to Observation' : 'Perform'}
                               </Button>
                             )}
                           </div>
@@ -1253,7 +1246,7 @@ export default function ProceduresQueuePage() {
                   {selectedProcedure.type === 'medication' && (
                     <>
                       <p className="font-medium text-foreground">{selectedProcedure.details.medication}</p>
-                      <p className="text-sm text-muted-foreground">{selectedProcedure.details.route} • Scheduled: {selectedProcedure.details.scheduledTime}</p>
+                      <p className="text-sm text-muted-foreground">{selectedProcedure.details.route}{selectedProcedure.details.scheduledTime ? ` • Scheduled: ${selectedProcedure.details.scheduledTime}` : ''}</p>
                     </>
                   )}
                   {selectedProcedure.type === 'ward_admission' && (
@@ -1263,80 +1256,6 @@ export default function ProceduresQueuePage() {
                     </>
                   )}
                 </div>
-
-                {(selectedProcedure.type === 'injection' || selectedProcedure.type === 'dressing') && (
-                  <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/20">
-                    <p className="text-sm font-semibold text-foreground">Paper register (required)</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label>Patient status *</Label>
-                        <Select
-                          value={paperSpec.patientStatusCategory}
-                          onValueChange={(v) => setPaperSpec((p) => ({ ...p, patientStatusCategory: v }))}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Pensioner">Pensioner</SelectItem>
-                            <SelectItem value="Employee">Employee</SelectItem>
-                            <SelectItem value="Dependent">Dependent</SelectItem>
-                            <SelectItem value="Retiree">Retiree</SelectItem>
-                            <SelectItem value="ED">Emergency / ED</SelectItem>
-                            <SelectItem value="Non-NPA">Non-NPA</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Staff category *</Label>
-                        <Select
-                          value={paperSpec.staffCategory}
-                          onValueChange={(v) => setPaperSpec((p) => ({ ...p, staffCategory: v }))}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Officer">Officer</SelectItem>
-                            <SelectItem value="Staff">Staff</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Nurse initials *</Label>
-                        <Input
-                          maxLength={12}
-                          value={paperSpec.nurseInitials}
-                          onChange={(e) => setPaperSpec((p) => ({ ...p, nurseInitials: e.target.value }))}
-                          placeholder="e.g. AN"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Doctor initials *</Label>
-                        <Input
-                          maxLength={12}
-                          value={paperSpec.doctorInitials}
-                          onChange={(e) => setPaperSpec((p) => ({ ...p, doctorInitials: e.target.value }))}
-                          placeholder="e.g. JD"
-                        />
-                      </div>
-                      {selectedProcedure.type === 'dressing' && (
-                        <div className="col-span-2 space-y-2">
-                          <Label>Wound / procedure *</Label>
-                          <Select
-                            value={paperSpec.woundIntervention}
-                            onValueChange={(v) => setPaperSpec((p) => ({ ...p, woundIntervention: v }))}
-                          >
-                            <SelectTrigger><SelectValue placeholder="Select procedure" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="dressing">Dressing</SelectItem>
-                              <SelectItem value="i_and_d">Incision & drainage (I&D)</SelectItem>
-                              <SelectItem value="sutures">Sutures</SelectItem>
-                              <SelectItem value="suture_removal">Suture removal</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 {/* Type-specific forms */}
                 {selectedProcedure.type === 'injection' && (
@@ -1453,42 +1372,6 @@ export default function ProceduresQueuePage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Wound Size</Label>
-                      <Input value={dressingForm.woundSize} onChange={(e) => setDressingForm(p => ({ ...p, woundSize: e.target.value }))} placeholder="e.g., 5x3 cm" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Drainage</Label>
-                      <Select value={dressingForm.drainage} onValueChange={(v) => setDressingForm(p => ({ ...p, drainage: v }))}>
-                        <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="None">None</SelectItem>
-                          <SelectItem value="Serous">Serous</SelectItem>
-                          <SelectItem value="Serosanguinous">Serosanguinous</SelectItem>
-                          <SelectItem value="Sanguinous">Sanguinous</SelectItem>
-                          <SelectItem value="Purulent">Purulent</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Pain Level (1-10)</Label>
-                      <Select value={dressingForm.painLevel} onValueChange={(v) => setDressingForm(p => ({ ...p, painLevel: v }))}>
-                        <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                        <SelectContent>{[...Array(10)].map((_, i) => <SelectItem key={i} value={String(i + 1)}>{i + 1}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Skin Condition</Label>
-                      <Select value={dressingForm.skinCondition} onValueChange={(v) => setDressingForm(p => ({ ...p, skinCondition: v }))}>
-                        <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Intact">Intact</SelectItem>
-                          <SelectItem value="Erythema">Erythema</SelectItem>
-                          <SelectItem value="Maceration">Maceration</SelectItem>
-                          <SelectItem value="Excoriation">Excoriation</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
                     <div className="col-span-2 space-y-2">
                       <Label>Observations</Label>
                       <Textarea value={dressingForm.observations} onChange={(e) => setDressingForm(p => ({ ...p, observations: e.target.value }))} placeholder="Detailed observations..." rows={3} />
@@ -1500,7 +1383,7 @@ export default function ProceduresQueuePage() {
                   <div className="space-y-4">
                     {['IV', 'IM', 'SC'].includes(selectedProcedure.details.route || '') && (
                       <div className="space-y-2">
-                        <Label>Injection Site</Label>
+                        <Label>Administration Site</Label>
                         <Select value={medicationForm.site} onValueChange={(v) => setMedicationForm(p => ({ ...p, site: v }))}>
                           <SelectTrigger><SelectValue placeholder="Select site" /></SelectTrigger>
                           <SelectContent>
@@ -1513,6 +1396,11 @@ export default function ProceduresQueuePage() {
                         </Select>
                       </div>
                     )}
+                    <div className="space-y-2">
+                      <Label>Time of administration <span className="text-red-500">*</span></Label>
+                      <Input type="time" value={medicationForm.administeredTime} onChange={(e) => setMedicationForm(p => ({ ...p, administeredTime: e.target.value }))} />
+                      <p className="text-xs text-muted-foreground">Record when the medication was administered</p>
+                    </div>
                     <div className="space-y-2">
                       <Label>Notes</Label>
                       <Textarea value={medicationForm.notes} onChange={(e) => setMedicationForm(p => ({ ...p, notes: e.target.value }))} placeholder="Any observations..." rows={2} />
@@ -1543,14 +1431,23 @@ export default function ProceduresQueuePage() {
                 disabled={
                   isSubmitting ||
                   (selectedProcedure?.type === 'injection' && !injectionCanComplete) ||
-                  (selectedProcedure?.type === 'dressing' && !dressingCanComplete)
+                  (selectedProcedure?.type === 'dressing' && !dressingCanComplete) ||
+                  (selectedProcedure?.type === 'medication' && !medicationCanComplete)
                 }
                 className={`text-white ${
                 selectedProcedure?.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
                 selectedProcedure?.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :
-                'bg-blue-500 hover:bg-blue-600'
+                selectedProcedure?.type === 'medication' ? 'bg-blue-500 hover:bg-blue-600' :
+                'bg-amber-500 hover:bg-amber-600'
               }`}>
-                {isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Recording...</> : <><CheckCircle2 className="h-4 w-4 mr-2" />Complete</>}
+                {isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Recording...</>
+                : <><CheckCircle2 className="h-4 w-4 mr-2" />{
+                  selectedProcedure?.type === 'injection' ? 'Administer' :
+                  selectedProcedure?.type === 'dressing' ? 'Complete Dressing' :
+                  selectedProcedure?.type === 'medication' ? 'Administer' :
+                  selectedProcedure?.type === 'ward_admission' ? 'Admit Patient' :
+                  'Complete'
+                }</>}
               </Button>
             </DialogFooter>
           </DialogContent>
