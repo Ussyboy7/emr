@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { toast } from "sonner";
 import { pharmacyService, type Medication } from "@/lib/services";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -37,7 +39,7 @@ export default function DrugMasterPage() {
   const [drugItemsPerPage, setDrugItemsPerPage] = useState(50);
 
   const [generics, setGenerics] = useState<Array<{ id: number; name: string; unit?: string }>>([]);
-  const [newGenericName, setNewGenericName] = useState("");
+  const [genericSearch, setGenericSearch] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
@@ -94,17 +96,21 @@ export default function DrugMasterPage() {
     setDrugCurrentPage(1);
   }, [debouncedDrugSearch, drugItemsPerPage]);
 
+  const debouncedGenericSearch = useDebouncedValue(genericSearch, 300);
+
   useEffect(() => {
     const loadGenerics = async () => {
       try {
-        const res = await pharmacyService.getGenerics({ page: 1, page_size: 200 });
+        const params: any = { page: 1, page_size: 200 };
+        if (debouncedGenericSearch.trim()) params.search = debouncedGenericSearch.trim();
+        const res = await pharmacyService.getGenerics(params);
         setGenerics((res.results || []).map((g: any) => ({ id: g.id, name: g.name, unit: g.unit })));
       } catch {
         /* silent */
       }
     };
     void loadGenerics();
-  }, []);
+  }, [debouncedGenericSearch]);
 
   const handleAddMedication = async () => {
     setAddDrugError(null);
@@ -463,19 +469,40 @@ export default function DrugMasterPage() {
                 />
               </div>
               <div>
-                <Label>Generic Medication</Label>
+                <Label>Generic Medication *</Label>
+                <div className="relative mt-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={genericSearch}
+                    onChange={(e) => setGenericSearch(e.target.value)}
+                    placeholder="Search generic..."
+                    className="pl-10 mb-1"
+                  />
+                </div>
                 <Select
                   value={formData.generic_id}
                   onValueChange={(val) => {
+                    if (val === '__create__') {
+                      const name = genericSearch.trim();
+                      if (!name) { toast.error("Enter a generic name first"); return; }
+                      pharmacyService.createGeneric({ name }).then((g) => {
+                        setGenerics((prev) => [{ id: g.id, name: g.name, unit: (g as any).unit || "tablet" }, ...prev]);
+                        setFormData({ ...formData, generic_id: String(g.id), ...((g as any).unit ? { unit: String((g as any).unit).toLowerCase() } : {}) });
+                        setGenericSearch("");
+                        toast.success("Generic created");
+                      }).catch((e: any) => toast.error(e?.message || "Failed to create generic"));
+                      return;
+                    }
                     const g = generics.find((x) => String(x.id) === val);
                     setFormData({
                       ...formData,
                       generic_id: val,
                       ...(g?.unit ? { unit: g.unit.toLowerCase() } : {}),
                     });
+                    setGenericSearch("");
                   }}
                 >
-                  <SelectTrigger className="mt-1">
+                  <SelectTrigger>
                     <SelectValue placeholder="Select generic" />
                   </SelectTrigger>
                   <SelectContent className="max-h-[200px]">
@@ -484,35 +511,22 @@ export default function DrugMasterPage() {
                         {g.name}
                       </SelectItem>
                     ))}
+                    {genericSearch.trim() && !generics.some((g) => g.name.toLowerCase() === genericSearch.trim().toLowerCase()) && (
+                      <SelectItem value="__create__">
+                        + Create "{genericSearch.trim()}"
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
-                <div className="mt-2 flex gap-2">
-                  <Input value={newGenericName} onChange={(e) => setNewGenericName(e.target.value)} placeholder="New generic name (e.g., Amoxicillin)" />
-                  <Button
-                    variant="outline"
-                    onClick={async () => {
-                      if (!newGenericName.trim()) {
-                        toast.error("Enter a generic name");
-                        return;
-                      }
-                      try {
-                        const g = await pharmacyService.createGeneric({ name: newGenericName.trim() });
-                        setGenerics((prev) => [{ id: g.id, name: g.name, unit: (g as any).unit || "tablet" }, ...prev]);
-                        setFormData({ ...formData, generic_id: String(g.id), ...((g as any).unit ? { unit: String((g as any).unit).toLowerCase() } : {}) });
-                        setNewGenericName("");
-                        toast.success("Generic created");
-                      } catch (e: any) {
-                        toast.error(e?.message || "Failed to create generic");
-                      }
-                    }}
-                  >
-                    + Add Generic
-                  </Button>
-                </div>
               </div>
               <div>
                 <Label>Code *</Label>
-                <Input value={formData.code} onChange={(e) => setFormData({ ...formData, code: e.target.value })} placeholder="e.g., AMOX500" className="mt-1" />
+                <Input
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                  placeholder="e.g., AMOX500"
+                  className="mt-1"
+                />
               </div>
               <div>
                 <Label>Unit *</Label>
@@ -527,6 +541,16 @@ export default function DrugMasterPage() {
                     <SelectItem value="vial">Vial</SelectItem>
                     <SelectItem value="box">Box</SelectItem>
                     <SelectItem value="pack">Pack</SelectItem>
+                    <SelectItem value="sachet">Sachet</SelectItem>
+                    <SelectItem value="drop">Drop</SelectItem>
+                    <SelectItem value="ampoule">Ampoule</SelectItem>
+                    <SelectItem value="suppository">Suppository</SelectItem>
+                    <SelectItem value="inhaler">Inhaler</SelectItem>
+                    <SelectItem value="patch">Patch</SelectItem>
+                    <SelectItem value="cream">Cream</SelectItem>
+                    <SelectItem value="ointment">Ointment</SelectItem>
+                    <SelectItem value="syringe">Syringe</SelectItem>
+                    <SelectItem value="bottle">Bottle</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -536,20 +560,20 @@ export default function DrugMasterPage() {
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select strength" />
                   </SelectTrigger>
-                  <SelectContent className="max-h-[200px]">
-                    {addStrengthOptions.map((strength) => (
-                      <SelectItem key={strength} value={strength}>
-                        {strength}
+                  <SelectContent>
+                    {addStrengthOptions.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {formData.strength === "__custom__" && (
                   <Input
-                    className="mt-2"
-                    value={formData.strengthCustom}
+                    value={formData.strengthCustom ?? ""}
                     onChange={(e) => setFormData({ ...formData, strengthCustom: e.target.value })}
-                    placeholder="Enter strength (e.g., 80/480mg)"
+                    placeholder="Enter strength"
+                    className="mt-1"
                   />
                 )}
               </div>
@@ -650,16 +674,47 @@ export default function DrugMasterPage() {
               </div>
               <div>
                 <Label>Generic Medication *</Label>
-                <Select value={editFormData.generic_id} onValueChange={(val) => setEditFormData({ ...editFormData, generic_id: val })}>
-                  <SelectTrigger className="mt-1">
+                <div className="relative mt-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={genericSearch}
+                    onChange={(e) => setGenericSearch(e.target.value)}
+                    placeholder="Search generic..."
+                    className="pl-10 mb-1"
+                  />
+                </div>
+                <Select
+                  value={editFormData.generic_id}
+                  onValueChange={(val) => {
+                    if (val === '__create__') {
+                      const name = genericSearch.trim();
+                      if (!name) { toast.error("Enter a generic name first"); return; }
+                      pharmacyService.createGeneric({ name }).then((g) => {
+                        setGenerics((prev) => [{ id: g.id, name: g.name, unit: (g as any).unit || "tablet" }, ...prev]);
+                        setEditFormData({ ...editFormData, generic_id: String(g.id) });
+                        setGenericSearch("");
+                        toast.success("Generic created");
+                      }).catch((e: any) => toast.error(e?.message || "Failed to create generic"));
+                      return;
+                    }
+                    setEditFormData({ ...editFormData, generic_id: val });
+                    setGenericSearch("");
+                  }}
+                >
+                  <SelectTrigger>
                     <SelectValue placeholder="Select generic" />
                   </SelectTrigger>
                   <SelectContent className="max-h-[200px]">
                     {generics.map((g) => (
-                      <SelectItem key={g.id} value={String(g.id)}>
-                        {g.name}
-                      </SelectItem>
+                        <SelectItem key={g.id} value={String(g.id)}>
+                          {g.name}
+                        </SelectItem>
                     ))}
+                    {genericSearch.trim() && !generics.some((g) => g.name.toLowerCase() === genericSearch.trim().toLowerCase()) && (
+                      <SelectItem value="__create__">
+                        + Create "{genericSearch.trim()}"
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
