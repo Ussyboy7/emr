@@ -3535,10 +3535,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  const handleMarkQueuePatientLeft = (patient: Patient) => {
-    setLeftWorkflowTarget({ kind: 'queue', patient });
-    setLeftWorkflowReason('Patient left before being seen');
-    setShowLeftWorkflowDialog(true);
+  const handleMarkQueuePatientLeft = async (patient: Patient) => {
+    const confirmed = window.confirm(
+      `Mark ${patient.name} as left?\n\nThey will be removed from the active queue.\n\nThis cannot be undone.`
+    );
+    if (!confirmed) return;
+    setIsMarkingLeft(true);
+    try {
+      if (!patient.queueItemId) throw new Error('Queue row not found for this patient');
+      await consultationService.markQueuePatientLeft(patient.queueItemId, {
+        reason: 'Patient left before being seen',
+      });
+      toast.success(`${patient.name} marked as left`);
+      await refreshQueueData();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to mark patient as left');
+    } finally {
+      setIsMarkingLeft(false);
+    }
   };
 
   const handleEndSessionNotSeen = async () => {
@@ -4896,20 +4910,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     </>
                                   )}
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                                  onClick={() => handleMarkQueuePatientLeft(patient)}
-                                  disabled={isMarkingLeft}
-                                  title="Mark left"
-                                >
-                                  {isMarkingLeft ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <UserX className="h-3 w-3" />
-                                  )}
-                                </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => handleMarkQueuePatientLeft(patient)}
+                                    disabled={isMarkingLeft}
+                                    title="Mark left"
+                                  >
+                                    {isMarkingLeft ? (
+                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    ) : (
+                                      <UserX className="h-3 w-3 mr-1" />
+                                    )}
+                                    Left
+                                  </Button>
                               </>
                             )}
                           </div>
@@ -5161,12 +5175,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             <Button
                               size="sm"
                               variant="destructive"
-                              className="h-9 w-9 p-0"
                               onClick={() => handleMarkQueuePatientLeft(patient)}
                               disabled={isMarkingLeft}
                               title="Mark Left"
                             >
-                              {isMarkingLeft ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserX className="h-4 w-4" />}
+                              {isMarkingLeft ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <UserX className="h-4 w-4 mr-1" />}
+                              Mark Left
                             </Button>
                           </div>
                         </div>
