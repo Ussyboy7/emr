@@ -532,8 +532,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Facility "${clinicForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetClinicForm();
-      await loadData(userRoleCounts);
-      await loadKpiStats();
+      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create clinic');
       console.error('Error creating clinic:', err);
@@ -563,8 +562,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedClinic(null);
       resetClinicForm();
-      await loadData(userRoleCounts);
-      await loadKpiStats();
+      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update clinic');
       console.error('Error updating clinic:', err);
@@ -583,8 +581,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Clinic "${selectedClinic.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedClinic(null);
-      await loadData(userRoleCounts);
-      await loadKpiStats();
+      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete clinic');
       console.error('Error deleting clinic:', err);
@@ -617,8 +614,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${deptForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetDeptForm();
-      await loadData(userRoleCounts);
-      await loadKpiStats();
+      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create department');
       console.error('Error creating department:', err);
@@ -650,8 +646,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedDepartment(null);
       resetDeptForm();
-      await loadData(userRoleCounts);
-      await loadKpiStats();
+      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update department');
       console.error('Error updating department:', err);
@@ -670,8 +665,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${selectedDepartment.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedDepartment(null);
-      await loadData(userRoleCounts);
-      await loadKpiStats();
+      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete department');
       console.error('Error deleting department:', err);

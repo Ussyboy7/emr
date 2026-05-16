@@ -121,16 +121,12 @@ export default function ConsultationReferralsPage() {
     setShowDetailsModal(true);
     setFormsLoading(true);
     try {
-      const fresh = await referralService.getReferral(referral.id);
-      setSelectedReferral(fresh as ReferralWithPatient);
-    } catch {
-      setSelectedReferral(referral);
-    }
-    try {
-      const forms = await referralService.getForms(referral.id);
+      const [fresh, forms] = await Promise.all([
+        referralService.getReferral(referral.id).catch(() => null),
+        referralService.getForms(referral.id).catch(() => []),
+      ]);
+      setSelectedReferral((fresh || referral) as ReferralWithPatient);
       setSelectedForms(forms || []);
-    } catch {
-      setSelectedForms([]);
     } finally {
       setFormsLoading(false);
     }

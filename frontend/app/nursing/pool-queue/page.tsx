@@ -52,6 +52,16 @@ const getVisitTypeLabel = (type: string) => {
   return typeMap[type] || type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, '-');
 };
 
+const formatWaitTime = (minutes: number): string => {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours < 24) return `${hours}h ${mins}m`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return `${days}d ${remainingHours}h`;
+};
+
 // Types
 interface Patient {
   id: string;
@@ -250,113 +260,128 @@ export default function NursingPoolQueuePage() {
 
         const result = await visitFetch;
 
-        if (!silent) {
-          try {
-            const metrics = await visitService.getNursingPoolMetrics({
-              ...metricsParams,
-              // Keep stat cards independent of search typing (list-only filtering UX).
-              search: undefined,
-            });
-            setPoolMetrics(metrics);
-          } catch (me: unknown) {
-            console.warn('Nursing pool metrics failed', me);
-          }
-        }
-
-        const nursingVisits = result.results.filter((visit) => visit.status !== 'cancelled');
-        const combinedVisitIds = Array.from(new Set(nursingVisits.map((v) => v.id))).filter(Boolean);
-        const visitIdsKey = combinedVisitIds.slice().sort((a, b) => a - b).join(',');
-
-        let queueVisitToRoom: Map<number, string>;
-        let queueVisitToSentAt: Map<number, string>;
-        if (silent && queueRoomCacheRef.current.size > 0) {
-          queueVisitToRoom = new Map(queueRoomCacheRef.current);
-          queueVisitToSentAt = new Map(queueSentAtCacheRef.current);
-        } else {
-          queueVisitToRoom = new Map();
-          queueVisitToSentAt = new Map();
-          if (combinedVisitIds.length > 0) {
+        // Fire metrics and enrichment in parallel — none depend on each other,
+        // only on the visit IDs from the main query.
+        const [metricsPromise, enrichmentPromise] = await Promise.all([
+          (async () => {
+            if (silent) return;
             try {
-              const queueResult = await apiFetch<{ results: any[] }>(
-                `/consultation/queue/by-visits/?visit_ids=${combinedVisitIds.join(',')}`
-              );
-              (queueResult.results || []).forEach((item: any) => {
-                if (item.visit != null && item.room_name) {
-                  const vid = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit), 10);
-                  queueVisitToRoom.set(vid, item.room_name);
-                  if (item.queued_at) queueVisitToSentAt.set(vid, item.queued_at);
-                }
+              const metrics = await visitService.getNursingPoolMetrics({
+                ...metricsParams,
+                search: undefined,
               });
-              queueRoomCacheRef.current = queueVisitToRoom;
-              queueSentAtCacheRef.current = queueVisitToSentAt;
-            } catch (err) {
-              console.error('Error fetching consultation queue:', err);
+              setPoolMetrics(metrics);
+            } catch (me: unknown) {
+              console.warn('Nursing pool metrics failed', me);
             }
-          }
-        }
+          })(),
 
-        debugLog('Nursing pool queue - loaded visits:', nursingVisits.length);
+          (async () => {
+            const nursingVisits = result.results.filter((visit) => visit.status !== 'cancelled');
+            const combinedVisitIds = Array.from(new Set(nursingVisits.map((v) => v.id))).filter(Boolean);
+            const visitIdsKey = combinedVisitIds.slice().sort((a, b) => a - b).join(',');
 
-        let physioCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
-        let eyeCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
-        let vitalsMap = new Map<number, any>();
+            let queueVisitToRoom: Map<number, string>;
+            let queueVisitToSentAt: Map<number, string>;
+            if (silent && queueRoomCacheRef.current.size > 0) {
+              queueVisitToRoom = new Map(queueRoomCacheRef.current);
+              queueVisitToSentAt = new Map(queueSentAtCacheRef.current);
+            } else {
+              queueVisitToRoom = new Map();
+              queueVisitToSentAt = new Map();
+            }
 
-        const reuseEnrichment = silent && visitIdsKey === visitEnrichmentKeyRef.current && visitIdsKey !== '';
-        if (reuseEnrichment) {
-          physioCheckedInByVisitId = { ...physioEnrichmentCacheRef.current };
-          eyeCheckedInByVisitId = { ...eyeEnrichmentCacheRef.current };
-          vitalsMap = new Map(vitalsEnrichmentCacheRef.current as Map<number, any>);
-        } else if (combinedVisitIds.length > 0) {
-          const visitIdsParam = combinedVisitIds.join(',');
-          // Fetch vitals independently: physiotherapy/eyecare must not abort vitals when those endpoints error.
-          try {
-            const vitalsRes = await apiFetch<{ results: Record<string, any> }>(
-              `/vitals/latest-by-visits/?visit_ids=${visitIdsParam}`
-            );
-            Object.entries(vitalsRes.results || {}).forEach(([visitIdRaw, vital]) => {
-              const visitId = Number(visitIdRaw);
-              if (Number.isFinite(visitId)) vitalsMap.set(visitId, vital);
-            });
-          } catch (err) {
-            debugLog('Vitals enrichment failed:', err);
-          }
-          try {
-            const physioRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
-              `/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
-            );
-            Object.entries(physioRes.results || {}).forEach(([visitIdRaw, payload]) => {
-              const visitId = Number(visitIdRaw);
-              if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
-              physioCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
-            });
-          } catch (err) {
-            debugLog('Physiotherapy check-in enrichment failed:', err);
-          }
-          try {
-            const eyeRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
-              `/eyecare/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
-            );
-            Object.entries(eyeRes.results || {}).forEach(([visitIdRaw, payload]) => {
-              const visitId = Number(visitIdRaw);
-              if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
-              eyeCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
-            });
-          } catch (err) {
-            debugLog('Eyecare check-in enrichment failed:', err);
-          }
-          visitEnrichmentKeyRef.current = visitIdsKey;
-          physioEnrichmentCacheRef.current = physioCheckedInByVisitId;
-          eyeEnrichmentCacheRef.current = eyeCheckedInByVisitId;
-          vitalsEnrichmentCacheRef.current = vitalsMap;
-        } else {
-          visitEnrichmentKeyRef.current = '';
-          physioEnrichmentCacheRef.current = {};
-          eyeEnrichmentCacheRef.current = {};
-          vitalsEnrichmentCacheRef.current = new Map();
-        }
+            let physioCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
+            let eyeCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
+            let vitalsMap = new Map<number, any>();
 
-        setPhysioCheckins(physioCheckedInByVisitId);
-        setEyeCheckins(eyeCheckedInByVisitId);
+            const reuseEnrichment = silent && visitIdsKey === visitEnrichmentKeyRef.current && visitIdsKey !== '';
+            if (reuseEnrichment) {
+              physioCheckedInByVisitId = { ...physioEnrichmentCacheRef.current };
+              eyeCheckedInByVisitId = { ...eyeEnrichmentCacheRef.current };
+              vitalsMap = new Map(vitalsEnrichmentCacheRef.current as Map<number, any>);
+            } else if (combinedVisitIds.length > 0) {
+              const visitIdsParam = combinedVisitIds.join(',');
+
+              await Promise.all([
+                (async () => {
+                  try {
+                    const queueResult = await apiFetch<{ results: any[] }>(
+                      `/consultation/queue/by-visits/?visit_ids=${visitIdsParam}`
+                    );
+                    (queueResult.results || []).forEach((item: any) => {
+                      if (item.visit != null && item.room_name) {
+                        const vid = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit), 10);
+                        queueVisitToRoom.set(vid, item.room_name);
+                        if (item.queued_at) queueVisitToSentAt.set(vid, item.queued_at);
+                      }
+                    });
+                    queueRoomCacheRef.current = queueVisitToRoom;
+                    queueSentAtCacheRef.current = queueVisitToSentAt;
+                  } catch (err) {
+                    console.error('Error fetching consultation queue:', err);
+                  }
+                })(),
+                (async () => {
+                  try {
+                    const vitalsRes = await apiFetch<{ results: Record<string, any> }>(
+                      `/vitals/latest-by-visits/?visit_ids=${visitIdsParam}`
+                    );
+                    Object.entries(vitalsRes.results || {}).forEach(([visitIdRaw, vital]) => {
+                      const visitId = Number(visitIdRaw);
+                      if (Number.isFinite(visitId)) vitalsMap.set(visitId, vital);
+                    });
+                  } catch (err) {
+                    debugLog('Vitals enrichment failed:', err);
+                  }
+                })(),
+                (async () => {
+                  try {
+                    const physioRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+                      `/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
+                    );
+                    Object.entries(physioRes.results || {}).forEach(([visitIdRaw, payload]) => {
+                      const visitId = Number(visitIdRaw);
+                      if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
+                      physioCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
+                    });
+                  } catch (err) {
+                    debugLog('Physiotherapy check-in enrichment failed:', err);
+                  }
+                })(),
+                (async () => {
+                  try {
+                    const eyeRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+                      `/eyecare/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
+                    );
+                    Object.entries(eyeRes.results || {}).forEach(([visitIdRaw, payload]) => {
+                      const visitId = Number(visitIdRaw);
+                      if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
+                      eyeCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
+                    });
+                  } catch (err) {
+                    debugLog('Eyecare check-in enrichment failed:', err);
+                  }
+                })(),
+              ]);
+
+              visitEnrichmentKeyRef.current = visitIdsKey;
+              physioEnrichmentCacheRef.current = physioCheckedInByVisitId;
+              eyeEnrichmentCacheRef.current = eyeCheckedInByVisitId;
+              vitalsEnrichmentCacheRef.current = vitalsMap;
+            } else {
+              visitEnrichmentKeyRef.current = '';
+              physioEnrichmentCacheRef.current = {};
+              eyeEnrichmentCacheRef.current = {};
+              vitalsEnrichmentCacheRef.current = new Map();
+            }
+
+            // Return enrichment data for the outer scope
+            return { nursingVisits, queueVisitToRoom, queueVisitToSentAt, physioCheckedInByVisitId, eyeCheckedInByVisitId, vitalsMap };
+          })(),
+        ]);
+
+        const { nursingVisits, queueVisitToRoom, queueVisitToSentAt, physioCheckedInByVisitId, eyeCheckedInByVisitId, vitalsMap } = enrichmentPromise;
 
         debugLog('Starting transformation of', nursingVisits.length, 'visits to nursing patients');
         const transformedPatients: NursingPatient[] = nursingVisits.map((visit: Visit) => {
@@ -1507,7 +1532,7 @@ export default function NursingPoolQueuePage() {
                           </>
                         ) : null}
                         <span>•</span>
-                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{patient.waitTime}m</span>
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatWaitTime(patient.waitTime)}</span>
                       </div>
                       {/* Row 3: Visit Notes (if available) */}
                       {patient.visitNotes && (

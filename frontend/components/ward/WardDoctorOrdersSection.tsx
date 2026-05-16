@@ -694,7 +694,7 @@ export function WardDoctorOrdersSection({
         }),
       });
       toast.success('Marked complete');
-      await loadOrders();
+      void loadOrders();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update order');
     }
@@ -723,7 +723,7 @@ export function WardDoctorOrdersSection({
       });
       toast.success('Order updated');
       setEditingOrder(null);
-      await loadOrders();
+      void loadOrders();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update order');
     } finally {

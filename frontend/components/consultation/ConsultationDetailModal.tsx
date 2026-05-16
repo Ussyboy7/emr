@@ -717,8 +717,11 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
   try {
     const visit = await apiFetch<VisitData>(`/visits/${visitId}/`);
     
-    // Get patient details
-    const patient = await patientService.getPatient(visit.patient);
+    // Get patient details and sessions in parallel
+    const [patient, sessionsResult] = await Promise.all([
+      patientService.getPatient(visit.patient),
+      apiFetch<ApiResponse<ConsultationSessionData>>(`/consultation/sessions/?visit=${visitId}&page_size=1`).catch(() => ({ results: [] })),
+    ]);
     
     // Get prescriptions, lab orders, radiology orders, and nursing orders - FILTERED BY CURRENT VISIT/CONSULTATION SESSION
     let prescriptions: ConsultationRecord['prescriptions'] = [];
@@ -730,7 +733,6 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     let consultationSessionId: string | null = null;
     let consultationSession: ConsultationSessionData | null = null;
     try {
-      const sessionsResult = await apiFetch<ApiResponse<ConsultationSessionData>>(`/consultation/sessions/?visit=${visitId}&page_size=1`);
       if (sessionsResult.results && sessionsResult.results.length > 0) {
         consultationSession = sessionsResult.results[0];
         consultationSessionId = String(consultationSession.id);
@@ -757,20 +759,71 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     const visitFilter = `visit=${visitId}`;
     // If we have a consultation session, only use session filtering - don't fall back to visit
     const filterParam = consultationSessionId ? sessionFilter : visitFilter;
-    
-    try {
-      let prescriptionsResult;
-      if (consultationSessionId) {
-        // If we have a consultation session, only use session filtering
-        try {
-          prescriptionsResult = await apiFetch<ApiResponse<PrescriptionData>>(`/pharmacy/prescriptions/?${sessionFilter}&page_size=100`);
-        } catch (err) {
-          prescriptionsResult = { results: [] };
+
+    // Fire all enrichment API calls in parallel
+    const [prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioResult, vitalsResult] = await Promise.all([
+      (async () => {
+        if (consultationSessionId) {
+          try {
+            return await apiFetch<ApiResponse<PrescriptionData>>(`/pharmacy/prescriptions/?${sessionFilter}&page_size=100`);
+          } catch { return { results: [] }; }
         }
-      } else {
-        // Only use visit filtering if no consultation session
-        prescriptionsResult = await apiFetch<ApiResponse<PrescriptionData>>(`/pharmacy/prescriptions/?${visitFilter}&page_size=100`);
-      }
+        return await apiFetch<ApiResponse<PrescriptionData>>(`/pharmacy/prescriptions/?${visitFilter}&page_size=100`);
+      })(),
+      (async () => {
+        if (consultationSessionId) {
+          try {
+            return await apiFetch<ApiResponse<LabOrderData>>(`/laboratory/orders/?${sessionFilter}&page_size=100`);
+          } catch { return { results: [] }; }
+        }
+        return await apiFetch<ApiResponse<LabOrderData>>(`/laboratory/orders/?${visitFilter}&page_size=100`);
+      })(),
+      (async () => {
+        if (consultationSessionId) {
+          try {
+            return await apiFetch<{ results: any[] }>(`/radiology/orders/?${sessionFilter}&page_size=100`);
+          } catch { return { results: [] }; }
+        }
+        return await apiFetch<{ results: any[] }>(`/radiology/orders/?${visitFilter}&page_size=100`);
+      })(),
+      (async () => {
+        if (consultationSessionId) {
+          try {
+            return await apiFetch<{ results: any[] }>(`/nursing/orders/?${sessionFilter}&page_size=100`);
+          } catch { return { results: [] }; }
+        }
+        return await apiFetch<{ results: any[] }>(`/nursing/orders/?${visitFilter}&page_size=100`);
+      })(),
+      (async () => {
+        if (consultationSessionId) {
+          try {
+            return await physioService.getOrders({ consultation_session: Number(consultationSessionId), page_size: 100 });
+          } catch { return { results: [] }; }
+        }
+        return { results: [] };
+      })(),
+      (async () => {
+        try {
+          if (consultationSessionId) {
+            return await apiFetch<{ results: any[] }>(`/vitals/?consultation_session=${consultationSessionId}&page_size=10`);
+          }
+          throw new Error('No session ID');
+        } catch {
+          const vResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`).catch(() => ({ results: [] }));
+          if (consultationSession && vResult.results && consultationSession.started_at) {
+            const sStart = new Date(consultationSession.started_at);
+            const sEnd = consultationSession.ended_at ? new Date(consultationSession.ended_at) : new Date();
+            vResult.results = vResult.results.filter((v: any) => {
+              const vitalDate = new Date(v.recorded_at || v.created_at);
+              return vitalDate >= sStart && vitalDate <= sEnd;
+            });
+          }
+          return vResult;
+        }
+      })(),
+    ]);
+
+    try {
       const filteredPrescriptions = filterBySessionTime(prescriptionsResult.results || []);
       prescriptions = filteredPrescriptions.map((p: PrescriptionData) => ({
         id: String(p.id),
@@ -790,18 +843,6 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     }
     
     try {
-      let labOrdersResult;
-      if (consultationSessionId) {
-        // If we have a consultation session, only use session filtering
-        try {
-          labOrdersResult = await apiFetch<ApiResponse<LabOrderData>>(`/laboratory/orders/?${sessionFilter}&page_size=100`);
-        } catch (err) {
-          labOrdersResult = { results: [] };
-        }
-      } else {
-        // Only use visit filtering if no consultation session
-        labOrdersResult = await apiFetch<ApiResponse<LabOrderData>>(`/laboratory/orders/?${visitFilter}&page_size=100`);
-      }
       const filteredLabOrders = filterBySessionTime(labOrdersResult.results || []);
       // Flatten lab orders - each test in an order should be a separate entry
       labOrders = filteredLabOrders.flatMap((l: LabOrderData) => {
@@ -836,18 +877,6 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     }
     
     try {
-      let radiologyOrdersResult;
-      if (consultationSessionId) {
-        // If we have a consultation session, only use session filtering
-        try {
-          radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?${sessionFilter}&page_size=100`);
-        } catch (err) {
-          radiologyOrdersResult = { results: [] };
-        }
-      } else {
-        // Only use visit filtering if no consultation session
-        radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?${visitFilter}&page_size=100`);
-      }
       const filteredRadiologyOrders = filterBySessionTime(radiologyOrdersResult.results || []);
       // Flatten radiology orders - each study in an order should be a separate entry
       radiologyOrders = filteredRadiologyOrders.flatMap((r: any) => {
@@ -880,18 +909,6 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     }
     
     try {
-      let nursingOrdersResult;
-      if (consultationSessionId) {
-        // If we have a consultation session, only use session filtering
-        try {
-          nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?${sessionFilter}&page_size=100`);
-        } catch (err) {
-          nursingOrdersResult = { results: [] };
-        }
-      } else {
-        // Only use visit filtering if no consultation session
-        nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?${visitFilter}&page_size=100`);
-      }
       const filteredNursingOrders = filterBySessionTime(nursingOrdersResult.results || []);
       nursingOrders = filteredNursingOrders.map((n: any) => ({
         id: String(n.id),
@@ -909,7 +926,6 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     let physioOrders: ConsultationRecord['physioOrders'] = [];
     if (consultationSessionId) {
       try {
-        const physioResult = await physioService.getOrders({ consultation_session: Number(consultationSessionId), page_size: 100 });
         physioOrders = (physioResult.results || []).map((o: any) => ({
           id: String(o.id),
           diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
@@ -925,26 +941,6 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     // Get vitals - filter by consultation session if available, otherwise by visit
     let vitals: ConsultationRecord['vitals'] = [];
     try {
-      let vitalsResult;
-      try {
-        // Try filtering by consultation_session first
-        if (consultationSessionId) {
-          vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?consultation_session=${consultationSessionId}&page_size=10`);
-        } else {
-          throw new Error('No session ID');
-        }
-      } catch (sessionErr) {
-        // Fallback to visit filter and filter by session timeframe if consultation session exists
-        vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
-        if (consultationSession && vitalsResult.results && consultationSession.started_at) {
-          const sessionStart = new Date(consultationSession.started_at);
-          const sessionEnd = consultationSession.ended_at ? new Date(consultationSession.ended_at) : new Date();
-          vitalsResult.results = vitalsResult.results.filter((v: any) => {
-            const vitalDate = new Date(v.recorded_at || v.created_at);
-            return vitalDate >= sessionStart && vitalDate <= sessionEnd;
-          });
-        }
-      }
       vitals = (vitalsResult.results || []).map((v: any) => {
         // Handle temperature - could be string or number
         const temp = v.temperature ? (typeof v.temperature === 'string' ? parseFloat(v.temperature) : Number(v.temperature)) : null;
@@ -1149,17 +1145,71 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     // Try to filter by consultation_session first, fallback to visit if needed
     const sessionFilter = `consultation_session=${sessionId}`;
     const visitFilter = session.visit ? `visit=${session.visit}` : '';
-    
+
+    // Fire all enrichment API calls in parallel
+    const [prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioResult, vitalsResult] = await Promise.all([
+      (async () => {
+        try {
+          return await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?${sessionFilter}&page_size=100`);
+        } catch {
+          return { results: [] };
+        }
+      })(),
+      (async () => {
+        try {
+          return await apiFetch<{ results: any[] }>(`/laboratory/orders/?${sessionFilter}&page_size=100`);
+        } catch {
+          return { results: [] };
+        }
+      })(),
+      (async () => {
+        try {
+          return await apiFetch<{ results: any[] }>(`/radiology/orders/?${sessionFilter}&page_size=100`);
+        } catch {
+          return { results: [] };
+        }
+      })(),
+      (async () => {
+        try {
+          return await apiFetch<{ results: any[] }>(`/nursing/orders/?${sessionFilter}&page_size=100`);
+        } catch {
+          return { results: [] };
+        }
+      })(),
+      (async () => {
+        try {
+          return await physioService.getOrders({ consultation_session: Number(sessionId), page_size: 100 });
+        } catch {
+          return { results: [] };
+        }
+      })(),
+      (async () => {
+        try {
+          return await apiFetch<{ results: any[] }>(`/vitals/?consultation_session=${sessionId}&page_size=10`);
+        } catch {
+          const visitId = session.visit || '';
+          if (visitId) {
+            try {
+              const vResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
+              if (vResult.results && session.started_at) {
+                const sStart = new Date(session.started_at);
+                const sEnd = session.ended_at ? new Date(session.ended_at) : new Date();
+                vResult.results = vResult.results.filter((v: any) => {
+                  const vitalDate = new Date(v.recorded_at || v.created_at);
+                  return vitalDate >= sStart && vitalDate <= sEnd;
+                });
+              }
+              return vResult;
+            } catch {
+              return { results: [] };
+            }
+          }
+          return { results: [] };
+        }
+      })(),
+    ]);
+
     try {
-      // Get prescriptions - ONLY filter by consultation_session (no visit fallback)
-      let prescriptionsResult;
-      try {
-        prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr: any) {
-        // Don't fallback to visit - only show prescriptions created during this session
-        console.warn('Could not load prescriptions by session:', sessionErr?.message || sessionErr);
-        prescriptionsResult = { results: [] };
-      }
       const filteredPrescriptions = filterBySessionTime(prescriptionsResult.results || []);
       prescriptions = filteredPrescriptions.map((p: PrescriptionData) => ({
         id: String(p.id),
@@ -1179,15 +1229,6 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     }
     
     try {
-      // Get lab orders - ONLY filter by consultation_session (no visit fallback)
-      let labOrdersResult;
-      try {
-        labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr: any) {
-        // Don't fallback to visit - only show lab orders created during this session
-        console.warn('Could not load lab orders by session:', sessionErr?.message || sessionErr);
-        labOrdersResult = { results: [] };
-      }
       const filteredLabOrders = filterBySessionTime(labOrdersResult.results || []);
       // Flatten lab orders - each test in an order should be a separate entry
       labOrders = filteredLabOrders.flatMap((l: LabOrderData) => {
@@ -1222,15 +1263,6 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     }
     
     try {
-      // Get radiology orders - ONLY filter by consultation_session (no visit fallback)
-      let radiologyOrdersResult;
-      try {
-        radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr: any) {
-        // Don't fallback to visit - only show radiology orders created during this session
-        console.warn('Could not load radiology orders by session:', sessionErr?.message || sessionErr);
-        radiologyOrdersResult = { results: [] };
-      }
       const filteredRadiologyOrders = filterBySessionTime(radiologyOrdersResult.results || []);
       // Flatten radiology orders - each study in an order should be a separate entry
       radiologyOrders = filteredRadiologyOrders.flatMap((r: any) => {
@@ -1263,15 +1295,6 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     }
     
     try {
-      // Get nursing orders - ONLY filter by consultation_session (no visit fallback)
-      let nursingOrdersResult;
-      try {
-        nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr: any) {
-        // Don't fallback to visit - only show nursing orders created during this session
-        console.warn('Could not load nursing orders by session:', sessionErr?.message || sessionErr);
-        nursingOrdersResult = { results: [] };
-      }
       const filteredNursingOrders = filterBySessionTime(nursingOrdersResult.results || []);
       nursingOrders = filteredNursingOrders.map((n: any) => ({
         id: String(n.id),
@@ -1288,7 +1311,6 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
 
     let physioOrders: ConsultationRecord['physioOrders'] = [];
     try {
-      const physioResult = await physioService.getOrders({ consultation_session: Number(sessionId), page_size: 100 });
       physioOrders = (physioResult.results || []).map((o: any) => ({
         id: String(o.id),
         diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
@@ -1303,34 +1325,6 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     // Get vitals - filter by consultation session (fallback to visit if session filter not supported)
     let vitals: ConsultationRecord['vitals'] = [];
     try {
-      // Try filtering by consultation_session first
-      let vitalsResult;
-      try {
-        vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?consultation_session=${sessionId}&page_size=10`);
-      } catch (sessionErr: any) {
-        // Fallback to visit filter and filter by session timeframe
-        console.warn('Could not load vitals by session:', sessionErr?.message || sessionErr);
-        const visitId = session.visit || '';
-        if (visitId) {
-          try {
-            vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
-            // Filter vitals to only those recorded during this session timeframe
-            if (vitalsResult.results && session.started_at) {
-              const sessionStart = new Date(session.started_at);
-              const sessionEnd = session.ended_at ? new Date(session.ended_at) : new Date();
-              vitalsResult.results = vitalsResult.results.filter((v: any) => {
-                const vitalDate = new Date(v.recorded_at || v.created_at);
-                return vitalDate >= sessionStart && vitalDate <= sessionEnd;
-              });
-            }
-          } catch (visitErr) {
-            console.warn('Could not load vitals by visit:', visitErr);
-            vitalsResult = { results: [] };
-          }
-        } else {
-          vitalsResult = { results: [] };
-        }
-      }
       vitals = (vitalsResult.results || []).map((v: any) => {
         // Handle temperature - could be string or number
         const temp = v.temperature ? (typeof v.temperature === 'string' ? parseFloat(v.temperature) : Number(v.temperature)) : null;

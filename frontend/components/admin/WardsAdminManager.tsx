@@ -329,7 +329,7 @@ export const WardsAdminManager = forwardRef<
       setBedDialogOpen(false);
       const list = await wardService.getWardBeds(bedsWard.id);
       setBeds(Array.isArray(list) ? list : []);
-      await loadWards();
+      void loadWards();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Save failed";
       toast.error(msg);

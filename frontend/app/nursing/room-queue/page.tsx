@@ -75,33 +75,43 @@ export default function RoomQueuePage() {
         setLoading(true);
         setError(null);
         
-        // Load rooms
-        const roomsResult = await roomService.getRooms({ page_size: 200 });
+        // Load rooms, sessions, today, and queue in parallel
+        const [roomsResult, sessionsResult, today, queueResult] = await Promise.all([
+          roomService.getRooms({ page_size: 200 }),
+          (async () => {
+            try {
+              return await apiFetch<{ results: any[] }>('/consultation/sessions/?status=active&page_size=200');
+            } catch {
+              return { results: [] };
+            }
+          })(),
+          (async () => {
+            try {
+              return await getServerToday();
+            } catch {
+              return formatLocalYmd(new Date());
+            }
+          })(),
+          (async () => {
+            try {
+              return await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
+            } catch {
+              return { results: [] };
+            }
+          })(),
+        ]);
         
-        // Load active consultation sessions to determine room status and current patients
-        let activeSessions: any[] = [];
-        try {
-          const sessionsResult = await apiFetch<{ results: any[] }>('/consultation/sessions/?status=active&page_size=200');
-          activeSessions = sessionsResult.results || [];
-        } catch (sessionErr) {
-          console.warn('Could not load active sessions:', sessionErr);
-        }
-        
-        // Count consultations today per room — anchor "today" on the server's
-        // calendar so the count matches the rest of the app.
+        // Load today's sessions (depends on `today`)
         let todaySessions: any[] = [];
         try {
-          let today: string;
-          try {
-            today = await getServerToday();
-          } catch {
-            today = formatLocalYmd(new Date());
-          }
           const todaySessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?started_at__date=${today}&page_size=1000`);
           todaySessions = todaySessionsResult.results || [];
         } catch (todayErr) {
           console.warn('Could not load today sessions:', todayErr);
         }
+        
+        const activeSessions = sessionsResult.results || [];
+        const queueItems = queueResult.results || [];
         
         // Group sessions by room
         const sessionsByRoom: Record<string, any[]> = {};
@@ -149,9 +159,7 @@ export default function RoomQueuePage() {
         });
         setRooms(transformedRooms);
         
-        // Load queue items
-        const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
-        const queueItems = queueResult.results || [];
+        // queueItems already loaded in parallel above
         
         // Create a map of rooms by ID for quick lookup
         const roomsMap = new Map(roomsResult.results.map((room: any) => [String(room.id), room]));

@@ -364,155 +364,130 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
   const session = (await consultationService.getSession(sessionId)) as unknown as Record<string, unknown>;
 
   const patientId = session.patient as number;
-  if (patientId) {
-    try {
-      const patient = await patientService.getPatient(patientId);
-      session.patient_name = patient.full_name ?? '';
-      session.patient_id = patient.patient_id ?? String(patient.id);
-      session.patient_age = patient.age ?? '';
-      session.patient_gender = patient.gender ?? '';
-    } catch (err) {
-      logWarn('Could not load patient for report:', err);
-    }
-  }
-
   const visitId = session.visit as number | undefined;
-  if (visitId) {
-    try {
-      const prescriptionsResult = await apiFetch<ApiResponse<PrescriptionApiResponse>>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
-      session.prescriptions = (prescriptionsResult.results || []).flatMap((p: PrescriptionApiResponse) => {
-        const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
-        return items.map((m: any) => ({
-          id: String(p.id) + (m.id != null ? '-' + m.id : ''),
-          medication: (m.medication_name || m.medication_details?.name || m.medication?.name || p.medication_name || p.medication) ?? '',
-          dosage: m.dosage || p.dosage || '',
-          frequency: m.frequency || p.frequency || '',
-          duration: m.duration || p.duration || '',
-          quantity: m.quantity ?? p.quantity ?? '',
-        }));
-      });
-    } catch (err) {
-      logWarn('Could not load prescriptions:', err);
-      session.prescriptions = [];
-    }
 
-    try {
-      const labOrders = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`);
-      const orderRows = labOrders.results || [];
-      const testResponses = await Promise.all(
-        orderRows.map((order: any) =>
-          apiFetch<{ results: any[] }>(`/laboratory/tests/?order=${order.id}&page_size=200`).catch(() => ({ results: [] }))
-        )
-      );
+  // Fire all enrichment calls in parallel — they only depend on session/patient/visit IDs
+  const [patient, prescriptionsResult, labOrders, radiologyOrders, vitals, physioOrders, diagnosesResult] = await Promise.all([
+    patientId
+      ? patientService.getPatient(patientId).catch(() => null)
+      : Promise.resolve(null),
+    visitId
+      ? apiFetch<ApiResponse<PrescriptionApiResponse>>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+      : Promise.resolve({ results: [] }),
+    visitId
+      ? apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+      : Promise.resolve({ results: [] }),
+    visitId
+      ? apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+      : Promise.resolve({ results: [] }),
+    visitId
+      ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`).catch(() => ({ results: [] }))
+      : Promise.resolve({ results: [] }),
+    physioService.getOrders({ consultation_session: sessionId, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
+    consultationService.getDiagnoses({ session: sessionId, page_size: 100 }).catch(() => ({ results: [] })),
+  ]);
 
-      session.labOrders = orderRows.flatMap((order: any, idx: number) => {
-        const tests = testResponses[idx]?.results || [];
-        if (!tests.length) {
-          // Fallback to nested tests from order if tests endpoint returns nothing.
-          const nestedTests = order.tests || [];
-          return nestedTests.map((t: any) => ({
-            test: (t.name || t.test_name || t.template_name || '').trim(),
-            priority: order.priority ?? '',
-            status: t.status ?? order.status ?? '',
-            result: summarizeLabTestForConsultationReport(t),
-          }));
-        }
-
-        return tests.map((t: any) => ({
-          test: (t.name || t.test_name || t.template_name || '').trim(),
-          priority: order.priority ?? '',
-          status: t.status ?? order.status ?? '',
-          result: summarizeLabTestForConsultationReport(t),
-        }));
-      });
-    } catch (err) {
-      logWarn('Could not load lab orders:', err);
-      session.labOrders = [];
-    }
-
-    try {
-      const radiologyOrders = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`);
-      session.radiologyOrders = (radiologyOrders.results || []).flatMap((order: any) => {
-        const studies = order.studies || [];
-        if (studies.length) {
-          return studies.map((s: any) => ({
-            procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
-            priority: order.priority ?? '',
-            status: s.status ?? order.status ?? '',
-            result: formatRadiologyResult(
-              s.report ?? s.findings ?? s.impression ?? s.results ?? ''
-            ),
-          }));
-        }
-        const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
-        if (!proc) return [];
-        return [{
-          procedure: proc,
-          priority: order.priority ?? '',
-          status: order.status ?? '',
-          result: formatRadiologyResult(order.report ?? order.findings ?? order.impression ?? ''),
-        }];
-      });
-    } catch (err) {
-      logWarn('Could not load radiology orders:', err);
-      session.radiologyOrders = [];
-    }
-
-    try {
-      const vitals = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`);
-      if (vitals.results && vitals.results.length > 0) {
-        const v = vitals.results[0];
-        session.vitals = {
-          temperature: v.temperature || '',
-          bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic
-            ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
-            : '',
-          heartRate: v.heart_rate || '',
-          respiratoryRate: v.respiratory_rate || '',
-          oxygenSaturation: v.oxygen_saturation || '',
-          weight: v.weight || '',
-          height: v.height || '',
-          recordedAt: v.recorded_at || '',
-        };
-      }
-    } catch (err) {
-      logWarn('Could not load vitals:', err);
-    }
-  } else {
-    session.prescriptions = [];
-    session.labOrders = [];
-    session.radiologyOrders = [];
+  // Process patient data
+  if (patient) {
+    session.patient_name = patient.full_name ?? '';
+    session.patient_id = patient.patient_id ?? String(patient.id);
+    session.patient_age = patient.age ?? '';
+    session.patient_gender = patient.gender ?? '';
   }
 
-  try {
-    const physioOrders = await physioService.getOrders({
-      consultation_session: sessionId,
-      patient: session.patient != null ? String(session.patient) : undefined,
-      page_size: 100,
-    });
-    session.physioOrders = (physioOrders.results || []).map((o: any) => ({
-      diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
-      priority: o.priority ?? '',
-      status: o.status ?? '',
+  // Process prescriptions
+  session.prescriptions = ((prescriptionsResult as any).results || []).flatMap((p: PrescriptionApiResponse) => {
+    const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
+    return items.map((m: any) => ({
+      id: String(p.id) + (m.id != null ? '-' + m.id : ''),
+      medication: (m.medication_name || m.medication_details?.name || m.medication?.name || p.medication_name || p.medication) ?? '',
+      dosage: m.dosage || p.dosage || '',
+      frequency: m.frequency || p.frequency || '',
+      duration: m.duration || p.duration || '',
+      quantity: m.quantity ?? p.quantity ?? '',
     }));
-  } catch (err) {
-    logWarn('Could not load physio orders:', err);
-    session.physioOrders = [];
+  });
+
+  // Process lab orders
+  const labOrderRows = (labOrders as any).results || [];
+  const testResponses = await Promise.all(
+    labOrderRows.map((order: any) =>
+      apiFetch<{ results: any[] }>(`/laboratory/tests/?order=${order.id}&page_size=200`).catch(() => ({ results: [] }))
+    )
+  );
+  session.labOrders = labOrderRows.flatMap((order: any, idx: number) => {
+    const tests = testResponses[idx]?.results || [];
+    if (!tests.length) {
+      const nestedTests = order.tests || [];
+      return nestedTests.map((t: any) => ({
+        test: (t.name || t.test_name || t.template_name || '').trim(),
+        priority: order.priority ?? '',
+        status: t.status ?? order.status ?? '',
+        result: summarizeLabTestForConsultationReport(t),
+      }));
+    }
+    return tests.map((t: any) => ({
+      test: (t.name || t.test_name || t.template_name || '').trim(),
+      priority: order.priority ?? '',
+      status: t.status ?? order.status ?? '',
+      result: summarizeLabTestForConsultationReport(t),
+    }));
+  });
+
+  // Process radiology orders
+  session.radiologyOrders = ((radiologyOrders as any).results || []).flatMap((order: any) => {
+    const studies = order.studies || [];
+    if (studies.length) {
+      return studies.map((s: any) => ({
+        procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
+        priority: order.priority ?? '',
+        status: s.status ?? order.status ?? '',
+        result: formatRadiologyResult(s.report ?? s.findings ?? s.impression ?? s.results ?? ''),
+      }));
+    }
+    const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
+    if (!proc) return [];
+    return [{
+      procedure: proc,
+      priority: order.priority ?? '',
+      status: order.status ?? '',
+      result: formatRadiologyResult(order.report ?? order.findings ?? order.impression ?? ''),
+    }];
+  });
+
+  // Process vitals
+  const vitalsResults = (vitals as any).results || [];
+  if (vitalsResults.length > 0) {
+    const v = vitalsResults[0];
+    session.vitals = {
+      temperature: v.temperature || '',
+      bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic
+        ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
+        : '',
+      heartRate: v.heart_rate || '',
+      respiratoryRate: v.respiratory_rate || '',
+      oxygenSaturation: v.oxygen_saturation || '',
+      weight: v.weight || '',
+      height: v.height || '',
+      recordedAt: v.recorded_at || '',
+    };
   }
 
-  try {
-    const diagnosesResult = await consultationService.getDiagnoses({ session: sessionId, page_size: 100 });
-    session.diagnoses = (diagnosesResult.results || []).map((d: any) => ({
-      id: String(d.id),
-      code: d.icd10_code_details?.code ?? '',
-      name: (d.icd10_code_details?.description || d.diagnosis_text) ?? '',
-      type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : (d.certainty ?? ''),
-      notes: d.notes || d.diagnosis_text || '',
-    }));
-  } catch (err) {
-    logWarn('Could not load diagnoses:', err);
-    session.diagnoses = [];
-  }
+  // Process physio orders
+  session.physioOrders = ((physioOrders as any).results || []).map((o: any) => ({
+    diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+    priority: o.priority ?? '',
+    status: o.status ?? '',
+  }));
+
+  // Process diagnoses
+  session.diagnoses = ((diagnosesResult as any).results || []).map((d: any) => ({
+    id: String(d.id),
+    code: d.icd10_code_details?.code ?? '',
+    name: (d.icd10_code_details?.description || d.diagnosis_text) ?? '',
+    type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : (d.certainty ?? ''),
+    notes: d.notes || d.diagnosis_text || '',
+  }));
 
   return session as unknown as ConsultationReportSession;
 }

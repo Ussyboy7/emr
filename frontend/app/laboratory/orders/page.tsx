@@ -1063,14 +1063,15 @@ export default function LabOrdersPage() {
       const count = selectedTestsForCollection.length;
       toast.success(`${count} sample${count > 1 ? 's' : ''} collected via ${selectedMethod} with shared Lab ID`);
       
-      // Reload orders to get updated data
-      await loadOrders();
-      
-      // Update selectedOrder if dialog is still open
-      if (isViewDialogOpen) {
-        const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
-        setSelectedOrder(transformOrder(updatedOrder));
-      }
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          if (isViewDialogOpen) {
+            const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+            setSelectedOrder(transformOrder(updatedOrder));
+          }
+        })(),
+      ]);
 
       setIsCollectDialogOpen(false);
       setSelectedTestsForCollection([]);
@@ -1114,12 +1115,15 @@ export default function LabOrdersPage() {
 
       toast.success(`${selectedTest.name} sent for in-house processing`);
 
-      await loadOrders();
-
-      if (isViewDialogOpen) {
-        const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
-        setSelectedOrder(transformOrder(updatedOrder));
-      }
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          if (isViewDialogOpen) {
+            const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+            setSelectedOrder(transformOrder(updatedOrder));
+          }
+        })(),
+      ]);
 
       setIsProcessDialogOpen(false);
     } catch (err: any) {
@@ -1246,10 +1250,14 @@ export default function LabOrdersPage() {
       setResponsibilityFormPrinted(false);
 
       // Refresh order + dispatch history so the order detail UI mirrors the new state.
-      await loadOrders();
-      const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
-      setSelectedOrder(transformOrder(updatedOrder));
-      await loadOrderDispatches(parseInt(selectedOrder.id));
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+          setSelectedOrder(transformOrder(updatedOrder));
+        })(),
+        loadOrderDispatches(parseInt(selectedOrder.id)),
+      ]);
     } catch (err: any) {
       console.error('dispatchOutsourced failed', err);
       const msg = err?.apiMessage || err?.message || 'Failed to create dispatch';
@@ -1343,10 +1351,14 @@ export default function LabOrdersPage() {
         cancelDispatchReason.trim() || undefined,
       );
       toast.success(`Dispatch ${dispatch.dispatch_id} cancelled`);
-      await loadOrders();
-      const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
-      setSelectedOrder(transformOrder(updatedOrder));
-      await loadOrderDispatches(parseInt(selectedOrder.id));
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+          setSelectedOrder(transformOrder(updatedOrder));
+        })(),
+        loadOrderDispatches(parseInt(selectedOrder.id)),
+      ]);
       setCancelDispatchTarget(null);
       setCancelDispatchReason('');
     } catch (err: any) {
@@ -1444,14 +1456,15 @@ export default function LabOrdersPage() {
 
       toast.success(`Results submitted for ${selectedTest.name}. Awaiting verification.`);
       
-      // Reload orders to get updated data
-      await loadOrders();
-      
-      // Update selectedOrder if dialog is still open
-      if (isViewDialogOpen) {
-        const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
-        setSelectedOrder(transformOrder(updatedOrder));
-      }
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          if (isViewDialogOpen) {
+            const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+            setSelectedOrder(transformOrder(updatedOrder));
+          }
+        })(),
+      ]);
 
       setIsResultsDialogOpen(false);
       setResultValues({});

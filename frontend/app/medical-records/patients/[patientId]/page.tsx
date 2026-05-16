@@ -398,7 +398,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const loadPatientHistory = async (numericPatientId: number) => {
     setLoadingHistory(true);
     try {
-      // Load consultations
+      // Load consultations first (needed for sessionRows mapping)
       const consultations = await consultationService.getSessions({ patient: numericPatientId });
       const consultationRows = consultations.results || [];
       setConsultationHistory(consultationRows);
@@ -411,7 +411,6 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         const timePart = timePartRaw ? String(timePartRaw).substring(0, 5) : '';
 
         return {
-          // Prefix so `VisitDetailModal` knows this is a consultation-session "report"
           id: `session-${session.id}`,
           visit_id: session.session_id || `session-${session.id}`,
           patient: session.patient,
@@ -428,10 +427,34 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         };
       });
 
-      try {
-        const visits = await patientService.getPatientVisits(numericPatientId);
-        const list = Array.isArray(visits) ? [...visits] : [];
+      // All remaining calls only depend on numericPatientId — fire in parallel
+      const [
+        visitsResp,
+        referralsRes,
+        labResults,
+        imagingOrders,
+        prescriptions,
+        vitals,
+        physioOrders,
+        admissions,
+        certificates,
+        history,
+      ] = await Promise.all([
+        patientService.getPatientVisits(numericPatientId).catch(() => []),
+        referralService.getReferrals({ patient: numericPatientId.toString(), page_size: 500 }).catch(() => ({ results: [] })),
+        labService.getCompletedTests({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
+        radiologyService.getOrders({ patient: numericPatientId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
+        pharmacyService.getPrescriptions({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
+        patientService.getPatientVitals(numericPatientId).catch(() => []),
+        physioService.getOrders({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
+        wardService.getAdmissions({ patient: numericPatientId }).catch(() => ({ results: [] })),
+        medicalCertificateService.getCertificates({ patient: numericPatientId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
+        patientService.getPatientHistory(numericPatientId).catch(() => null),
+      ]);
 
+      // Process visits
+      try {
+        const list = Array.isArray(visitsResp) ? [...visitsResp] : [];
         const combined = [...list, ...sessionRows];
         combined.sort((a, b) => {
           const dateA = String(a.date || '').split('T')[0];
@@ -450,13 +473,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         setVisitHistory([...sessionRows]);
       }
 
+      // Process referrals
       try {
-        const referralsRes = await referralService.getReferrals({
-          patient: numericPatientId.toString(),
-          page_size: 500,
-        });
-        const refList = [...(referralsRes?.results || [])];
-        refList.sort((a, b) => {
+        const refList = [...((referralsRes as any)?.results || [])];
+        refList.sort((a: any, b: any) => {
           const ta = new Date(a.referred_at || 0).getTime();
           const tb = new Date(b.referred_at || 0).getTime();
           return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
@@ -467,14 +487,15 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         setReferralHistory([]);
       }
 
-      // Load lab results
-      const labResults = await labService.getCompletedTests({ patient: numericPatientId.toString() });
-      setLabHistory(labResults?.results || []);
+      setLabHistory((labResults as any)?.results || []);
+      setPrescriptionHistory((prescriptions as any)?.results || []);
+      setVitalsHistory((vitals as any) || []);
+      setWardAdmissions((admissions as any)?.results || []);
+      setMedicalHistory(history);
 
-      // Load imaging
+      // Process imaging
       try {
-        const imagingOrders = await radiologyService.getOrders({ patient: numericPatientId.toString(), page_size: 200 });
-        const items = (imagingOrders?.results || []).flatMap((order: any) => {
+        const items = ((imagingOrders as any)?.results || []).flatMap((order: any) => {
           const studies = Array.isArray(order.studies) ? order.studies : [];
           return studies.map((study: any) => ({
             id: study?.id ?? `${order.id}-${study?.procedure ?? 'study'}`,
@@ -511,46 +532,20 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         setImagingHistory([]);
       }
 
-      // Load prescriptions
-      const prescriptions = await pharmacyService.getPrescriptions({ patient: numericPatientId.toString() });
-      setPrescriptionHistory(prescriptions?.results || []);
-
-      // Load vitals
-      const vitals = await patientService.getPatientVitals(numericPatientId);
-      setVitalsHistory(vitals || []);
-
-      // Load physio
+      // Process physio
       try {
-        const physioOrders = await physioService.getOrders({ patient: numericPatientId.toString() });
-        setPhysioHistory(physioOrders?.results || []);
+        setPhysioHistory((physioOrders as any)?.results || []);
       } catch (err) {
         console.warn('Could not load physio history:', err);
         setPhysioHistory([]);
       }
 
-      // Load ward admissions
-      const admissions = await wardService.getAdmissions({ patient: numericPatientId });
-      setWardAdmissions(admissions?.results || []);
-
-      // Load medical certificates (persisted records)
+      // Process certificates
       try {
-        const certificates = await medicalCertificateService.getCertificates({
-          patient: numericPatientId.toString(),
-          page_size: 200,
-        });
-        setCertificateHistory(certificates?.results || []);
+        setCertificateHistory((certificates as any)?.results || []);
       } catch (err) {
         console.warn('Could not load medical certificates:', err);
         setCertificateHistory([]);
-      }
-
-      // Load medical history
-      try {
-        const history = await patientService.getPatientHistory(numericPatientId);
-        setMedicalHistory(history);
-      } catch (err) {
-        console.warn('Could not load medical history:', err);
-        setMedicalHistory(null);
       }
     } catch (err) {
       console.error('Error loading patient history:', err);

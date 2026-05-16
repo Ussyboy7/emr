@@ -322,14 +322,15 @@ export default function RadiologyOrdersPage() {
       toast.success('Study processing started successfully');
       setIsProcessDialogOpen(false);
       
-      // Reload orders to get updated data
-      await loadOrders();
-      
-      // Update selectedOrder if view dialog is still open (like lab orders)
-      if (isViewDialogOpen && selectedOrder) {
-        const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
-        setSelectedOrder(updatedOrder);
-      }
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          if (isViewDialogOpen && selectedOrder) {
+            const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
+            setSelectedOrder(updatedOrder);
+          }
+        })(),
+      ]);
     } catch (error: any) {
       console.error('Error starting study processing:', error);
       toast.error(error.message || 'Failed to start study processing');
@@ -651,10 +652,14 @@ export default function RadiologyOrdersPage() {
       setResponsibilityFormPrinted(false);
 
       // Refresh order + dispatch history so the order detail UI mirrors the new state.
-      await loadOrders();
-      const updatedOrder = await radiologyService.getOrder(Number(selectedOrder.id));
-      setSelectedOrder(updatedOrder);
-      await loadOrderDispatches(Number(selectedOrder.id));
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          const updatedOrder = await radiologyService.getOrder(Number(selectedOrder.id));
+          setSelectedOrder(updatedOrder);
+        })(),
+        loadOrderDispatches(Number(selectedOrder.id)),
+      ]);
     } catch (err: any) {
       console.error('dispatchOutsourced failed', err);
       const msg = err?.apiMessage || err?.message || 'Failed to create dispatch';
@@ -748,10 +753,14 @@ export default function RadiologyOrdersPage() {
         cancelDispatchReason.trim() || undefined,
       );
       toast.success(`Dispatch ${dispatch.dispatch_id} cancelled`);
-      await loadOrders();
-      const updatedOrder = await radiologyService.getOrder(Number(selectedOrder.id));
-      setSelectedOrder(updatedOrder);
-      await loadOrderDispatches(Number(selectedOrder.id));
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          const updatedOrder = await radiologyService.getOrder(Number(selectedOrder.id));
+          setSelectedOrder(updatedOrder);
+        })(),
+        loadOrderDispatches(Number(selectedOrder.id)),
+      ]);
       setCancelDispatchTarget(null);
       setCancelDispatchReason('');
     } catch (err: any) {
@@ -876,19 +885,14 @@ export default function RadiologyOrdersPage() {
         ...(!searching && activeTab === 'rejected' ? { date_field: 'rejected_at' as const } : {}),
       };
 
-      const response = await radiologyService.getOrders({
-        page: currentPage,
-        page_size: itemsPerPage,
-        ...listFilters,
-      });
-      const statsResponse: {
-        total: number;
-        pending: number;
-        processing: number;
-        results_ready: number;
-        rejected: number;
-        stat: number;
-      } = await radiologyService.getOrderStats(commonFilters);
+      const [response, statsResponse] = await Promise.all([
+        radiologyService.getOrders({
+          page: currentPage,
+          page_size: itemsPerPage,
+          ...listFilters,
+        }),
+        radiologyService.getOrderStats(commonFilters),
+      ]);
 
       setOrders(response.results || []);
       setTotalCount(response.count || response.results.length);
@@ -1332,17 +1336,15 @@ export default function RadiologyOrdersPage() {
       toast.success('Study results submitted successfully');
       setIsResultsDialogOpen(false);
       
-      // Reload orders to get updated data
-      await loadOrders();
-      
-      // Update selectedOrder if view dialog is still open (like lab orders)
-      if (isViewDialogOpen && selectedOrder) {
-        const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
-        setSelectedOrder(updatedOrder);
-      } else {
-        setSelectedStudy(null);
-        setSelectedOrder(null);
-      }
+      await Promise.all([
+        loadOrders(),
+        (async () => {
+          if (isViewDialogOpen && selectedOrder) {
+            const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
+            setSelectedOrder(updatedOrder);
+          }
+        })(),
+      ]);
     } catch (error: any) {
       toast.error(error.message || 'Failed to submit study results');
     } finally {

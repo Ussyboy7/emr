@@ -522,9 +522,7 @@ export default function ResultsVerificationPage() {
 
       toast.success(`Result verified for ${selectedResult.patient.name}`);
       
-      // Reload results to get updated data
-      await loadResults();
-      await loadVerificationCounts();
+      await Promise.all([loadResults(), loadVerificationCounts()]);
       
       setIsVerifyDialogOpen(false);
       setVerificationNotes('');
@@ -545,7 +543,6 @@ export default function ResultsVerificationPage() {
     setIsSubmitting(true);
 
     try {
-      // Get the test ID from the result
       const testId = parseInt(selectedResult.testId || selectedResult.id);
       if (isNaN(testId)) {
         toast.error('Invalid test ID');
@@ -556,9 +553,7 @@ export default function ResultsVerificationPage() {
       
       toast.success(`Result rejected and sent back to ${selectedResult.submittedBy}`);
       
-      // Reload results to get updated data
-      await loadResults();
-      await loadVerificationCounts();
+      await Promise.all([loadResults(), loadVerificationCounts()]);
       
       setIsRejectDialogOpen(false);
       setRejectionReason('');

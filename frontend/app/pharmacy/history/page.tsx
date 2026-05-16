@@ -91,18 +91,20 @@ export default function DispenseHistoryPage() {
     try {
       setLoading(true);
       setError(null);
-      await getServerToday();
+      const [, response] = await Promise.all([
+        getServerToday(),
+        pharmacyService.getDispenseHistory({
+          page: currentPage,
+          page_size: itemsPerPage,
+          search: searchQuery.trim() || undefined,
+          gender: genderFilter !== 'all' ? genderFilter : undefined,
+          date_preset: dateFilter !== 'all' ? dateFilter : undefined,
+        }),
+      ]);
       const serverTz = peekServerTimezone();
       if (!serverTz) {
         throw new Error('Server timezone unavailable. Check /common/server-time/.');
       }
-      const response = await pharmacyService.getDispenseHistory({
-        page: currentPage,
-        page_size: itemsPerPage,
-        search: searchQuery.trim() || undefined,
-        gender: genderFilter !== 'all' ? genderFilter : undefined,
-        date_preset: dateFilter !== 'all' ? dateFilter : undefined,
-      });
       setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format
       const transformed = await Promise.all(response.results.map(async (dispense: any) => {

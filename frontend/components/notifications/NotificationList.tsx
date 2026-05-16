@@ -182,7 +182,7 @@ export const NotificationList = ({
   const handleMarkAllRead = useCallback(async () => {
     try {
       await markAllNotificationsAsRead();
-      await loadNotifications();
+      void loadNotifications();
       toast.success('All notifications marked as read');
     } catch {
       toast.error('Failed to mark all as read');

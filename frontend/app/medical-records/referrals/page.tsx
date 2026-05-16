@@ -79,16 +79,12 @@ export default function MedicalRecordsReferralsPage() {
     setShowDetailsModal(true);
     setFormsLoading(true);
     try {
-      const fresh = await referralService.getReferral(referral.id);
-      setSelectedReferral(fresh as ReferralWithPatient);
-    } catch {
-      setSelectedReferral(referral);
-    }
-    try {
-      const forms = await referralService.getForms(referral.id);
+      const [fresh, forms] = await Promise.all([
+        referralService.getReferral(referral.id).catch(() => null),
+        referralService.getForms(referral.id).catch(() => []),
+      ]);
+      setSelectedReferral((fresh || referral) as ReferralWithPatient);
       setSelectedForms(forms || []);
-    } catch {
-      setSelectedForms([]);
     } finally {
       setFormsLoading(false);
     }
@@ -134,17 +130,23 @@ export default function MedicalRecordsReferralsPage() {
         selectedReferral.id,
         form.id
       );
-      const fresh = await referralService.getReferral(selectedReferral.id);
-      setSelectedReferral(fresh as ReferralWithPatient);
-      const formsList = await referralService.getForms(selectedReferral.id);
-      setSelectedForms(formsList || []);
-      if (fresh.status === "approved_for_forms" || fresh.status === "scheduled") {
-        toast.success(
-          `Form #${form.sequence_number} stamped — referral marked Records acknowledged`
-        );
+      const [fresh, formsList] = await Promise.all([
+        referralService.getReferral(selectedReferral.id).catch(() => null),
+        referralService.getForms(selectedReferral.id).catch(() => []),
+      ]);
+      if (fresh) {
+        setSelectedReferral(fresh as ReferralWithPatient);
+        if (fresh.status === "approved_for_forms" || fresh.status === "scheduled") {
+          toast.success(
+            `Form #${form.sequence_number} stamped — referral marked Records acknowledged`
+          );
+        } else {
+          toast.success(`Responsibility form #${form.sequence_number} stamp recorded`);
+        }
       } else {
         toast.success(`Responsibility form #${form.sequence_number} stamp recorded`);
       }
+      setSelectedForms(formsList || []);
       void refetch();
       void refetchStats();
     } catch (error: unknown) {

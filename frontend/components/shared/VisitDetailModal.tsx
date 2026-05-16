@@ -130,13 +130,25 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
         notes: rawVisitData.clinical_notes || '',
       });
 
+      // Fire all enrichment API calls in parallel
+      const [patientDataResult, vitalsDataResult, sessionsResult, labOrdersResult, prescriptionsResult, radiologyOrdersResult] = await Promise.all([
+        patientService.getPatient(rawVisitData.patient).catch(() => null),
+        patientService.getPatientVitals(rawVisitData.patient).catch(() => []),
+        consultationService.getSessions({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
+        labService.getOrders({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
+        pharmacyService.getPrescriptions({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
+        radiologyService.getOrders({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
+      ]);
+
       // Load patient
       try {
-        const patientData = await patientService.getPatient(rawVisitData.patient);
-        setPatient({
-          id: patientData.patient_id || '',
-          name: patientData.full_name ?? '',
-        });
+        const patientData = patientDataResult;
+        if (patientData) {
+          setPatient({
+            id: patientData.patient_id || '',
+            name: patientData.full_name ?? '',
+          });
+        }
       } catch (err) {
         console.error('Failed to load patient:', err);
       }
@@ -181,7 +193,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
       // 3. Vitals Recorded (check if vitals exist for this visit date)
       try {
-        const vitalsData = await patientService.getPatientVitals(rawVisitData.patient);
+        const vitalsData = vitalsDataResult;
         const visitVitals = vitalsData.filter((v: any) => {
           const vitalDate = v.date || (v.recorded_at ? new Date(v.recorded_at).toISOString().split('T')[0] : '');
           return vitalDate === rawVisitData.date;
@@ -212,7 +224,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
       // 4. Consultation Session (if exists) - filter by patient and date
       try {
-        const sessions = await consultationService.getSessions({ patient: rawVisitData.patient.toString() });
+        const sessions = sessionsResult;
         if (sessions.results && sessions.results.length > 0) {
           // Filter sessions by visit date or session ID
           const visitSessions = sessions.results.filter((s: any) => {
@@ -267,7 +279,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
       // 5. Lab Orders (if any) - filter by visit
       try {
-        const labOrders = await labService.getOrders({ patient: rawVisitData.patient.toString() });
+        const labOrders = labOrdersResult;
         if (labOrders.results && labOrders.results.length > 0) {
           visitLabOrders = labOrders.results.filter((order: any) => {
             if (isConsultationSession) {
@@ -303,7 +315,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
       // 6. Prescriptions (if any) - filter by visit
       try {
-        const prescriptions = await pharmacyService.getPrescriptions({ patient: rawVisitData.patient.toString() });
+        const prescriptions = prescriptionsResult;
         if (prescriptions.results && prescriptions.results.length > 0) {
           visitPrescriptions = prescriptions.results.filter((rx: any) => {
             if (isConsultationSession) {
@@ -372,7 +384,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
       // 8. Radiology Reports Completed (if any studies have reports)
       try {
-        const radiologyOrders = await radiologyService.getOrders({ patient: rawVisitData.patient.toString() });
+        const radiologyOrders = radiologyOrdersResult;
         if (radiologyOrders.results && radiologyOrders.results.length > 0) {
           const visitRadiologyOrders = radiologyOrders.results.filter((order: any) => {
             if (isConsultationSession) {

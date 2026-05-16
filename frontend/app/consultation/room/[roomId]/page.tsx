@@ -1282,45 +1282,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     setLoadingPatientHistory(true);
     try {
-      // Load consultations history
-      const consultationsResponse = await consultationService.getSessions({ patient: patientId });
+      // Load all patient history data in parallel
+      const [consultationsResponse, labResults, imagingResults, prescriptions, vitals, physioOrders, admissions] = await Promise.all([
+        consultationService.getSessions({ patient: patientId }),
+        labService.getCompletedTests({ patient: patientId.toString() }),
+        radiologyService.getVerifiedReports({ patient: patientId.toString() }),
+        pharmacyService.getPrescriptions({ patient: patientId.toString(), page_size: 500 }),
+        patientService.getPatientVitals(patientId),
+        physioService.getOrders({ patient: patientId.toString() }).catch(() => ({ results: [] })),
+        wardService.getAdmissions({ patient: patientId }),
+      ]);
+
       const consultations = consultationsResponse.results || [];
       setRawConsultations(consultations || []);
-
-      // Load lab results history
-      const labResults = await labService.getCompletedTests({ patient: patientId.toString() });
       setRawLabResults(labResults?.results || []);
-
-      // Load imaging history
-      const imagingResults = await radiologyService.getVerifiedReports({ patient: patientId.toString() });
       setRawImagingResults(imagingResults?.results || []);
-
-      // Load prescription history (high page size — list endpoint is paginated)
-      const prescriptions = await pharmacyService.getPrescriptions({
-        patient: patientId.toString(),
-        page_size: 500,
-      });
       setRawPrescriptions(prescriptions?.results || []);
-
-      // Load vitals history for the History tab
-      const vitals = await patientService.getPatientVitals(patientId);
       setRawVitals(vitals);
-
-      // Load physiotherapy history for the History tab
-      try {
-        const physioOrders = await physioService.getOrders({ patient: patientId.toString() });
-        setRawPhysioResults(physioOrders?.results || []);
-      } catch (physioErr) {
-        console.warn('Could not load physio history:', physioErr);
-        setRawPhysioResults([]);
-      }
-
-      // Load ward admissions history
-      const admissions = await wardService.getAdmissions({ patient: patientId });
+      setRawPhysioResults(physioOrders?.results || []);
       setWardAdmissions(admissions?.results || []);
 
       // Set the most recent vitals on the current patient for display
-      if (vitals.length > 0) {
+      if (vitals?.length > 0) {
         const latestVitals = vitals[0];
         setCurrentPatient((prevPatient: Patient | null) => {
           if (!prevPatient) return prevPatient;
@@ -1827,182 +1810,126 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return true;
       }
 
+      // Fire all enrichment API calls in parallel
+      const [diagnosesResult, prescriptionsResp, labResp, radiologyResp, nursingResp, physioResp, vitalsResp, historyResp] = await Promise.all([
+        consultationService.getDiagnoses({ session: session.id, page_size: 100 }).catch(() => ({ results: [] })),
+        visitId ? apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        visitId ? apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        visitId ? apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        visitId ? apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        physioService.getOrders({ consultation_session: session.id, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
+        visitId ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        (async () => {
+          const numericPatientId = typeof patient.id === 'number' ? patient.id : parseInt(patient.id, 10);
+          try {
+            return await patientService.getPatientHistory(numericPatientId);
+          } catch {
+            return null;
+          }
+        })(),
+      ]);
+
       // Enrich session with related data
       const enrichedSession: any = { ...session };
 
-      // Load prescriptions for this visit
-      if (visitId) {
-        try {
-          const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
-          enrichedSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) => {
-            const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
-            return items.map((m: any) => ({
-              id: String(p.id) + (m.id != null ? '-' + m.id : ''),
-              medication: m.medication_name || m.medication?.name || p.medication_name || p.medication || 'Unknown',
-              dosage: m.dose || m.dosage || p.dose || p.dosage || '',
-              frequency: m.frequency || p.frequency || '',
-              duration: m.duration || p.duration || '',
-              quantity: m.quantity ?? p.quantity ?? 0,
-            }));
-          });
-        } catch (err) {
-          console.warn('Could not load prescriptions for session:', err);
-          enrichedSession.prescriptions = [];
-        }
+      // Process prescriptions
+      enrichedSession.prescriptions = (prescriptionsResp.results || []).flatMap((p: any) => {
+        const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
+        return items.map((m: any) => ({
+          id: String(p.id) + (m.id != null ? '-' + m.id : ''),
+          medication: m.medication_name || m.medication?.name || p.medication_name || p.medication || 'Unknown',
+          dosage: m.dose || m.dosage || p.dose || p.dosage || '',
+          frequency: m.frequency || p.frequency || '',
+          duration: m.duration || p.duration || '',
+          quantity: m.quantity ?? p.quantity ?? 0,
+        }));
+      });
 
-        // Load lab orders for this visit
-        try {
-          const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`);
-          enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) => {
-            const tests = order.tests || [];
-            if (!tests.length) return [];
-            return tests.map((test: any) => ({
-              id: `LAB-${order.id}-${test.id}`,
-              test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
-              status: test.status ?? order.status ?? '',
-              priority: order.priority ?? '',
-              result: summarizeLabTestForConsultationReport(test),
-              orderedBy: order.doctor_name ?? '',
-              createdAt: test.created_at ?? order.ordered_at ?? '',
-            }));
-          });
-        } catch (err) {
-          console.warn('Could not load lab orders for session:', err);
-          enrichedSession.labOrders = [];
-        }
+      // Process lab orders
+      enrichedSession.labOrders = (labResp.results || []).flatMap((order: any) => {
+        const tests = order.tests || [];
+        if (!tests.length) return [];
+        return tests.map((test: any) => ({
+          id: `LAB-${order.id}-${test.id}`,
+          test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
+          status: test.status ?? order.status ?? '',
+          priority: order.priority ?? '',
+          result: summarizeLabTestForConsultationReport(test),
+          orderedBy: order.doctor_name ?? '',
+          createdAt: test.created_at ?? order.ordered_at ?? '',
+        }));
+      });
 
-        // Load radiology orders for this visit
-        try {
-          const radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`);
-          enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).flatMap((order: any) => {
-            const studies = order.studies || [];
-            if (studies.length) {
-              return studies.map((s: any) => ({
-                id: `RAD-${order.id}-${s.id}`,
-                procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
-                priority: order.priority ?? '',
-                status: s.status ?? order.status ?? '',
-                finding: (
-                  s.report ??
-                  s.findings ??
-                  s.impression ??
-                  s.finding ??
-                  order.finding ??
-                  ''
-                ).toString().trim(),
-                orderedBy: order.doctor_name ?? '',
-                createdAt: s.created_at ?? order.ordered_at ?? '',
-              }));
-            }
-            const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
-            if (!proc) return [];
-            return [{
-              id: String(order.id),
-              procedure: proc,
-              priority: order.priority ?? '',
-              status: order.status ?? '',
-              finding: (
-                order.report ??
-                order.findings ??
-                order.impression ??
-                order.finding ??
-                ''
-              ).toString().trim(),
-              orderedBy: order.doctor_name ?? '',
-              createdAt: order.ordered_at ?? '',
-            }];
-          });
-        } catch (err) {
-          console.warn('Could not load radiology orders for session:', err);
-          enrichedSession.radiologyOrders = [];
-        }
-
-        // Load nursing orders for this visit
-        try {
-          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${visitId}&page_size=100`);
-          enrichedSession.nursingOrders = (nursingOrdersResult.results || []).map((order: any) => ({
-            id: String(order.id),
-            type: order.order_type || order.type || 'General',
-            instructions: order.instructions || '',
-            status: order.status || 'pending',
-            priority: order.priority === 'urgent' ? 'Urgent' : order.priority === 'high' ? 'High' : 'Medium',
-            orderedBy: order.ordered_by_name || 'Unknown',
-            createdAt: order.created_at || new Date().toISOString(),
+      // Process radiology orders
+      enrichedSession.radiologyOrders = (radiologyResp.results || []).flatMap((order: any) => {
+        const studies = order.studies || [];
+        if (studies.length) {
+          return studies.map((s: any) => ({
+            id: `RAD-${order.id}-${s.id}`,
+            procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
+            priority: order.priority ?? '',
+            status: s.status ?? order.status ?? '',
+            finding: (s.report ?? s.findings ?? s.impression ?? s.finding ?? order.finding ?? '').toString().trim(),
+            orderedBy: order.doctor_name ?? '',
+            createdAt: s.created_at ?? order.ordered_at ?? '',
           }));
-        } catch (err) {
-          console.warn('Could not load nursing orders for session:', err);
-          enrichedSession.nursingOrders = [];
         }
-      } else {
-        // No visit ID, set empty arrays
-        enrichedSession.prescriptions = [];
-        enrichedSession.labOrders = [];
-        enrichedSession.radiologyOrders = [];
-        enrichedSession.nursingOrders = [];
-      }
+        const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
+        if (!proc) return [];
+        return [{
+          id: String(order.id),
+          procedure: proc,
+          priority: order.priority ?? '',
+          status: order.status ?? '',
+          finding: (order.report ?? order.findings ?? order.impression ?? order.finding ?? '').toString().trim(),
+          orderedBy: order.doctor_name ?? '',
+          createdAt: order.ordered_at ?? '',
+        }];
+      });
 
-      // Load physio orders for this session (by consultation_session)
-      try {
-        const physioOrdersResult = await physioService.getOrders({
-          consultation_session: session.id,
-          patient: session.patient != null ? String(session.patient) : undefined,
-          page_size: 100,
-        });
-        enrichedSession.physioOrders = (physioOrdersResult.results || []).map((o: any) => ({
-          diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
-          priority: o.priority ?? '',
-          status: o.status ?? '',
-        }));
-      } catch (err) {
-        console.warn('Could not load physio orders for session:', err);
-        enrichedSession.physioOrders = [];
-      }
+      // Process nursing orders
+      enrichedSession.nursingOrders = (nursingResp.results || []).map((order: any) => ({
+        id: String(order.id),
+        type: order.order_type || order.type || 'General',
+        instructions: order.instructions || '',
+        status: order.status || 'pending',
+        priority: order.priority === 'urgent' ? 'Urgent' : order.priority === 'high' ? 'High' : 'Medium',
+        orderedBy: order.ordered_by_name || 'Unknown',
+        createdAt: order.created_at || new Date().toISOString(),
+      }));
 
-      // Load vitals for the session viewer
-      if (visitId) {
-        try {
-          const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
-          enrichedSession.vitals = (vitalsResult.results || []).reduce((acc: any, v: any) => {
-            acc.temperature = v.temperature || '';
-            acc.bloodPressure = v.blood_pressure_systolic && v.blood_pressure_diastolic
-              ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
-              : '';
-            acc.heartRate = v.heart_rate || '';
-            acc.respiratoryRate = v.respiratory_rate || '';
-            acc.oxygenSaturation = v.oxygen_saturation || '';
-            acc.weight = v.weight || '';
-            acc.height = v.height || '';
-            acc.recordedAt = v.recorded_at || '';
-            return acc;
-          }, {});
-        } catch (err) {
-          console.warn('Could not load vitals for session:', err);
-          enrichedSession.vitals = {};
-        }
-      } else {
-        enrichedSession.vitals = {};
-      }
+      // Process physio orders
+      enrichedSession.physioOrders = (physioResp.results || []).map((o: any) => ({
+        diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+        priority: o.priority ?? '',
+        status: o.status ?? '',
+      }));
 
-      // Load diagnoses for this session
-      try {
-        const diagnosesResult = await consultationService.getDiagnoses({
-          session: session.id,
-          page_size: 100
-        });
-        const list = diagnosesResult.results || [];
-        setDiagnoses(list);
-        enrichedSession.diagnoses = list.map((d: any) => ({
-          id: d.id,
-          code: d.icd10_code_details?.code || '',
-          name: d.icd10_code_details?.description || d.diagnosis_text || '',
-          type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential',
-          notes: d.notes || ''
-        }));
-      } catch (err) {
-        console.warn('Could not load diagnoses for session:', err);
-        setDiagnoses([]);
-        enrichedSession.diagnoses = [];
-      }
+      // Process vitals
+      enrichedSession.vitals = (vitalsResp.results || []).reduce((acc: any, v: any) => {
+        acc.temperature = v.temperature || '';
+        acc.bloodPressure = v.blood_pressure_systolic && v.blood_pressure_diastolic
+          ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
+          : '';
+        acc.heartRate = v.heart_rate || '';
+        acc.respiratoryRate = v.respiratory_rate || '';
+        acc.oxygenSaturation = v.oxygen_saturation || '';
+        acc.weight = v.weight || '';
+        acc.height = v.height || '';
+        acc.recordedAt = v.recorded_at || '';
+        return acc;
+      }, {});
+
+      // Process diagnoses
+      const diagnosesList = (diagnosesResult as any).results || [];
+      setDiagnoses(diagnosesList);
+      enrichedSession.diagnoses = diagnosesList.map((d: any) => ({
+        id: d.id,
+        code: d.icd10_code_details?.code || '',
+        name: d.icd10_code_details?.description || d.diagnosis_text || '',
+        type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential',
+        notes: d.notes || '',
+      }));
 
       // Set the enriched session
       setSelectedSession(enrichedSession);
@@ -2015,150 +1942,113 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         assessment: session.assessment || '',
         plan: session.plan || '',
       });
-      
-      // Load medical history
-      try {
-        const numericPatientId = typeof patient.id === 'number' ? patient.id : parseInt(patient.id, 10);
-        const history = await patientService.getPatientHistory(numericPatientId);
+
+      // Set medical history
+      if (historyResp) {
         setMedicalHistory({
-          allergies: Array.isArray(history.allergies) ? history.allergies : [],
-          diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
-          surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
-          familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
+          allergies: Array.isArray(historyResp.allergies) ? historyResp.allergies : [],
+          diagnoses: Array.isArray(historyResp.diagnoses) ? historyResp.diagnoses : [],
+          surgicalHistory: Array.isArray(historyResp.surgical_history) ? historyResp.surgical_history : [],
+          familyHistory: Array.isArray(historyResp.family_history) ? historyResp.family_history : [],
           socialHistory: {
-            smoking: history.social_history?.smoking || '',
-            alcohol: history.social_history?.alcohol || '',
-            exercise: history.social_history?.exercise || '',
-            occupation: history.social_history?.occupation || '',
+            smoking: historyResp.social_history?.smoking || '',
+            alcohol: historyResp.social_history?.alcohol || '',
+            exercise: historyResp.social_history?.exercise || '',
+            occupation: historyResp.social_history?.occupation || '',
           },
         });
-      } catch (historyErr) {
-        console.warn('Could not load medical history:', historyErr);
+      } else {
         setMedicalHistory({
-          allergies: [],
-          diagnoses: [],
-          surgicalHistory: [],
-          familyHistory: [],
-          socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
+          allergies: [], diagnoses: [], surgicalHistory: [],
+          familyHistory: [], socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
         });
       }
-      
-      // Load prescriptions if visit exists
-      if (visitId) {
-        try {
-          const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
-          // Transform prescriptions for the UI
-          const transformedPrescriptions = prescriptionsResult.results?.flatMap((rx: any) => 
-            (rx.medications || []).map((item: any) => ({
-              id: `RX-${rx.id}-${item.id}`,
-              prescriptionId: rx.id,
-              medication: item.medication?.name || item.medication_name || 'Unknown',
-              genericId: item.generic ?? item.generic_id,
-              brandMedicationId: item.medication?.id ?? item.medication_id,
-              medicationId: item.generic ?? item.generic_id ?? item.medication?.id ?? item.medication_id,
-              genericName: item.medication?.generic_name || item.generic_name || '',
-              unit: item.unit || item.medication_details?.unit || 'tablet',
-              strength: item.strength || item.medication_details?.strength || '',
-              form: item.dosage_form || item.medication_details?.form || '',
-                  dosage: item.dose || item.dosage || '',
-                  frequency: item.frequency || '',
-                  duration: item.duration || '',
-                  quantity: item.quantity || 0,
-                  route: item.route || 'Oral',
-                  instructions: item.instructions || '',
-                  priority: item.priority || 'Routine',
-              status: rx.status === 'dispensed' ? 'Dispensed' :
-                      rx.status === 'partially_dispensed' ? 'Partially Dispensed' :
-                      rx.status === 'cancelled' ? 'Cancelled' :
-                      rx.status === 'pending' ? 'Sent to Pharmacy' :
-                      'Draft',
-            })) || []
-          ) || [];
-          setPrescriptions(transformedPrescriptions);
-        } catch (prescriptionErr) {
-          console.warn('Could not load prescriptions:', prescriptionErr);
-        }
-      }
-      
-      // Load lab orders if visit exists
-      if (visitId) {
-        try {
-          const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`);
-          // Transform lab orders - each order has multiple tests
-          const transformedLabOrders: typeof labOrders = [];
-          labOrdersResult.results?.forEach((order: any) => {
-            // Each order can have multiple tests
-            (order.tests || []).forEach((test: any) => {
-              transformedLabOrders.push({
-                id: `LAB-${order.id}-${test.id}`,
-                test: test.name || 'Unknown Test',
-                testId: test.template,
-                code: test.code,
-                sampleType: test.sample_type,
-                priority: order.priority === 'routine' ? 'Routine' : order.priority === 'urgent' ? 'Urgent' : 'STAT',
-                notes: test.notes || order.clinical_notes || '',
-                status: 'Sent to Lab' as const, // Already sent if loaded from API
-              });
-            });
-          });
-          setLabOrders(transformedLabOrders);
-        } catch (labErr) {
-          console.warn('Could not load lab orders:', labErr);
-        }
-        }
-      
-      // Load radiology orders if visit exists
-      if (visitId) {
-      try {
-          const radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`);
-          // Transform radiology orders - each order has multiple studies
-          const transformedRadiologyOrders: typeof radiologyOrders = [];
-          radiologyOrdersResult.results?.forEach((order: any) => {
-            // Each order can have multiple studies
-            (order.studies || []).forEach((study: any) => {
-              transformedRadiologyOrders.push({
-                id: `RAD-${order.id}-${study.id}`,
-                procedure: study.procedure || 'Unknown Procedure',
-                category: study.modality || 'X-Ray',
-                bodyPart: study.body_part || '',
-                clinicalIndication: order.clinical_notes || '',
-                priority: order.priority === 'routine' ? 'Routine' : order.priority === 'urgent' ? 'Urgent' : 'STAT',
-                provisionalDiagnosis: order.provisional_diagnosis || undefined,
-                lmp: order.lmp || undefined,
-                status: 'Sent to Radiology' as const, // Already sent if loaded from API
-              });
-            });
-          });
-          setRadiologyOrders(transformedRadiologyOrders);
-        } catch (radiologyErr) {
-          console.warn('Could not load radiology orders:', radiologyErr);
-        }
-      }
 
-      // Load nursing orders if visit exists
+      // Set state-level orders for the UI (reuse the parallel results)
       if (visitId) {
-        try {
-          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${visitId}&page_size=100`);
-          // Transform nursing orders
-          const transformedNursingOrders: typeof nursingOrders = [];
-          nursingOrdersResult.results?.forEach((order: any) => {
-            transformedNursingOrders.push({
-              id: order.id.toString(),
-              type: order.order_type || 'Injection',
-              medication: order.description?.split(' - ')[1] || '',
-              dosage: order.frequency || '',
-              route: 'As ordered',
-              woundLocation: '',
-              woundType: '',
-              instructions: order.description || '',
-              priority: order.priority === 'medium' ? 'Routine' : order.priority === 'high' ? 'Urgent' : 'STAT',
-              status: 'Sent to Nursing' as const, // Already sent if loaded from API
+        // Prescriptions
+        const transformedPrescriptions = (prescriptionsResp.results || []).flatMap((rx: any) =>
+          (rx.medications || []).map((item: any) => ({
+            id: `RX-${rx.id}-${item.id}`,
+            prescriptionId: rx.id,
+            medication: item.medication?.name || item.medication_name || 'Unknown',
+            genericId: item.generic ?? item.generic_id,
+            brandMedicationId: item.medication?.id ?? item.medication_id,
+            medicationId: item.generic ?? item.generic_id ?? item.medication?.id ?? item.medication_id,
+            genericName: item.medication?.generic_name || item.generic_name || '',
+            unit: item.unit || item.medication_details?.unit || 'tablet',
+            strength: item.strength || item.medication_details?.strength || '',
+            form: item.dosage_form || item.medication_details?.form || '',
+            dosage: item.dose || item.dosage || '',
+            frequency: item.frequency || '',
+            duration: item.duration || '',
+            quantity: item.quantity || 0,
+            route: item.route || 'Oral',
+            instructions: item.instructions || '',
+            priority: item.priority || 'Routine',
+            status: rx.status === 'dispensed' ? 'Dispensed' :
+                    rx.status === 'partially_dispensed' ? 'Partially Dispensed' :
+                    rx.status === 'cancelled' ? 'Cancelled' :
+                    rx.status === 'pending' ? 'Sent to Pharmacy' :
+                    'Draft',
+          })) || []
+        ) || [];
+        setPrescriptions(transformedPrescriptions);
+
+        // Lab orders
+        const transformedLabOrders: typeof labOrders = [];
+        (labResp.results || []).forEach((order: any) => {
+          (order.tests || []).forEach((test: any) => {
+            transformedLabOrders.push({
+              id: `LAB-${order.id}-${test.id}`,
+              test: test.name || 'Unknown Test',
+              testId: test.template,
+              code: test.code,
+              sampleType: test.sample_type,
+              priority: order.priority === 'routine' ? 'Routine' : order.priority === 'urgent' ? 'Urgent' : 'STAT',
+              notes: test.notes || order.clinical_notes || '',
+              status: 'Sent to Lab' as const,
             });
           });
-          setNursingOrders(transformedNursingOrders);
-        } catch (nursingErr) {
-          console.warn('Could not load nursing orders:', nursingErr);
-        }
+        });
+        setLabOrders(transformedLabOrders);
+
+        // Radiology orders
+        const transformedRadiologyOrders: typeof radiologyOrders = [];
+        (radiologyResp.results || []).forEach((order: any) => {
+          (order.studies || []).forEach((study: any) => {
+            transformedRadiologyOrders.push({
+              id: `RAD-${order.id}-${study.id}`,
+              procedure: study.procedure || 'Unknown Procedure',
+              category: study.modality || 'X-Ray',
+              bodyPart: study.body_part || '',
+              clinicalIndication: order.clinical_notes || '',
+              priority: order.priority === 'routine' ? 'Routine' : order.priority === 'urgent' ? 'Urgent' : 'STAT',
+              provisionalDiagnosis: order.provisional_diagnosis || undefined,
+              lmp: order.lmp || undefined,
+              status: 'Sent to Radiology' as const,
+            });
+          });
+        });
+        setRadiologyOrders(transformedRadiologyOrders);
+
+        // Nursing orders
+        const transformedNursingOrders: typeof nursingOrders = [];
+        (nursingResp.results || []).forEach((order: any) => {
+          transformedNursingOrders.push({
+            id: order.id.toString(),
+            type: order.order_type || 'Injection',
+            medication: order.description?.split(' - ')[1] || '',
+            dosage: order.frequency || '',
+            route: 'As ordered',
+            woundLocation: '',
+            woundType: '',
+            instructions: order.description || '',
+            priority: order.priority === 'medium' ? 'Routine' : order.priority === 'high' ? 'Urgent' : 'STAT',
+            status: 'Sent to Nursing' as const,
+          });
+        });
+        setNursingOrders(transformedNursingOrders);
       }
 
       // Load patient history data for the History tab
@@ -2862,36 +2752,30 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       enrichedSession.patient_gender = currentPatient.gender;
     }
 
-    // Load diagnoses for this session
-    try {
-      const diagnosesResult = await consultationService.getDiagnoses({
-        session: fullSession.id,
-        page_size: 100
-      });
-      enrichedSession.diagnoses = (diagnosesResult.results || []).map((d: any) => ({
-        id: String(d.id),
-        code: d.icd10_code_details?.code || 'Unknown',
-        name: d.icd10_code_details?.description || d.diagnosis_text || 'Unknown diagnosis',
-        type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential',
-        notes: d.notes || d.diagnosis_text || '',
-        status: d.status,
-        certainty: d.certainty,
-        diagnosed_at: d.diagnosed_at,
-      }));
-    } catch (err) {
-      console.warn('Could not load diagnoses for session:', err);
-      enrichedSession.diagnoses = [];
-    }
+    // Load all enrichment data in parallel — all only depend on fullSession.id
+    const [diagnosesResult, prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioOrdersResult, vitalsResult] = await Promise.all([
+      consultationService.getDiagnoses({ session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
+      pharmacyService.getPrescriptions({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
+      labService.getOrders({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
+      radiologyService.getOrders({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
+      apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${fullSession.id}&page_size=100`).catch(() => ({ results: [] })),
+      physioService.getOrders({ consultation_session: fullSession.id, patient: fullSession.patient != null ? String(fullSession.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
+      patientService.getPatientVitals(fullSession.patient, fullSession.visit).catch(() => []),
+    ]);
 
-    // Load related data for this session
-    try {
-    // Load prescriptions for this session
-    const prescriptionsResult = await pharmacyService.getPrescriptions({
-      consultation_session: fullSession.id,
-      page_size: 100
-    });
-    // Flatten prescription medications into individual prescription items
-    // Support both: p.medications[] and top-level p.medication_name / p.medication (single-med per rx)
+    // Process diagnoses
+    enrichedSession.diagnoses = (diagnosesResult.results || []).map((d: any) => ({
+      id: String(d.id),
+      code: d.icd10_code_details?.code || 'Unknown',
+      name: d.icd10_code_details?.description || d.diagnosis_text || 'Unknown diagnosis',
+      type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential',
+      notes: d.notes || d.diagnosis_text || '',
+      status: d.status,
+      certainty: d.certainty,
+      diagnosed_at: d.diagnosed_at,
+    }));
+
+    // Process prescriptions
     enrichedSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) => {
       const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
       return items.map((m: any) => ({
@@ -2903,151 +2787,88 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         quantity: m.quantity ?? p.quantity ?? 0,
       }));
     });
-    } catch (err) {
-      console.warn('Could not load prescriptions for session:', err);
-      enrichedSession.prescriptions = [];
-    }
 
-    // Load lab orders for this session
-    try {
-      const labOrdersResult = await labService.getOrders({
-        consultation_session: fullSession.id,
-        page_size: 100
-      });
-      enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) => {
-        const tests = order.tests || [];
-        if (!tests.length) return [];
-        return tests.map((test: any) => ({
-          id: `LAB-${order.id}-${test.id}`,
-          test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
-          status: test.status ?? order.status ?? '',
+    // Process lab orders
+    enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) => {
+      const tests = order.tests || [];
+      if (!tests.length) return [];
+      return tests.map((test: any) => ({
+        id: `LAB-${order.id}-${test.id}`,
+        test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
+        status: test.status ?? order.status ?? '',
+        priority: order.priority ?? '',
+        result: summarizeLabTestForConsultationReport(test),
+        orderedBy: order.doctor_name ?? '',
+        createdAt: test.created_at ?? order.ordered_at ?? '',
+      }));
+    });
+
+    // Process radiology orders
+    enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).flatMap((order: any) => {
+      const studies = order.studies || [];
+      if (studies.length) {
+        return studies.map((s: any) => ({
+          id: `RAD-${order.id}-${s.id}`,
+          procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
           priority: order.priority ?? '',
-          result: summarizeLabTestForConsultationReport(test),
+          status: s.status ?? order.status ?? '',
+          finding: (s.report ?? s.findings ?? s.impression ?? s.finding ?? order.finding ?? '').toString().trim(),
           orderedBy: order.doctor_name ?? '',
-          createdAt: test.created_at ?? order.ordered_at ?? '',
+          createdAt: s.created_at ?? order.ordered_at ?? '',
         }));
-      });
-    } catch (err) {
-      console.warn('Could not load lab orders for session:', err);
-      enrichedSession.labOrders = [];
-    }
-
-    // Load radiology orders for this session
-    try {
-      const radiologyOrdersResult = await radiologyService.getOrders({
-        consultation_session: fullSession.id,
-        page_size: 100
-      });
-      enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).flatMap((order: any) => {
-        const studies = order.studies || [];
-        if (studies.length) {
-          return studies.map((s: any) => ({
-            id: `RAD-${order.id}-${s.id}`,
-            procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
-            priority: order.priority ?? '',
-            status: s.status ?? order.status ?? '',
-            finding: (
-              s.report ??
-              s.findings ??
-              s.impression ??
-              s.finding ??
-              order.finding ??
-              ''
-            ).toString().trim(),
-            orderedBy: order.doctor_name ?? '',
-            createdAt: s.created_at ?? order.ordered_at ?? '',
-          }));
-        }
-        const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
-        if (!proc) return [];
-        return [{
-          id: String(order.id),
-          procedure: proc,
-          priority: order.priority ?? '',
-          status: order.status ?? '',
-          finding: (
-            order.report ??
-            order.findings ??
-            order.impression ??
-            order.finding ??
-            ''
-          ).toString().trim(),
-          orderedBy: order.doctor_name ?? '',
-          createdAt: order.ordered_at ?? '',
-        }];
-      });
-    } catch (err) {
-      console.warn('Could not load radiology orders for session:', err);
-      enrichedSession.radiologyOrders = [];
-    }
-
-    // Load nursing orders for this session (using direct API call since no service method)
-    try {
-      const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${fullSession.id}&page_size=100`);
-      enrichedSession.nursingOrders = (nursingOrdersResult.results || []).map((order: any) => ({
-        id: String(order.id),
-        type: order.order_type || order.type || 'General',
-        instructions: order.instructions || '',
-        status: order.status || 'pending',
-        priority: order.priority === 'urgent' ? 'Urgent' : order.priority === 'high' ? 'High' : 'Medium',
-        orderedBy: order.ordered_by_name || 'Unknown',
-        createdAt: order.created_at || new Date().toISOString(),
-      }));
-    } catch (err) {
-      console.warn('Could not load nursing orders for session:', err);
-      enrichedSession.nursingOrders = [];
-    }
-
-    // Load physio orders for this session (by consultation_session)
-    try {
-      const physioOrdersResult = await physioService.getOrders({
-        consultation_session: fullSession.id,
-        patient: fullSession.patient != null ? String(fullSession.patient) : undefined,
-        page_size: 100,
-      });
-      enrichedSession.physioOrders = (physioOrdersResult.results || []).map((o: any) => ({
-        diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
-        priority: o.priority ?? '',
-        status: o.status ?? '',
-      }));
-    } catch (err) {
-      console.warn('Could not load physio orders for session:', err);
-      enrichedSession.physioOrders = [];
-    }
-
-    // Load vitals for the session (by visit if available, otherwise by patient)
-    try {
-      const visitId = fullSession.visit; // Now fullSession has the visit ID from API
-      const vitalsResult = await patientService.getPatientVitals(fullSession.patient, visitId);
-
-      // Use the most recent complete vitals record
-      const sortedVitals = (vitalsResult || []).sort((a, b) =>
-        new Date(b.recorded_at || 0).getTime() - new Date(a.recorded_at || 0).getTime()
-      );
-
-      // Find the most recent vitals with complete BP data
-      const latestCompleteVitals = sortedVitals.find(v =>
-        v.blood_pressure_systolic && v.blood_pressure_diastolic
-      ) || sortedVitals[0]; // Fallback to most recent even if BP incomplete
-
-      if (latestCompleteVitals) {
-        enrichedSession.vitals = {
-          temperature: latestCompleteVitals.temperature || '',
-          bloodPressure: latestCompleteVitals.blood_pressure_systolic && latestCompleteVitals.blood_pressure_diastolic
-            ? `${latestCompleteVitals.blood_pressure_systolic}/${latestCompleteVitals.blood_pressure_diastolic}`
-            : '',
-          heartRate: latestCompleteVitals.heart_rate || '',
-          respiratoryRate: latestCompleteVitals.respiratory_rate || '',
-          oxygenSaturation: latestCompleteVitals.oxygen_saturation || '',
-          weight: latestCompleteVitals.weight || '',
-          height: latestCompleteVitals.height || '',
-          recordedAt: latestCompleteVitals.recorded_at || '',
-        };
-      } else {
-        enrichedSession.vitals = {};
       }
-    } catch (err) {
-      console.warn('Could not load vitals for session:', err);
+      const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
+      if (!proc) return [];
+      return [{
+        id: String(order.id),
+        procedure: proc,
+        priority: order.priority ?? '',
+        status: order.status ?? '',
+        finding: (order.report ?? order.findings ?? order.impression ?? order.finding ?? '').toString().trim(),
+        orderedBy: order.doctor_name ?? '',
+        createdAt: order.ordered_at ?? '',
+      }];
+    });
+
+    // Process nursing orders
+    enrichedSession.nursingOrders = (nursingOrdersResult.results || []).map((order: any) => ({
+      id: String(order.id),
+      type: order.order_type || order.type || 'General',
+      instructions: order.instructions || '',
+      status: order.status || 'pending',
+      priority: order.priority === 'urgent' ? 'Urgent' : order.priority === 'high' ? 'High' : 'Medium',
+      orderedBy: order.ordered_by_name || 'Unknown',
+      createdAt: order.created_at || new Date().toISOString(),
+    }));
+
+    // Process physio orders
+    enrichedSession.physioOrders = (physioOrdersResult.results || []).map((o: any) => ({
+      diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+      priority: o.priority ?? '',
+      status: o.status ?? '',
+    }));
+
+    // Process vitals
+    const sortedVitals = (vitalsResult || []).sort((a: any, b: any) =>
+      new Date(b.recorded_at || 0).getTime() - new Date(a.recorded_at || 0).getTime()
+    );
+    const latestCompleteVitals = sortedVitals.find((v: any) =>
+      v.blood_pressure_systolic && v.blood_pressure_diastolic
+    ) || sortedVitals[0];
+    if (latestCompleteVitals) {
+      enrichedSession.vitals = {
+        temperature: latestCompleteVitals.temperature || '',
+        bloodPressure: latestCompleteVitals.blood_pressure_systolic && latestCompleteVitals.blood_pressure_diastolic
+          ? `${latestCompleteVitals.blood_pressure_systolic}/${latestCompleteVitals.blood_pressure_diastolic}`
+          : '',
+        heartRate: latestCompleteVitals.heart_rate || '',
+        respiratoryRate: latestCompleteVitals.respiratory_rate || '',
+        oxygenSaturation: latestCompleteVitals.oxygen_saturation || '',
+        weight: latestCompleteVitals.weight || '',
+        height: latestCompleteVitals.height || '',
+        recordedAt: latestCompleteVitals.recorded_at || '',
+      };
+    } else {
       enrichedSession.vitals = {};
     }
 

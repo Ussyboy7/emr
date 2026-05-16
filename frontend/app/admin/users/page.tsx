@@ -370,8 +370,10 @@ export default function UserManagementPage() {
 
     try {
       const userId = parseInt(s.id, 10);
-      const user = await adminService.getUser(userId);
-      const assignments = await adminService.getUserRoleAssignments(userId);
+      const [user, assignments] = await Promise.all([
+        adminService.getUser(userId),
+        adminService.getUserRoleAssignments(userId),
+      ]);
       const firstRoleId = assignments?.[0]?.role;
       if (firstRoleId != null) {
         setFormData((prev) => ({ ...prev, accessRoleId: Number(firstRoleId) }));

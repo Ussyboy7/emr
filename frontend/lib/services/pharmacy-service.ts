@@ -876,13 +876,15 @@ class PharmacyService {
     lowStock: number;
     totalInventory: number;
   }> {
-    // Get pending prescriptions
-    const pendingResponse = await this.getPrescriptions({ status: 'pending', page: 1 });
+    const [pendingResponse, dispensedResponse, alertsResponse, inventoryResponse] = await Promise.all([
+      this.getPrescriptions({ status: 'pending', page: 1 }),
+      this.getPrescriptions({ status: 'dispensed', page: 1 }),
+      this.getInventoryAlertSummary(),
+      this.getInventory({ page: 1 }),
+    ]);
+
     const pendingRx = pendingResponse.count || pendingResponse.results.length;
-    
-    // Get dispensed today
     const today = new Date().toLocaleDateString('en-CA');
-    const dispensedResponse = await this.getPrescriptions({ status: 'dispensed', page: 1 });
     const dispensedToday = dispensedResponse.results.filter((rx: Prescription) => {
       if (rx.dispensed_at) {
         const dispensedDate = new Date(rx.dispensed_at).toLocaleDateString('en-CA');
@@ -890,13 +892,7 @@ class PharmacyService {
       }
       return false;
     }).length;
-    
-    // Get inventory alerts
-    const alertsResponse = await this.getInventoryAlertSummary();
     const lowStock = alertsResponse.low_stock_count || 0;
-    
-    // Get total inventory items
-    const inventoryResponse = await this.getInventory({ page: 1 });
     const totalInventory = inventoryResponse.count || inventoryResponse.results.length;
     
     return {

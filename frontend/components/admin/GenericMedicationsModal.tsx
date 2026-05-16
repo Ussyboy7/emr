@@ -170,7 +170,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
       });
       toast.success("Generic created");
       setShowCreateModal(false);
-      await loadGenerics();
+      void loadGenerics();
     } catch (err: any) {
       toast.error(err?.apiMessage || err?.message || "Failed to create generic");
     } finally {
@@ -202,7 +202,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
       toast.success("Generic updated");
       setShowEditModal(false);
       setSelectedGeneric(null);
-      await loadGenerics();
+      void loadGenerics();
     } catch (err: any) {
       toast.error(err?.apiMessage || err?.message || "Failed to update generic");
     } finally {
@@ -216,7 +216,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
     try {
       await pharmacyService.deleteGeneric(g.id);
       toast.success("Generic deleted");
-      await loadGenerics();
+      void loadGenerics();
     } catch (err: any) {
       toast.error(err?.apiMessage || err?.message || "Failed to delete generic");
     }

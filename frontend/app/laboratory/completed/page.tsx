@@ -125,25 +125,26 @@ export default function CompletedTestsPage() {
         end_date,
       } as const;
 
-      const listResult = await labService.getVerifiedResults({
-        ...baseParams,
-        page: currentPage,
-        page_size: itemsPerPage,
-      });
+      const [listResult, statsResult] = await Promise.all([
+        labService.getVerifiedResults({
+          ...baseParams,
+          page: currentPage,
+          page_size: itemsPerPage,
+        }),
+        labService.getVerificationStats({
+          status: 'verified',
+          overall_status: statusFilter !== 'all' ? statusFilter : undefined,
+          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+          gender: genderFilter !== 'all' ? genderFilter : undefined,
+          search: debouncedSearchQuery || undefined,
+          processing_method: processingFilter !== 'all' ? processingFilter : undefined,
+          date,
+          start_date,
+          end_date,
+        }),
+      ]);
 
       setTotalCount(listResult.count || (listResult.results || []).length);
-
-      const statsResult = await labService.getVerificationStats({
-        status: 'verified',
-        overall_status: statusFilter !== 'all' ? statusFilter : undefined,
-        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
-        gender: genderFilter !== 'all' ? genderFilter : undefined,
-        search: debouncedSearchQuery || undefined,
-        processing_method: processingFilter !== 'all' ? processingFilter : undefined,
-        date,
-        start_date,
-        end_date,
-      });
       setStats({
         total: statsResult.total || 0,
         normal: statsResult.normal || 0,

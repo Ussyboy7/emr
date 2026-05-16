@@ -142,21 +142,26 @@ export default function PatientVitalsPage() {
       }
 
       // Fetch visits with backend filtering and pagination
-      const visitsResponse = await visitService.getVisits(params);
+      const [visitsResponse, sessionsResult] = await Promise.all([
+        visitService.getVisits(params),
+        (async () => {
+          try {
+            return await consultationService.getSessions({ page_size: 200 });
+          } catch (error) {
+            console.warn('[Patient Vitals] Could not load consultation sessions:', error);
+            return { results: [] };
+          }
+        })(),
+      ]);
       const nursingVisits = visitsResponse.results || [];
 
       // Get consultation sessions to exclude already processed visits
       let visitsWithSessions: Set<number> = new Set();
-      try {
-        const sessionsResult = await consultationService.getSessions({ page_size: 200 });
-        visitsWithSessions = new Set(
-          sessionsResult.results
-            .map((s: any) => s.visit?.id || s.visit_id)
-            .filter((id: any) => id)
-        );
-      } catch (error) {
-        console.warn('[Patient Vitals] Could not load consultation sessions:', error);
-      }
+      visitsWithSessions = new Set(
+        (sessionsResult as any).results
+          .map((s: any) => s.visit?.id || s.visit_id)
+          .filter((id: any) => id)
+      );
 
       // Filter out cancelled visits and those already in consultation
       const filteredNursingVisits = nursingVisits.filter((visit: any) => {

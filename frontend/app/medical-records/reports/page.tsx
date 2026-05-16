@@ -432,13 +432,9 @@ export default function ReportsPage() {
     let sickLeaveDaysPayload: number | undefined;
     if (newReport.purpose === "illness") {
       const trimmed = newReport.sickLeaveDays.trim();
-      let n = trimmed === "" ? NaN : parseInt(trimmed, 10);
-      if (Number.isNaN(n) || n < 1) {
-        const fromRange = inclusiveCalendarDaysBetween(newReport.startDate, newReport.endDate);
-        if (fromRange != null) n = fromRange;
-      }
+      const n = parseInt(trimmed, 10);
       if (Number.isNaN(n) || n < 1 || n > 366) {
-        toast.error("Enter sick leave days (1–366), or use a valid start/end date range.");
+        toast.error("Enter sick leave days (1–366).");
         return;
       }
       sickLeaveDaysPayload = n;

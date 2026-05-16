@@ -162,18 +162,17 @@ export default function WardOverviewPage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const wardsResponse = await wardService.getWards();
-      setWards(wardsResponse.results || []);
-
       const admissionsParams: any = { ...buildDateParams() };
       if (statusFilter !== 'all') admissionsParams.status = statusFilter;
       if (selectedWard !== 'all') admissionsParams.ward = parseInt(selectedWard);
       if (typeFilter !== 'all') admissionsParams.admission_type = typeFilter;
 
-      const [admissionsResponse, assignmentsResponse] = await Promise.all([
+      const [wardsResponse, admissionsResponse, assignmentsResponse] = await Promise.all([
+        wardService.getWards(),
         wardService.getAdmissions(admissionsParams),
         wardService.getAssignments(),
       ]);
+      setWards(wardsResponse.results || []);
       setAdmissions(admissionsResponse.results || []);
       setAssignments(assignmentsResponse.results || []);
     } catch (error: any) {
