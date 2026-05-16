@@ -3535,7 +3535,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  const handleMarkQueuePatientLeft = async (patient: Patient) => {
+  const handleMarkQueuePatientLeft = (patient: Patient) => {
     setLeftWorkflowTarget({ kind: 'queue', patient });
     setLeftWorkflowReason('Patient left before being seen');
     setShowLeftWorkflowDialog(true);
