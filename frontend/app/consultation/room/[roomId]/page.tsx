@@ -3536,10 +3536,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   const handleMarkQueuePatientLeft = async (patient: Patient) => {
-    const confirmed = window.confirm(
-      `Mark ${patient.name} as left?\n\nThey will be removed from the active queue.\n\nThis cannot be undone.`
-    );
-    if (!confirmed) return;
+    if (!window.confirm(`Mark ${patient.name} as left?\n\nThey will be removed from the active queue.`)) return;
     setIsMarkingLeft(true);
     try {
       if (!patient.queueItemId) throw new Error('Queue row not found for this patient');
@@ -9227,18 +9224,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </Dialog>
 
         {renderRoomPatientsQueueDialog()}
-        <Dialog open={showLeftWorkflowDialog} onOpenChange={setShowLeftWorkflowDialog}>
-          <DialogContent className="w-[95vw] sm:max-w-[540px]">
-            <DialogHeader>
-              <DialogTitle>
+        <AlertDialog open={showLeftWorkflowDialog} onOpenChange={setShowLeftWorkflowDialog}>
+          <AlertDialogContent className="w-[95vw] sm:max-w-[540px]">
+            <AlertDialogHeader>
+              <AlertDialogTitle>
                 {leftWorkflowTarget?.kind === 'session' ? 'End as not seen' : 'Mark queue patient as left'}
-              </DialogTitle>
-              <DialogDescription>
+              </AlertDialogTitle>
+              <AlertDialogDescription>
                 {leftWorkflowTarget?.kind === 'session'
                   ? `This will close the consultation for ${currentPatient?.name || 'this patient'} without marking it as completed.`
                   : `This will remove ${leftWorkflowTarget?.kind === 'queue' ? leftWorkflowTarget.patient.name : 'this patient'} from the active queue.`}
-              </DialogDescription>
-            </DialogHeader>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
             <div className="space-y-2 py-2">
               <Label htmlFor="left-workflow-reason">Reason</Label>
               <Textarea
@@ -9249,9 +9246,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 rows={3}
               />
             </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
+            <AlertDialogFooter>
+              <AlertDialogCancel
                 onClick={() => {
                   if (!isMarkingLeft) {
                     setShowLeftWorkflowDialog(false);
@@ -9261,14 +9257,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 disabled={isMarkingLeft}
               >
                 Keep Active
-              </Button>
-              <Button variant="destructive" onClick={confirmLeftWorkflowAction} disabled={isMarkingLeft || !leftWorkflowTarget}>
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={confirmLeftWorkflowAction} disabled={isMarkingLeft || !leftWorkflowTarget}>
                 {isMarkingLeft ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UserX className="h-4 w-4 mr-2" />}
                 Confirm
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Observation Admission Detail Dialog */}
         <Dialog open={showWardAdmissionDetail} onOpenChange={setShowWardAdmissionDetail}>
