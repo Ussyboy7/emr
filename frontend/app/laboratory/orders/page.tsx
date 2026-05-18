@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
@@ -454,6 +455,7 @@ export default function LabOrdersPage() {
   
   const [resultEntryMode, setResultEntryMode] = useState<'values' | 'upload'>('values');
   const [resultValues, setResultValues] = useState<Record<string, string>>({});
+  const [customModeFields, setCustomModeFields] = useState<Record<string, boolean>>({});
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [customResultRows, setCustomResultRows] = useState<CustomResultRow[]>([]);
   const [customResultFiles, setCustomResultFiles] = useState<Record<string, File | null>>({});
@@ -4155,14 +4157,45 @@ export default function LabOrdersPage() {
                                   <Fragment key={field.name}>
                                     <Label className="text-sm">{field.name}</Label>
                                     {options ? (
-                                      <Select value={value} onValueChange={(v) => setResultValues((prev) => ({...prev, [field.name]: v}))}>
-                                        <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
-                                          <SelectValue placeholder="Value" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          {options.map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
-                                        </SelectContent>
-                                      </Select>
+                                      customModeFields[field.name] ? (
+                                        <div className="flex items-center gap-1">
+                                          <Input
+                                            value={value}
+                                            onChange={(e) => setResultValues((prev) => ({...prev, [field.name]: e.target.value}))}
+                                            placeholder="Custom value"
+                                            className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setCustomModeFields((prev) => ({...prev, [field.name]: false}));
+                                              setResultValues((prev) => ({...prev, [field.name]: ''}));
+                                            }}
+                                            className="text-muted-foreground hover:text-foreground"
+                                            title="Back to dropdown"
+                                          >
+                                            <X className="h-3 w-3" />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <Select value={value} onValueChange={(v) => {
+                                          if (v === '__CUSTOM__') {
+                                            setCustomModeFields((prev) => ({...prev, [field.name]: true}));
+                                            setResultValues((prev) => ({...prev, [field.name]: ''}));
+                                          } else {
+                                            setResultValues((prev) => ({...prev, [field.name]: v}));
+                                          }
+                                        }}>
+                                          <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
+                                            <SelectValue placeholder="Value" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {options.map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
+                                            <Separator className="my-1" />
+                                            <SelectItem value="__CUSTOM__">Custom...</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      )
                                     ) : (
                                       <Input
                                         value={value}
