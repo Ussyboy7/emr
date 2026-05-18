@@ -133,9 +133,11 @@ export default function TestTemplatesPage() {
 
   // Field options management (within view dialog)
   const [viewFieldName, setViewFieldName] = useState('');
-  const [viewFieldOptions, setViewFieldOptions] = useState<string[]>([]);
+  const [viewFieldOptions, setViewFieldOptions] = useState<{id: number; value: string}[]>([]);
   const [loadingViewOptions, setLoadingViewOptions] = useState(false);
   const [newOptionValue, setNewOptionValue] = useState('');
+  const [editingOptionIdx, setEditingOptionIdx] = useState<number | null>(null);
+  const [editingOptionValue, setEditingOptionValue] = useState('');
 
   // Form states
   const [formData, setFormData] = useState({
@@ -742,7 +744,7 @@ export default function TestTemplatesPage() {
                             template: Number(selectedTemplate.id),
                             field_name: name,
                           });
-                          setViewFieldOptions(Array.isArray(raw) ? raw.map(o => o.value) : []);
+                          setViewFieldOptions(Array.isArray(raw) ? raw.map(o => ({id: o.id, value: o.value})) : []);
                         } catch {
                           setViewFieldOptions([]);
                         } finally {
@@ -771,24 +773,59 @@ export default function TestTemplatesPage() {
                         ) : (
                           <div className="space-y-1 max-w-xs">
                             {viewFieldOptions.map((opt, i) => (
-                              <div key={i} className="flex items-center gap-2 p-1.5 rounded border text-sm">
+                              <div key={opt.id} className="flex items-center gap-2 p-1.5 rounded border text-sm">
                                 <GripVertical className="h-3 w-3 text-muted-foreground shrink-0" />
-                                <span className="flex-1">{opt}</span>
+                                {editingOptionIdx === i ? (
+                                  <Input
+                                    value={editingOptionValue}
+                                    onChange={e => setEditingOptionValue(e.target.value)}
+                                    className="h-7 text-sm flex-1"
+                                    autoFocus
+                                    onKeyDown={async e => {
+                                      if (e.key === 'Enter' && editingOptionValue.trim()) {
+                                        e.preventDefault();
+                                        try {
+                                          await labService.updateFieldOption(opt.id, { value: editingOptionValue.trim() });
+                                          setViewFieldOptions(prev => prev.map((o, idx) => idx === i ? {...o, value: editingOptionValue.trim()} : o));
+                                          setEditingOptionIdx(null);
+                                          toast.success('Option updated');
+                                        } catch { toast.error('Failed to update option'); }
+                                      }
+                                      if (e.key === 'Escape') {
+                                        setEditingOptionIdx(null);
+                                      }
+                                    }}
+                                    onBlur={async () => {
+                                      if (editingOptionValue.trim() && editingOptionValue.trim() !== opt.value) {
+                                        try {
+                                          await labService.updateFieldOption(opt.id, { value: editingOptionValue.trim() });
+                                          setViewFieldOptions(prev => prev.map((o, idx) => idx === i ? {...o, value: editingOptionValue.trim()} : o));
+                                          toast.success('Option updated');
+                                        } catch { toast.error('Failed to update option'); }
+                                      }
+                                      setEditingOptionIdx(null);
+                                    }}
+                                  />
+                                ) : (
+                                  <span
+                                    className="flex-1 cursor-pointer hover:text-foreground/80"
+                                    onDoubleClick={() => {
+                                      setEditingOptionIdx(i);
+                                      setEditingOptionValue(opt.value);
+                                    }}
+                                    title="Double-click to edit"
+                                  >
+                                    {opt.value}
+                                  </span>
+                                )}
                                 <button
                                   type="button"
                                   className="text-destructive hover:text-destructive/80"
                                   onClick={async () => {
                                     try {
-                                      const raw = await labService.getFieldOptions({
-                                        template: Number(selectedTemplate!.id),
-                                        field_name: viewFieldName,
-                                      });
-                                      const match = (Array.isArray(raw) ? raw : []).find(o => o.value === opt);
-                                      if (match) {
-                                        await labService.deleteFieldOption(match.id);
-                                        setViewFieldOptions(prev => prev.filter(v => v !== opt));
-                                        toast.success('Option removed');
-                                      }
+                                      await labService.deleteFieldOption(opt.id);
+                                      setViewFieldOptions(prev => prev.filter(o => o.id !== opt.id));
+                                      toast.success('Option removed');
                                     } catch {
                                       toast.error('Failed to remove option');
                                     }
@@ -811,13 +848,13 @@ export default function TestTemplatesPage() {
                               if (e.key === 'Enter' && newOptionValue.trim()) {
                                 e.preventDefault();
                                 try {
-                                  await labService.createFieldOption({
+                                  const created = await labService.createFieldOption({
                                     template: Number(selectedTemplate!.id),
                                     field_name: viewFieldName,
                                     value: newOptionValue.trim(),
                                     sort_order: viewFieldOptions.length,
                                   });
-                                  setViewFieldOptions(prev => [...prev, newOptionValue.trim()]);
+                                  setViewFieldOptions(prev => [...prev, {id: created.id, value: created.value}]);
                                   setNewOptionValue('');
                                   toast.success('Option added');
                                 } catch {
@@ -833,13 +870,13 @@ export default function TestTemplatesPage() {
                             onClick={async () => {
                               if (!newOptionValue.trim()) return;
                               try {
-                                await labService.createFieldOption({
+                                const created = await labService.createFieldOption({
                                   template: Number(selectedTemplate!.id),
                                   field_name: viewFieldName,
                                   value: newOptionValue.trim(),
                                   sort_order: viewFieldOptions.length,
                                 });
-                                setViewFieldOptions(prev => [...prev, newOptionValue.trim()]);
+                                setViewFieldOptions(prev => [...prev, {id: created.id, value: created.value}]);
                                 setNewOptionValue('');
                                 toast.success('Option added');
                               } catch {

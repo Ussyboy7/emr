@@ -617,6 +617,16 @@ class LabService {
   }
 
   /**
+   * Update a field option.
+   */
+  async updateFieldOption(id: number, data: { value: string; sort_order?: number }): Promise<TemplateFieldOption> {
+    return apiFetch<TemplateFieldOption>(`/laboratory/template-field-options/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
    * Delete a field option.
    */
   async deleteFieldOption(id: number): Promise<void> {
