@@ -1422,7 +1422,7 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
 
             for param, value, unit, ref_range, status, flag in packed_rows:
                 result_rows.append(
-                    [param, value, unit, ref_range, status if status != 'Normal' else '']
+                    [param, value, unit, ref_range, status]
                 )
                 row_statuses.append(status)
                 row_flags.append(flag)
