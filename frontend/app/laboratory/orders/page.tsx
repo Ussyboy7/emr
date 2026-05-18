@@ -4152,23 +4152,68 @@ export default function LabOrdersPage() {
                                 return (
                                   <Fragment key={field.name}>
                                     <Label className="text-sm">{field.name}</Label>
-                                    <Input
-                                      value={value}
-                                      onChange={(e) =>
-                                        setResultValues((prev) => ({
-                                          ...prev,
-                                          [field.name]: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Value"
-                                      className={
-                                        status === 'Critical'
-                                          ? 'border-red-500 focus:border-red-500'
-                                          : status === 'Abnormal'
-                                            ? 'border-amber-500 focus:border-amber-500'
-                                            : ''
-                                      }
-                                    />
+                                    {field.name === 'Colour' ? (
+                                      <Select value={value} onValueChange={(v) => setResultValues((prev) => ({...prev, [field.name]: v}))}>
+                                        <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
+                                          <SelectValue placeholder="Value" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {['Amber','Deep Amber','Pale Amber','Straw'].map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : field.name === 'Appearance' ? (
+                                      <Select value={value} onValueChange={(v) => setResultValues((prev) => ({...prev, [field.name]: v}))}>
+                                        <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
+                                          <SelectValue placeholder="Value" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {['Clear','Turbid','Slightly Turbid','Cloudy','Slightly Cloudy'].map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : field.name === 'pH' ? (
+                                      <Select value={value} onValueChange={(v) => setResultValues((prev) => ({...prev, [field.name]: v}))}>
+                                        <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
+                                          <SelectValue placeholder="Value" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {['1.0','1.5','2.0','2.5','3.0','3.5','4.0','4.5','5.0','5.5','6.0','6.5','7.0','7.5','8.0'].map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : field.name === 'Specific Gravity' ? (
+                                      <Select value={value} onValueChange={(v) => setResultValues((prev) => ({...prev, [field.name]: v}))}>
+                                        <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
+                                          <SelectValue placeholder="Value" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {['1.000','1.005','1.010','1.015','1.020','1.025','1.030'].map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : field.name === 'Nitrite' ? (
+                                      <Select value={value} onValueChange={(v) => setResultValues((prev) => ({...prev, [field.name]: v}))}>
+                                        <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
+                                          <SelectValue placeholder="Value" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {['NEGATIVE','POSITIVE'].map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : ['Glucose','Ketone','Proteins','Bilirubin','Urobilinogen','Blood','Leucocytes','Ascorbic Acid'].includes(field.name) ? (
+                                      <Select value={value} onValueChange={(v) => setResultValues((prev) => ({...prev, [field.name]: v}))}>
+                                        <SelectTrigger className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}>
+                                          <SelectValue placeholder="Value" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'].map((o) => (<SelectItem key={o} value={o}>{o}</SelectItem>))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Input
+                                        value={value}
+                                        onChange={(e) => setResultValues((prev) => ({...prev, [field.name]: e.target.value}))}
+                                        placeholder="Value"
+                                        className={status === 'Critical' ? 'border-red-500 focus:border-red-500' : status === 'Abnormal' ? 'border-amber-500 focus:border-amber-500' : ''}
+                                      />
+                                    )}
                                     <span className="text-sm text-muted-foreground truncate">
                                       {field.unit}
                                     </span>
