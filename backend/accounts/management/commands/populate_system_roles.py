@@ -5,7 +5,6 @@ class Command(BaseCommand):
     help = 'Populate SystemRole table with predefined professional roles'
 
     def handle(self, *args, **options):
-        # Predefined system roles based on the legacy SYSTEM_ROLE_CHOICES
         system_roles_data = [
             {
                 'name': 'System Administrator',
@@ -42,6 +41,14 @@ class Command(BaseCommand):
             {
                 'name': 'Admin Staff',
                 'description': 'Administrative support functions'
+            },
+            {
+                'name': 'Cardiologist',
+                'description': 'Cardiology and heart care services'
+            },
+            {
+                'name': 'Physiotherapist',
+                'description': 'Physical therapy and rehabilitation services'
             }
         ]
 

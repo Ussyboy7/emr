@@ -30,23 +30,10 @@ class User(AbstractUser):
     Extends Django's AbstractUser with EMR-specific fields.
     """
 
-    # Legacy choices for backward compatibility during migration
-    SYSTEM_ROLE_CHOICES = [
-        ('System Administrator', 'System Administrator'),
-        ('Medical Doctor', 'Medical Doctor'),
-        ('Nursing Officer', 'Nursing Officer'),
-        ('Laboratory Scientist', 'Laboratory Scientist'),
-        ('Pharmacist', 'Pharmacist'),
-        ('Radiologist', 'Radiologist'),
-        ('Optamologist', 'Optamologist'),
-        ('Medical Records Officer', 'Medical Records Officer'),
-        ('Admin Staff', 'Admin Staff'),
-    ]
-
     # NPA-specific fields
     employee_id = models.CharField(max_length=50, unique=True, blank=True, null=True, db_index=True)
     grade_level = models.CharField(max_length=50, blank=True)
-    system_role = models.CharField(max_length=50, choices=SYSTEM_ROLE_CHOICES, blank=True)
+    system_role = models.CharField(max_length=50, blank=True)
 
     # New dynamic system role relationship
     system_role_obj = models.ForeignKey(

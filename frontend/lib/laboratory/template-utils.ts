@@ -254,90 +254,9 @@ export const orderResultRows = <T extends { parameter: string }>(
   });
 };
 
-/**
- * Return a list of dropdown options for a field, or null if the field should use a
- * free-text Input. Works for ALL template fields — matched by name, by range pattern,
- * or by explicit lookup in a curated map.
- */
-const _nameOptions: Record<string, string[]> = {
-  // Urinalysis
-  'Colour': ['Amber', 'Deep Amber', 'Pale Amber', 'Straw'],
-  'Appearance': ['Clear', 'Turbid', 'Slightly Turbid', 'Cloudy', 'Slightly Cloudy'],
-  'pH': ['1.0','1.5','2.0','2.5','3.0','3.5','4.0','4.5','5.0','5.5','6.0','6.5','7.0','7.5','8.0'],
-  'Specific Gravity': ['1.000','1.005','1.010','1.015','1.020','1.025','1.030'],
-  'Nitrite': ['NEGATIVE', 'POSITIVE'],
-  'Glucose': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  'Ketone': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  'Proteins': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  'Bilirubin': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  'Urobilinogen': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  'Blood': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  'Leucocytes': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  'Ascorbic Acid': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
-  // Blood group / genotype
-  'Blood Group': ['A+','A-','B+','B-','O+','O-','AB+','AB-'],
-  'Rhesus': ['POSITIVE', 'NEGATIVE'],
-  'Genotype': ['AA', 'AS', 'SS', 'AC', 'SC'],
-  // Microscopy / qualitative
-  'Pus Cells': ['NONE', 'FEW', 'MODERATE', 'MANY'],
-  'Epithelial Cell': ['NONE', 'FEW', 'MODERATE', 'MANY'],
-  'RBCs': ['NONE', 'FEW', 'MODERATE', 'MANY'],
-  'Mucus': ['NONE', 'TRACE', '+', '++', '+++'],
-  'Bacteria': ['Not Seen', 'Few', 'Moderate', 'Many'],
-  'Yeast Cells': ['Not Seen', 'Seen'],
-  'Cast/Crystals': ['Not Seen', 'Seen'],
-  'Fungal Elements': ['Not Seen', 'Seen'],
-  'Ova': ['Not Seen', 'Seen'],
-  'Cyst': ['Not Seen', 'Seen'],
-  'Parasites': ['Not Seen', 'Seen'],
-  'Other Parasites': ['Not Seen', 'Seen'],
-  'Gram Stain': ['No Organisms Seen', 'Gram Positive Cocci', 'Gram Negative Bacilli', 'Gram Positive Bacilli', 'Gram Negative Cocci', 'Mixed Growth'],
-  // Stool
-  'Others': [], // free-text, explicitly empty
-  // Noble Cup / Drug Screen (toxicology)
-  'AMPHETAMINE (AMP)': ['NEGATIVE', 'POSITIVE'],
-  'BARBITURATES (BAR)': ['NEGATIVE', 'POSITIVE'],
-  'TRICYCLIC ANTIDEPRESANTS (TCA)': ['NEGATIVE', 'POSITIVE'],
-  'COCAINE (COC)': ['NEGATIVE', 'POSITIVE'],
-  'BENZODIAZEPINE (BZO)': ['NEGATIVE', 'POSITIVE'],
-  'OPIATE (OPI)': ['NEGATIVE', 'POSITIVE'],
-  'METHAMPHETAMINE (MET)': ['NEGATIVE', 'POSITIVE'],
-  'MARIJUANA (THC)': ['NEGATIVE', 'POSITIVE'],
-  'ECSTASY (MDMA)': ['NEGATIVE', 'POSITIVE'],
-  'TRAMADOL (TML)': ['NEGATIVE', 'POSITIVE'],
-  // Pregnancy
-  'hCG': ['NEGATIVE', 'POSITIVE'],
-  // H. Pylori
-  'H. Pylori AB': ['NEGATIVE', 'POSITIVE'],
-  'H. Pylori AG': ['NEGATIVE', 'POSITIVE'],
-  // Serology
-  'HBsAg': ['Non-Reactive', 'Reactive', 'Indeterminate'],
-  'HCV': ['Non-Reactive', 'Reactive', 'Indeterminate'],
-  'HIV 1/2': ['Non-Reactive', 'Reactive', 'Indeterminate'],
-  'VDRL': ['Non-Reactive', 'Reactive', 'Indeterminate'],
-  // Haemoglobin Genotype
-  'HB Genotype': ['AA', 'AS', 'SS', 'AC', 'SC'],
-};
-
-const _rangePatterns: [RegExp, string[]][] = [
-  [/S \/ I \/ R \/ NT/i, ['S', 'I', 'R', 'NT']],
-  [/(POSITIVE|NEGATIVE)/i, ['NEGATIVE', 'POSITIVE']],
-  [/(Non-Reactive|Non-reactive|Non reactive)/i, ['Non-Reactive', 'Reactive', 'Indeterminate']],
-  [/(Negative\/Positive|Negative\/positive|neg.*pos)/i, ['NEGATIVE', 'POSITIVE']],
-  [/(Detected|Not Detected|Not detected)/i, ['Not Detected', 'Detected']],
-];
-
 export function getFieldOptions(field: TemplateField): string[] | null {
   if (field.dataType && field.dataType.toLowerCase() !== 'text') return null;
-
-  if (field.options) return field.options;
-
-  const range = field.normalRange || '';
-  for (const [pattern, options] of _rangePatterns) {
-    if (pattern.test(range)) return options;
-  }
-
-  return null;
+  return field.options || null;
 }
 
 /** Worst-of: Critical > Abnormal > Normal. */
