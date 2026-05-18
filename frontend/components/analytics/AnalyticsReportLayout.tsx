@@ -47,6 +47,8 @@ export interface AnalyticsReportLayoutProps {
   highlightThisMonth?: boolean;
   highlightThisYear?: boolean;
 
+  /** Hide the "This Month" / "This Year" quick buttons (replaced by view mode dropdown) */
+  hideQuickButtons?: boolean;
   /** Defaults to last 10 calendar years including current */
   yearOptions?: string[];
 
@@ -88,6 +90,7 @@ export function AnalyticsReportLayout({
   backLink,
   children,
   contentClassName = '',
+  hideQuickButtons = false,
 }: AnalyticsReportLayoutProps) {
   const Icon = ReportIcon ?? Activity;
 
@@ -135,27 +138,28 @@ export function AnalyticsReportLayout({
         </div>
       </div>
 
-      {/* Quick filters */}
-      <div className="flex flex-wrap gap-2 print:hidden">
-        <Button
-          type="button"
-          variant={highlightThisMonth ? 'default' : 'outline'}
-          onClick={onThisMonth}
-          className="flex items-center gap-2"
-        >
-          <Calendar className="h-4 w-4" />
-          This Month
-        </Button>
-        <Button
-          type="button"
-          variant={highlightThisYear ? 'default' : 'outline'}
-          onClick={onThisYear}
-          className="flex items-center gap-2"
-        >
-          <Calendar className="h-4 w-4" />
-          This Year
-        </Button>
-      </div>
+      {!hideQuickButtons && (
+        <div className="flex flex-wrap gap-2 print:hidden">
+          <Button
+            type="button"
+            variant={highlightThisMonth ? 'default' : 'outline'}
+            onClick={onThisMonth}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Month
+          </Button>
+          <Button
+            type="button"
+            variant={highlightThisYear ? 'default' : 'outline'}
+            onClick={onThisYear}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Year
+          </Button>
+        </div>
+      )}
 
       {/* Filters card */}
       <Card className="print:hidden">

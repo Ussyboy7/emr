@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import Link from "next/link";
+import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
 
 interface ComprehensiveData {
   year: string;
@@ -42,37 +43,20 @@ export default function ComprehensiveReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<"year" | "range">("year");
+  const [viewMode, setViewMode] = useState<string>("monthly");
   const [reportData, setReportData] = useState<ComprehensiveData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
-  const setThisMonth = () => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setStartDate(firstDay.toISOString().split("T")[0]);
-    setEndDate(lastDay.toISOString().split("T")[0]);
-    setViewMode("range");
-  };
-
-  const setThisYear = () => {
-    setYear(new Date().getFullYear().toString());
-    setViewMode("year");
-  };
 
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      let url = "/reports/comprehensive/?";
-      if (viewMode === "year") {
-        url += `year=${year}`;
-      } else if (startDate && endDate) {
-        url += `start_date=${startDate}&end_date=${endDate}`;
-      } else {
-        toast.error("Please select both start and end dates");
+      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+      if (!range) {
+        toast.error("Please select a valid date range");
         setIsLoading(false);
         return;
       }
+      const url = `/reports/comprehensive/?start_date=${range.start}&end_date=${range.end}`;
       const response = await apiFetch<ComprehensiveData>(url);
       setReportData(response);
     } catch (error: any) {
@@ -85,8 +69,8 @@ export default function ComprehensiveReport() {
   };
 
   useEffect(() => {
-    if (viewMode === "year" && year) fetchReport();
-    if (viewMode === "range" && startDate && endDate) fetchReport();
+    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+    if (range) fetchReport();
   }, [year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
@@ -124,7 +108,8 @@ export default function ComprehensiveReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
+    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+    const period = range ? `${range.start}_to_${range.end}` : 'unknown';
     a.download = `comprehensive_report_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
@@ -172,25 +157,6 @@ export default function ComprehensiveReport() {
           </div>
         </div>
 
-        <div className="flex gap-2 print:hidden">
-          <Button
-            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
-            onClick={setThisMonth}
-            className="flex items-center gap-2"
-          >
-            <Calendar className="h-4 w-4" />
-            This Month
-          </Button>
-          <Button
-            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
-            onClick={setThisYear}
-            className="flex items-center gap-2"
-          >
-            <Calendar className="h-4 w-4" />
-            This Year
-          </Button>
-        </div>
-
         <Card className="print:hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -203,17 +169,24 @@ export default function ComprehensiveReport() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
+                <Select value={viewMode} onValueChange={setViewMode}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
+                    <SelectItem value="quarterly">Quarterly</SelectItem>
+                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
+                    <SelectItem value="annually">Annually</SelectItem>
                     <SelectItem value="year">By Year</SelectItem>
                     <SelectItem value="range">Date Range</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {viewMode === "year" ? (
+              {viewMode === 'year' ? (
                 <div>
                   <Label>Year</Label>
                   <Select value={year} onValueChange={setYear}>
@@ -227,7 +200,7 @@ export default function ComprehensiveReport() {
                     </SelectContent>
                   </Select>
                 </div>
-              ) : (
+              ) : viewMode === 'range' ? (
                 <>
                   <div>
                     <Label>Start Date</Label>
@@ -238,6 +211,19 @@ export default function ComprehensiveReport() {
                     <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
                   </div>
                 </>
+              ) : (
+                <div className="col-span-2">
+                  <Label>Period</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {viewMode === 'daily' && 'Today'}
+                    {viewMode === 'weekly' && 'This week'}
+                    {viewMode === 'monthly' && 'This month'}
+                    {viewMode === 'bimonthly' && 'Last 2 months'}
+                    {viewMode === 'quarterly' && 'This quarter'}
+                    {viewMode === 'half-yearly' && 'This half-year'}
+                    {viewMode === 'annually' && 'This year'}
+                  </p>
+                </div>
               )}
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
@@ -404,4 +390,3 @@ export default function ComprehensiveReport() {
     </DashboardLayout>
   );
 }
-

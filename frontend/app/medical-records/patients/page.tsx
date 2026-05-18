@@ -314,6 +314,7 @@ function PatientsListPageContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const loadReqId = useRef(0);
   const [counts, setCounts] = useState<{ total: number; employees: number; retirees: number; dependents: number; nonnpa: number } | null>(null);
   const [principalBannerName, setPrincipalBannerName] = useState<string | null>(null);
   const [principalDepsOpen, setPrincipalDepsOpen] = useState<{
@@ -407,6 +408,7 @@ function PatientsListPageContent() {
   }, [debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage, principalIdFromUrl]);
 
   const loadPatients = async () => {
+    const reqId = ++loadReqId.current;
     try {
       setLoading(true);
       setError(null);
@@ -424,9 +426,10 @@ function PatientsListPageContent() {
       if (locationFilter !== 'all') params.location = locationFilter;
       const searchTerm = debouncedSearchQuery.trim();
       if (searchTerm) params.search = searchTerm;
-      
+
       const response = await patientService.getPatients(params);
-      setTotalCount(response.count || response.results.length);
+      if (reqId !== loadReqId.current) return;
+      setTotalCount(Math.max(response.count, response.results.length));
       
       // Transform patients (visit data will be fetched on-demand when viewing patient details)
       const transformedPatients = response.results.map(apiPatient => transformPatient(apiPatient));
@@ -522,6 +525,7 @@ function PatientsListPageContent() {
         })
       );
       
+      if (reqId !== loadReqId.current) return;
       setPatients(transformedPatients);
       setAuthError(null); // Clear any previous auth errors
     } catch (err: any) {

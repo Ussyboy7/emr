@@ -17,7 +17,7 @@ from pharmacy.models import Prescription, MedicationInventory, PrescriptionItem,
 from radiology.models import RadiologyOrder, RadiologyStudy
 from nursing.models import NursingOrder, Procedure
 from consultation.models import Referral, ConsultationSession
-from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth
+from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth, TruncDay, TruncWeek
 
 
 def _resolve_period_bounds(year=None, start_date=None, end_date=None, default_to_current_year=False):
@@ -607,6 +607,114 @@ class AttendanceSummaryReportView(views.APIView):
                 'grand_total': grand_total,
                 **lifecycle_summary,
             }
+        })
+
+
+class VisitStatisticsReportView(views.APIView):
+    """Visit statistics grouped by day/week/month with status breakdown."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.utils.dateparse import parse_date
+
+        year = request.query_params.get('year')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        group_by = request.query_params.get('group_by', 'month')
+        parsed_start = parse_date(start_date) if start_date else None
+        parsed_end = parse_date(end_date) if end_date else None
+
+        period_start, period_end = _resolve_period_bounds(
+            year=year,
+            start_date=parsed_start,
+            end_date=parsed_end,
+            default_to_current_year=True,
+        )
+
+        visits = Visit.objects.filter(
+            date__gte=period_start, date__lte=period_end
+        )
+
+        trunc_fn = {'day': TruncDay, 'week': TruncWeek, 'month': TruncMonth}.get(group_by, TruncMonth)
+
+        period_annotation = trunc_fn('date')
+
+        grouped = visits.annotate(
+            period=period_annotation
+        ).values('period').annotate(
+            completed=Count('id', filter=Q(status='completed')),
+            cancelled=Count('id', filter=Q(status='cancelled')),
+            in_progress=Count('id', filter=Q(status='in_progress')),
+            scheduled=Count('id', filter=Q(status__in=['scheduled', 'pending'])),
+            total=Count('id'),
+            male=Count('id', filter=Q(patient__gender='male')),
+            female=Count('id', filter=Q(patient__gender='female')),
+            employee=Count('id', filter=Q(patient__category='employee')),
+            non_employee=Count('id', filter=~Q(patient__category='employee')),
+            officer=Count('id', filter=Q(patient__category='employee', patient__employee_type__icontains='officer')),
+            staff=Count('id', filter=Q(patient__category='employee') & ~Q(patient__employee_type__icontains='officer')),
+            emp_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='employee')),
+            ret_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='retiree')),
+            nonnpa=Count('id', filter=Q(patient__category='nonnpa')),
+            retiree=Count('id', filter=Q(patient__category='retiree')),
+        ).order_by('period')
+
+        def format_label(dt, group):
+            if group == 'day':
+                return dt.strftime('%b %d, %Y')
+            elif group == 'week':
+                start_of_week = dt
+                end_of_week = dt + timedelta(days=6)
+                return f"{start_of_week.strftime('%b %d')} - {end_of_week.strftime('%b %d, %Y')}"
+            return dt.strftime('%b %Y')
+
+        data = []
+        for entry in grouped:
+            period_val = entry['period']
+            if period_val is None:
+                continue
+            data.append({
+                'period': period_val.isoformat(),
+                'period_label': format_label(period_val, group_by),
+                'completed': entry['completed'],
+                'cancelled': entry['cancelled'],
+                'in_progress': entry['in_progress'],
+                'scheduled': entry['scheduled'],
+                'total': entry['total'],
+                'male': entry['male'],
+                'female': entry['female'],
+                'employee': entry['employee'],
+                'non_employee': entry['non_employee'],
+                'officer': entry['officer'],
+                'staff': entry['staff'],
+                'emp_dependent': entry['emp_dependent'],
+                'ret_dependent': entry['ret_dependent'],
+                'nonnpa': entry['nonnpa'],
+                'retiree': entry['retiree'],
+            })
+
+        totals = visits.aggregate(
+            completed=Count('id', filter=Q(status='completed')),
+            cancelled=Count('id', filter=Q(status='cancelled')),
+            in_progress=Count('id', filter=Q(status='in_progress')),
+            scheduled=Count('id', filter=Q(status__in=['scheduled', 'pending'])),
+            total=Count('id'),
+            male=Count('id', filter=Q(patient__gender='male')),
+            female=Count('id', filter=Q(patient__gender='female')),
+            employee=Count('id', filter=Q(patient__category='employee')),
+            non_employee=Count('id', filter=~Q(patient__category='employee')),
+            officer=Count('id', filter=Q(patient__category='employee', patient__employee_type__icontains='officer')),
+            staff=Count('id', filter=Q(patient__category='employee') & ~Q(patient__employee_type__icontains='officer')),
+            emp_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='employee')),
+            ret_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='retiree')),
+            nonnpa=Count('id', filter=Q(patient__category='nonnpa')),
+            retiree=Count('id', filter=Q(patient__category='retiree')),
+        )
+
+        return Response({
+            'data': data,
+            'summary': totals,
         })
 
 

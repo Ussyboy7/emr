@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import Link from "next/link";
+import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
 
 interface LabCategoryData {
   sn: number;
@@ -40,7 +41,7 @@ export default function LaboratoryAttendanceReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<"year" | "range">("year");
+  const [viewMode, setViewMode] = useState<string>("monthly");
   const [data, setData] = useState<LabCategoryData[]>([]);
   const [summary, setSummary] = useState<LabSummary>({
     total_employee: 0,
@@ -56,35 +57,16 @@ export default function LaboratoryAttendanceReport() {
   });
   const [isLoading, setIsLoading] = useState(true);
 
-  const setThisMonth = () => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setStartDate(firstDay.toISOString().split('T')[0]);
-    setEndDate(lastDay.toISOString().split('T')[0]);
-    setViewMode("range");
-  };
-
-  const setThisYear = () => {
-    setYear(new Date().getFullYear().toString());
-    setViewMode("year");
-  };
-
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      let url = `/reports/laboratory-attendance/?`;
-      if (viewMode === "year") {
-        url += `year=${year}`;
-      } else {
-        if (startDate && endDate) {
-          url += `start_date=${startDate}&end_date=${endDate}`;
-        } else {
-          toast.error("Please select both start and end dates");
-          setIsLoading(false);
-          return;
-        }
+      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+      if (!range) {
+        toast.error("Please select a valid date range");
+        setIsLoading(false);
+        return;
       }
+      const url = `/reports/laboratory-attendance/?start_date=${range.start}&end_date=${range.end}`;
       const response = await apiFetch<{ data: LabCategoryData[]; summary: LabSummary }>(url);
       setData(response.data || []);
       setSummary(response.summary || {
@@ -121,15 +103,8 @@ export default function LaboratoryAttendanceReport() {
   };
 
   useEffect(() => {
-    fetchReport();
-  }, []);
-
-  useEffect(() => {
-    if (viewMode === "year" && year) {
-      fetchReport();
-    } else if (viewMode === "range" && startDate && endDate) {
-      fetchReport();
-    }
+    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+    if (range) fetchReport();
   }, [year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
@@ -153,7 +128,8 @@ export default function LaboratoryAttendanceReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
+    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+    const period = range ? `${range.start}_to_${range.end}` : year;
     a.download = `laboratory_attendance_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
@@ -200,56 +176,44 @@ export default function LaboratoryAttendanceReport() {
           </div>
         </div>
 
-        <div className="flex gap-2 print:hidden">
-          <Button
-            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
-            onClick={setThisMonth}
-            className="flex items-center gap-2"
-          >
-            <TestTube className="h-4 w-4" />
-            This Month
-          </Button>
-          <Button
-            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
-            onClick={setThisYear}
-            className="flex items-center gap-2"
-          >
-            <TestTube className="h-4 w-4" />
-            This Year
-          </Button>
-        </div>
-
         {/* Filters */}
         <Card className="print:hidden">
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
+                <Select value={viewMode} onValueChange={setViewMode}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
+                    <SelectItem value="quarterly">Quarterly</SelectItem>
+                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
+                    <SelectItem value="annually">Annually</SelectItem>
                     <SelectItem value="year">By Year</SelectItem>
                     <SelectItem value="range">Date Range</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {viewMode === "year" ? (
+              {viewMode === 'year' ? (
                 <div>
-              <Label>Year</Label>
-              <Select value={year} onValueChange={setYear}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {years.map(y => (
-                    <SelectItem key={y} value={y}>{y}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <Label>Year</Label>
+                  <Select value={year} onValueChange={setYear}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {years.map(y => (
+                        <SelectItem key={y} value={y}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              ) : (
+              ) : viewMode === 'range' ? (
                 <>
                   <div>
                     <Label>Start Date</Label>
@@ -270,6 +234,19 @@ export default function LaboratoryAttendanceReport() {
                     />
                   </div>
                 </>
+              ) : (
+                <div>
+                  <Label>Period</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {viewMode === 'daily' && 'Today'}
+                    {viewMode === 'weekly' && 'This week'}
+                    {viewMode === 'monthly' && 'This month'}
+                    {viewMode === 'bimonthly' && 'Last 2 months'}
+                    {viewMode === 'quarterly' && 'This quarter'}
+                    {viewMode === 'half-yearly' && 'This half-year'}
+                    {viewMode === 'annually' && 'This year'}
+                  </p>
+                </div>
               )}
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
@@ -426,4 +403,3 @@ export default function LaboratoryAttendanceReport() {
     </DashboardLayout>
   );
 }
-

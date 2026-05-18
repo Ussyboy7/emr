@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import Link from "next/link";
 import { useOutpatientClinicTypes } from "@/hooks/use-outpatient-clinic-types";
+import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
 
 interface CategoryData {
   sn: number;
@@ -44,7 +45,7 @@ export default function ClinicAttendanceReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<"year" | "range">("year");
+  const [viewMode, setViewMode] = useState<string>("monthly");
   const [data, setData] = useState<CategoryData[]>([]);
   const emptySummary: ClinicAttendanceSummary = {
     total_employee: 0,
@@ -114,31 +115,17 @@ export default function ClinicAttendanceReport() {
     });
   }, [opdClinicTypes]);
 
-  const setThisMonth = () => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setStartDate(firstDay.toISOString().split('T')[0]);
-    setEndDate(lastDay.toISOString().split('T')[0]);
-    setViewMode("range");
-  };
-  
-  const setThisYear = () => {
-    setYear(new Date().getFullYear().toString());
-    setViewMode("year");
-  };
-
   const fetchReport = async () => {
     if (!selectedClinic) return;
     setIsLoading(true);
     try {
-      let url = `/reports/clinic-attendance/?clinic_type=${encodeURIComponent(selectedClinic)}`;
-      
-      if (viewMode === 'year') {
-        url += `&year=${year}`;
-      } else if (startDate && endDate) {
-        url += `&start_date=${startDate}&end_date=${endDate}`;
+      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+      if (!range) {
+        toast.error("Please select a valid date range");
+        setIsLoading(false);
+        return;
       }
+      let url = `/reports/clinic-attendance/?clinic_type=${encodeURIComponent(selectedClinic)}&start_date=${range.start}&end_date=${range.end}`;
 
       const response = await apiFetch<{ data: any[]; summary: Partial<ClinicAttendanceSummary> }>(url);
       setData(normalizeCategoryRows(response.data || []));
@@ -154,14 +141,9 @@ export default function ClinicAttendanceReport() {
   };
 
   useEffect(() => {
-    setThisMonth();
-  }, []);
-
-  useEffect(() => {
     if (!selectedClinic) return;
-    if ((viewMode === 'range' && startDate && endDate) || viewMode === 'year') {
-      fetchReport();
-    }
+    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+    if (range) fetchReport();
   }, [selectedClinic, year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
@@ -183,7 +165,9 @@ export default function ClinicAttendanceReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${selectedClinic}_clinic_${year}.csv`;
+    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
+    const periodLabel = range ? `${range.start}_to_${range.end}` : year;
+    a.download = `${selectedClinic}_clinic_${periodLabel}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -228,25 +212,6 @@ export default function ClinicAttendanceReport() {
           </div>
         </div>
 
-        <div className="flex gap-2 print:hidden">
-          <Button 
-            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0,7)) ? "default" : "outline"}
-            onClick={setThisMonth}
-            className="flex items-center gap-2"
-          >
-            <Calendar className="h-4 w-4" />
-            This Month
-          </Button>
-          <Button 
-            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
-            onClick={setThisYear}
-            className="flex items-center gap-2"
-          >
-            <Calendar className="h-4 w-4" />
-            This Year
-          </Button>
-        </div>
-
         <Card className="print:hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -280,6 +245,13 @@ export default function ClinicAttendanceReport() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
+                    <SelectItem value="quarterly">Quarterly</SelectItem>
+                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
+                    <SelectItem value="annually">Annually</SelectItem>
                     <SelectItem value="year">By Year</SelectItem>
                     <SelectItem value="range">Date Range</SelectItem>
                   </SelectContent>
@@ -300,7 +272,7 @@ export default function ClinicAttendanceReport() {
                     </SelectContent>
                   </Select>
                 </div>
-              ) : (
+              ) : viewMode === 'range' ? (
                 <>
                   <div>
                     <Label>Start Date</Label>
@@ -319,6 +291,19 @@ export default function ClinicAttendanceReport() {
                     />
                   </div>
                 </>
+              ) : (
+                <div className="col-span-2">
+                  <Label>Period</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {viewMode === 'daily' && 'Today'}
+                    {viewMode === 'weekly' && 'This week'}
+                    {viewMode === 'monthly' && 'This month'}
+                    {viewMode === 'bimonthly' && 'Last 2 months'}
+                    {viewMode === 'quarterly' && 'This quarter'}
+                    {viewMode === 'half-yearly' && 'This half-year'}
+                    {viewMode === 'annually' && 'This year'}
+                  </p>
+                </div>
               )}
             </div>
           </CardContent>

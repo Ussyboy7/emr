@@ -71,6 +71,16 @@ function inclusiveCalendarDaysBetween(start: string, end: string): number | null
 
 const statisticalReports: StatisticalReportTile[] = [
   {
+    id: "visit-statistics",
+    title: "Visit Statistics",
+    description: "Visit records by status (completed, cancelled, in progress) with monthly breakdown",
+    icon: Activity,
+    href: "/medical-records/reports/visit-statistics",
+    borderAccent: "border-l-purple-500",
+    iconWrap: "bg-purple-500/10",
+    iconClass: "text-purple-500",
+  },
+  {
     id: "attendance-summary",
     title: "Attendance Summary",
     description: "Patient attendance by category (Officers, Staff, Dependents, Retirees, etc.)",

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
+  analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,39 +57,14 @@ export default function AttendanceSummaryReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<AnalyticsViewMode>("year");
-  
-  // Quick filters
-  const setThisMonth = () => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setStartDate(firstDay.toISOString().split('T')[0]);
-    setEndDate(lastDay.toISOString().split('T')[0]);
-    setViewMode("range");
-  };
-  
-  const setThisYear = () => {
-    setYear(new Date().getFullYear().toString());
-    setViewMode("year");
-  };
+  const [viewMode, setViewMode] = useState<AnalyticsViewMode>("monthly");
 
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      let url = '/reports/attendance-summary/?';
-      
-      if (viewMode === 'year') {
-        url += `year=${year}`;
-      } else {
-        if (startDate && endDate) {
-          url += `start_date=${startDate}&end_date=${endDate}`;
-        } else {
-          toast.error("Please select both start and end dates");
-          setIsLoading(false);
-          return;
-        }
-      }
+      const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
+      if (!range) { toast.error("Please select a valid date range"); setIsLoading(false); return; }
+      let url = `/reports/attendance-summary/?start_date=${range.start}&end_date=${range.end}`;
 
       const response = await apiFetch<{ data: AttendanceData[]; summary: AttendanceSummary }>(url);
       setData(response.data || []);
@@ -104,12 +80,8 @@ export default function AttendanceSummaryReport() {
   };
 
   useEffect(() => {
-    // Fetch when active filter values change
-    if (viewMode === 'year' && year) {
-      fetchReport();
-    } else if (viewMode === 'range' && startDate && endDate) {
-      fetchReport();
-    }
+    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
+    if (range) fetchReport();
   }, [startDate, endDate, year, viewMode]);
 
   const exportToCSV = () => {
@@ -137,8 +109,9 @@ export default function AttendanceSummaryReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const period = viewMode === 'year' ? year : `${startDate}_to_${endDate}`;
-    a.download = `attendance_summary_${period}.csv`;
+    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
+    const periodLabel = viewMode === 'year' ? year : (range ? `${range.start}_to_${range.end}` : 'custom');
+    a.download = `attendance_summary_${periodLabel}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -146,12 +119,6 @@ export default function AttendanceSummaryReport() {
   };
 
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
-
-  const highlightThisMonth =
-    viewMode === "range" &&
-    Boolean(startDate) &&
-    startDate.includes(new Date().toISOString().slice(0, 7));
-  const highlightThisYear = viewMode === "year" && year === new Date().getFullYear().toString();
 
   return (
     <DashboardLayout>
@@ -175,10 +142,11 @@ export default function AttendanceSummaryReport() {
         onStartDateChange={setStartDate}
         endDate={endDate}
         onEndDateChange={setEndDate}
-        onThisMonth={setThisMonth}
-        onThisYear={setThisYear}
-        highlightThisMonth={highlightThisMonth}
-        highlightThisYear={highlightThisYear}
+        onThisMonth={() => setViewMode("monthly")}
+        onThisYear={() => setViewMode("annually")}
+        highlightThisMonth={viewMode === "monthly"}
+        highlightThisYear={viewMode === "annually"}
+        hideQuickButtons
         yearOptions={years}
       >
         {/* Summary Cards */}
