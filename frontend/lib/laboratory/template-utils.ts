@@ -250,6 +250,50 @@ export const orderResultRows = <T extends { parameter: string }>(
   });
 };
 
+/**
+ * Return a list of dropdown options for a field, or null if the field should use a
+ * free-text Input. Works for ALL template fields — matched by name, by range pattern,
+ * or by explicit lookup in a curated map.
+ */
+const _nameOptions: Record<string, string[]> = {
+  'Colour': ['Amber', 'Deep Amber', 'Pale Amber', 'Straw'],
+  'Appearance': ['Clear', 'Turbid', 'Slightly Turbid', 'Cloudy', 'Slightly Cloudy'],
+  'pH': ['1.0','1.5','2.0','2.5','3.0','3.5','4.0','4.5','5.0','5.5','6.0','6.5','7.0','7.5','8.0'],
+  'Specific Gravity': ['1.000','1.005','1.010','1.015','1.020','1.025','1.030'],
+  'Nitrite': ['NEGATIVE', 'POSITIVE'],
+  'Glucose': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Ketone': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Proteins': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Bilirubin': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Urobilinogen': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Blood': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Leucocytes': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Ascorbic Acid': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  'Blood Group': ['A+','A-','B+','B-','O+','O-','AB+','AB-'],
+  'Rhesus': ['POSITIVE', 'NEGATIVE'],
+  'Genotype': ['AA', 'AS', 'SS', 'AC', 'SC'],
+};
+
+const _rangePatterns: [RegExp, string[]][] = [
+  [/S \/ I \/ R \/ NT/i, ['S', 'I', 'R', 'NT']],
+  [/(POSITIVE|NEGATIVE)/i, ['NEGATIVE', 'POSITIVE']],
+  [/(Non-Reactive|Non-reactive|Non reactive)/i, ['Non-Reactive', 'Reactive', 'Indeterminate']],
+  [/(Negative\/Positive|Negative\/positive|neg.*pos)/i, ['NEGATIVE', 'POSITIVE']],
+  [/(Detected|Not Detected|Not detected)/i, ['Not Detected', 'Detected']],
+];
+
+export function getFieldOptions(field: TemplateField): string[] | null {
+  const nameHit = _nameOptions[field.name];
+  if (nameHit) return nameHit;
+
+  const range = field.normalRange || '';
+  for (const [pattern, options] of _rangePatterns) {
+    if (pattern.test(range)) return options;
+  }
+
+  return null;
+}
+
 /** Worst-of: Critical > Abnormal > Normal. */
 export const deriveOverallStatus = (
   rows: { status: ResultStatus }[]
