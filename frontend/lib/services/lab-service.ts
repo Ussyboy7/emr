@@ -152,6 +152,16 @@ export interface LabTemplate {
   updated_at?: string;
 }
 
+export interface TemplateFieldOption {
+  id: number;
+  template: number;
+  template_code: string;
+  template_name: string;
+  field_name: string;
+  value: string;
+  sort_order: number;
+}
+
 export interface LabResult {
   id: number;
   test?: LabTest;
@@ -576,6 +586,43 @@ class LabService {
    */
   async getTemplate(templateId: number): Promise<LabTemplate> {
     return apiFetch<LabTemplate>(`/laboratory/templates/${templateId}/`);
+  }
+
+  // ── Template Field Options ──────────────────────────────────────────
+
+  /**
+   * List field options for a template (or for a specific field).
+   */
+  async getFieldOptions(params: {
+    template?: number;
+    field_name?: string;
+  }): Promise<TemplateFieldOption[]> {
+    const query = buildQueryString(params);
+    return apiFetch<TemplateFieldOption[]>(`/laboratory/template-field-options/${query}`);
+  }
+
+  /**
+   * Create a field option.
+   */
+  async createFieldOption(data: {
+    template: number;
+    field_name: string;
+    value: string;
+    sort_order?: number;
+  }): Promise<TemplateFieldOption> {
+    return apiFetch<TemplateFieldOption>('/laboratory/template-field-options/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a field option.
+   */
+  async deleteFieldOption(id: number): Promise<void> {
+    await apiFetch<void>(`/laboratory/template-field-options/${id}/`, {
+      method: 'DELETE',
+    });
   }
 
   /**

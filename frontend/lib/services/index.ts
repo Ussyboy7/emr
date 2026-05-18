@@ -10,6 +10,7 @@ export type {
   LabPartner,
   LabReferralDispatch,
   LabAnalyticsSummary,
+  TemplateFieldOption,
 } from './lab-service';
 export type {
   Patient,

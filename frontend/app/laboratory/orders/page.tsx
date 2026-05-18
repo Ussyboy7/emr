@@ -920,10 +920,39 @@ export default function LabOrdersPage() {
   const loadTemplatesForResults = useCallback(async () => {
     try {
       const { results } = await labService.getTemplates({ page_size: 200 });
+
+      // Fetch all DB-managed field options and index by template code + field name
+      let allOptions: Record<string, Record<string, string[]>> = {};
+      try {
+        const raw = await labService.getFieldOptions({});
+        if (Array.isArray(raw)) {
+          for (const o of raw) {
+            const code = (o as any).template_code || '';
+            if (!code) continue;
+            if (!allOptions[code]) allOptions[code] = {};
+            if (!allOptions[code][o.field_name]) allOptions[code][o.field_name] = [];
+            allOptions[code][o.field_name].push(o.value);
+          }
+        }
+      } catch {
+        // Field options are optional; fall through to template-only data
+      }
+
       const next: Record<string, { name: string; fields: TemplateField[] }> = {};
       for (const t of results) {
         const tpl = buildEntryTemplate(t.code, (t as any).normal_range);
-        if (tpl) next[t.code] = { name: t.name, fields: tpl.fields };
+        if (tpl) {
+          // Inject DB-managed options into each field
+          const codeOpts = allOptions[t.code];
+          if (codeOpts) {
+            for (const f of tpl.fields) {
+              if (codeOpts[f.name] && codeOpts[f.name].length > 0) {
+                f.options = codeOpts[f.name];
+              }
+            }
+          }
+          next[t.code] = { name: t.name, fields: tpl.fields };
+        }
       }
       setApiTemplatesByCode(prev => ({ ...prev, ...next }));
     } catch (e) {

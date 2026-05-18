@@ -31,6 +31,7 @@ from .models import (
     LabTestResultAttachment,
     LabReferralDispatch,
     LabResult,
+    TemplateFieldOption,
 )
 from .serializers import (
     LabTemplateSerializer,
@@ -39,6 +40,7 @@ from .serializers import (
     LabTestSerializer,
     LabReferralDispatchSerializer,
     LabResultSerializer,
+    TemplateFieldOptionSerializer,
     OTHER_TEMPLATE_CODES,
 )
 from .pagination import FlexiblePageNumberPagination
@@ -1661,3 +1663,12 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         )
         
         return Response(LabResultSerializer(result).data)
+
+
+class TemplateFieldOptionViewSet(viewsets.ModelViewSet):
+    queryset = TemplateFieldOption.objects.all()
+    serializer_class = TemplateFieldOptionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['template', 'field_name']
+    pagination_class = None

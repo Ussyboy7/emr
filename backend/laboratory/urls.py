@@ -9,6 +9,7 @@ from .views import (
     LabOrderViewSet,
     LabTestViewSet,
     LabResultViewSet,
+    TemplateFieldOptionViewSet,
 )
 from .analytics_views import LaboratoryAnalyticsSummaryView
 from .tracker_views import LaboratoryPatientTrackerView
@@ -19,6 +20,7 @@ router.register(r'templates', LabTemplateViewSet, basename='lab-template')
 router.register(r'orders', LabOrderViewSet, basename='lab-order')
 router.register(r'tests', LabTestViewSet, basename='lab-test')
 router.register(r'verification', LabResultViewSet, basename='lab-result')
+router.register(r'template-field-options', TemplateFieldOptionViewSet, basename='template-field-option')
 
 urlpatterns = [
     path('laboratory/', include(router.urls)),

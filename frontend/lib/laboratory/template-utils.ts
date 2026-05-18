@@ -28,6 +28,7 @@ export interface AnalyteMeta {
   criticalMax?: string | number;
   dataType?: string;
   required?: boolean;
+  options?: string[];
 }
 
 /** Flattened/canonical field used by the result entry UI. */
@@ -41,6 +42,7 @@ export interface TemplateField {
   criticalMax?: number;
   dataType?: string;
   required?: boolean;
+  options?: string[];
 }
 
 const toNumber = (value: unknown): number | undefined => {
@@ -114,6 +116,7 @@ export const getOrderedTemplateFields = (
       criticalMax: toNumber(meta.critical_max ?? meta.criticalMax),
       dataType: meta.dataType,
       required: meta.required,
+      options: meta.options || undefined,
     };
   });
 };
@@ -219,6 +222,7 @@ export const fieldForParameter = (
     criticalMax: toNumber(resolved.meta.critical_max ?? resolved.meta.criticalMax),
     dataType: resolved.meta.dataType,
     required: resolved.meta.required,
+    options: resolved.meta.options || undefined,
   };
 };
 
@@ -325,6 +329,8 @@ const _rangePatterns: [RegExp, string[]][] = [
 
 export function getFieldOptions(field: TemplateField): string[] | null {
   if (field.dataType && field.dataType.toLowerCase() !== 'text') return null;
+
+  if (field.options) return field.options;
 
   const nameHit = _nameOptions[field.name];
   if (nameHit) return nameHit.length > 0 ? nameHit : null;

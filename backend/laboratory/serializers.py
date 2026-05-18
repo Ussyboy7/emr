@@ -11,6 +11,7 @@ from .models import (
     LabTestResultAttachment,
     LabReferralDispatch,
     LabResult,
+    TemplateFieldOption,
 )
 
 
@@ -581,3 +582,15 @@ class LabResultSerializer(serializers.ModelSerializer):
         model = LabResult
         fields = '__all__'
         read_only_fields = ['created_at']
+
+
+class TemplateFieldOptionSerializer(serializers.ModelSerializer):
+    template_code = serializers.CharField(source='template.code', read_only=True)
+    template_name = serializers.CharField(source='template.name', read_only=True)
+
+    class Meta:
+        model = TemplateFieldOption
+        fields = [
+            'id', 'template', 'template_code', 'template_name',
+            'field_name', 'value', 'sort_order',
+        ]

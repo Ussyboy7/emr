@@ -462,3 +462,27 @@ class LabResult(models.Model):
     def __str__(self):
         return f"Result for {self.test.name} - {self.patient.get_full_name()}"
 
+
+class TemplateFieldOption(models.Model):
+    """
+    Dropdown options for a specific field in a lab template.
+    When populated, the result entry UI shows these as a Select instead of a
+    free-text Input.  Managed by admins through the "Manage Result Types" UI.
+    """
+    template = models.ForeignKey(
+        LabTemplate, on_delete=models.CASCADE, related_name='field_options'
+    )
+    field_name = models.CharField(max_length=255)
+    value = models.CharField(max_length=255)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'lab_template_field_options'
+        ordering = ['field_name', 'sort_order']
+        unique_together = ['template', 'field_name', 'value']
+        verbose_name = 'Template field option'
+        verbose_name_plural = 'Template field options'
+
+    def __str__(self):
+        return f'{self.template.code}.{self.field_name}: {self.value}'
+
