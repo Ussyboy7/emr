@@ -462,6 +462,7 @@ export default function LabOrdersPage() {
 
   // Templates from API for result entry (params from Test Templates / normal_range)
   const [apiTemplatesByCode, setApiTemplatesByCode] = useState<Record<string, { name: string; fields: TemplateField[] }>>({});
+  const fieldOptionsByTemplateRef = useRef<Record<string, Record<string, string[]>>>({});
   const [externalPatientSearch, setExternalPatientSearch] = useState('');
   const [externalPatientResults, setExternalPatientResults] = useState<Patient[]>([]);
   const [searchingExternalPatients, setSearchingExternalPatients] = useState(false);
@@ -544,7 +545,17 @@ export default function LabOrdersPage() {
   };
   const resolveTemplateForTest = (test: LabTest): TemplateLookup => {
     const fromTest = buildEntryTemplate(test.code, test.templateNormalRange);
-    if (fromTest) return { template: fromTest, source: 'snapshot' };
+    if (fromTest) {
+      const codeOpts = fieldOptionsByTemplateRef.current[test.code];
+      if (codeOpts) {
+        for (const f of fromTest.fields) {
+          if (codeOpts[f.name] && codeOpts[f.name].length > 0) {
+            f.options = codeOpts[f.name];
+          }
+        }
+      }
+      return { template: fromTest, source: 'snapshot' };
+    }
     const fromApi = apiTemplatesByCode[test.code];
     if (fromApi) return { template: fromApi, source: 'api' };
     return { template: undefined, source: 'none' };
@@ -937,6 +948,7 @@ export default function LabOrdersPage() {
       } catch {
         // Field options are optional; fall through to template-only data
       }
+      fieldOptionsByTemplateRef.current = allOptions;
 
       const next: Record<string, { name: string; fields: TemplateField[] }> = {};
       for (const t of results) {
