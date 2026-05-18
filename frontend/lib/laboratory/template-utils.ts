@@ -290,6 +290,29 @@ const _nameOptions: Record<string, string[]> = {
   'Gram Stain': ['No Organisms Seen', 'Gram Positive Cocci', 'Gram Negative Bacilli', 'Gram Positive Bacilli', 'Gram Negative Cocci', 'Mixed Growth'],
   // Stool
   'Others': [], // free-text, explicitly empty
+  // Noble Cup / Drug Screen (toxicology)
+  'AMPHETAMINE (AMP)': ['NEGATIVE', 'POSITIVE'],
+  'BARBITURATES (BAR)': ['NEGATIVE', 'POSITIVE'],
+  'TRICYCLIC ANTIDEPRESANTS (TCA)': ['NEGATIVE', 'POSITIVE'],
+  'COCAINE (COC)': ['NEGATIVE', 'POSITIVE'],
+  'BENZODIAZEPINE (BZO)': ['NEGATIVE', 'POSITIVE'],
+  'OPIATE (OPI)': ['NEGATIVE', 'POSITIVE'],
+  'METHAMPHETAMINE (MET)': ['NEGATIVE', 'POSITIVE'],
+  'MARIJUANA (THC)': ['NEGATIVE', 'POSITIVE'],
+  'ECSTASY (MDMA)': ['NEGATIVE', 'POSITIVE'],
+  'TRAMADOL (TML)': ['NEGATIVE', 'POSITIVE'],
+  // Pregnancy
+  'hCG': ['NEGATIVE', 'POSITIVE'],
+  // H. Pylori
+  'H. Pylori AB': ['NEGATIVE', 'POSITIVE'],
+  'H. Pylori AG': ['NEGATIVE', 'POSITIVE'],
+  // Serology
+  'HBsAg': ['Non-Reactive', 'Reactive', 'Indeterminate'],
+  'HCV': ['Non-Reactive', 'Reactive', 'Indeterminate'],
+  'HIV 1/2': ['Non-Reactive', 'Reactive', 'Indeterminate'],
+  'VDRL': ['Non-Reactive', 'Reactive', 'Indeterminate'],
+  // Haemoglobin Genotype
+  'HB Genotype': ['AA', 'AS', 'SS', 'AC', 'SC'],
 };
 
 const _rangePatterns: [RegExp, string[]][] = [

@@ -4174,7 +4174,7 @@ export default function LabOrdersPage() {
                                     <span className="text-sm text-muted-foreground truncate">
                                       {field.unit}
                                     </span>
-                                    <span className="text-xs text-muted-foreground truncate">
+                                    <span className="text-xs text-muted-foreground break-words">
                                       {field.normalRange ? `Normal: ${field.normalRange}` : ''}
                                     </span>
                                     {status !== 'Normal' && (
