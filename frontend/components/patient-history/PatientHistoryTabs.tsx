@@ -37,7 +37,7 @@ const humanizeStatus = (v: unknown): string => {
 const statusBadgeClass = (status: string): string => {
   switch (status) {
     case 'completed': case 'discharged': case 'verified': case 'normal': return 'bg-emerald-500/10 text-emerald-600';
-    case 'in_progress': case 'admitted': case 'reported': return 'bg-blue-500/10 text-blue-600';
+    case 'in_progress': case 'admitted': case 'reported': case 'results_ready': return 'bg-blue-500/10 text-blue-600';
     case 'scheduled': return 'bg-amber-500/10 text-amber-600';
     case 'critical': return 'bg-rose-500/10 text-rose-600';
     case 'abnormal': return 'bg-amber-500/10 text-amber-600';
@@ -310,8 +310,8 @@ export function PatientHistoryTabs({
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant="outline" className={`text-xs ${statusBadgeClass((lab.overall_status || lab.status || '').toLowerCase())}`}>
-                            {humanizeStatus(lab.overall_status || lab.status)}
+                          <Badge variant="outline" className={`text-xs ${statusBadgeClass((lab.status || lab.overall_status || '').toLowerCase())}`}>
+                            {humanizeStatus(lab.status || lab.overall_status)}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-center">
