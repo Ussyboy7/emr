@@ -214,11 +214,9 @@ export function LabCompletedReportDialog({
                           <td className="p-3 text-muted-foreground">{result.unit || '—'}</td>
                           <td className="p-3 text-muted-foreground">{result.normalRange || '—'}</td>
                           <td className="p-3">
-                            {result.status !== 'Normal' && (
-                              <Badge variant="outline" className={getResultStatusColor(result.status)}>
-                                {result.status}
-                              </Badge>
-                            )}
+                            <Badge variant="outline" className={getResultStatusColor(result.status)}>
+                              {result.status}
+                            </Badge>
                           </td>
                           {hasRowAttachments && (
                             <td className="p-3">
