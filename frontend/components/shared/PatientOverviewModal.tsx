@@ -470,6 +470,11 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               else healthStatus = 'Completed';
             }
 
+            const workflowStatus =
+              test.status === 'verified' ? 'Verified' :
+              test.status === 'results_ready' ? 'Results Ready' :
+              'Pending';
+
             return {
               id: `${order.id}-${test.id}`,
               test: test.name || test.code || 'Unknown Test',
@@ -478,7 +483,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               result: formattedResults,
               unit: '',
               range: '',
-            status: healthStatus,
+            status: workflowStatus,
             overallStatus: healthStatus,
               orderedBy: order.doctor?.name || 'Unknown',
               verifiedBy: test.processed_by || 'Pending',

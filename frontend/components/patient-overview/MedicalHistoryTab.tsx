@@ -89,10 +89,9 @@ const getImagingBadgeClass = (label: string) => {
 };
 
 const getLabStatusBadgeClass = (status: string) => {
-  if (status === 'Normal') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
-  if (status === 'Abnormal') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
-  if (status === 'Critical') return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400';
-  return 'bg-muted/40 text-muted-foreground border-border/60';
+  if (status === 'Verified') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+  if (status === 'Results Ready') return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+  return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
 };
 
 interface PatientDetail {
@@ -730,7 +729,7 @@ export function MedicalHistoryTab({
                   <tbody className="divide-y">
                     {labResults
                       .filter((lab: any) => {
-                        if (labStatusFilter !== 'all' && lab.status.toLowerCase() !== labStatusFilter.toLowerCase()) return false;
+                        if (labStatusFilter !== 'all' && lab.status.replace(' ', '_').toLowerCase() !== labStatusFilter.toLowerCase()) return false;
                         if (labDateFilter === 'all') return true;
                         const labDate = safeParseDate(lab.date);
                         if (!labDate) return false;
@@ -743,8 +742,8 @@ export function MedicalHistoryTab({
                         <td className="px-4 py-3 text-muted-foreground">{lab.date}</td>
                         <td className="px-4 py-3 font-medium">{lab.test}</td>
                         <td className="px-4 py-3">
-                          <Badge className={getLabStatusBadgeClass(lab.overallStatus)}>
-                            {lab.overallStatus || 'Pending'}
+                          <Badge className={getLabStatusBadgeClass(lab.status)}>
+                            {lab.status}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-center">
