@@ -332,9 +332,6 @@ export function getFieldOptions(field: TemplateField): string[] | null {
 
   if (field.options) return field.options;
 
-  const nameHit = _nameOptions[field.name];
-  if (nameHit) return nameHit.length > 0 ? nameHit : null;
-
   const range = field.normalRange || '';
   for (const [pattern, options] of _rangePatterns) {
     if (pattern.test(range)) return options;

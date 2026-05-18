@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
@@ -18,7 +19,7 @@ import { labService, radiologyService, type RadiologyTemplate as ApiRadiologyTem
 import {
   FileText, Search, Eye, Plus, Edit, Trash2, Copy, CheckCircle2,
   Loader2, Settings, ListPlus, ScanLine, Activity, Clock,
-  Heart, Scan, FlaskConical, Microscope
+  Heart, Scan, FlaskConical, Microscope, GripVertical
 } from 'lucide-react';
 
 interface TemplateField {
@@ -129,6 +130,12 @@ export default function TestTemplatesPage() {
   const [isFieldEditDialogOpen, setIsFieldEditDialogOpen] = useState(false);
   const [editingField, setEditingField] = useState<TemplateField | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Field options management (within view dialog)
+  const [viewFieldName, setViewFieldName] = useState('');
+  const [viewFieldOptions, setViewFieldOptions] = useState<string[]>([]);
+  const [loadingViewOptions, setLoadingViewOptions] = useState(false);
+  const [newOptionValue, setNewOptionValue] = useState('');
 
   // Form states
   const [formData, setFormData] = useState({
@@ -716,11 +723,143 @@ export default function TestTemplatesPage() {
                     </table>
                   </div>
                 </div>
+
+                {/* Field Options */}
+                <div>
+                  <h4 className="font-semibold mb-2">Field Options</h4>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Configure dropdown options for result entry fields. These override the default range-based options.
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs">Select field</Label>
+                      <Select value={viewFieldName} onValueChange={async (name) => {
+                        setViewFieldName(name);
+                        if (!selectedTemplate) return;
+                        setLoadingViewOptions(true);
+                        try {
+                          const raw = await labService.getFieldOptions({
+                            template: Number(selectedTemplate.id),
+                            field_name: name,
+                          });
+                          setViewFieldOptions(Array.isArray(raw) ? raw.map(o => o.value) : []);
+                        } catch {
+                          setViewFieldOptions([]);
+                        } finally {
+                          setLoadingViewOptions(false);
+                        }
+                      }}>
+                        <SelectTrigger className="max-w-xs">
+                          <SelectValue placeholder="Choose a field..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {selectedTemplate?.fields.map(f => (
+                            <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {viewFieldName && (
+                      <div className="space-y-2 border rounded-md p-3">
+                        {loadingViewOptions ? (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Loading...
+                          </div>
+                        ) : viewFieldOptions.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">No custom options. Add some below.</p>
+                        ) : (
+                          <div className="space-y-1 max-w-xs">
+                            {viewFieldOptions.map((opt, i) => (
+                              <div key={i} className="flex items-center gap-2 p-1.5 rounded border text-sm">
+                                <GripVertical className="h-3 w-3 text-muted-foreground shrink-0" />
+                                <span className="flex-1">{opt}</span>
+                                <button
+                                  type="button"
+                                  className="text-destructive hover:text-destructive/80"
+                                  onClick={async () => {
+                                    try {
+                                      const raw = await labService.getFieldOptions({
+                                        template: Number(selectedTemplate!.id),
+                                        field_name: viewFieldName,
+                                      });
+                                      const match = (Array.isArray(raw) ? raw : []).find(o => o.value === opt);
+                                      if (match) {
+                                        await labService.deleteFieldOption(match.id);
+                                        setViewFieldOptions(prev => prev.filter(v => v !== opt));
+                                        toast.success('Option removed');
+                                      }
+                                    } catch {
+                                      toast.error('Failed to remove option');
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <Separator />
+                        <div className="flex items-center gap-2 max-w-xs">
+                          <Input
+                            value={newOptionValue}
+                            onChange={e => setNewOptionValue(e.target.value)}
+                            placeholder="New option value"
+                            className="h-8 text-sm"
+                            onKeyDown={async e => {
+                              if (e.key === 'Enter' && newOptionValue.trim()) {
+                                e.preventDefault();
+                                try {
+                                  await labService.createFieldOption({
+                                    template: Number(selectedTemplate!.id),
+                                    field_name: viewFieldName,
+                                    value: newOptionValue.trim(),
+                                    sort_order: viewFieldOptions.length,
+                                  });
+                                  setViewFieldOptions(prev => [...prev, newOptionValue.trim()]);
+                                  setNewOptionValue('');
+                                  toast.success('Option added');
+                                } catch {
+                                  toast.error('Failed to add option');
+                                }
+                              }
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            className="h-8"
+                            disabled={!newOptionValue.trim()}
+                            onClick={async () => {
+                              if (!newOptionValue.trim()) return;
+                              try {
+                                await labService.createFieldOption({
+                                  template: Number(selectedTemplate!.id),
+                                  field_name: viewFieldName,
+                                  value: newOptionValue.trim(),
+                                  sort_order: viewFieldOptions.length,
+                                });
+                                setViewFieldOptions(prev => [...prev, newOptionValue.trim()]);
+                                setNewOptionValue('');
+                                toast.success('Option added');
+                              } catch {
+                                toast.error('Failed to add option');
+                              }
+                            }}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
-              <Button onClick={() => { setIsViewDialogOpen(false); if (selectedTemplate) openEditDialog(selectedTemplate); }}>
+              <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); setViewFieldName(''); setViewFieldOptions([]); }}>Close</Button>
+              <Button onClick={() => { setIsViewDialogOpen(false); setViewFieldName(''); setViewFieldOptions([]); if (selectedTemplate) openEditDialog(selectedTemplate); }}>
                 <Edit className="h-4 w-4 mr-2" />Edit
               </Button>
             </DialogFooter>
