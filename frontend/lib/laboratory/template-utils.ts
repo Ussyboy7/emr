@@ -256,6 +256,7 @@ export const orderResultRows = <T extends { parameter: string }>(
  * or by explicit lookup in a curated map.
  */
 const _nameOptions: Record<string, string[]> = {
+  // Urinalysis
   'Colour': ['Amber', 'Deep Amber', 'Pale Amber', 'Straw'],
   'Appearance': ['Clear', 'Turbid', 'Slightly Turbid', 'Cloudy', 'Slightly Cloudy'],
   'pH': ['1.0','1.5','2.0','2.5','3.0','3.5','4.0','4.5','5.0','5.5','6.0','6.5','7.0','7.5','8.0'],
@@ -269,9 +270,26 @@ const _nameOptions: Record<string, string[]> = {
   'Blood': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
   'Leucocytes': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
   'Ascorbic Acid': ['NORMAL','NEGATIVE','TRACE','+','++','+++','++++'],
+  // Blood group / genotype
   'Blood Group': ['A+','A-','B+','B-','O+','O-','AB+','AB-'],
   'Rhesus': ['POSITIVE', 'NEGATIVE'],
   'Genotype': ['AA', 'AS', 'SS', 'AC', 'SC'],
+  // Microscopy / qualitative
+  'Pus Cells': ['NONE', 'FEW', 'MODERATE', 'MANY'],
+  'Epithelial Cell': ['NONE', 'FEW', 'MODERATE', 'MANY'],
+  'RBCs': ['NONE', 'FEW', 'MODERATE', 'MANY'],
+  'Mucus': ['NONE', 'TRACE', '+', '++', '+++'],
+  'Bacteria': ['Not Seen', 'Few', 'Moderate', 'Many'],
+  'Yeast Cells': ['Not Seen', 'Seen'],
+  'Cast/Crystals': ['Not Seen', 'Seen'],
+  'Fungal Elements': ['Not Seen', 'Seen'],
+  'Ova': ['Not Seen', 'Seen'],
+  'Cyst': ['Not Seen', 'Seen'],
+  'Parasites': ['Not Seen', 'Seen'],
+  'Other Parasites': ['Not Seen', 'Seen'],
+  'Gram Stain': ['No Organisms Seen', 'Gram Positive Cocci', 'Gram Negative Bacilli', 'Gram Positive Bacilli', 'Gram Negative Cocci', 'Mixed Growth'],
+  // Stool
+  'Others': [], // free-text, explicitly empty
 };
 
 const _rangePatterns: [RegExp, string[]][] = [
@@ -283,8 +301,10 @@ const _rangePatterns: [RegExp, string[]][] = [
 ];
 
 export function getFieldOptions(field: TemplateField): string[] | null {
+  if (field.dataType && field.dataType.toLowerCase() !== 'text') return null;
+
   const nameHit = _nameOptions[field.name];
-  if (nameHit) return nameHit;
+  if (nameHit) return nameHit.length > 0 ? nameHit : null;
 
   const range = field.normalRange || '';
   for (const [pattern, options] of _rangePatterns) {
