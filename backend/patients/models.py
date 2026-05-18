@@ -166,6 +166,13 @@ class Patient(models.Model):
         null=True,
         related_name="created_patients",
     )
+    updated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_patients",
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

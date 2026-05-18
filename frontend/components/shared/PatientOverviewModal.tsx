@@ -13,9 +13,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from "sonner";
 import { patientService, labService, pharmacyService, consultationService, radiologyService, physioService, wardService, medicalCertificateService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
+import { eyeCareService } from '@/lib/services/eye-care-service';
 import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
-import { MedicalHistoryTab } from '@/components/patient-overview/MedicalHistoryTab';
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
 import {
   getVisitServiceClinicsDisplay,
@@ -23,8 +23,8 @@ import {
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 import {
   User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
-  ChevronRight, AlertTriangle, Loader2, Mail, MapPin, Droplets,
-  X, RefreshCw, ClipboardList, History, ScanLine, ChevronLeft, Download, Clock, Users, UserPlus
+  AlertTriangle, Loader2, Mail, MapPin, Droplets,
+  ClipboardList, Clock, Users, UserPlus
 } from 'lucide-react';
 
 interface Patient {
@@ -149,6 +149,10 @@ interface PatientDetail {
     exercise: string;
     occupation: string;
   };
+  createdAt: string;
+  updatedAt: string;
+  createdByName?: string | null;
+  updatedByName?: string | null;
 }
 
 interface DependentPatient {
@@ -197,6 +201,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
   const [consultationSessions, setConsultationSessions] = useState<any[]>([]);
   const [imagingResults, setImagingResults] = useState<any[]>([]);
   const [physioOrders, setPhysioOrders] = useState<any[]>([]);
+  const [eyeOrders, setEyeOrders] = useState<any[]>([]);
   const [wardAdmissions, setWardAdmissions] = useState<any[]>([]);
   const [medicalCertificates, setMedicalCertificates] = useState<any[]>([]);
   const [dependents, setDependents] = useState<DependentPatient[]>([]);
@@ -218,32 +223,22 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
   /** Header / avatar: list prop until GET patient returns, then API full_name only */
   const [overviewPatientName, setOverviewPatientName] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
-  const [historySubTab, setHistorySubTab] = useState('background');
-  
-  // History tab filters and pagination
-  const [sessionDateFilter, setSessionDateFilter] = useState<string>('all');
-  const [labDateFilter, setLabDateFilter] = useState<string>('all');
-  const [labStatusFilter, setLabStatusFilter] = useState<string>('all');
-  const [imagingDateFilter, setImagingDateFilter] = useState<string>('all');
-  const [imagingStatusFilter, setImagingStatusFilter] = useState<string>('all');
-  const [prescriptionsDateFilter, setPrescriptionsDateFilter] = useState<string>('all');
-  const [prescriptionsStatusFilter, setPrescriptionsStatusFilter] = useState<string>('all');
-  const [vitalsDateFilter, setVitalsDateFilter] = useState<string>('all');
-  const [consultationsPage, setConsultationsPage] = useState(1);
-  const [labResultsPage, setLabResultsPage] = useState(1);
-  const [imagingPage, setImagingPage] = useState(1);
-  const [prescriptionsPage, setPrescriptionsPage] = useState(1);
-  const [vitalsPage, setVitalsPage] = useState(1);
-  const [consultationsPerPage, setConsultationsPerPage] = useState(10);
-  const [labResultsPerPage, setLabResultsPerPage] = useState(10);
-  const [imagingPerPage, setImagingPerPage] = useState(10);
-  const [prescriptionsPerPage, setPrescriptionsPerPage] = useState(10);
-  const [vitalsPerPage, setVitalsPerPage] = useState(10);
-  
   // Visit detail modal state
   const [isVisitDetailModalOpen, setIsVisitDetailModalOpen] = useState(false);
   const [selectedVisit, setSelectedVisit] = useState<Visit | null>(null);
-  
+
+  const formatDateTime = (iso: string) => {
+    if (!iso) return null;
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return null;
+      return d.toLocaleString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      });
+    } catch { return null; }
+  };
+
   const handleViewVisit = (visit: Visit) => {
     setSelectedVisit(visit);
     setIsVisitDetailModalOpen(true);
@@ -324,6 +319,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         consultationsData,
         imagingData,
         physioData,
+        eyeData,
         wardAdmissionsData,
         certificatesData,
       ] = await Promise.allSettled([
@@ -335,6 +331,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         consultationService.getSessions({ patient: numericId }).catch(() => ({ results: [] })),
         radiologyService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
         physioService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
+        eyeCareService.getOrders({ patient: numericId }).catch(() => ({ results: [] })),
         wardService.getAdmissions({ patient: numericId }).catch(() => ({ results: [] })),
         medicalCertificateService.getCertificates({ patient: numericId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
       ]);
@@ -463,6 +460,16 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 })
                 .join(', ') || 'Pending';
             
+            const overallStatus = test.overall_status;
+            let healthStatus = test.status === 'verified' ? 'Completed' : 'Pending';
+            if (overallStatus) {
+              const s = String(overallStatus).toLowerCase();
+              if (s === 'normal') healthStatus = 'Normal';
+              else if (s === 'abnormal') healthStatus = 'Abnormal';
+              else if (s === 'critical') healthStatus = 'Critical';
+              else healthStatus = 'Completed';
+            }
+
             return {
               id: `${order.id}-${test.id}`,
               test: test.name || test.code || 'Unknown Test',
@@ -472,9 +479,11 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               unit: '',
               range: '',
               status: test.status === 'verified' ? 'Normal' : 'Pending',
+              overallStatus: healthStatus,
               orderedBy: order.doctor?.name || 'Unknown',
               verifiedBy: test.processed_by || 'Pending',
               notes: test.notes || '',
+              _raw: test,
             };
           })
         );
@@ -511,6 +520,13 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         setPhysioOrders([]);
       }
 
+      // Process eye orders
+      if (eyeData.status === 'fulfilled') {
+        setEyeOrders(eyeData.value?.results || []);
+      } else {
+        setEyeOrders([]);
+      }
+
       // Process ward admissions
       if (wardAdmissionsData.status === 'fulfilled') {
         setWardAdmissions(wardAdmissionsData.value?.results || []);
@@ -541,6 +557,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 orderedBy: order.doctor_name || order.doctor?.name || 'Unknown',
                 result: study.findings || study.report || 'Pending',
                 report: study.report || '',
+                _rawOrder: order,
+                _rawStudy: study,
               });
             });
           }
@@ -708,6 +726,10 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         stateOfResidence: apiPatient.state_of_residence || '',
         stateOfOrigin: apiPatient.state_of_origin || '',
         lga: apiPatient.lga || '',
+        createdAt: apiPatient.created_at || '',
+        updatedAt: apiPatient.updated_at || '',
+        createdByName: (apiPatient as any).created_by_name || null,
+        updatedByName: (apiPatient as any).updated_by_name || null,
         numericId,
         socialHistory,
       };
@@ -725,7 +747,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
     if (isOpen && patient) {
       loadPatientData();
       setActiveTab('overview');
-      setHistorySubTab('background');
     }
   }, [isOpen, patient, loadPatientData]);
 
@@ -806,9 +827,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={loadPatientData} disabled={loading} title="Refresh data">
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              </Button>
               {onEdit && (
                 <Button variant="outline" size="sm" onClick={() => { onClose(); onEdit(patient); }}>
                   Edit Patient
@@ -835,9 +853,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 </TabsTrigger>
                 <TabsTrigger value="dependents" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
                   <Users className="h-4 w-4 mr-2" />Dependents
-                </TabsTrigger>
-                <TabsTrigger value="medical-history" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-                  <History className="h-4 w-4 mr-2" />Medical History
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -899,6 +914,29 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                               <p>{patientDetail.nonNpaType}</p>
                             </div>
                           ) : null}
+                          <Separator className="col-span-full my-1" />
+                          <div className="space-y-1 col-span-full md:col-span-1">
+                            <p className="text-muted-foreground flex items-center gap-1">
+                              <User className="h-3 w-3" /> Registered by
+                            </p>
+                            <p>{patientDetail.createdByName || '—'}</p>
+                            {formatDateTime(patientDetail.createdAt) && (
+                              <p className="text-xs text-muted-foreground">
+                                {formatDateTime(patientDetail.createdAt)}
+                              </p>
+                            )}
+                          </div>
+                          <div className="space-y-1 col-span-full md:col-span-1">
+                            <p className="text-muted-foreground flex items-center gap-1">
+                              <User className="h-3 w-3" /> Last modified by
+                            </p>
+                            <p>{patientDetail.updatedByName || '—'}</p>
+                            {formatDateTime(patientDetail.updatedAt) && (
+                              <p className="text-xs text-muted-foreground">
+                                {formatDateTime(patientDetail.updatedAt)}
+                              </p>
+                            )}
+                          </div>
                         </CardContent>
                       </Card>
 
@@ -983,12 +1021,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                           <CardTitle className="flex items-center gap-2">
                             <Calendar className="h-5 w-5 text-blue-500" />Recent Visits
                           </CardTitle>
-                          <Button variant="ghost" size="sm" onClick={() => {
-                            setActiveTab('medical-history');
-                            setHistorySubTab('consultations');
-                          }}>
-                            View All<ChevronRight className="h-4 w-4 ml-1" />
-                          </Button>
                         </CardHeader>
                         <CardContent className="space-y-3">
                           {visits.slice(0, 3).map((visit) => (
@@ -1250,38 +1282,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               )}
             </TabsContent>
 
-            {/* MEDICAL HISTORY TAB */}
-            <TabsContent value="medical-history" className="flex-1 overflow-y-auto px-6 py-4 mt-0">
-              <MedicalHistoryTab
-                patientDetail={patientDetail}
-                visits={visits}
-                consultationSessions={consultationSessions}
-                labResults={labResults}
-                imagingResults={imagingResults}
-                prescriptions={prescriptions}
-                vitalSigns={vitalSigns}
-                physioOrders={physioOrders}
-                wardAdmissions={wardAdmissions}
-                medicalCertificates={medicalCertificates}
-                historySubTab={historySubTab}
-                onHistorySubTabChange={setHistorySubTab}
-                onViewVisit={(visit) => {
-                  setSelectedVisit(visit);
-                  setIsVisitDetailModalOpen(true);
-                }}
-                patientNumericId={patientDetail?.numericId}
-                onAllergiesUpdate={(updatedAllergies) => {
-                  if (patientDetail) {
-                    setPatientDetail({
-                      ...patientDetail,
-                      allergies: updatedAllergies,
-                    });
-                  }
-                  // Reload patient data to get latest history
-                  loadPatientData();
-                }}
-              />
-            </TabsContent>
+
 
             {/* CURRENT CARE TAB */}
           </Tabs>
@@ -1301,6 +1302,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           }
         }}
       />
+
+
 
       <Dialog open={isAddDependentOpen} onOpenChange={(open) => {
         setIsAddDependentOpen(open);

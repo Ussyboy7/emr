@@ -17,7 +17,7 @@ import {
   ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText, Pencil, Share2,
 } from "lucide-react";
 import { patientService, consultationService, labService, radiologyService,
-         pharmacyService, physioService, wardService, medicalCertificateService, referralService, type Patient, type Visit } from '@/lib/services';
+         pharmacyService, physioService, wardService, medicalCertificateService, referralService, eyeCareService, type Patient, type Visit } from '@/lib/services';
 import type { Referral } from '@/lib/services/referral-service';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
@@ -34,14 +34,15 @@ import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
-import {
-  transformApiRowToCompletedTest,
-  type CompletedTest,
-} from '@/lib/laboratory/completedLabReport';
-import { getOrganizationLabHeader } from '@/lib/constants/organization';
-import { getOrganizationServicesHeader } from '@/lib/constants/organization';
-import { getVisitServiceClinicsDisplay, joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { RadiologyCompletedReportDialog } from '@/components/radiology/RadiologyCompletedReportDialog';
+import { PrescriptionReportDialog } from '@/components/pharmacy/PrescriptionReportDialog';
 import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
+import { ViewEyeOrderModal } from '@/components/eyecare/ViewEyeOrderModal';
+import { PatientHistoryTabs } from '@/components/patient-history/PatientHistoryTabs';
+import { transformApiRowToCompletedTest, type CompletedTest } from '@/lib/laboratory/completedLabReport';
+import { transformApiRadiologyReportToCompleted, type CompletedRadiologyReport } from '@/lib/radiology/completedRadiologyReport';
+import { getVisitServiceClinicsDisplay, joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 
 // Utility functions
 const formatDate = (dateString: string | undefined): string => {
@@ -270,6 +271,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   // Lab / Imaging / Physio / Ward view dialogs
   const [selectedLabReport, setSelectedLabReport] = useState<CompletedTest | null>(null);
   const [selectedImaging, setSelectedImaging] = useState<any>(null);
+  const [selectedImagingReport, setSelectedImagingReport] = useState<CompletedRadiologyReport | null>(null);
   const [selectedPhysio, setSelectedPhysio] = useState<any>(null);
   const [selectedPhysioSessions, setSelectedPhysioSessions] = useState<any[]>([]);
   const [selectedPhysioSession, setSelectedPhysioSession] = useState<any>(null);
@@ -302,6 +304,9 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [prescriptionHistory, setPrescriptionHistory] = useState<any[]>([]);
   const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
   const [physioHistory, setPhysioHistory] = useState<any[]>([]);
+  const [eyeHistory, setEyeHistory] = useState<any[]>([]);
+  const [selectedEyeOrderId, setSelectedEyeOrderId] = useState<number | undefined>(undefined);
+  const [showEyeOrderModal, setShowEyeOrderModal] = useState(false);
   const [wardAdmissions, setWardAdmissions] = useState<any[]>([]);
   const [certificateHistory, setCertificateHistory] = useState<any[]>([]);
   const [medicalHistory, setMedicalHistory] = useState<any>(null);
@@ -436,6 +441,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         prescriptions,
         vitals,
         physioOrders,
+        eyeOrders,
         admissions,
         certificates,
         history,
@@ -447,6 +453,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         pharmacyService.getPrescriptions({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
         patientService.getPatientVitals(numericPatientId).catch(() => []),
         physioService.getOrders({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
+        eyeCareService.getOrders({ patient: Number(numericPatientId) }).catch(() => ({ results: [] })),
         wardService.getAdmissions({ patient: numericPatientId }).catch(() => ({ results: [] })),
         medicalCertificateService.getCertificates({ patient: numericPatientId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
         patientService.getPatientHistory(numericPatientId).catch(() => null),
@@ -539,7 +546,14 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         console.warn('Could not load physio history:', err);
         setPhysioHistory([]);
       }
-
+      // Process eye
+      try {
+        setEyeHistory((eyeOrders as any)?.results || []);
+      } catch (err) {
+        console.warn('Could not load eye history:', err);
+        setEyeHistory([]);
+      }
+    
       // Process certificates
       try {
         setCertificateHistory((certificates as any)?.results || []);
@@ -576,6 +590,25 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       setShowConsultationReport(false);
     } finally {
       setLoadingReport(false);
+    }
+  };
+
+  const openPhysioDetail = async (order: any) => {
+    setSelectedPhysio(order);
+    setSelectedPhysioSession(null);
+    setSelectedPhysioSessions([]);
+    setLoadingPhysioSessions(true);
+    try {
+      const sessions = await physioService.getSessions({ order: order.id });
+      const list = Array.isArray(sessions) ? sessions : (sessions as any)?.results ?? [];
+      setSelectedPhysioSessions(list);
+      if (list.length > 0) {
+        setSelectedPhysioSession(list[0]);
+      }
+    } catch {
+      setSelectedPhysioSessions([]);
+    } finally {
+      setLoadingPhysioSessions(false);
     }
   };
 
@@ -773,176 +806,34 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
             if (patient?.id) void loadPatientHistory(patient.id);
           }}
         />
-        {/* Prescription View Dialog */}
-        <Dialog open={showPrescriptionView} onOpenChange={setShowPrescriptionView}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-violet-500" />Prescription</DialogTitle>
-              <DialogDescription>
-                {selectedPrescription ? `${selectedPrescription.prescription_id || selectedPrescription.id} - ${selectedPrescription.patient_name || selectedPrescription.patient_details?.name || patient?.full_name || ''}` : ''}
-              </DialogDescription>
-            </DialogHeader>
-            {selectedPrescription && (() => {
-              const patientName =
-                selectedPrescription.patient_name ||
-                selectedPrescription.patient_details?.name ||
-                patient?.full_name ||
-                '';
-              const patientIdValue = patient?.patient_id || selectedPrescription.patient_details?.patient_id || '';
-              const age = selectedPrescription.patient_details?.age ?? (patient as any)?.age ?? null;
-              const gender = selectedPrescription.patient_details?.gender ?? (patient as any)?.gender ?? '';
-
-              const prescribedAt = selectedPrescription.prescribed_at || selectedPrescription.date || '';
-              const dispensedAt = selectedPrescription.dispensed_at || '';
-
-              const handlePrint = () => {
-                try {
-                  const content = document.getElementById('prescription-report-print-root');
-                  if (!content) return;
-                  const w = window.open('', '_blank', 'noopener,noreferrer');
-                  if (!w) return;
-                  w.document.open();
-                  w.document.write(`
-                    <html>
-                      <head>
-                        <title>Prescription</title>
-                        <style>
-                          body { font-family: Arial, sans-serif; margin: 24px; }
-                          table { width: 100%; border-collapse: collapse; }
-                          th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }
-                          th { background: #f5f5f5; text-align: left; }
-                          h2 { margin: 0 0 4px 0; }
-                        </style>
-                      </head>
-                      <body>${content.innerHTML}</body>
-                    </html>
-                  `);
-                  w.document.close();
-                  w.focus();
-                  w.print();
-                } catch {
-                  toast.error('Unable to print prescription');
+        <PrescriptionReportDialog
+          open={showPrescriptionView}
+          onOpenChange={(o) => {
+            setShowPrescriptionView(o);
+            if (!o) setSelectedPrescription(null);
+          }}
+          prescription={selectedPrescription ? {
+            ...selectedPrescription,
+            clinic: selectedPrescription.clinic || (selectedPrescription as any)?.visit_details?.clinic || '',
+            doctor_name: selectedPrescription.doctor_name || '',
+            prescription_id: selectedPrescription.prescription_id || selectedPrescription.id,
+            dispensed_by_name: selectedPrescription.dispensed_by_name || (selectedPrescription as any)?.dispensed_by_name || '',
+          } : null}
+          prescriptionDbId={selectedPrescription?.id ?? null}
+          patient={
+            selectedPrescription && patient
+              ? {
+                  name: selectedPrescription.patient_name ||
+                        selectedPrescription.patient_details?.name ||
+                        patient.full_name ||
+                        '',
+                  patientId: patient.patient_id || selectedPrescription.patient_details?.patient_id || '',
+                  age: selectedPrescription.patient_details?.age ?? (patient as any)?.age ?? null,
+                  gender: selectedPrescription.patient_details?.gender ?? (patient as any)?.gender ?? '',
                 }
-              };
-
-              const handleDownloadPdf = () => {
-                handlePrint();
-              };
-
-              return (
-                <div className="space-y-6 py-4">
-                  <div id="prescription-report-print-root">
-                    <div className="text-center p-4 border-b">
-                      <h2 className="text-xl font-bold">PRESCRIPTION</h2>
-                      <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Patient Name</p>
-                        <p className="font-medium">{patientName}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Patient ID</p>
-                        <p className="font-medium">{patientIdValue}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Age / Gender</p>
-                        <p className="font-medium">{age != null ? `${age} years` : ''} / {gender}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Clinic</p>
-                        <p className="font-medium">{selectedPrescription.clinic ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Ordering Doctor</p>
-                        <p className="font-medium">{selectedPrescription.doctor_name ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Prescription ID</p>
-                        <p className="font-medium">{selectedPrescription.prescription_id || selectedPrescription.id}</p>
-                      </div>
-                      <div className="col-span-2">
-                        <p className="text-xs text-muted-foreground">Status</p>
-                        <Badge variant="outline" className="w-fit">{humanizeStatus(selectedPrescription.status)}</Badge>
-                      </div>
-                      {selectedPrescription.diagnosis && (
-                        <div className="col-span-2">
-                          <p className="text-xs text-muted-foreground">Diagnosis</p>
-                          <p className="font-medium">{selectedPrescription.diagnosis}</p>
-                        </div>
-                      )}
-                      {selectedPrescription.notes && (
-                        <div className="col-span-2">
-                          <p className="text-xs text-muted-foreground">Notes</p>
-                          <p className="font-medium">{selectedPrescription.notes}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <h3 className="font-semibold mb-3 flex items-center gap-2">
-                        <Pill className="h-4 w-4 text-violet-500" />
-                        Medications
-                      </h3>
-                      <div className="overflow-x-auto border rounded-lg">
-                        <table className="w-full text-sm">
-                          <thead><tr className="border-b bg-muted/50">
-                            <th className="text-left p-3 font-medium">Medication</th>
-                            <th className="text-left p-3 font-medium">Dose</th>
-                            <th className="text-left p-3 font-medium">Frequency</th>
-                            <th className="text-left p-3 font-medium">Duration</th>
-                            <th className="text-left p-3 font-medium">Instructions</th>
-                            <th className="text-center p-3 font-medium">Qty</th>
-                            <th className="text-center p-3 font-medium">Dispensed</th>
-                          </tr></thead>
-                          <tbody>
-                            {(selectedPrescription.medications || []).map((med: any, idx: number) => (
-                              <tr key={med.id || idx} className="border-b">
-                                <td className="p-3 font-medium">{(med.medication_name || med.medication?.name || med.name) ?? ''}</td>
-                                <td className="p-3">{med.dosage ?? ''}</td>
-                                <td className="p-3">{med.frequency ?? ''}</td>
-                                <td className="p-3">{med.duration ?? ''}</td>
-                                <td className="p-3">{med.instructions ?? ''}</td>
-                                <td className="p-3 text-center">{med.quantity ?? ''}{med.unit ? ` ${med.unit}` : ''}</td>
-                                <td className="p-3 text-center">
-                                  <Badge variant={med.is_dispensed ? 'default' : 'outline'} className={med.is_dispensed ? 'bg-emerald-600' : ''}>
-                                    {med.is_dispensed ? 'Yes' : 'No'}
-                                  </Badge>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Prescribed</p>
-                        <p className="font-medium">{prescribedAt ? `${formatDate(prescribedAt)} ${formatTime(prescribedAt)}` : ''}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Dispensed</p>
-                        <p className="font-medium">{dispensedAt ? `${formatDate(dispensedAt)} ${formatTime(dispensedAt)}` : ''}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2">
-                    <Button variant="outline" onClick={() => { setShowPrescriptionView(false); setSelectedPrescription(null); }}>Close</Button>
-                    <Button variant="outline" onClick={handlePrint}>
-                      <Printer className="h-4 w-4 mr-2" />Print
-                    </Button>
-                    <Button onClick={handleDownloadPdf}>
-                      <Download className="h-4 w-4 mr-2" />Download PDF
-                    </Button>
-                  </div>
-                </div>
-              );
-            })()}
-          </DialogContent>
-        </Dialog>
+              : null
+          }
+        />
 
         <VitalsDetailModal
           vitals={selectedVital}
@@ -960,242 +851,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         />
 
         {/* Imaging View Dialog */}
-        <Dialog open={!!selectedImaging} onOpenChange={(open) => { if (!open) setSelectedImaging(null); }}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Radiology Report</DialogTitle>
-              <DialogDescription>
-                {selectedImaging ? `${selectedImaging?.study_details?.procedure ?? selectedImaging?.procedure ?? ''} - ${selectedImaging?.patient_details?.name ?? selectedImaging?.patient_name ?? ''}` : ''}
-              </DialogDescription>
-            </DialogHeader>
-            {selectedImaging && (() => {
-              const studyDetails = selectedImaging.study_details || {};
-              const orderDetails = selectedImaging.order_details || {};
-              const patientDetails = selectedImaging.patient_details || orderDetails.patient_details || {};
-              const doctorDetails = orderDetails.doctor_details || {};
-
-              const mapOverallStatus = (s: any): 'Normal' | 'Abnormal' | 'Critical' => {
-                const v = String(s ?? '').toLowerCase();
-                if (v === 'critical') return 'Critical';
-                if (v === 'abnormal') return 'Abnormal';
-                if (v === 'normal') return 'Normal';
-                return 'Normal';
-              };
-
-              const overallStatus = selectedImaging.overall_status ? mapOverallStatus(selectedImaging.overall_status) : null;
-              const studyStatusLabel = humanizeStatus(studyDetails.status || (overallStatus ? '' : 'reported'));
-              const statusLabel = overallStatus ?? studyStatusLabel;
-
-              const orderedAt = studyDetails.created_at || selectedImaging.created_at || '';
-              const completedAt = studyDetails.reported_at || studyDetails.verified_at || '';
-              const verifiedAt = studyDetails.verified_at || '';
-
-              const turnaroundMs =
-                orderedAt && completedAt ? new Date(completedAt).getTime() - new Date(orderedAt).getTime() : 0;
-              const turnaroundHours = turnaroundMs > 0 ? Math.floor(turnaroundMs / 3600000) : 0;
-              const turnaroundMins = turnaroundMs > 0 ? Math.floor((turnaroundMs % 3600000) / 60000) : 0;
-              const turnaroundTime = turnaroundMs > 0 ? (turnaroundHours > 0 ? `${turnaroundHours}h ${turnaroundMins}m` : `${turnaroundMins}m`) : '';
-
-              const reportFileUrl = studyDetails.report_file_url ? (
-                String(studyDetails.report_file_url).startsWith('http') ? String(studyDetails.report_file_url) : `${window.location.origin}${studyDetails.report_file_url}`
-              ) : (studyDetails.report_file ? (
-                String(studyDetails.report_file).startsWith('http') ? String(studyDetails.report_file) : `${window.location.origin}${studyDetails.report_file}`
-              ) : null);
-
-              const handlePrint = () => {
-                try {
-                  const content = document.getElementById('radiology-report-print-root');
-                  if (!content) return;
-                  const w = window.open('', '_blank', 'noopener,noreferrer');
-                  if (!w) return;
-                  w.document.open();
-                  w.document.write(`
-                    <html>
-                      <head>
-                        <title>Radiology Report</title>
-                        <style>
-                          body { font-family: Arial, sans-serif; margin: 24px; }
-                          h2 { margin: 0 0 4px 0; }
-                          .section { margin-top: 16px; }
-                          .label { font-weight: bold; }
-                          .box { border: 1px solid #ddd; padding: 12px; border-radius: 6px; }
-                          @media print { body { margin: 0; } }
-                        </style>
-                      </head>
-                      <body>${content.innerHTML}</body>
-                    </html>
-                  `);
-                  w.document.close();
-                  w.focus();
-                  w.print();
-                } catch {
-                  toast.error('Unable to print radiology report');
-                }
-              };
-
-              const handleDownloadPdf = () => {
-                if (!reportFileUrl) {
-                  handlePrint();
-                  return;
-                }
-                const link = document.createElement('a');
-                link.href = reportFileUrl;
-                link.download = `radiology_report_${selectedImaging.id}.pdf`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-              };
-
-              return (
-                <div className="space-y-6 py-4">
-                  <div id="radiology-report-print-root">
-                    <div className="text-center p-4 border-b">
-                      <h2 className="text-xl font-bold">RADIOLOGY REPORT</h2>
-                      <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Patient Name</p>
-                        <p className="font-medium">{patientDetails?.name ?? selectedImaging.patient_name ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Age / Gender</p>
-                        <p className="font-medium">{patientDetails?.age != null ? `${patientDetails.age} years` : ''} / {patientDetails?.gender ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Ordering Doctor</p>
-                        <p className="font-medium">{doctorDetails?.name ?? orderDetails?.doctor_name ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Order ID</p>
-                        <p className="font-medium">{selectedImaging.order_id ?? orderDetails?.order_id ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Study</p>
-                        <p className="font-medium">{studyDetails.procedure ?? selectedImaging.procedure ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Modality</p>
-                        <p className="font-medium">{studyDetails.modality ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Clinic</p>
-                        <p className="font-medium">{orderDetails?.clinic ?? ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Status</p>
-                        <Badge variant="outline" className={getImagingBadgeClass(statusLabel)}>{statusLabel}</Badge>
-                      </div>
-                    </div>
-
-                    {reportFileUrl && (
-                      <div className="p-4">
-                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-blue-600" />
-                              <span className="text-sm font-medium text-blue-800 dark:text-blue-200">Report file available</span>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => { window.open(reportFileUrl, '_blank'); }}
-                                className="text-blue-600 hover:text-blue-800"
-                              >
-                                <Download className="h-3 w-3 mr-1" />
-                                View
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleDownloadPdf}
-                                className="text-blue-600 hover:text-blue-800"
-                              >
-                                <Download className="h-3 w-3 mr-1" />
-                                Download
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {(studyDetails.findings || studyDetails.impression || studyDetails.recommendations || studyDetails.report) && (
-                      <div className="space-y-4 p-4">
-                        {studyDetails.findings && (
-                          <div className="section">
-                            <div className="text-sm font-semibold mb-2">Findings</div>
-                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.findings}</div>
-                          </div>
-                        )}
-                        {studyDetails.impression && (
-                          <div className="section">
-                            <div className="text-sm font-semibold mb-2">Impression</div>
-                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.impression}</div>
-                          </div>
-                        )}
-                        {studyDetails.recommendations && (
-                          <div className="section">
-                            <div className="text-sm font-semibold mb-2">Recommendations</div>
-                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.recommendations}</div>
-                          </div>
-                        )}
-                        {!studyDetails.findings && !studyDetails.impression && studyDetails.report && (
-                          <div className="section">
-                            <div className="text-sm font-semibold mb-2">Report</div>
-                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.report}</div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-4 text-sm p-4">
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Ordered</p>
-                        <p className="font-medium">{orderedAt ? `${formatDate(orderedAt)} ${formatTime(orderedAt)}` : ''}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Completed</p>
-                        <p className="font-medium">{completedAt ? `${formatDate(completedAt)} ${formatTime(completedAt)}` : ''}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Verified</p>
-                        <p className="font-medium">{verifiedAt ? `${formatDate(verifiedAt)} ${formatTime(verifiedAt)}` : ''}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Turnaround Time</p>
-                        <p className="font-medium">{turnaroundTime}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 pt-4 border-t p-4">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Verified By</p>
-                        <p className="font-medium">{studyDetails.verified_by_name || ''}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Report Status</p>
-                        <p className="font-medium">{humanizeStatus(studyDetails.status || 'reported')}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2">
-                    <Button variant="outline" onClick={() => setSelectedImaging(null)}>Close</Button>
-                    <Button variant="outline" onClick={handlePrint}>
-                      <Printer className="h-4 w-4 mr-2" />Print
-                    </Button>
-                    <Button onClick={handleDownloadPdf}>
-                      <Download className="h-4 w-4 mr-2" />Download PDF
-                    </Button>
-                  </div>
-                </div>
-              );
-            })()}
-          </DialogContent>
-        </Dialog>
+        <RadiologyCompletedReportDialog
+          open={!!selectedImagingReport}
+          onOpenChange={(open) => { if (!open) setSelectedImagingReport(null); }}
+          report={selectedImagingReport}
+        />
 
         {/* Physio View Dialog - Full Session Report */}
         <Dialog open={!!selectedPhysio} onOpenChange={(open) => { 
@@ -1829,928 +1489,28 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           </DialogContent>
         </Dialog>
 
-        {/* Tabs */}
-        <Card>
-          <CardHeader className="pb-0">
-              <Tabs defaultValue="consultations" className="w-full">
-                <TabsList className="mb-1 flex h-auto w-full flex-wrap items-center justify-start gap-1 overflow-visible rounded-md bg-muted p-1 text-muted-foreground">
-                  <TabsTrigger value="visits" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <Calendar className="h-3 w-3" />
-                  Visits ({visitHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="consultations" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <ClipboardList className="h-3 w-3" />
-                  Consultations ({consultationHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="labs" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <TestTube className="h-3 w-3" />
-                  Lab Results ({labHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="imaging" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <ScanLine className="h-3 w-3" />
-                  Imaging ({imagingHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="prescriptions" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <Pill className="h-3 w-3" />
-                  Prescriptions ({prescriptionHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="vitals" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <Heart className="h-3 w-3" />
-                  Vitals ({vitalsHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="physio" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <Activity className="h-3 w-3" />
-                  Physio ({physioHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="wards" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <Building2 className="h-3 w-3" />
-                  Ward Admissions ({wardAdmissions.length})
-                </TabsTrigger>
-                  <TabsTrigger value="certificates" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <FileText className="h-3 w-3" />
-                  Certificates ({certificateHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="referrals" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <Share2 className="h-3 w-3" />
-                  Referrals ({referralHistory.length})
-                </TabsTrigger>
-                  <TabsTrigger value="background" className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
-                  <User className="h-3 w-3" />
-                  Background
-                </TabsTrigger>
-              </TabsList>
-
-              {/* Visits Tab */}
-              <TabsContent value="visits" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading visits...</p>
-                  </div>
-                ) : visitHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <Calendar className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No visits found</p>
-                    <p className="text-sm text-muted-foreground">OPD visit attendance will appear here</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Time</th>
-                          <th className="px-4 py-2 text-left font-medium">Visit ID</th>
-                          <th className="px-4 py-2 text-left font-medium">Type</th>
-                          <th className="px-4 py-2 text-left font-medium">Clinics</th>
-                          <th className="px-4 py-2 text-left font-medium">Status</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {visitHistory.map((visit) => {
-                          const clinics = getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics });
-                          return (
-                            <tr key={visit.id} className="hover:bg-muted/30">
-                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(visit.date)}</td>
-                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{visit.time || '—'}</td>
-                              <td className="px-4 py-3 font-mono text-xs">{visit.visit_id || visit.id}</td>
-                              <td className="px-4 py-3">{visit.visit_type || '—'}</td>
-                              <td className="px-4 py-3 max-w-[220px]">
-                                {clinics ? (
-                                  <span className="text-xs leading-snug">{clinics}</span>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <Badge variant="outline" className="font-normal">
-                                  {humanizeStatus(visit.status)}
-                                </Badge>
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <Button variant="ghost" size="sm" onClick={() => openVisitDetail(visit)}>
-                                  <Eye className="h-4 w-4 mr-1" /> View Report
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Consultations Tab */}
-              <TabsContent value="consultations" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading consultations...</p>
-                  </div>
-                ) : consultationHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <ClipboardList className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No consultations found</p>
-                    <p className="text-sm text-muted-foreground">Consultation history will appear here</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/50">
-                          <tr>
-                            <th className="px-4 py-2 text-left font-medium">Date</th>
-                            <th className="px-4 py-2 text-left font-medium">Doctor</th>
-                            <th className="px-4 py-2 text-left font-medium">Clinic</th>
-                            <th className="px-4 py-2 text-center font-medium">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {paginatedConsultations.map((session) => (
-                            <tr key={session.id} className="hover:bg-muted/30">
-                              <td className="px-4 py-3 text-muted-foreground">{formatDate(session.started_at)}</td>
-                              <td className="px-4 py-3">
-                                {(session.doctor_name ?? '').trim() || '—'}
-                              </td>
-                              <td className="px-4 py-3">
-                                <Badge variant="outline">{session.clinic_name ?? ''}</Badge>
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <Button variant="ghost" size="sm" onClick={() => viewSessionDetails(session)}>
-                                  <Eye className="h-4 w-4 mr-1" /> View Report
-                                </Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* Pagination */}
-                    {totalConsultationPages > 1 && (
-                      <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
-                        <div className="flex items-center gap-4">
-                          <p className="text-sm text-muted-foreground">
-                            Showing {consultationHistory.length === 0 ? 0 : `${(consultationsPage - 1) * consultationsPerPage + 1}-${Math.min(consultationHistory.length, consultationsPage * consultationsPerPage)}`} of {consultationHistory.length}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" disabled={consultationsPage === 1} onClick={() => setConsultationsPage(p => p - 1)}>
-                            <ChevronLeft className="h-4 w-4" />
-                            Previous
-                          </Button>
-                          <div className="flex items-center gap-1">
-                            {Array.from({ length: Math.min(5, totalConsultationPages) }, (_, i) => {
-                              let pageNum: number;
-                              if (totalConsultationPages <= 5) pageNum = i + 1;
-                              else if (consultationsPage <= 3) pageNum = i + 1;
-                              else if (consultationsPage >= totalConsultationPages - 2) pageNum = totalConsultationPages - 4 + i;
-                              else pageNum = consultationsPage - 2 + i;
-                              if (pageNum > totalConsultationPages || pageNum < 1) return null;
-                              return (
-                                <Button key={pageNum} variant={consultationsPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setConsultationsPage(pageNum)}>
-                                  {pageNum}
-                                </Button>
-                              );
-                            })}
-                          </div>
-                          <Button variant="outline" size="sm" disabled={consultationsPage >= totalConsultationPages} onClick={() => setConsultationsPage(p => p + 1)}>
-                            Next
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </TabsContent>
-
-              {/* Lab Results Tab */}
-              <TabsContent value="labs" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading lab results...</p>
-                  </div>
-                ) : labHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <TestTube className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No lab results found</p>
-                    <p className="text-sm text-muted-foreground">Lab results will appear here once available</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Test</th>
-                          <th className="px-4 py-2 text-left font-medium">Status</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {labHistory.map((lab: any) => (
-                          <tr key={lab.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(lab.processed_at || lab.verified_at)} {formatTime(lab.processed_at || lab.verified_at)}
-                            </td>
-                            <td className="px-4 py-3 font-medium">{(lab.test_name || lab.name) ?? ''}</td>
-                            <td className="px-4 py-3">
-                              <Badge className={lab.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}>
-                                {lab.status ?? ''}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedLabReport(transformApiRowToCompletedTest(lab, 'tests'));
-                                }}
-                              >
-                                <Eye className="h-4 w-4 mr-1" /> View
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Imaging Tab */}
-              <TabsContent value="imaging" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading imaging results...</p>
-                  </div>
-                ) : imagingHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <ScanLine className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No imaging results found</p>
-                    <p className="text-sm text-muted-foreground">Imaging results will appear here once available</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Procedure</th>
-                          <th className="px-4 py-2 text-left font-medium">Status</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {imagingHistory.map((img: any) => (
-                          <tr key={img.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(img.study_details?.verified_at || img.study_details?.reported_at || img.study_details?.created_at || img.created_at)} {formatTime(img.study_details?.verified_at || img.study_details?.reported_at || img.study_details?.created_at || img.created_at)}
-                            </td>
-                            <td className="px-4 py-3 font-medium">{(img.study_details?.procedure || img.procedure) ?? ''}</td>
-                            <td className="px-4 py-3">
-                              {(() => {
-                                const label = img.overall_status ? humanizeStatus(img.overall_status) : humanizeStatus(img.study_details?.status);
-                                return (
-                                  <Badge variant="outline" className={getImagingBadgeClass(label)}>
-                                    {label}
-                                  </Badge>
-                                );
-                              })()}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={() => { setSelectedImaging(img); }}>
-                                <Eye className="h-4 w-4 mr-1" /> View
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Prescriptions Tab */}
-              <TabsContent value="prescriptions" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading prescriptions...</p>
-                  </div>
-                ) : prescriptionHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <Pill className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No prescriptions found</p>
-                    <p className="text-sm text-muted-foreground">Prescriptions will appear here once available</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Prescription ID</th>
-                          <th className="px-4 py-2 text-left font-medium">Doctor</th>
-                          <th className="px-4 py-2 text-left font-medium">Medications</th>
-                          <th className="px-4 py-2 text-center font-medium">Status</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {prescriptionHistory.map((prescription: any) => (
-                          <tr key={prescription.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">{formatDate(prescription.prescribed_at || prescription.date)}</td>
-                            <td className="px-4 py-3">
-                              <Badge variant="outline">{prescription.prescription_id || prescription.id}</Badge>
-                            </td>
-                            <td className="px-4 py-3">{prescription.doctor_name ?? ''}</td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-wrap gap-1">
-                                {(prescription.medications || []).slice(0, 3).map((med: any, idx: number) => (
-                                  <Badge key={idx} variant="outline" className="text-xs">
-                                    {[med.medication_name || med.medication?.name || med.name, med.dosage].filter(Boolean).join(' ')}
-                                  </Badge>
-                                ))}
-                                {(prescription.medications || []).length > 3 && (
-                                  <Badge variant="outline" className="text-xs">
-                                    +{(prescription.medications || []).length - 3} more
-                                  </Badge>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Badge className={
-                                prescription.status === 'dispensed' ? 'bg-emerald-100 text-emerald-800' :
-                                prescription.status === 'partially_dispensed' ? 'bg-amber-100 text-amber-800' :
-                                'bg-gray-100 text-gray-800'
-                              }>
-                                {prescription.status ?? ''}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={() => { setSelectedPrescription(prescription); setShowPrescriptionView(true); }}>
-                                <Eye className="h-4 w-4 mr-1" /> View
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Vitals Tab */}
-              <TabsContent value="vitals" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading vitals...</p>
-                  </div>
-                ) : vitalsHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <Heart className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No vitals records found</p>
-                    <p className="text-sm text-muted-foreground">Vitals will appear here once recorded</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Summary</th>
-                          <th className="px-4 py-2 text-left font-medium">Recorded By</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {vitalsHistory.map((vital: any) => (
-                          <tr key={vital.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(vital.recorded_at)} {formatTime(vital.recorded_at)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-wrap gap-2 text-xs">
-                                {vital.temperature && (
-                                  <Badge variant="outline" className="text-xs">
-                                    T: {vital.temperature}°C
-                                  </Badge>
-                                )}
-                                {vital.blood_pressure_systolic && vital.blood_pressure_diastolic && (
-                                  <Badge variant="outline" className="text-xs">
-                                    BP: {vital.blood_pressure_systolic}/{vital.blood_pressure_diastolic}
-                                  </Badge>
-                                )}
-                                {vital.heart_rate && (
-                                  <Badge variant="outline" className="text-xs">
-                                    HR: {vital.heart_rate} bpm
-                                  </Badge>
-                                )}
-                                {vital.oxygen_saturation && (
-                                  <Badge variant="outline" className="text-xs">
-                                    SpO2: {vital.oxygen_saturation}%
-                                  </Badge>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground text-sm">{vital.recorded_by_name ?? ''}</td>
-                            <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={() => {
-                                setSelectedVital({
-                                  id: vital.id,
-                                  recordedAt: vital.recorded_at,
-                                  recordedBy: vital.recorded_by_name,
-                                  bloodPressureSystolic: vital.blood_pressure_systolic,
-                                  bloodPressureDiastolic: vital.blood_pressure_diastolic,
-                                  pulse: vital.heart_rate,
-                                  temperature: vital.temperature,
-                                  respiratoryRate: vital.respiratory_rate,
-                                  oxygenSaturation: vital.oxygen_saturation,
-                                  weight: vital.weight,
-                                  height: vital.height,
-                                  notes: vital.notes,
-                                });
-                                setIsVitalsDetailModalOpen(true);
-                              }}>
-                                <Eye className="h-4 w-4 mr-1" /> View
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Physio Tab */}
-              <TabsContent value="physio" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading physiotherapy records...</p>
-                  </div>
-                ) : physioHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <Activity className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No physiotherapy records found</p>
-                    <p className="text-sm text-muted-foreground">Physiotherapy records will appear here once available</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
-                          <th className="px-4 py-2 text-left font-medium">Status</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {physioHistory.map((order: any) => (
-                          <tr key={order.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(order.ordered_at)} {formatTime(order.ordered_at)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="font-medium">{order.diagnosis ?? ''}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <Badge className={
-                                order.status === 'completed' ? 'bg-emerald-100 text-emerald-800' :
-                                order.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                                'bg-gray-100 text-gray-800'
-                              }>
-                                {order.status ?? ''}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={async () => {
-                                setSelectedPhysio(order);
-                                setLoadingPhysioSessions(true);
-                                try {
-                                  const sessions = await physioService.getSessions({ order: order.id });
-                                  // Only show completed sessions - no fallback
-                                  const completedSessions = (sessions.results || []).filter((s: any) => s.status === 'completed');
-                                  setSelectedPhysioSessions(completedSessions);
-                                  if (completedSessions.length > 0) {
-                                    setSelectedPhysioSession(completedSessions[0]);
-                                  } else {
-                                    setSelectedPhysioSession(null);
-                                  }
-                                } catch (err) {
-                                  console.error('Error loading physio sessions:', err);
-                                  toast.error('Failed to load session details');
-                                  setSelectedPhysioSessions([]);
-                                  setSelectedPhysioSession(null);
-                                } finally {
-                                  setLoadingPhysioSessions(false);
-                                }
-                              }}>
-                                <Eye className="h-4 w-4 mr-1" /> View
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Ward Admissions Tab */}
-              <TabsContent value="wards" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading ward admissions...</p>
-                  </div>
-                ) : wardAdmissions.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <Building2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No ward admissions found</p>
-                    <p className="text-sm text-muted-foreground">Ward admission history will appear here</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Admission Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Ward</th>
-                          <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
-                          <th className="px-4 py-2 text-left font-medium">Days</th>
-                          <th className="px-4 py-2 text-left font-medium">Status</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {wardAdmissions.map((admission: any) => (
-                          <tr key={admission.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(admission.admission_date)} {formatTime(admission.admission_date)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="font-medium">{admission.ward_name ?? ''}</div>
-                              <div className="text-xs text-muted-foreground">{admission.admission_type ?? ''}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <p className="text-sm max-w-[200px] truncate" title={admission.admission_diagnosis ?? ''}>
-                                {admission.admission_diagnosis ?? ''}
-                              </p>
-                            </td>
-                            <td className="px-4 py-3">{admission.length_of_stay ?? 0} days</td>
-                            <td className="px-4 py-3">
-                              <Badge className={`${
-                                admission.status === 'admitted' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
-                                admission.status === 'discharged' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {admission.status ?? ''}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={() => { setSelectedWard(admission); }}>
-                                <Eye className="h-4 w-4 mr-1" /> View
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Certificates Tab */}
-              <TabsContent value="certificates" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading certificates...</p>
-                  </div>
-                ) : certificateHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <FileText className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No certificates found</p>
-                    <p className="text-sm text-muted-foreground">Create a Medical Certificate to see it listed here</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Issued</th>
-                          <th className="px-4 py-2 text-left font-medium">Certificate No</th>
-                          <th className="px-4 py-2 text-left font-medium">Purpose</th>
-                          <th className="px-4 py-2 text-left font-medium">Validity</th>
-                          <th className="px-4 py-2 text-left font-medium">Sick leave (days)</th>
-                          <th className="px-4 py-2 text-center font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {certificateHistory.map((cert: any) => (
-                          <tr key={cert.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(cert.issued_at)}
-                            </td>
-                            <td className="px-4 py-3 font-medium">{cert.certificate_number}</td>
-                            <td className="px-4 py-3">
-                              <Badge variant="outline" className="border-teal-500/50 text-teal-600 dark:text-teal-400">
-                                {purposeLabelMap[cert.purpose] ?? cert.purpose}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(cert.valid_from)} - {formatDate(cert.valid_to)}
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {cert.purpose === "illness" && cert.sick_leave_days != null
-                                ? cert.sick_leave_days
-                                : "—"}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={() => handlePrintMedicalCertificate(cert)}>
-                                <Printer className="h-4 w-4 mr-1" /> Print
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Referrals Tab */}
-              <TabsContent value="referrals" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading referrals...</p>
-                  </div>
-                ) : referralHistory.length === 0 ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <Share2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No referrals found</p>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Referrals created for this patient will appear here
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleCreateTestReferral()}
-                      disabled={isCreatingTestReferral}
-                    >
-                      <Share2 className="h-4 w-4 mr-2" />
-                      {isCreatingTestReferral ? "Adding..." : "Add test referral"}
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-2 text-left font-medium">Date</th>
-                          <th className="px-4 py-2 text-left font-medium">Referral ID</th>
-                          <th className="px-4 py-2 text-left font-medium">Facility</th>
-                          <th className="px-4 py-2 text-left font-medium">Specialty</th>
-                          <th className="px-4 py-2 text-left font-medium">Urgency</th>
-                          <th className="px-4 py-2 text-left font-medium">Status</th>
-                          <th className="px-4 py-2 text-left font-medium">Referred by</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {referralHistory.map((ref) => (
-                          <tr key={ref.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                              {formatDate(ref.referred_at)}
-                            </td>
-                            <td className="px-4 py-3 font-mono text-xs">{ref.referral_id}</td>
-                            <td className="px-4 py-3 max-w-[200px]">
-                              <span className="text-xs leading-snug">
-                                {ref.facility_partner_detail?.name?.trim() || ref.facility?.trim() || '—'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">{ref.specialty || '—'}</td>
-                            <td className="px-4 py-3">
-                              <Badge variant="outline" className="font-normal capitalize">
-                                {ref.urgency || '—'}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3">
-                              <Badge variant="outline" className="font-normal">
-                                {humanizeStatus(ref.status)}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {(ref.referred_by_name ?? '').trim() || '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Background Tab */}
-              <TabsContent value="background" className="mt-4">
-                {loadingHistory ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading medical history...</p>
-                  </div>
-                ) : !medicalHistory ? (
-                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                    <User className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="font-medium text-muted-foreground mb-1">No medical history recorded</p>
-                    <p className="text-sm text-muted-foreground">Medical history will appear here once recorded</p>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {/* Allergies */}
-                    <Card className={medicalHistory.allergies && medicalHistory.allergies.length > 0 ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : 'border-muted'}>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <AlertTriangle className={`h-4 w-4 ${medicalHistory.allergies && medicalHistory.allergies.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
-                          Allergies
-                          {medicalHistory.allergies && medicalHistory.allergies.length > 0 && (
-                            <Badge variant="outline" className="ml-auto bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                              {medicalHistory.allergies.length}
-                            </Badge>
-                          )}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {medicalHistory.allergies && medicalHistory.allergies.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {medicalHistory.allergies.map((allergy: string, index: number) => (
-                              <Badge key={index} className="bg-red-600 text-white hover:bg-red-700">
-                                <AlertTriangle className="h-3 w-3 mr-1" />
-                                {allergy}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-4 text-sm text-muted-foreground">
-                            <AlertTriangle className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                            <p>No known allergies</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {/* Chronic Conditions */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <Stethoscope className="h-4 w-4 text-amber-500" />
-                          Chronic Conditions
-                          {medicalHistory.diagnoses && medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 && (
-                            <Badge variant="outline" className="ml-auto bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
-                              {medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length}
-                            </Badge>
-                          )}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {medicalHistory.diagnoses && medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').map((diagnosis: { name: string; code?: string; diagnosedDate?: string }, index: number) => (
-                              <div key={index} className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs">
-                                    {diagnosis.code ?? ''}
-                                  </Badge>
-                                  <span className="font-medium text-sm">{diagnosis.name}</span>
-                                </div>
-                                {diagnosis.diagnosedDate && (
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    Diagnosed: {diagnosis.diagnosedDate}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-4 text-sm text-muted-foreground">
-                            <Stethoscope className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                            <p>No active chronic conditions</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {/* Surgical History */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <Activity className="h-4 w-4 text-rose-500" />
-                          Surgical History
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {medicalHistory.surgical_history && medicalHistory.surgical_history.length > 0 ? (
-                          <div className="space-y-3">
-                            {medicalHistory.surgical_history.map((surgery: { procedure: string; date: string; hospital?: string }, index: number) => (
-                              <div key={index} className="p-3 bg-rose-50 dark:bg-rose-900/20 rounded-lg border border-rose-200 dark:border-rose-800">
-                                <div className="flex items-start justify-between mb-1">
-                                  <span className="font-medium text-sm">{surgery.procedure}</span>
-                                  <Badge variant="outline" className="text-xs">{surgery.date}</Badge>
-                                </div>
-                                {surgery.hospital && (
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    {surgery.hospital}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-8 text-sm text-muted-foreground">
-                            <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p>No surgical history recorded</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {/* Family History */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <User className="h-4 w-4 text-blue-500" />
-                          Family History
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {medicalHistory.family_history && medicalHistory.family_history.length > 0 ? (
-                          <div className="space-y-3">
-                            {medicalHistory.family_history.map((fh: { relation: string; condition: string }, index: number) => (
-                              <div key={index} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <div className="font-medium text-sm mb-1">{fh.relation}</div>
-                                    <div className="text-xs text-muted-foreground">{fh.condition}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-8 text-sm text-muted-foreground">
-                            <User className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p>No family history recorded</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {/* Social History */}
-                    <Card className="md:col-span-2">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <User className="h-4 w-4 text-emerald-500" />
-                          Social History
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800 text-center">
-                            <div className="text-xs text-muted-foreground mb-2">Smoking</div>
-                            <div className="font-semibold text-emerald-700 dark:text-emerald-300">{medicalHistory.social_history?.smoking ?? ''}</div>
-                          </div>
-                          <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-center">
-                            <div className="text-xs text-muted-foreground mb-2">Alcohol</div>
-                            <div className="font-semibold text-blue-700 dark:text-blue-300">{medicalHistory.social_history?.alcohol ?? ''}</div>
-                          </div>
-                          <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800 text-center">
-                            <div className="text-xs text-muted-foreground mb-2">Exercise</div>
-                            <div className="font-semibold text-purple-700 dark:text-purple-300">{medicalHistory.social_history?.exercise ?? ''}</div>
-                          </div>
-                          {medicalHistory.social_history?.occupation && (
-                            <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800 text-center">
-                              <div className="text-xs text-muted-foreground mb-2">Occupation</div>
-                              <div className="font-semibold text-amber-700 dark:text-amber-300">{medicalHistory.social_history.occupation}</div>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
-          </CardHeader>
-        </Card>
+        <PatientHistoryTabs
+          patientId={patient.id}
+          showVisits
+          showCertificates
+          showReferrals
+          showBackground
+          onViewConsultation={viewSessionDetails}
+          onViewVisit={openVisitDetail}
+          onViewPrescription={(p) => { setSelectedPrescription(p); setShowPrescriptionView(true); }}
+          onViewVital={(v) => { setSelectedVital(v); setIsVitalsDetailModalOpen(true); }}
+          onViewLab={(l) => setSelectedLabReport(transformApiRowToCompletedTest(l, 'tests'))}
+          onViewImaging={(i) => setSelectedImagingReport(transformApiRadiologyReportToCompleted(i))}
+          onViewPhysio={openPhysioDetail}
+          onViewWard={(a) => { setSelectedWard(a); }}
+          onViewEyeOrder={(o) => { setSelectedEyeOrderId(o.id); setShowEyeOrderModal(true); }}
+        />
       </div>
+      <ViewEyeOrderModal
+        open={showEyeOrderModal}
+        onOpenChange={setShowEyeOrderModal}
+        orderId={selectedEyeOrderId}
+      />
     </DashboardLayout>
   );
 }

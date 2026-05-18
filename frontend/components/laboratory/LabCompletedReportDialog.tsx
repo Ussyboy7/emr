@@ -15,7 +15,6 @@ import { Download, Eye, FileText, FlaskConical, Printer } from 'lucide-react';
 import {
   displayNameFromLabResultFileUrl,
   downloadOfficialLabReportPdf,
-  downloadPartnerResultFile,
   printOfficialLabReportPdf,
   type CompletedTest,
 } from '@/lib/laboratory/completedLabReport';
@@ -64,7 +63,7 @@ export function LabCompletedReportDialog({
   const hasUsableResultFile = Boolean(test?.result_file && test?.result_file_exists !== false);
   const canUseOfficialPdf = Boolean(test?.labResultId);
 
-  const hasRowAttachments = test?.results.some((r) => Boolean(r.attachment?.url)) ?? false;
+  const hasRowAttachments = Array.isArray(test?.results) && test.results.some((r) => Boolean(r.attachment?.url));
 
   const handlePrint = async () => {
     if (!test) return;
@@ -72,12 +71,11 @@ export function LabCompletedReportDialog({
       toast.error('Cannot print: missing result id. Refresh the list and try again.');
       return;
     }
-    toast.info(`Printing result for ${test.patient.name}...`);
     try {
       await printOfficialLabReportPdf(test.labResultId);
     } catch (error) {
       console.error('Print error:', error);
-      toast.error((error as Error)?.message || 'Failed to print lab report');
+      toast.error((error as Error)?.message || 'Failed to open print PDF');
     }
   };
 
@@ -90,20 +88,14 @@ export function LabCompletedReportDialog({
     try {
       await downloadOfficialLabReportPdf({
         labResultId: test.labResultId,
-        patientId: test.patient.id,
+        patientId: test.patient?.id,
         testCode: test.testCode,
-        patientName: test.patient.name,
+        patientName: test.patient?.name,
       });
     } catch (error) {
       console.error('Error downloading PDF report:', error);
       toast.error('Failed to download PDF report');
     }
-  };
-
-  const handleDownloadPartnerFile = () => {
-    if (!test?.result_file) return;
-    downloadPartnerResultFile(test.result_file, getPdfDisplayName(test) || undefined);
-    toast.success(`Downloaded attachment for ${test.patient.name}`);
   };
 
   return (
@@ -115,7 +107,7 @@ export function LabCompletedReportDialog({
             Lab Report
           </DialogTitle>
           <DialogDescription>
-            {test?.testName} - {test?.patient.name}
+            {test?.testName} - {test?.patient?.name || 'Unknown'}
           </DialogDescription>
         </DialogHeader>
         {test && (
@@ -128,20 +120,20 @@ export function LabCompletedReportDialog({
             <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
               <div>
                 <p className="text-xs text-muted-foreground">Patient Name</p>
-                <p className="font-medium">{test.patient.name}</p>
+                <p className="font-medium">{test.patient?.name}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Age / Gender</p>
                 <p className="font-medium">
-                  {test.patient.age !== null && test.patient.age !== undefined
+                  {test.patient?.age != null
                     ? `${test.patient.age} years`
                     : ''}{' '}
-                  / {test.patient.gender}
+                  / {test.patient?.gender}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Ordering Doctor</p>
-                <p className="font-medium">{test.doctor.name}</p>
+                <p className="font-medium">{test.doctor?.name}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Clinic</p>
@@ -153,7 +145,7 @@ export function LabCompletedReportDialog({
               <h3 className="font-semibold mb-3 flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-amber-500" />
                 Test Results
-                {(test.results.length > 0 || hasUsableResultFile) && (
+                {((test.results?.length ?? 0) > 0 || hasUsableResultFile) && (
                   <Badge variant="outline" className={getOverallStatusBadge(test.overallStatus)}>
                     {test.overallStatus}
                   </Badge>
@@ -192,17 +184,14 @@ export function LabCompletedReportDialog({
                           <Eye className="h-3.5 w-3.5 mr-1" />
                           View
                         </Button>
-                        <Button size="sm" variant="outline" onClick={handleDownloadPartnerFile}>
-                          <Download className="h-3.5 w-3.5 mr-1" />
-                          Attachment
-                        </Button>
+
                       </div>
                     </div>
                   </div>
                 ) : null;
               })()}
 
-              {test.results.length > 0 ? (
+              {test.results?.length > 0 ? (
                 <div className="border rounded-lg overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
@@ -216,7 +205,7 @@ export function LabCompletedReportDialog({
                       </tr>
                     </thead>
                     <tbody>
-                      {test.results.map((result, index) => (
+                      {test.results?.map((result, index) => (
                         <tr key={index} className="border-t">
                           <td className="p-3 font-medium">{result.parameter}</td>
                           <td className={`p-3 font-mono ${getResultStatusColor(result.status)}`}>
@@ -279,6 +268,33 @@ export function LabCompletedReportDialog({
                 )
               )}
             </div>
+
+            {test.reportAttachments && test.reportAttachments.length > 0 && (
+              <div>
+                <h3 className="font-semibold mb-3 flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-blue-500" />
+                  Attachments
+                </h3>
+                <div className="space-y-1">
+                  {test.reportAttachments.map((att, i) => (
+                    <div key={i} className="p-2 rounded bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200/50 dark:border-blue-800/50 flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-blue-400 shrink-0" />
+                        <span className="text-xs text-blue-700 dark:text-blue-300 truncate">{att.name}</span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-blue-600 shrink-0"
+                        onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
+                      >
+                        <Eye className="h-3 w-3 mr-1" />View
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4 pt-4 border-t">
               <div>

@@ -777,6 +777,13 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             'completed_today': today_stats['completed'],
         })
 
+    @action(detail=True, methods=['get'], url_path='report')
+    def download_report(self, request, pk=None):
+        """Download consultation report as PDF."""
+        session = self.get_object()
+        from .report_pdf import build_consultation_report_pdf
+        return build_consultation_report_pdf(session)
+
 
 class ConsultationQueueViewSet(viewsets.ModelViewSet):
     """ViewSet for managing consultation queue."""

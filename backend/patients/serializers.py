@@ -12,7 +12,27 @@ class PatientSerializer(serializers.ModelSerializer):
     age = serializers.ReadOnlyField()
     age_display = serializers.ReadOnlyField()
     photo = serializers.SerializerMethodField()
-    
+    created_by_name = serializers.SerializerMethodField()
+    updated_by_name = serializers.SerializerMethodField()
+
+    def get_created_by_name(self, obj):
+        user = getattr(obj, 'created_by', None)
+        if not user:
+            return None
+        try:
+            return user.get_full_name() or getattr(user, 'username', None) or str(user)
+        except (AttributeError, TypeError):
+            return str(user) if user else None
+
+    def get_updated_by_name(self, obj):
+        user = getattr(obj, 'updated_by', None)
+        if not user:
+            return None
+        try:
+            return user.get_full_name() or getattr(user, 'username', None) or str(user)
+        except (AttributeError, TypeError):
+            return str(user) if user else None
+
     class Meta:
         model = Patient
         fields = [
@@ -24,7 +44,7 @@ class PatientSerializer(serializers.ModelSerializer):
             'state_of_origin', 'lga', 'permanent_address',
             'blood_group', 'genotype', 'allergies',
             'nok_surname', 'nok_first_name', 'nok_middle_name', 'nok_relationship', 'nok_address', 'nok_phone',
-            'created_at', 'updated_at', 'is_active',
+            'created_at', 'updated_at', 'created_by_name', 'updated_by_name', 'is_active',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'updated_at', 'age']
     

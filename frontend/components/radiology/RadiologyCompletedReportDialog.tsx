@@ -155,6 +155,26 @@ export function RadiologyCompletedReportDialog({
                   </div>
                 </div>
               )}
+              {report.reportAttachments && report.reportAttachments.length > 0 && (
+                <div className="space-y-1 mt-2">
+                  {report.reportAttachments.map((att, i) => (
+                    <div key={i} className="p-2 rounded bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200/50 dark:border-blue-800/50 flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-blue-400 shrink-0" />
+                        <span className="text-xs text-blue-700 dark:text-blue-300 truncate">{att.name}</span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-blue-600 shrink-0"
+                        onClick={() => openRadiologyReportUrl(att.url)}
+                      >
+                        <Eye className="h-3 w-3 mr-1" />View
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {report.report && (

@@ -473,18 +473,24 @@ class LabService {
     orderId: number,
     testId: number,
     results: Record<string, string> | { custom_results: CustomLabResultRow[] },
-    resultFile?: File,
+    resultFiles?: File[],
     notes?: string,
     customAttachments?: Record<string, File | null>
   ): Promise<LabTest> {
     const hasCustomAttachments = customAttachments && Object.values(customAttachments).some(Boolean);
     const hasCustomRows = Array.isArray((results as any)?.custom_results);
-    if (resultFile || hasCustomAttachments || hasCustomRows) {
+    const hasFiles = resultFiles && resultFiles.length > 0;
+    if (hasFiles || hasCustomAttachments || hasCustomRows) {
       // Upload file using FormData
       const formData = new FormData();
       formData.append('test_id', testId.toString());
       formData.append('results', JSON.stringify(results || {}));
-      if (resultFile) formData.append('result_file', resultFile);
+      if (hasFiles) {
+        resultFiles.forEach((file, idx) => {
+          formData.append(`report_file_${idx}`, file);
+        });
+        formData.append('report_file_count', String(resultFiles.length));
+      }
       if (customAttachments) {
         Object.entries(customAttachments).forEach(([rowId, file]) => {
           if (file) formData.append(`custom_attachment_${rowId}`, file);

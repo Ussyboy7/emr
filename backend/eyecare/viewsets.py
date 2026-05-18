@@ -48,7 +48,7 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["priority", "patient", "visit"]
+    filterset_fields = ["priority", "patient", "visit", "consultation_session"]
     search_fields = [
         "patient__first_name",
         "patient__surname",
@@ -72,35 +72,37 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
         )
 
         params = self.request.query_params
-        status_tab = (params.get("status_tab") or "").strip().lower()
-        if status_tab == "pending":
-            qs = qs.filter(status__in=["pending", "scheduled"])
-        elif status_tab == "in_progress":
-            qs = qs.filter(status="in_progress")
-        elif status_tab == "cancelled":
-            qs = qs.filter(status="cancelled")
-        elif status_tab == "completed":
-            qs = qs.filter(status="completed")
-        elif params.get("status"):
-            qs = qs.filter(status=params.get("status"))
 
-        after = (params.get("ordered_at_after") or "").strip()
-        before = (params.get("ordered_at_before") or "").strip()
-        if after or before:
-            if after:
-                qs = qs.filter(ordered_at__date__gte=after)
-            if before:
-                qs = qs.filter(ordered_at__date__lte=before)
-        else:
-            date_filter = (params.get("date_filter") or "today").strip().lower()
-            today = timezone.now().date()
-            if date_filter == "today":
-                qs = qs.filter(ordered_at__date=today)
-            elif date_filter == "week":
-                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=7))
-            elif date_filter == "month":
-                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=31))
-            # "all" — no extra date constraint
+        if self.action == "list":
+            status_tab = (params.get("status_tab") or "").strip().lower()
+            if status_tab == "pending":
+                qs = qs.filter(status__in=["pending", "scheduled"])
+            elif status_tab == "in_progress":
+                qs = qs.filter(status="in_progress")
+            elif status_tab == "cancelled":
+                qs = qs.filter(status="cancelled")
+            elif status_tab == "completed":
+                qs = qs.filter(status="completed")
+            elif params.get("status"):
+                qs = qs.filter(status=params.get("status"))
+
+            after = (params.get("ordered_at_after") or "").strip()
+            before = (params.get("ordered_at_before") or "").strip()
+            if after or before:
+                if after:
+                    qs = qs.filter(ordered_at__date__gte=after)
+                if before:
+                    qs = qs.filter(ordered_at__date__lte=before)
+            else:
+                date_filter = (params.get("date_filter") or "today").strip().lower()
+                today = timezone.now().date()
+                if date_filter == "today":
+                    qs = qs.filter(ordered_at__date=today)
+                elif date_filter == "week":
+                    qs = qs.filter(ordered_at__date__gte=today - timedelta(days=7))
+                elif date_filter == "month":
+                    qs = qs.filter(ordered_at__date__gte=today - timedelta(days=31))
+                # "all" — no extra date constraint
 
         return qs
 

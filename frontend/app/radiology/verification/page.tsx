@@ -49,6 +49,7 @@ interface ImagingStudy {
   customReports?: Array<{ id: string; procedure: string; report: string; recommendations?: string; critical?: boolean; attachment?: { name: string; url: string } | null }>;
   critical?: boolean;
   reportFile?: { name: string; type: string; uploadedAt: string };
+  reportAttachments?: Array<{ name: string; url: string }>;
   reportedBy?: string;
   reportedAt?: string;
   verifiedBy?: string;
@@ -89,11 +90,14 @@ const transformReport = (apiReport: any): RadiologyReport => {
     ? `${reportText}\n\nImpression:\n${legacyImpression}`.trim()
     : reportText;
   const attachments = Array.isArray(studyObj.report_attachments) ? studyObj.report_attachments : [];
+  const matchedAttachmentFiles = new Set<string>();
   const customReports = Array.isArray(studyObj.custom_reports)
     ? studyObj.custom_reports.map((row: any) => {
-        const attachment = attachments.find((file: any) =>
-          file.row_id === row.id || file.row_name?.trim().toLowerCase() === String(row.procedure || row.name || '').trim().toLowerCase()
-        );
+        const attachment = attachments.find((file: any) => {
+          const matched = file.row_id === row.id || file.row_name?.trim().toLowerCase() === String(row.procedure || row.name || '').trim().toLowerCase();
+          if (matched && file.file) matchedAttachmentFiles.add(String(file.file));
+          return matched;
+        });
         const attachmentUrl = getRadiologyReportFileUrl(attachment?.file);
         return {
           id: String(row.id || ''),
@@ -110,6 +114,13 @@ const transformReport = (apiReport: any): RadiologyReport => {
         };
       })
     : [];
+  const reportAttachments = attachments
+    .filter((att: any) => !att.file || !matchedAttachmentFiles.has(String(att.file)))
+    .map((att: any) => ({
+      name: att.row_name || att.file?.split('/').filter(Boolean).pop() || 'Additional file',
+      url: getRadiologyReportFileUrl(String(att.file)),
+    }))
+    .filter((att: { name: string; url: string }) => att.url);
   
   // Extract patient details
   const patientId = (apiReport as any).patient_details?.patient_id || '';
@@ -159,9 +170,10 @@ const transformReport = (apiReport: any): RadiologyReport => {
       report: mergedReportText || undefined,
       customReports,
       critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
+      reportAttachments: reportAttachments.length > 0 ? reportAttachments : undefined,
       reportFile: studyObj.report_file_url ? {
         name: String(studyObj.report_file ? studyObj.report_file.split('/').pop() : 'Report File'),
-        type: 'application/pdf', // Assume PDF for now
+        type: 'application/pdf',
         uploadedAt: String(studyObj.reported_at || new Date().toISOString()),
         url: String(studyObj.report_file_url)
       } as any : undefined,
@@ -992,6 +1004,34 @@ export default function RadiologyVerificationPage() {
                     >
                       <Eye className="h-4 w-4 mr-1" />View
                     </Button>
+                  </div>
+                )}
+                {selectedReport.study.reportAttachments && selectedReport.study.reportAttachments.length > 0 && (
+                  <div className="space-y-1">
+                    {selectedReport.study.reportAttachments.map((att, i) => (
+                      <div key={i} className="p-2 rounded bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-200/50 dark:border-indigo-800/50 flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-4 w-4 text-indigo-400 shrink-0" />
+                          <span className="text-xs text-indigo-700 dark:text-indigo-300 truncate">{att.name}</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs text-indigo-600 shrink-0"
+                          onClick={() => {
+                            const link = document.createElement('a');
+                            link.href = att.url;
+                            link.target = '_blank';
+                            link.rel = 'noopener noreferrer';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          }}
+                        >
+                          <Eye className="h-3 w-3 mr-1" />View
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 )}
                 <div className="text-sm text-muted-foreground">

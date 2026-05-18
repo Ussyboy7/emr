@@ -59,19 +59,7 @@ export async function printOfficialLabReportPdf(labResultId: string): Promise<vo
     responseType: 'blob',
   });
   const printUrl = URL.createObjectURL(blob);
-  const printWindow = window.open(printUrl, '_blank');
-  if (!printWindow) {
-    URL.revokeObjectURL(printUrl);
-    throw new Error('Failed to open print window. Please allow popups.');
-  }
-  setTimeout(() => {
-    try {
-      printWindow.focus();
-      printWindow.print();
-    } finally {
-      URL.revokeObjectURL(printUrl);
-    }
-  }, 700);
+  window.open(printUrl, '_blank');
 }
 
 export function downloadPartnerResultFile(url: string, filename?: string) {
@@ -109,6 +97,7 @@ export interface CompletedTest {
   testName: string;
   testCode: string;
   results: CompletedTestResultRow[];
+  reportAttachments?: Array<{ name: string; url: string }>;
   result_file?: string | null;
   result_file_exists?: boolean;
   overallStatus: 'Normal' | 'Abnormal' | 'Critical';
@@ -181,11 +170,27 @@ export function transformApiRowToCompletedTest(
 
   const toAbs = (raw: string) => resolveLabResultFileUrl(raw) || String(raw);
 
+  const attachments = (test as any).result_attachments;
+  const attachmentList = Array.isArray(attachments) ? attachments : [];
+
   const processedResults = buildOrderedLabResultViewRows(resultPayload, normalRangeObj, {
-    resultAttachments: (test as any).result_attachments,
+    resultAttachments: attachmentList,
     resolveFileUrl: toAbs,
     attachmentDisplayName: displayNameFromLabResultFileUrl,
   });
+
+  const usedUrls = new Set<string>();
+  processedResults.forEach((r) => { if (r.attachment?.url) usedUrls.add(r.attachment.url); });
+  const reportAttachments = attachmentList
+    .filter((att: any) => {
+      if (!att.file) return false;
+      const url = toAbs(String(att.file));
+      return !usedUrls.has(url);
+    })
+    .map((att: any) => ({
+      name: att.row_name || att.file?.split('/').filter(Boolean).pop() || 'Additional file',
+      url: toAbs(String(att.file)),
+    }));
 
   let overallStatus: ResultStatus;
   if (test.overall_status) {
@@ -233,6 +238,7 @@ export function transformApiRowToCompletedTest(
     testName: (test as any).name,
     testCode: (test as any).code,
     results: processedResults,
+    reportAttachments: reportAttachments.length > 0 ? reportAttachments : undefined,
     overallStatus,
     priority,
     orderedAt,

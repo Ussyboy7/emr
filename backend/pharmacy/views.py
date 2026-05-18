@@ -1541,6 +1541,13 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(prescription)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'], url_path='download')
+    def download_prescription(self, request, pk=None):
+        """Download prescription as PDF."""
+        prescription = self.get_object()
+        from .prescription_pdf import build_prescription_pdf
+        return build_prescription_pdf(prescription)
+
 
 class DispenseViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing dispense history."""

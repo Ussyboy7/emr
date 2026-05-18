@@ -75,6 +75,7 @@ interface LabResult {
   testName: string;
   testCode: string;
   results: TestResult[];
+  reportAttachments?: Array<{ name: string; url: string }>;
   resultFile?: string; // PDF file URL
   resultFileExists?: boolean;
   overallStatus: 'Normal' | 'Abnormal' | 'Critical';
@@ -145,14 +146,30 @@ const transformResult = (
     resultsObj = (apiResult as any).results;
   }
 
+  const attachments = (testDetails as any)?.result_attachments || (test as any)?.result_attachments;
+  const attachmentList = Array.isArray(attachments) ? attachments : [];
+
   if (resultsObj && Object.keys(resultsObj).length > 0) {
     const built = buildOrderedLabResultViewRows(resultsObj, normalRangeObj, {
-      resultAttachments: (testDetails as any)?.result_attachments || (test as any)?.result_attachments,
+      resultAttachments: attachmentList,
       resolveFileUrl: toAbsoluteResultFileUrl,
       attachmentDisplayName: displayNameFromResultFileUrl,
     });
     results.push(...built);
   }
+
+  const usedUrls = new Set<string>();
+  results.forEach((r) => { if (r.attachment?.url) usedUrls.add(r.attachment.url); });
+  const reportAttachments = attachmentList
+    .filter((att: any) => {
+      if (!att.file) return false;
+      const url = toAbsoluteResultFileUrl(String(att.file));
+      return !usedUrls.has(url);
+    })
+    .map((att: any) => ({
+      name: att.row_name || att.file?.split('/').filter(Boolean).pop() || 'Additional file',
+      url: toAbsoluteResultFileUrl(String(att.file)),
+    }));
 
   // Determine overall status from individual results or use API value
   let overallStatus: ResultStatus = 'Normal';
@@ -205,6 +222,7 @@ const transformResult = (
     testName: testName,
     testCode: testCode,
     results,
+    reportAttachments: reportAttachments.length > 0 ? reportAttachments : undefined,
     resultFile: resultFileUrl,
     resultFileExists,
     overallStatus,
@@ -1106,6 +1124,29 @@ export default function ResultsVerificationPage() {
                     <p className="text-sm text-muted-foreground mb-1">Clinical Notes</p>
                     <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
                       <p className="text-sm">{selectedResult.clinicalNotes}</p>
+                    </div>
+                  </div>
+                )}
+                {selectedResult.reportAttachments && selectedResult.reportAttachments.length > 0 && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-2 font-medium">Attachments</p>
+                    <div className="space-y-1">
+                      {selectedResult.reportAttachments.map((att, i) => (
+                        <div key={i} className="p-2 rounded bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-200/50 dark:border-indigo-800/50 flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="h-4 w-4 text-indigo-400 shrink-0" />
+                            <span className="text-xs text-indigo-700 dark:text-indigo-300 truncate">{att.name}</span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-xs text-indigo-600 shrink-0"
+                            onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />View
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

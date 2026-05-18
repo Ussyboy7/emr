@@ -26,6 +26,7 @@ export interface CompletedRadiologyReport {
   turnaroundTime: string;
   report?: string;
   reportFile?: { name: string; url: string };
+  reportAttachments?: Array<{ name: string; url: string }>;
   customReports?: Array<{
     id: string;
     procedure: string;
@@ -162,6 +163,17 @@ export function transformApiRadiologyReportToCompleted(apiReport: Record<string,
     turnaroundTime: calculateRadiologyTurnaroundTime((sd as any).created_at, (sd as any).verified_at),
     report: mergedReportText || undefined,
     customReports,
+    reportAttachments: attachments
+      .filter((att: any) => {
+        if (!att.row_id) return true;
+        return !customReports.some((row: any) =>
+          row.id === att.row_id || row.procedure?.trim().toLowerCase() === att.row_name?.trim().toLowerCase()
+        );
+      })
+      .map((att: any) => ({
+        name: att.row_name || att.file?.split('/').filter(Boolean).pop() || 'Additional file',
+        url: toAbsoluteMediaUrl(String(att.file)),
+      })),
     reportFile: fileUrl
       ? {
           name: fileName,

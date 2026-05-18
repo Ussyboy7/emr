@@ -213,6 +213,21 @@ class Command(BaseCommand):
             {'code': 'CT-PELVIMETRY', 'name': 'CT PELVIMETRY', 'category': 'ct-scan', 'modality': 'CT Scan', 'body_part': 'Pelvis', 'radiation_exposure': 'high'},
         ]
 
+        # MAMMOGRAPHY
+        mammography_data = [
+            {'code': 'MG-SCREENING', 'name': 'SCREENING MAMMOGRAM', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-DIAGNOSTIC', 'name': 'DIAGNOSTIC MAMMOGRAM', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-TOMO', 'name': 'DIGITAL BREAST TOMOSYNTHESIS (3D MAMMOGRAM)', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-DUCTOGRAM', 'name': 'DUCTOGRAM (GALACTOGRAM)', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-BREAST-BIOPSY-STEREO', 'name': 'STEREOTACTIC BREAST BIOPSY', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-BREAST-BIOPSY-CORE', 'name': 'CORE NEEDLE BREAST BIOPSY', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-BREAST-BIOPSY-FNA', 'name': 'FINE NEEDLE ASPIRATION (BREAST)', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'none'},
+            {'code': 'MG-WIRE-LOCALIZATION', 'name': 'PRE-OP WIRE LOCALIZATION (BREAST)', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-BREAST-MARKER-CLIP', 'name': 'BREAST MARKER/CLIP PLACEMENT', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-BREAST-SPECIMEN-RADIOGRAPHY', 'name': 'BREAST SPECIMEN RADIOGRAPHY', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+            {'code': 'MG-BREAST-IMPLANT-RUPTURE-STUDY', 'name': 'BREAST IMPLANT RUPTURE STUDY', 'category': 'mammography', 'modality': 'Mammography', 'body_part': 'Breast', 'radiation_exposure': 'low'},
+        ]
+
         # OTHERS
         others_data = [
             {'code': 'OTHER-ECG-RESTING', 'name': 'ECG (RESTING)', 'category': 'others', 'modality': 'ECG', 'body_part': 'Heart', 'radiation_exposure': 'none'},
@@ -225,7 +240,7 @@ class Command(BaseCommand):
         ]
 
         # Combine all radiology template data
-        all_templates = xray_data + special_investigations_data + ultrasound_data + doppler_data + mri_data + ct_scan_data + others_data
+        all_templates = xray_data + special_investigations_data + ultrasound_data + doppler_data + mri_data + ct_scan_data + mammography_data + others_data
 
         created_count = 0
         for template_data in all_templates:

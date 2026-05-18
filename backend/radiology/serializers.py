@@ -165,7 +165,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_details = serializers.SerializerMethodField()
-    doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
+    doctor_name = serializers.SerializerMethodField()
     doctor_details = serializers.SerializerMethodField()
     external_clinic_details = serializers.SerializerMethodField()
     studies = RadiologyStudySerializer(many=True, read_only=True)
@@ -191,6 +191,13 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             }
         return None
     
+    def get_doctor_name(self, obj):
+        if obj.doctor:
+            return obj.doctor.get_full_name()
+        if obj.external_requesting_doctor_name:
+            return obj.external_requesting_doctor_name
+        return None
+    
     def get_doctor_details(self, obj):
         """Get doctor details including specialty."""
         if obj.doctor:
@@ -198,6 +205,10 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
                 'id': obj.doctor.id,
                 'name': obj.doctor.get_full_name(),
                 'specialty': getattr(obj.doctor, 'specialty', None),
+            }
+        if obj.external_requesting_doctor_name:
+            return {
+                'name': obj.external_requesting_doctor_name,
             }
         return None
 
@@ -376,7 +387,7 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
                 'id': obj.order.id,
                 'order_id': obj.order.order_id,
                 'doctor': obj.order.doctor.id if obj.order.doctor else None,
-                'doctor_name': obj.order.doctor.get_full_name() if obj.order.doctor else None,
+                'doctor_name': obj.order.doctor.get_full_name() if obj.order.doctor else obj.order.external_requesting_doctor_name or None,
                 'doctor_specialty': getattr(obj.order.doctor, 'specialty', None) if obj.order.doctor else None,
                 'clinic': obj.order.clinic,
                 'clinical_notes': obj.order.clinical_notes,

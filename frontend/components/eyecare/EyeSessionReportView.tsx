@@ -50,12 +50,15 @@ export function EyeSessionReportView({ reportSession }: Props) {
       <div className="space-y-3">
         <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">SUBJECTIVE (S)</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">CC:</span> {reportSession.soap_note?.subjective.chiefComplaint || reportSession.order_details?.chief_complaint || 'Not documented'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">POHx:</span> {reportSession.soap_note?.subjective.ocularHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">PMHx:</span> {reportSession.soap_note?.subjective.medicalHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Drug History:</span> {reportSession.soap_note?.subjective.drugHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Allergies:</span> {reportSession.soap_note?.subjective.allergyHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Social History:</span> {reportSession.soap_note?.subjective.socialHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">CC:</span> {reportSession.soap_note?.subjective?.chiefComplaint || reportSession.order_details?.chief_complaint || 'Not documented'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">POHx:</span> {reportSession.soap_note?.subjective?.ocularHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">PMHx:</span> {reportSession.soap_note?.subjective?.medicalHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Drug History:</span> {reportSession.soap_note?.subjective?.drugHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Allergies:</span> {reportSession.soap_note?.subjective?.allergyHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Social History:</span> {reportSession.soap_note?.subjective?.socialHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">FOHx:</span> {reportSession.soap_note?.subjective?.familyOcularHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">FMHx:</span> {reportSession.soap_note?.subjective?.familyMedicalHistory || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Special Instructions:</span> {reportSession.order_details?.special_instructions || '—'}</p>
         </div>
       </div>
 
@@ -76,9 +79,9 @@ export function EyeSessionReportView({ reportSession }: Props) {
                 {visualAcuityRows.map((row) => (
                   <tr key={row.key} className="border-t">
                     <td className="p-2 font-medium">{row.label}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective.visualAcuity[row.key]?.od || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_od : '') || '—'}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective.visualAcuity[row.key]?.os || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_os : '') || '—'}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective.visualAcuity[row.key]?.ou || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_ou : '') || '—'}</td>
+                    <td className="p-2">{reportSession.soap_note?.objective?.visualAcuity?.[row.key]?.od || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_od : '') || '—'}</td>
+                    <td className="p-2">{reportSession.soap_note?.objective?.visualAcuity?.[row.key]?.os || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_os : '') || '—'}</td>
+                    <td className="p-2">{reportSession.soap_note?.objective?.visualAcuity?.[row.key]?.ou || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_ou : '') || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -97,8 +100,8 @@ export function EyeSessionReportView({ reportSession }: Props) {
                 {examinationRows.map((row) => (
                   <tr key={row.key} className="border-t">
                     <td className="p-2 font-medium">{row.label}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective.examination[row.key]?.od || '—'}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective.examination[row.key]?.os || '—'}</td>
+                    <td className="p-2">{reportSession.soap_note?.objective?.examination?.[row.key]?.od || '—'}</td>
+                    <td className="p-2">{reportSession.soap_note?.objective?.examination?.[row.key]?.os || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -106,14 +109,14 @@ export function EyeSessionReportView({ reportSession }: Props) {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <p className="bg-muted/50 p-3 rounded border">
-              <span className="font-medium">IOP:</span> OD {reportSession.soap_note?.objective.diagnostics.iopOd || reportSession.order_details?.iop_od || '—'} | OS {reportSession.soap_note?.objective.diagnostics.iopOs || reportSession.order_details?.iop_os || '—'}<br />
-              <span className="font-medium">Method:</span> {reportSession.soap_note?.objective.diagnostics.method || '—'} | <span className="font-medium">Time:</span> {reportSession.soap_note?.objective.diagnostics.time || '—'}
+              <span className="font-medium">IOP:</span> OD {reportSession.soap_note?.objective?.diagnostics?.iopOd || reportSession.order_details?.iop_od || '—'} | OS {reportSession.soap_note?.objective?.diagnostics?.iopOs || reportSession.order_details?.iop_os || '—'}<br />
+              <span className="font-medium">Method:</span> {reportSession.soap_note?.objective?.diagnostics?.method || '—'} | <span className="font-medium">Time:</span> {reportSession.soap_note?.objective?.diagnostics?.time || '—'}
             </p>
             <div className="bg-muted/50 p-3 rounded border space-y-2">
               {([
-                ['pachymetry', 'Pachymetry', reportSession.soap_note?.objective.diagnostics.pachymetry],
-                ['oct', 'OCT', reportSession.soap_note?.objective.diagnostics.oct],
-                ['visual_field', 'Visual Field', reportSession.soap_note?.objective.diagnostics.visualField],
+                ['pachymetry', 'Pachymetry', reportSession.soap_note?.objective?.diagnostics?.pachymetry],
+                ['oct', 'OCT', reportSession.soap_note?.objective?.diagnostics?.oct],
+                ['visual_field', 'Visual Field', reportSession.soap_note?.objective?.diagnostics?.visualField],
               ] as const).map(([cat, title, noteText]) => {
                 const items = diagnosticAttachmentsForCategory(reportSession, cat);
                 return (
@@ -158,30 +161,34 @@ export function EyeSessionReportView({ reportSession }: Props) {
                   <tr key={`${group}-${eye}`} className="border-t">
                     <td className="p-2 font-medium">{label}</td>
                     <td className="p-2 uppercase">{eye}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.sphere || (group === 'subjective' && eye === 'od' ? reportSession.order_details?.refraction_od : '') || (group === 'subjective' && eye === 'os' ? reportSession.order_details?.refraction_os : '') || '—'}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.cylinder || '—'}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.axis || '—'}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.va || '—'}</td>
+                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.sphere || (group === 'subjective' && eye === 'od' ? reportSession.order_details?.refraction_od : '') || (group === 'subjective' && eye === 'os' ? reportSession.order_details?.refraction_os : '') || '—'}</td>
+                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.cylinder || '—'}</td>
+                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.axis || '—'}</td>
+                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.va || '—'}</td>
                   </tr>
                 )))}
               </tbody>
             </table>
+          </div>
+          <div className="bg-muted/50 p-3 rounded border grid grid-cols-2 gap-3 text-sm">
+            <p><span className="font-medium">Near Addition (ADD):</span> {(reportSession.soap_note?.objective?.refraction as any)?.nearAddition?.add || '—'}</p>
+            <p><span className="font-medium">Near VA:</span> {(reportSession.soap_note?.objective?.refraction as any)?.nearAddition?.va || '—'}</p>
           </div>
         </div>
       </div>
 
       <div className="space-y-3">
         <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b pb-2">ASSESSMENT (A)</h3>
-        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.soap_note?.assessment.diagnosis || reportSession.order_details?.diagnosis || reportSession.findings || 'Not documented'}</p>
+        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.soap_note?.assessment?.diagnosis || reportSession.order_details?.diagnosis || reportSession.findings || 'Not documented'}</p>
       </div>
 
       <div className="space-y-3">
         <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">PLAN (P)</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Optical Correction:</span> {reportSession.soap_note?.plan.opticalCorrection || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Medications:</span> {reportSession.soap_note?.plan.medications || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Management Plan:</span> {reportSession.soap_note?.plan.managementPlan || reportSession.order_details?.treatment_plan || reportSession.procedures_performed || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Follow-up Date:</span> {reportSession.soap_note?.plan.followUpDate || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Optical Correction:</span> {reportSession.soap_note?.plan?.opticalCorrection || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Medications:</span> {reportSession.soap_note?.plan?.medications || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Management Plan:</span> {reportSession.soap_note?.plan?.managementPlan || reportSession.order_details?.treatment_plan || reportSession.procedures_performed || '—'}</p>
+          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Follow-up Date:</span> {reportSession.soap_note?.plan?.followUpDate || '—'}</p>
         </div>
       </div>
     </div>

@@ -552,6 +552,13 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     # Allow medications to be written during creation
     items = PrescriptionItemSerializer(many=True, write_only=True, required=False)
     icd10_diagnoses = serializers.SerializerMethodField()
+    dispensed_by_name = serializers.SerializerMethodField()
+
+    def get_dispensed_by_name(self, obj):
+        latest_dispense = obj.dispenses.order_by("-dispensed_at").first()
+        if latest_dispense and latest_dispense.dispensed_by:
+            return latest_dispense.dispensed_by.get_full_name()
+        return None
 
     def get_patient_name(self, obj):
         """Get patient full name."""

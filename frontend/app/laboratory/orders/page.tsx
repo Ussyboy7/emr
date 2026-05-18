@@ -453,7 +453,7 @@ export default function LabOrdersPage() {
   
   const [resultEntryMode, setResultEntryMode] = useState<'values' | 'upload'>('values');
   const [resultValues, setResultValues] = useState<Record<string, string>>({});
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [customResultRows, setCustomResultRows] = useState<CustomResultRow[]>([]);
   const [customResultFiles, setCustomResultFiles] = useState<Record<string, File | null>>({});
 
@@ -1429,8 +1429,8 @@ export default function LabOrdersPage() {
           }
         }
       }
-    } else if (!uploadedFile) {
-      toast.error('Please upload a result file');
+    } else if (uploadedFiles.length === 0) {
+      toast.error('Please upload at least one result file');
       return;
     }
 
@@ -1449,7 +1449,7 @@ export default function LabOrdersPage() {
               }
             : resultValues
           : {},
-        resultEntryMode === 'upload' ? (uploadedFile || undefined) : undefined,
+        resultEntryMode === 'upload' ? uploadedFiles : (uploadedFiles.length > 0 ? uploadedFiles : undefined),
         undefined,
         isOtherLabTest(selectedTest) && resultEntryMode === 'values' ? customResultFiles : undefined
       );
@@ -1468,7 +1468,7 @@ export default function LabOrdersPage() {
 
       setIsResultsDialogOpen(false);
       setResultValues({});
-      setUploadedFile(null);
+      setUploadedFiles([]);
       setCustomResultRows([]);
       setCustomResultFiles({});
       setResultEntryMode('values');
@@ -1694,15 +1694,21 @@ export default function LabOrdersPage() {
 
     setResultValues(initial);
     setResultEntryMode(test.processingMethod === 'Outsourced' ? 'upload' : 'values');
-    setUploadedFile(null);
+    setUploadedFiles([]);
     setCustomResultFiles({});
     setIsResultsDialogOpen(true);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setUploadedFile(e.target.files[0]);
+    const newFiles = Array.from(e.target.files || []);
+    if (newFiles.length) {
+      setUploadedFiles(prev => [...prev, ...newFiles]);
     }
+    e.target.value = '';
+  };
+
+  const removeUploadedFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const selectedExternalTemplates = useMemo(
@@ -2662,6 +2668,43 @@ export default function LabOrdersPage() {
                           </Button>
                         </div>
                       )}
+                      {(() => {
+                        const extraAttachments = (test.resultAttachments || []).filter((att) => {
+                          if (!att.row_id) return true;
+                          const customRows = (test.results as any)?.custom_results;
+                          if (!Array.isArray(customRows)) return true;
+                          return !customRows.some((row: any) =>
+                            String(att.row_id) === String(row.id) ||
+                            att.row_name?.trim().toLowerCase() === String(row.name || '').trim().toLowerCase()
+                          );
+                        });
+                        return extraAttachments.length > 0 ? (
+                          <div className="mt-2 space-y-1">
+                            {extraAttachments.map((att, i) => {
+                              const attUrl = getLabResultFileUrl(att.file);
+                              return attUrl ? (
+                                <div key={att.id || i} className="p-2 rounded bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-200/50 dark:border-indigo-800/50 text-xs flex items-center justify-between">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <FileText className="h-4 w-4 text-indigo-400 shrink-0" />
+                                    <span className="truncate">{att.row_name || att.file?.split('/').filter(Boolean).pop() || 'Additional file'}</span>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs text-indigo-600 shrink-0"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.open(attUrl, '_blank', 'noopener,noreferrer');
+                                    }}
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />View
+                                  </Button>
+                                </div>
+                              ) : null;
+                            })}
+                          </div>
+                        ) : null;
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -4157,33 +4200,35 @@ export default function LabOrdersPage() {
                   </Card>
                 ) : (
                   <div className="space-y-3">
-                    <Label>Upload Result File</Label>
+                    <Label>Upload Result Files</Label>
                     <div className="border-2 border-dashed rounded-lg p-6 text-center">
-                      {uploadedFile ? (
-                        <div className="flex items-center justify-center gap-3">
-                          <FileText className="h-8 w-8 text-indigo-500" />
-                          <div className="text-left">
-                            <p className="font-medium">{uploadedFile.name}</p>
-                            <p className="text-xs text-muted-foreground">{(uploadedFile.size / 1024).toFixed(1)} KB</p>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={() => setUploadedFile(null)}>
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
-                          <p className="text-sm text-muted-foreground mb-2">Drag and drop or click to upload</p>
-                          <p className="text-xs text-muted-foreground">Supports PDF, Word, Images (JPG, PNG)</p>
-                          <Input
-                            type="file"
-                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                            onChange={handleFileChange}
-                            className="mt-3"
-                          />
-                        </>
-                      )}
+                      <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground mb-2">Drag and drop or click to upload</p>
+                      <p className="text-xs text-muted-foreground">Supports PDF, Word, Images (JPG, PNG)</p>
+                      <Input
+                        type="file"
+                        multiple
+                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                        onChange={handleFileChange}
+                        className="mt-3"
+                      />
                     </div>
+                    {uploadedFiles.length > 0 && (
+                      <div className="text-sm space-y-1">
+                        {uploadedFiles.map((f, i) => (
+                          <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-green-600">
+                            <span className="flex-1 truncate">Selected: {f.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeUploadedFile(i)}
+                              className="text-red-500 hover:text-red-700 text-xs font-medium"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

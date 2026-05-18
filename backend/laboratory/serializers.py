@@ -107,7 +107,14 @@ class LabTestSerializer(serializers.ModelSerializer):
     order_details = serializers.SerializerMethodField()
     result_file_exists = serializers.SerializerMethodField()
     lab_result_id = serializers.SerializerMethodField()
+    overall_status = serializers.SerializerMethodField()
     result_attachments = LabTestResultAttachmentSerializer(many=True, read_only=True)
+
+    def get_overall_status(self, obj):
+        try:
+            return obj.result_record.overall_status
+        except Exception:
+            return None
 
     def get_lab_result_id(self, obj):
         """Verified result row id for PDF download (LabResult.pk)."""

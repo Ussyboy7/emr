@@ -480,7 +480,7 @@ export default function RadiologyOrdersPage() {
   const [resultsForm, setResultsForm] = useState({
     report: '',
     critical: false,
-    reportFile: null as File | null,
+    reportFiles: [] as File[],
   });
   const [customReportRows, setCustomReportRows] = useState<CustomRadiologyReportRow[]>([]);
   const [customReportFiles, setCustomReportFiles] = useState<Record<string, File | null>>({});
@@ -1299,7 +1299,7 @@ export default function RadiologyOrdersPage() {
     setResultsForm({
       report: study.report || study.findings || '',
       critical: study.critical || false,
-      reportFile: null,
+      reportFiles: [],
     });
     setCustomReportRows(initialCustomRows.length > 0 ? initialCustomRows : [createCustomRadiologyRow()]);
     setCustomReportFiles({});
@@ -1318,7 +1318,7 @@ export default function RadiologyOrdersPage() {
         critical: isOtherRadiologyStudy(selectedStudy)
           ? customReportRows.some((row) => row.critical)
           : resultsForm.critical,
-        reportFile: resultsForm.reportFile,
+        reportFiles: resultsForm.reportFiles,
         customReports: isOtherRadiologyStudy(selectedStudy)
           ? customReportRows
               .map((row) => ({
@@ -2132,19 +2132,39 @@ export default function RadiologyOrdersPage() {
                       </div>
 
                       <div className="space-y-2 border-t pt-4">
-                        <Label htmlFor="report-file-manual">Optional: Upload Supporting File</Label>
+                        <Label htmlFor="report-file-manual">Optional: Upload Supporting Files</Label>
                         <Input
                           id="report-file-manual"
                           type="file"
+                          multiple
                           accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                          onChange={(e) => setResultsForm(prev => ({ ...prev, reportFile: e.target.files?.[0] || null }))}
+                          onChange={(e) => {
+                            const newFiles = Array.from(e.target.files || []);
+                            if (newFiles.length) {
+                              setResultsForm(prev => ({ ...prev, reportFiles: [...prev.reportFiles, ...newFiles] }));
+                            }
+                            e.target.value = '';
+                          }}
                           className="cursor-pointer"
                         />
                         <p className="text-xs text-muted-foreground">
-                          Optional: Upload additional files (PDF, Word, Images)
+                          Upload additional files (PDF, Word, Images)
                         </p>
-                        {resultsForm.reportFile && (
-                          <p className="text-sm text-green-600">Selected: {resultsForm.reportFile.name}</p>
+                        {resultsForm.reportFiles.length > 0 && (
+                          <div className="text-sm space-y-1">
+                            {resultsForm.reportFiles.map((f, i) => (
+                              <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-green-600">
+                                <span className="flex-1 truncate">Selected: {f.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setResultsForm(prev => ({ ...prev, reportFiles: prev.reportFiles.filter((_, idx) => idx !== i) }))}
+                                  className="text-red-500 hover:text-red-700 text-xs font-medium"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         )}
                       </div>
                     </TabsContent>
@@ -2154,19 +2174,39 @@ export default function RadiologyOrdersPage() {
                         Upload a complete report document. You can also add summary report text below if desired.
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="report-file">Upload Result File</Label>
+                        <Label htmlFor="report-file">Upload Result Files</Label>
                         <Input
                           id="report-file"
                           type="file"
+                          multiple
                           accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                          onChange={(e) => setResultsForm(prev => ({ ...prev, reportFile: e.target.files?.[0] || null }))}
+                          onChange={(e) => {
+                            const newFiles = Array.from(e.target.files || []);
+                            if (newFiles.length) {
+                              setResultsForm(prev => ({ ...prev, reportFiles: [...prev.reportFiles, ...newFiles] }));
+                            }
+                            e.target.value = '';
+                          }}
                           className="cursor-pointer"
                         />
                         <p className="text-xs text-muted-foreground">
                           Supports PDF, Word, Images (JPG, PNG)
                         </p>
-                        {resultsForm.reportFile && (
-                          <p className="text-sm text-green-600">Selected: {resultsForm.reportFile.name}</p>
+                        {resultsForm.reportFiles.length > 0 && (
+                          <div className="text-sm space-y-1">
+                            {resultsForm.reportFiles.map((f, i) => (
+                              <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-green-600">
+                                <span className="flex-1 truncate">Selected: {f.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setResultsForm(prev => ({ ...prev, reportFiles: prev.reportFiles.filter((_, idx) => idx !== i) }))}
+                                  className="text-red-500 hover:text-red-700 text-xs font-medium"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         )}
                       </div>
 
@@ -2208,7 +2248,7 @@ export default function RadiologyOrdersPage() {
                   isSubmittingResults ||
                   (isOtherRadiologyStudy(selectedStudy)
                     ? !customReportRows.some((row) => row.procedure.trim() || row.report.trim() || row.recommendations.trim() || customReportFiles[row.id])
-                    : (!resultsForm.reportFile && !resultsForm.report.trim()))
+                    : (!resultsForm.reportFiles.length && !resultsForm.report.trim()))
                 }
                 className="bg-amber-500 hover:bg-amber-600"
               >
@@ -2570,6 +2610,32 @@ export default function RadiologyOrdersPage() {
                               >
                                 <Eye className="h-3 w-3 mr-1" />View
                               </Button>
+                            </div>
+                          )}
+                          {/* Show additional uploaded files (attachments without a row_id) */}
+                          {Array.isArray(study.report_attachments) && study.report_attachments.filter((att: any) => !att.row_id).length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {study.report_attachments.filter((att: any) => !att.row_id).map((att: any) => {
+                                const fileUrl = getRadiologyReportFileUrl(att.file);
+                                return (
+                                  <div key={att.id} className="p-2 rounded bg-blue-50/50 dark:bg-blue-900/10 flex items-center justify-between border border-blue-200/50 dark:border-blue-800/50">
+                                    <div className="flex items-center gap-2">
+                                      <FileText className="h-4 w-4 text-blue-400" />
+                                      <span className="text-xs text-blue-700 dark:text-blue-300">{att.row_name || 'Additional File'}</span>
+                                    </div>
+                                    {fileUrl && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700"
+                                        onClick={() => window.open(fileUrl, '_blank', 'noopener,noreferrer')}
+                                      >
+                                        <Eye className="h-3 w-3 mr-1" />View
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>

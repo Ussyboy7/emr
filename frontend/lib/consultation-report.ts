@@ -2,7 +2,7 @@
  * Shared consultation report: type, HTML generator, and loader.
  * Used by Patient Medical Records and Consultation History "View Report" modal.
  */
-import { getOrganizationHeader } from '@/lib/constants/organization';
+import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { apiFetch } from '@/lib/api-client';
 import { consultationService, physioService, patientService } from '@/lib/services';
 import { logWarn } from './client-logger';
@@ -84,6 +84,7 @@ export interface ConsultationReportSession {
   labOrders?: Array<{ test?: string; priority?: string; status?: string; result?: string }>;
   radiologyOrders?: Array<{ procedure?: string; priority?: string; status?: string; result?: string }>;
   physioOrders?: Array<{ diagnosis?: string; priority?: string; status?: string }>;
+  eyeOrders?: Array<{ chief_complaint?: string; diagnosis?: string; priority?: string; status?: string }>;
   diagnoses?: Array<{ id?: string; code?: string; name?: string; type?: string; notes?: string }>;
 }
 
@@ -178,12 +179,17 @@ const formatResultWithPending = (
 /** True if API attached a result file (string URL or { url } object). */
 function labTestHasResultFile(test: any): boolean {
   const rf = test?.result_file;
-  if (rf == null || rf === false) return false;
-  if (typeof rf === 'string') return rf.trim().length > 0;
-  if (typeof rf === 'object' && rf && typeof (rf as { url?: string }).url === 'string') {
-    return (rf as { url: string }).url.trim().length > 0;
+  if (rf != null && rf !== false) {
+    if (typeof rf === 'string') {
+      if (rf.trim().length > 0) return true;
+    } else if (typeof rf === 'object' && rf) {
+      if (typeof (rf as { url?: string }).url === 'string' && (rf as { url: string }).url.trim().length > 0) return true;
+      return true;
+    }
   }
-  return true;
+  const attachments = test?.result_attachments || test?.reportAttachments;
+  if (Array.isArray(attachments) && attachments.length > 0) return true;
+  return false;
 }
 
 /**
@@ -205,64 +211,75 @@ export function summarizeLabTestForConsultationReport(test: any): string {
 }
 
 // ----- HTML generator (single source for Download/Print) -----
+function escapeHtmlForHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export function buildConsultationReportHTML(session: ConsultationReportSession): string {
   const vitals = session.vitals || {};
   const prescriptions = session.prescriptions || [];
   const labOrders = session.labOrders || [];
   const radiologyOrders = session.radiologyOrders || [];
   const physioOrders = session.physioOrders || [];
+  const eyeOrders = session.eyeOrders || [];
   const diagnoses = session.diagnoses || [];
 
   const durationStr =
     session.ended_at && session.started_at
       ? Math.round(
           (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60),
-        ) + ' minutes'
+        ) + ' min'
       : session.started_at
-        ? Math.round((Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes (ongoing)'
+        ? Math.round((Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' min (ongoing)'
         : '';
 
-  return `
-<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8" />
   <title>Consultation Report - Session ${session.id}</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-    .section { margin-bottom: 20px; }
-    .section h3 { color: #333; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background-color: #f5f5f5; }
-    .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-    .vital-item { padding: 10px; border: 1px solid #ddd; text-align: center; }
-    .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #666; }
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; font-size: 11pt; }
+    .banner { text-align: center; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 20px; }
+    .banner h1 { margin: 0; font-size: 18pt; }
+    .banner p { margin: 4px 0 0; font-size: 10pt; color: #444; }
+    .section { margin-bottom: 18px; }
+    .section h3 { font-size: 11pt; color: #333; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f5f5f5; font-weight: 600; }
+    .meta-table td { border: none; padding: 3px 8px; }
+    .meta-table td:first-child, .meta-table td:nth-child(3) { font-weight: 600; white-space: nowrap; }
+    .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+    .vital-item { padding: 8px; border: 1px solid #ccc; text-align: center; }
+    .footer { margin-top: 28px; text-align: center; font-size: 9pt; color: #666; border-top: 1px solid #ddd; padding-top: 12px; }
+    @media print {
+      html, body { height: auto !important; overflow: visible !important; margin: 0; }
+    }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>Nigerian Ports Authority</h1>
-    <h2>Medical Services Department</h2>
-    <h3>Consultation Report</h3>
-    <p>Session ID: ${session.id}</p>
+  <div class="banner">
+    <h1>CONSULTATION REPORT</h1>
+    <p>${escapeHtmlForHtml(getOrganizationServicesHeader())}</p>
   </div>
 
   <div class="section">
-    <h3>PATIENT INFORMATION</h3>
-    <p><strong>Name:</strong> ${session.patient_name ?? ''}</p>
-    <p><strong>Patient ID:</strong> ${session.patient_id ?? ''}</p>
-    <p><strong>Age:</strong> ${session.patient_age ?? ''} years</p>
-    <p><strong>Gender:</strong> ${session.patient_gender ?? ''}</p>
-  </div>
-
-  <div class="section">
-    <h3>CONSULTATION DETAILS</h3>
-    <p><strong>Doctor:</strong> ${session.doctor_name ?? ''}</p>
-    <p><strong>Clinic:</strong> ${session.clinic_name ?? ''}</p>
-    <p><strong>Room:</strong> ${session.room_name ?? ''}</p>
-    <p><strong>Date & Time:</strong> ${formatDate(session.started_at)} ${formatTime(session.started_at)}</p>
-    <p><strong>Duration:</strong> ${durationStr}</p>
+    <table class="meta-table">
+      <tr><td>Patient Name</td><td>${escapeHtmlForHtml(session.patient_name ?? '')}</td>
+          <td>Patient ID</td><td>${escapeHtmlForHtml(String(session.patient_id ?? ''))}</td></tr>
+      <tr><td>Age / Gender</td><td>${escapeHtmlForHtml(
+        [session.patient_age != null && session.patient_age !== '' ? `${session.patient_age} years` : '', session.patient_gender || ''].filter(Boolean).join(' / ')
+      )}</td>
+          <td>Doctor</td><td>${escapeHtmlForHtml(session.doctor_name ?? '')}</td></tr>
+      <tr><td>Clinic</td><td>${escapeHtmlForHtml(session.clinic_name ?? '')}</td>
+          <td>Room</td><td>${escapeHtmlForHtml(session.room_name ?? '')}</td></tr>
+      ${durationStr ? `<tr><td>Duration</td><td>${escapeHtmlForHtml(durationStr)}</td><td>Status</td><td>${escapeHtmlForHtml(session.status === 'completed' ? 'Completed' : 'In Progress')}</td></tr>` : ''}
+    </table>
   </div>
 
   ${Object.keys(vitals).length > 0 ? `
@@ -278,20 +295,20 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
 
   <div class="section">
     <h3>CLINICAL NOTES</h3>
-    ${session.presentation_complaint ? `<p><strong>Presentation Complaint:</strong> ${session.presentation_complaint.replace(/\n/g, '<br>')}</p>` : ''}
-    ${session.history_of_presenting_illness ? `<p><strong>History of Present Illness:</strong> ${session.history_of_presenting_illness.replace(/\n/g, '<br>')}</p>` : ''}
-    ${session.physical_examination ? `<p><strong>Physical Examination:</strong> ${session.physical_examination.replace(/\n/g, '<br>')}</p>` : ''}
-    ${session.assessment ? `<p><strong>Assessment:</strong> ${session.assessment.replace(/\n/g, '<br>')}</p>` : ''}
-    ${session.plan ? `<p><strong>Treatment Plan:</strong> ${session.plan.replace(/\n/g, '<br>')}</p>` : ''}
+    ${session.presentation_complaint ? `<p><strong>Presentation Complaint:</strong> ${escapeHtmlForHtml(session.presentation_complaint).replace(/\n/g, '<br>')}</p>` : ''}
+    ${session.history_of_presenting_illness ? `<p><strong>History of Present Illness:</strong> ${escapeHtmlForHtml(session.history_of_presenting_illness).replace(/\n/g, '<br>')}</p>` : ''}
+    ${session.physical_examination ? `<p><strong>Physical Examination:</strong> ${escapeHtmlForHtml(session.physical_examination).replace(/\n/g, '<br>')}</p>` : ''}
+    ${session.assessment ? `<p><strong>Assessment:</strong> ${escapeHtmlForHtml(session.assessment).replace(/\n/g, '<br>')}</p>` : ''}
+    ${session.plan ? `<p><strong>Treatment Plan:</strong> ${escapeHtmlForHtml(session.plan).replace(/\n/g, '<br>')}</p>` : ''}
   </div>
 
   ${diagnoses.length > 0 ? `
   <div class="section">
     <h3>DIAGNOSES</h3>
     <table>
-      <thead><tr><th>ICD-10 Code</th><th>Diagnosis</th><th>Diagnosis Type</th></tr></thead>
+      <thead><tr><th>ICD-10 Code</th><th>Diagnosis</th><th>Type</th></tr></thead>
       <tbody>
-        ${diagnoses.map((dx: any) => `<tr><td>${dx.code ?? ''}</td><td>${dx.name ?? ''}</td><td>${dx.type ?? ''}</td></tr>`).join('')}
+        ${diagnoses.map((dx: any) => `<tr><td>${escapeHtmlForHtml(dx.code ?? '')}</td><td>${escapeHtmlForHtml(dx.name ?? '')}${dx.notes?.trim() ? `<br><span style="font-size:10pt;color:#555">${escapeHtmlForHtml(dx.notes)}</span>` : ''}</td><td>${escapeHtmlForHtml(dx.type ?? '')}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -301,9 +318,9 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
   <div class="section">
     <h3>PRESCRIPTIONS</h3>
     <table>
-      <thead><tr><th>Medication</th><th>Dose</th><th>Frequency</th><th>Duration</th><th>Quantity</th></tr></thead>
+      <thead><tr><th>Medication</th><th>Dose</th><th>Frequency</th><th>Duration</th><th>Qty</th></tr></thead>
       <tbody>
-        ${prescriptions.map((rx: any) => `<tr><td>${(rx.medication_name ?? rx.medication) ?? ''}</td><td>${rx.dosage ?? ''}</td><td>${rx.frequency ?? ''}</td><td>${rx.duration ?? ''}</td><td>${rx.quantity ?? ''}</td></tr>`).join('')}
+        ${prescriptions.map((rx: any) => `<tr><td>${escapeHtmlForHtml((rx.medication_name ?? rx.medication) ?? '')}</td><td>${escapeHtmlForHtml(rx.dosage ?? '')}</td><td>${escapeHtmlForHtml(rx.frequency ?? '')}</td><td>${escapeHtmlForHtml(rx.duration ?? '')}</td><td style="text-align:center">${escapeHtmlForHtml(rx.quantity != null ? String(rx.quantity) : '')}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -315,7 +332,7 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
     <table>
       <thead><tr><th>Test</th><th>Priority</th><th>Status</th><th>Result</th></tr></thead>
       <tbody>
-        ${labOrders.map((lab: any) => `<tr><td>${lab.test ?? ''}</td><td>${formatPriority(lab.priority)}</td><td>${lab.status ?? ''}</td><td>${formatResultWithPending(lab.result ? formatLabResult(lab.result) : '', lab.status, ['verified', 'completed', 'results_ready']).toString().replace(/\n/g, '<br>')}</td></tr>`).join('')}
+        ${labOrders.map((lab: any) => `<tr><td>${escapeHtmlForHtml(lab.test ?? '')}</td><td>${escapeHtmlForHtml(formatPriority(lab.priority))}</td><td>${escapeHtmlForHtml(lab.status ?? '')}</td><td>${(formatResultWithPending(lab.result ? formatLabResult(lab.result) : '', lab.status, ['verified', 'completed', 'results_ready']).toString().replace(/\n/g, '<br>'))}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -325,9 +342,9 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
   <div class="section">
     <h3>RADIOLOGY ORDERS</h3>
     <table>
-      <thead><tr><th>Procedure</th><th>Priority</th><th>Status</th><th>Result</th></tr></thead>
+      <thead><tr><th>Procedure</th><th>Priority</th><th>Status</th><th>Finding</th></tr></thead>
       <tbody>
-        ${radiologyOrders.map((rad: any) => `<tr><td>${rad.procedure ?? ''}</td><td>${formatPriority(rad.priority)}</td><td>${rad.status ?? ''}</td><td>${formatResultWithPending(rad.result, rad.status, ['verified', 'completed', 'reported']).toString().replace(/\n/g, '<br>')}</td></tr>`).join('')}
+        ${radiologyOrders.map((rad: any) => `<tr><td>${escapeHtmlForHtml(rad.procedure ?? '')}</td><td>${escapeHtmlForHtml(formatPriority(rad.priority))}</td><td>${escapeHtmlForHtml(rad.status ?? '')}</td><td>${(formatResultWithPending(rad.result, rad.status, ['verified', 'completed', 'reported']).toString().replace(/\n/g, '<br>'))}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -339,21 +356,27 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
     <table>
       <thead><tr><th>Diagnosis / Chief Complaint</th><th>Priority</th><th>Status</th></tr></thead>
       <tbody>
-        ${physioOrders.map((p: any) => `<tr><td>${p.diagnosis ?? ''}</td><td>${formatPriority(p.priority)}</td><td>${p.status ?? ''}</td></tr>`).join('')}
+        ${physioOrders.map((p: any) => `<tr><td>${escapeHtmlForHtml(p.diagnosis ?? '')}</td><td>${escapeHtmlForHtml(formatPriority(p.priority))}</td><td>${escapeHtmlForHtml(p.status ?? '')}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
   ` : ''}
 
+  ${eyeOrders.length > 0 ? `
   <div class="section">
-    <h3>SESSION OUTCOME</h3>
-    <p><strong>Status:</strong> ${session.status === 'completed' ? 'Completed' : (session.status ?? '')}</p>
+    <h3>EYE CARE ORDERS</h3>
+    <table>
+      <thead><tr><th>Diagnosis / Chief Complaint</th><th>Priority</th><th>Status</th></tr></thead>
+      <tbody>
+        ${eyeOrders.map((e: any) => `<tr><td>${escapeHtmlForHtml(e.diagnosis || e.chief_complaint || '—')}</td><td>${escapeHtmlForHtml(formatPriority(e.priority))}</td><td>${escapeHtmlForHtml(e.status ?? '')}</td></tr>`).join('')}
+      </tbody>
+    </table>
   </div>
+  ` : ''}
 
   <div class="footer">
-    <p>Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-    <p>Document ID: ${session.id}</p>
-    <p>${getOrganizationHeader()}</p>
+    <p>${escapeHtmlForHtml(getOrganizationServicesHeader())}</p>
+    <p>Generated: ${escapeHtmlForHtml(new Date().toLocaleString())} | Document ID: ${escapeHtmlForHtml(String(session.id))}</p>
   </div>
 </body>
 </html>`;
@@ -367,7 +390,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
   const visitId = session.visit as number | undefined;
 
   // Fire all enrichment calls in parallel — they only depend on session/patient/visit IDs
-  const [patient, prescriptionsResult, labOrders, radiologyOrders, vitals, physioOrders, diagnosesResult] = await Promise.all([
+  const [patient, prescriptionsResult, labOrders, radiologyOrders, vitals, physioOrders, eyeOrdersResult, diagnosesResult] = await Promise.all([
     patientId
       ? patientService.getPatient(patientId).catch(() => null)
       : Promise.resolve(null),
@@ -384,6 +407,9 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
       ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`).catch(() => ({ results: [] }))
       : Promise.resolve({ results: [] }),
     physioService.getOrders({ consultation_session: sessionId, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
+    visitId
+      ? apiFetch<{ results: any[] }>(`/eyecare/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+      : Promise.resolve({ results: [] }),
     consultationService.getDiagnoses({ session: sessionId, page_size: 100 }).catch(() => ({ results: [] })),
   ]);
 
@@ -476,6 +502,14 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
   // Process physio orders
   session.physioOrders = ((physioOrders as any).results || []).map((o: any) => ({
     diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+    priority: o.priority ?? '',
+    status: o.status ?? '',
+  }));
+
+  // Process eye orders
+  session.eyeOrders = ((eyeOrdersResult as any).results || []).map((o: any) => ({
+    chief_complaint: o.chief_complaint ?? '',
+    diagnosis: o.diagnosis ?? '',
     priority: o.priority ?? '',
     status: o.status ?? '',
   }));

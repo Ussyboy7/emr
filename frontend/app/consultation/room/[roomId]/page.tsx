@@ -18,8 +18,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, Droplets, FileText, History, Loader2, MapPin, Pill, Play, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, Edit, DoorOpen, UserX, Wind, Zap, Scale, Search, Lightbulb, Target } from "lucide-react";
 import { toast } from "sonner";
-import { roomService, patientService, pharmacyService, labService, radiologyService, physioService, referralService, consultationService, appointmentService, wardService, type ConsultationSession, type ICD10Code, type Diagnosis, type RadiologyReport as ServiceRadiologyReport, type VitalReading, type Prescription, type LabTemplate as ServiceLabTemplate, type Medication, type PhysioSession } from '@/lib/services';
+import { roomService, patientService, pharmacyService, labService, radiologyService, physioService, eyeCareService, referralService, consultationService, appointmentService, wardService, type ConsultationSession, type ICD10Code, type Diagnosis, type RadiologyReport as ServiceRadiologyReport, type VitalReading, type Prescription, type LabTemplate as ServiceLabTemplate, type Medication, type PhysioSession } from '@/lib/services';
 import { sanitizePatientForRendering } from '@/lib/services/patient-service';
+import { ViewEyeOrderModal } from '@/components/eyecare/ViewEyeOrderModal';
+import { PatientHistoryTabs } from '@/components/patient-history/PatientHistoryTabs';
 
 // Extended interface for local usage
 interface ExtendedConsultationSession extends ConsultationSession {
@@ -90,13 +92,17 @@ import {
   type CompletedRadiologyReport,
 } from '@/lib/radiology/completedRadiologyReport';
 import { PrescriptionReportDialog } from '@/components/pharmacy/PrescriptionReportDialog';
+import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import {
   PrescriptionOrderModal,
   type PrescriptionOrderSubmitInput,
 } from '@/components/consultation/orders/PrescriptionOrderModal';
 import {
+  buildConsultationReportHTML,
+  loadConsultationReportSession,
   summarizeLabTestForConsultationReport,
   reportFormatters,
+  type ConsultationReportSession,
 } from '@/lib/consultation-report';
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 
@@ -133,21 +139,6 @@ function initialsFromQueueDisplayName(fullName: string): string {
   const out = `${c1}${c2}`.trim();
   return out.length ? out : '?';
 }
-
-// Helper to safely access extended session properties
-const getSessionProperty = (session: ExtendedConsultationSession | null, property: keyof ExtendedConsultationSession): any[] => {
-  if (!session) return [];
-  const value = session[property];
-  return Array.isArray(value) ? value : [];
-};
-
-// Safe date formatting utility
-const escapeHtml = (s: string) =>
-  String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
@@ -227,18 +218,6 @@ const normalizeGenderLabel = (value: unknown): string => {
   if (normalized === 'male' || normalized === 'm') return 'Male';
   if (normalized === 'female' || normalized === 'f') return 'Female';
   return '';
-};
-
-const formatVitalDisplay = (key: string, value: unknown): string => {
-  if (value == null || value === '') return '';
-  if (key === 'recordedAt' || key === 'recorded_at' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)))
-    return formatDate(String(value)) + ' ' + formatTime(String(value));
-  return String(value);
-};
-
-const vitalLabel = (key: string): string => {
-  if (key === 'recordedAt' || key === 'recorded_at') return 'Recorded at';
-  return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 };
 
 // ==========================================
@@ -751,6 +730,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
+  // Function to open eye order view modal
+  const openEyeOrderDialog = (order: any) => {
+    setSelectedEyeOrderId(order.id);
+    setShowEyeOrderModal(true);
+  };
+
   // Load injection medications from API
   useEffect(() => {
     if (!showAddNursingOrder || newNursingOrder.type !== 'Injection' || !showInjectionMedicationDropdown) {
@@ -877,9 +862,31 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [physioTemplates, setPhysioTemplates] = useState<any[]>([]);
   const [loadingPhysioTemplates, setLoadingPhysioTemplates] = useState(false);
 
+  // Eye Care state
+  const [eyeOrders, setEyeOrders] = useState<{
+    id: string;
+    chiefComplaint: string;
+    diagnosis: string;
+    treatmentPlan: string;
+    specialInstructions?: string;
+    priority: 'low' | 'normal' | 'high' | 'urgent';
+    status: 'Draft' | 'Sent to Eye Care' | 'Scheduled' | 'In Progress' | 'Completed';
+  }[]>([]);
+  const [eyeOrdersFromApi, setEyeOrdersFromApi] = useState<any[]>([]);
+  const [showAddEye, setShowAddEye] = useState(false);
+  const [editingEyeIndex, setEditingEyeIndex] = useState<number | null>(null);
+  const [newEye, setNewEye] = useState({
+    chiefComplaint: "",
+    diagnosis: "",
+    treatmentPlan: "",
+    specialInstructions: "",
+    priority: "normal" as 'low' | 'normal' | 'high' | 'urgent'
+  });
+
   // Consultation session viewer state
   const [selectedSession, setSelectedSession] = useState<ExtendedConsultationSession | null>(null);
-  const [showSessionViewer, setShowSessionViewer] = useState(false);
+  const [consultationReportSession, setConsultationReportSession] = useState<ConsultationReportSession | null>(null);
+  const [isConsultationReportLoading, setIsConsultationReportLoading] = useState(false);
   const [expandedSessions, setExpandedSessions] = useState<string[]>([]);
 
   // Lab result viewer (same standard report as Laboratory → Completed Tests)
@@ -888,7 +895,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [selectedCompletedRadiologyReport, setSelectedCompletedRadiologyReport] =
     useState<CompletedRadiologyReport | null>(null);
   const [showRadiologyReportViewer, setShowRadiologyReportViewer] = useState(false);
-  const [expandedLabResults, setExpandedLabResults] = useState<string[]>([]);
 
   const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
   const [showPrescriptionViewer, setShowPrescriptionViewer] = useState(false);
@@ -1004,6 +1010,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setNursingOrders([]);
     setRadiologyOrders([]);
     setPhysioOrders([]);
+    setEyeOrders([]);
     setReferrals([]);
     setFollowUpRequired(false);
     setFollowUpDate("");
@@ -1013,17 +1020,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Vitals detail modal state
   const [selectedVital, setSelectedVital] = useState<VitalsData | null>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
-  const [vitalsHistory, setVitalsHistory] = useState<VitalsData[]>([]);
   const [loadingVitals, setLoadingVitals] = useState(false);
-
-
-  // Real patient history data (instead of demo data)
-  const [consultationHistory, setConsultationHistory] = useState<any[]>([]);
-  const [labHistory, setLabHistory] = useState<LabTestResult[]>([]);
-  const [imagingHistory, setImagingHistory] = useState<ServiceRadiologyReport[]>([]);
-  const [prescriptionHistory, setPrescriptionHistory] = useState<any[]>([]);
-  const [physioHistory, setPhysioHistory] = useState<any[]>([]);
-  const [loadingPatientHistory, setLoadingPatientHistory] = useState(false);
 
   // Raw data storage (before transformation)
   const [rawConsultations, setRawConsultations] = useState<any[]>([]);
@@ -1032,6 +1029,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [rawLabResults, setRawLabResults] = useState<any[]>([]);
   const [rawImagingResults, setRawImagingResults] = useState<any[]>([]);
   const [rawPhysioResults, setRawPhysioResults] = useState<any[]>([]);
+  const [rawEyeResults, setRawEyeResults] = useState<any[]>([]);
   
   // View vitals details
   const viewVitalsDetails = (vital: any) => {
@@ -1039,256 +1037,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setIsVitalsDetailModalOpen(true);
   };
 
-  // Transform consultations with actual user who performed the action
-  const transformConsultations = (consultations: any[]) => {
-    return consultations.map((session: any) => ({
-      id: session.id?.toString() || '',
-      date: formatDate(session.started_at),
-      doctor: session.doctor_name || currentUser?.name || '',
-      clinic: getVisitServiceClinicsDisplay({
-        clinic: session.clinic_name,
-        clinics: session.visit_clinics,
-      }),
-      sessionId: session.session_id || '',
-      status: session.status || 'completed',
-      started_at: session.started_at,
-      ended_at: session.ended_at,
-      notes: session.notes || '',
-      presentation_complaint: session.presentation_complaint || '',
-      assessment: session.assessment || '',
-      plan: session.plan || ''
-    }));
-  };
-
-  // Transform prescriptions with actual user who prescribed
-  const transformPrescriptions = (prescriptions: any[]) => {
-    return prescriptions.map((rx: any) => {
-      // Handle date parsing - API might return different formats
-      let formattedDate = '';
-      const dateField = rx.prescribed_at || rx.created_at;
-      if (dateField) {
-        try {
-          const date = new Date(dateField);
-          if (!isNaN(date.getTime())) {
-            formattedDate = date.toLocaleDateString();
-          }
-        } catch (e) {
-          formattedDate = dateField.toString();
-        }
-      }
-
-      const icdDx = Array.isArray(rx.icd10_diagnoses) ? rx.icd10_diagnoses : [];
-      return {
-        id: rx.id?.toString() || '',
-        date: formattedDate,
-        doctor: rx.doctor_name || currentUser?.name || '',
-        medications: (rx.medications || []).map((med: any) => ({
-          medication_name:
-            med.medication_name ||
-            (med.medication && typeof med.medication === 'object' ? med.medication.name : null) ||
-            (typeof med.medication === 'string' ? med.medication : '') ||
-            'Unknown',
-          dosage: med.dose || med.dosage || '',
-          dose: med.dose || med.dosage || '',
-          frequency: med.frequency || '',
-          duration: med.duration || '',
-          quantity: med.quantity != null && med.quantity !== '' ? med.quantity : '',
-          route: med.route || '',
-        })),
-        status: rx.status || 'pending',
-        canCancel: rx.status === 'pending' || rx.status === 'dispensing',
-        diagnoses: icdDx.map((d: any) => ({
-          code: String(d.code ?? ''),
-          name: String(d.name ?? ''),
-          type: String(d.type ?? 'Primary'),
-          notes: String(d.notes ?? ''),
-        })),
-        // Free-text notes only when no ICD rows (avoid duplicating assessment as "NOTES").
-        notes:
-          icdDx.length > 0
-            ? ''
-            : (rx.notes && String(rx.notes).trim()) ||
-              (rx.clinical_notes && String(rx.clinical_notes).trim()) ||
-              (rx.instructions && String(rx.instructions).trim()) ||
-              '',
-      };
-    });
-  };
-
-  // Transform vitals with actual user who recorded them
-  const transformVitals = (vitals: any[]): VitalsData[] => {
-    return vitals.map((v: any) => ({
-      id: v.id?.toString() || '',
-      date: formatDate(v.recorded_at),
-      time: formatTime(v.recorded_at),
-      systolic: v.blood_pressure_systolic || 0,
-      diastolic: v.blood_pressure_diastolic || 0,
-      heartRate: v.heart_rate || 0,
-      temperature: parseFloat(v.temperature) || 0,
-      respiratoryRate: v.respiratory_rate || 0,
-      oxygenSaturation: parseFloat(v.oxygen_saturation) || 0,
-      weight: v.weight ? parseFloat(v.weight) : undefined,
-      height: v.height ? parseFloat(v.height) : undefined,
-      bmi: v.bmi != null && v.bmi !== '' ? parseFloat(String(v.bmi)) : undefined,
-      painScale:
-        v.pain_scale != null && v.pain_scale !== ''
-          ? parseInt(String(v.pain_scale), 10)
-          : undefined,
-      bloodSugar:
-        v.blood_sugar != null && v.blood_sugar !== ''
-          ? parseFloat(String(v.blood_sugar))
-          : undefined,
-      randomBloodSugar:
-        v.random_blood_sugar != null && v.random_blood_sugar !== ''
-          ? parseFloat(String(v.random_blood_sugar))
-          : undefined,
-      recordedBy: v.recorded_by_name || currentUser?.name || '',
-      recordedAt: v.recorded_at || '',
-      bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic
-        ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
-        : '',
-      notes: v.notes || '',
-    }));
-  };
-
-  // DRF returns FileField as a URL string; some clients may send { name, url }.
-  const normalizeLabResultFileFromApi = (rf: unknown): { name: string; url: string; type: string } | null => {
-    if (rf == null || rf === '') return null;
-    if (typeof rf === 'string') {
-      const trimmed = rf.trim();
-      if (!trimmed) return null;
-      const name = trimmed.split('/').filter(Boolean).pop() || 'lab-result.pdf';
-      const url =
-        trimmed.startsWith('http://') || trimmed.startsWith('https://')
-          ? trimmed
-          : typeof window !== 'undefined'
-            ? `${window.location.origin}${trimmed.startsWith('/') ? trimmed : `/${trimmed}`}`
-            : trimmed;
-      const lower = name.toLowerCase();
-      const type = lower.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream';
-      return { name, url, type };
-    }
-    if (typeof rf === 'object' && rf !== null) {
-      const o = rf as { name?: string; url?: string; type?: string };
-      const rawUrl = o.url || (o.name ? `/media/${String(o.name).replace(/^\/+/, '')}` : '');
-      if (!rawUrl && !o.name) return null;
-      const name = o.name || String(rawUrl).split('/').filter(Boolean).pop() || 'lab-result.pdf';
-      const url =
-        typeof rawUrl === 'string' &&
-        (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))
-          ? rawUrl
-          : typeof window !== 'undefined' && typeof rawUrl === 'string'
-            ? `${window.location.origin}${rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`}`
-            : String(rawUrl);
-      const lower = String(name).toLowerCase();
-      return {
-        name: String(name),
-        url,
-        type: o.type || (lower.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
-      };
-    }
-    return null;
-  };
-
-  // Transform lab results with actual users who processed/verified them
-  const transformLabResults = (labResults: any[]) => {
-    return labResults.map((test: any) => {
-      const resultsPayload = test.results && typeof test.results === 'object' ? test.results : null;
-      const normalRange = test.template_normal_range || test.normal_range;
-      const orderedRows = buildOrderedLabResultViewRows(
-        resultsPayload as Record<string, any> | null | undefined,
-        normalRange
-      );
-
-      const hasManualResults = Boolean(
-        resultsPayload &&
-          (() => {
-            const cr = (resultsPayload as any).custom_results;
-            if (Array.isArray(cr) && cr.length > 0) return true;
-            return Object.keys(resultsPayload).filter((k) => k !== 'custom_results').length > 0;
-          })()
-      );
-      const resultFile = normalizeLabResultFileFromApi(test.result_file);
-      const hasUploadedFile = resultFile != null;
-
-      const resultSummary = orderedRows.length
-        ? orderedRows.map((r) => `${r.parameter}: ${r.value}${r.unit ? ` ${r.unit}` : ''}`).join('; ')
-        : '';
-
-      return {
-        id: test.id || 0,
-        test_name: test.name || 'Unknown Test',
-        result: resultSummary,
-        unit: '',
-        reference_range: '',
-        status: test.status === 'verified' ? 'Normal' : test.status || 'pending',
-        completed_at: test.verified_at || test.processed_at,
-        rejectedBy: test.rejected_by_name || '',
-        rejectedAt: test.rejected_at ? formatDate(test.rejected_at) : '',
-        criticalValue: false,
-        date: formatDate(test.verified_at || test.processed_at),
-        category: test.template_category || 'Unknown',
-        test: test.name || 'Unknown Test',
-        specimenType: test.sample_type || test.template_sample_type || 'Unknown',
-        orderedBy: test.order_details?.doctor_name || test.order?.doctor_name || 'Unknown',
-        collectedAt: test.collected_at ? formatDate(test.collected_at) : 'N/A',
-        reportedAt: test.processed_at ? formatDate(test.processed_at) : 'N/A',
-        performedBy: test.processed_by_name || 'Unknown',
-        verifiedBy: test.verified_by_name || 'Unknown',
-        resultFile,
-        hasManualResults,
-        hasUploadedFile,
-        parameters: orderedRows.map((r) => ({
-          name: r.parameter,
-          value: r.value,
-          unit: r.unit,
-          referenceRange: r.normalRange,
-          status: r.status,
-        })),
-      };
-    });
-  };
-
-  // Transform imaging results with actual users who reported/verified them
-  const transformImagingResults = (imagingResults: any[]) => {
-    return imagingResults.map((report: any) => ({
-      id: parseInt(report.id) || 0,
-      study: parseInt(report.study) || 0,
-      order: parseInt(report.order) || 0,
-      patient: parseInt(report.patient) || 0,
-      created_at: report.created_at || report.reported_at || new Date().toISOString(),
-      overall_status: report.overall_status || report.status || 'normal',
-      priority: report.priority || 'medium',
-      study_details: report.study_details || undefined,
-      order_id: report.order_id || '',
-      patient_name: report.patient_name || '',
-    }));
-  };
-
-  // Keep History tab in sync with raw API data (including empty results — avoids showing another patient's rows).
-  useEffect(() => {
-    setConsultationHistory(transformConsultations(rawConsultations));
-    setPrescriptionHistory(transformPrescriptions(rawPrescriptions));
-    setVitalsHistory(transformVitals(rawVitals));
-    setLabHistory(transformLabResults(rawLabResults));
-    setImagingHistory(transformImagingResults(rawImagingResults));
-    setPhysioHistory(rawPhysioResults);
-  }, [currentUser, rawConsultations, rawPrescriptions, rawVitals, rawLabResults, rawImagingResults, rawPhysioResults]);
-
   // Load real patient history data
   const loadPatientHistory = async (patientId: number) => {
     if (!patientId) return;
 
-    setLoadingPatientHistory(true);
     try {
       // Load all patient history data in parallel
-      const [consultationsResponse, labResults, imagingResults, prescriptions, vitals, physioOrders, admissions] = await Promise.all([
+      const [consultationsResponse, labResults, imagingResults, prescriptions, vitals, physioOrders, eyeOrdersResult, admissions] = await Promise.all([
         consultationService.getSessions({ patient: patientId }),
         labService.getCompletedTests({ patient: patientId.toString() }),
         radiologyService.getVerifiedReports({ patient: patientId.toString() }),
         pharmacyService.getPrescriptions({ patient: patientId.toString(), page_size: 500 }),
         patientService.getPatientVitals(patientId),
         physioService.getOrders({ patient: patientId.toString() }).catch(() => ({ results: [] })),
+        eyeCareService.getOrders({ patient: patientId }).catch(() => ({ results: [] })),
         wardService.getAdmissions({ patient: patientId }),
       ]);
 
@@ -1299,6 +1061,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setRawPrescriptions(prescriptions?.results || []);
       setRawVitals(vitals);
       setRawPhysioResults(physioOrders?.results || []);
+      setRawEyeResults(eyeOrdersResult?.results || []);
       setWardAdmissions(admissions?.results || []);
 
       // Set the most recent vitals on the current patient for display
@@ -1321,50 +1084,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setRawPrescriptions([]);
       setRawVitals([]);
       setRawPhysioResults([]);
+      setRawEyeResults([]);
       setWardAdmissions([]);
-      setConsultationHistory([]);
-      setLabHistory([]);
-      setImagingHistory([]);
-      setPrescriptionHistory([]);
-      setVitalsHistory([]);
-      setPhysioHistory([]);
-    } finally {
-      setLoadingPatientHistory(false);
     }
   };
-
-  // History tab filters
-  const [sessionDateFilter, setSessionDateFilter] = useState<string>('all');
-  const [labDateFilter, setLabDateFilter] = useState<string>('all');
-  const [labStatusFilter, setLabStatusFilter] = useState<string>('all');
-  const [imagingDateFilter, setImagingDateFilter] = useState<string>('all');
-  const [imagingStatusFilter, setImagingStatusFilter] = useState<string>('all');
-  const [vitalsDateFilter, setVitalsDateFilter] = useState<string>('all');
-  const [prescriptionsDateFilter, setPrescriptionsDateFilter] = useState<string>('all');
-  const [prescriptionsStatusFilter, setPrescriptionsStatusFilter] = useState<string>('all');
-  const [physioSearchQuery, setPhysioSearchQuery] = useState<string>('');
-  const [physioDateFilter, setPhysioDateFilter] = useState<string>('all');
-  const [physioStatusFilter, setPhysioStatusFilter] = useState<string>('all');
-  
-  // Pagination state
-  const [consultationsPage, setConsultationsPage] = useState(1);
-  const [labResultsPage, setLabResultsPage] = useState(1);
-  const [imagingPage, setImagingPage] = useState(1);
-  const [vitalsPage, setVitalsPage] = useState(1);
-  const [prescriptionsPage, setPrescriptionsPage] = useState(1);
-  const [consultationsPerPage, setConsultationsPerPage] = useState(10);
-  const [labResultsPerPage, setLabResultsPerPage] = useState(10);
-  const [imagingPerPage, setImagingPerPage] = useState(10);
-  const [vitalsPerPage, setVitalsPerPage] = useState(10);
-  const [prescriptionsPerPage, setPrescriptionsPerPage] = useState(10);
-  const [physioPage, setPhysioPage] = useState(1);
-  const [physioPerPage, setPhysioPerPage] = useState(10);
 
   // Physio dialog state
   const [selectedPhysioOrder, setSelectedPhysioOrder] = useState<any>(null);
   const [isPhysioOrderDialogOpen, setIsPhysioOrderDialogOpen] = useState(false);
   const [physioOrderSessions, setPhysioOrderSessions] = useState<PhysioSession[]>([]);
   const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
+
+  // Eye dialog state
+  const [selectedEyeOrderId, setSelectedEyeOrderId] = useState<number | undefined>(undefined);
+  const [showEyeOrderModal, setShowEyeOrderModal] = useState(false);
 
   const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
   const [isMarkingLeft, setIsMarkingLeft] = useState(false);
@@ -1828,13 +1561,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
 
       // Fire all enrichment API calls in parallel
-      const [diagnosesResult, prescriptionsResp, labResp, radiologyResp, nursingResp, physioResp, vitalsResp, historyResp] = await Promise.all([
+      const [diagnosesResult, prescriptionsResp, labResp, radiologyResp, nursingResp, physioResp, eyeResp, vitalsResp, historyResp] = await Promise.all([
         consultationService.getDiagnoses({ session: session.id, page_size: 100 }).catch(() => ({ results: [] })),
         visitId ? apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
         visitId ? apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
         visitId ? apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
         visitId ? apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
         physioService.getOrders({ consultation_session: session.id, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
+        eyeCareService.getOrders({ consultation_session: session.id, patient: session.patient != null ? session.patient : undefined, page_size: 100 }).catch(() => ({ results: [] })),
         visitId ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
         (async () => {
           const numericPatientId = typeof patient.id === 'number' ? patient.id : parseInt(patient.id, 10);
@@ -1917,6 +1651,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       // Process physio orders
       enrichedSession.physioOrders = (physioResp.results || []).map((o: any) => ({
+        diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+        priority: o.priority ?? '',
+        status: o.status ?? '',
+      }));
+
+      // Process eye orders
+      enrichedSession.eyeOrders = (eyeResp.results || []).map((o: any) => ({
         diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
         priority: o.priority ?? '',
         status: o.status ?? '',
@@ -2273,6 +2014,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         if (!cancelled) setPhysioOrdersFromApi(r?.results ?? []);
       } catch {
         if (!cancelled) setPhysioOrdersFromApi([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sessionId]);
+
+  // Load eye orders from API for this consultation session
+  useEffect(() => {
+    if (!sessionId) {
+      setEyeOrdersFromApi([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await eyeCareService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        if (!cancelled) setEyeOrdersFromApi(r?.results ?? []);
+      } catch {
+        if (!cancelled) setEyeOrdersFromApi([]);
       }
     })();
     return () => { cancelled = true; };
@@ -2770,13 +2529,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
 
     // Load all enrichment data in parallel — all only depend on fullSession.id
-    const [diagnosesResult, prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioOrdersResult, vitalsResult] = await Promise.all([
+    const [diagnosesResult, prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioOrdersResult, eyeOrdersResult, vitalsResult] = await Promise.all([
       consultationService.getDiagnoses({ session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
       pharmacyService.getPrescriptions({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
       labService.getOrders({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
       radiologyService.getOrders({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
       apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${fullSession.id}&page_size=100`).catch(() => ({ results: [] })),
       physioService.getOrders({ consultation_session: fullSession.id, patient: fullSession.patient != null ? String(fullSession.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
+      eyeCareService.getOrders({ consultation_session: fullSession.id, patient: fullSession.patient != null ? fullSession.patient : undefined, page_size: 100 }).catch(() => ({ results: [] })),
       patientService.getPatientVitals(fullSession.patient, fullSession.visit).catch(() => []),
     ]);
 
@@ -2865,6 +2625,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       status: o.status ?? '',
     }));
 
+    // Process eye orders
+    enrichedSession.eyeOrders = (eyeOrdersResult.results || []).map((o: any) => ({
+      diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+      priority: o.priority ?? '',
+      status: o.status ?? '',
+    }));
+
     // Process vitals
     const sortedVitals = (vitalsResult || []).sort((a: any, b: any) =>
       new Date(b.recorded_at || 0).getTime() - new Date(a.recorded_at || 0).getTime()
@@ -2890,7 +2657,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
 
     setSelectedSession(enrichedSession);
-    setShowSessionViewer(true);
+    setIsConsultationReportLoading(true);
+    loadConsultationReportSession(Number(session.id))
+      .then((reportSession) => {
+        setConsultationReportSession(reportSession);
+        setIsConsultationReportLoading(false);
+      })
+      .catch(() => {
+        // If loading the report fails, create a basic session from enriched data
+        setConsultationReportSession({
+          id: Number(session.id),
+          patient_name: session.patient_name ?? session.name ?? enrichedSession.patient_name ?? '',
+          patient_id: session.patient_id ?? enrichedSession.patient_id ?? '',
+          patient_age: session.patient_age ?? enrichedSession.patient_age ?? undefined,
+          patient_gender: session.patient_gender ?? enrichedSession.patient_gender ?? undefined,
+          doctor_name: session.doctor_name ?? enrichedSession.doctor_name ?? '',
+          clinic_name: session.clinic_name ?? '',
+          room_name: session.room_name ?? 'Consulting Room',
+          started_at: enrichedSession.started_at ?? session.date ?? '',
+          ended_at: enrichedSession.ended_at ?? undefined,
+          status: enrichedSession.status ?? session.status ?? '',
+          presentation_complaint: enrichedSession.presentation_complaint ?? '',
+          history_of_presenting_illness: enrichedSession.history_of_presenting_illness ?? '',
+          physical_examination: enrichedSession.physical_examination ?? '',
+          assessment: enrichedSession.assessment ?? '',
+          plan: enrichedSession.plan ?? '',
+          vitals: enrichedSession.vitals ?? undefined,
+          diagnoses: enrichedSession.diagnoses ?? [],
+          prescriptions: enrichedSession.prescriptions ?? [],
+          labOrders: enrichedSession.labOrders ?? [],
+          radiologyOrders: enrichedSession.radiologyOrders ?? [],
+          physioOrders: enrichedSession.physioOrders ?? [],
+        });
+        setIsConsultationReportLoading(false);
+      });
   };
 
   // Toggle session expansion in history
@@ -2902,389 +2702,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     );
   };
 
-  // Download consultation report as PDF
-  const downloadConsultationReport = async (session: any) => {
-    try {
-      toast.loading('Generating PDF report...', { id: 'pdf-generation' });
-
-      // Create a new window with the report for PDF generation
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        toast.error('Unable to open report window. Please allow popups for this site.', { id: 'pdf-generation' });
-        return;
-      }
-
-      // Generate HTML content with PDF-specific styling
-      const reportHTML = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Consultation Report - Session ${session.id}</title>
-          <style>
-            @media print {
-              @page {
-                size: A4;
-                margin: 20mm;
-              }
-              body { print-color-adjust: exact; }
-            }
-            body {
-              font-family: 'Times New Roman', serif;
-              margin: 0;
-              padding: 20px;
-              font-size: 12pt;
-              line-height: 1.4;
-              color: #000;
-              background: white;
-            }
-            .header {
-              text-align: center;
-              border-bottom: 2px solid #000;
-              padding-bottom: 15px;
-              margin-bottom: 25px;
-            }
-            .header h1 { margin: 0; font-size: 18pt; font-weight: bold; }
-            .header h2 { margin: 5px 0; font-size: 14pt; }
-            .header h3 { margin: 5px 0; font-size: 12pt; }
-            .section {
-              margin-bottom: 20px;
-              page-break-inside: avoid;
-            }
-            .section h3 {
-              color: #000;
-              border-bottom: 1px solid #000;
-              padding-bottom: 5px;
-              margin-bottom: 10px;
-              font-size: 14pt;
-              font-weight: bold;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 15px;
-              font-size: 11pt;
-            }
-            th, td {
-              border: 1px solid #000;
-              padding: 6px;
-              text-align: left;
-              vertical-align: top;
-            }
-            th {
-              background-color: #f0f0f0;
-              font-weight: bold;
-            }
-            .vitals-grid {
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-              gap: 8px;
-              margin-bottom: 15px;
-            }
-            .vital-item {
-              padding: 8px;
-              border: 1px solid #000;
-              text-align: center;
-              font-size: 11pt;
-            }
-            .footer {
-              margin-top: 30px;
-              text-align: center;
-              font-size: 10pt;
-              color: #666;
-              border-top: 1px solid #ccc;
-              padding-top: 10px;
-            }
-            .no-break { page-break-inside: avoid; }
-          </style>
-        </head>
-        <body>
-          ${generateConsultationReportHTML(session).replace('<html>', '').replace('</html>', '').replace('<head>', '').replace('</head>', '').replace('<body>', '').replace('</body>', '').replace(/<title>.*?<\/title>/, '')}
-        </body>
-        </html>
-      `;
-
-      printWindow.document.write(reportHTML);
-      printWindow.document.close();
-
-      // Wait for content to load, then trigger PDF download
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-          printWindow.close();
-          toast.success('PDF report generated and sent to printer', { id: 'pdf-generation' });
-        }, 500);
-      };
-
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      toast.error('Failed to generate PDF report', { id: 'pdf-generation' });
-    }
-  };
-
-  // Print consultation report
-  const printConsultationReport = (session: any) => {
-    // Generate HTML content for the consultation report
-    const reportHTML = generateConsultationReportHTML(session);
-
-    // Create a new window with the report
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(reportHTML);
-      printWindow.document.close();
-
-      // Wait for content to load, then print
-      printWindow.onload = () => {
-        printWindow.print();
-        printWindow.close();
-      };
-
-      toast.success('Consultation report opened for printing');
-    } else {
-      toast.error('Unable to open report window. Please allow popups for this site.');
-    }
-  };
-
-  // Generate HTML for consultation report
-  const generateConsultationReportHTML = (session: any) => {
-    const vitalsObj = Array.isArray(session.vitals) ? (session.vitals[0] || {}) : (session.vitals || {});
-    const prescriptions = getSessionProperty(session, 'prescriptions');
-    const labOrders = getSessionProperty(session, 'labOrders');
-    const radiologyOrders = getSessionProperty(session, 'radiologyOrders');
-    const physioOrders = getSessionProperty(session, 'physioOrders') || [];
-    const nursingOrders = getSessionProperty(session, 'nursingOrders');
-
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Consultation Report - Session ${session.id}</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-          .section { margin-bottom: 20px; }
-          .section h3 { color: #333; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f5f5f5; }
-          .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-          .vital-item { padding: 10px; border: 1px solid #ddd; text-align: center; }
-          .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>Nigerian Ports Authority</h1>
-          <h2>Medical Services Department</h2>
-          <h3>Consultation Report</h3>
-          <p>Session ID: ${session.id}</p>
-        </div>
-
-        <div class="section">
-          <h3>Patient Information</h3>
-          <p><strong>Name:</strong> ${session.patient_name ?? ''}</p>
-          ${session.patient_id ? `<p><strong>Patient ID:</strong> ${session.patient_id}</p>` : ''}
-          ${session.patient_age != null && session.patient_age !== '' ? `<p><strong>Age:</strong> ${session.patient_age} years</p>` : ''}
-          ${session.patient_gender ? `<p><strong>Gender:</strong> ${session.patient_gender}</p>` : ''}
-        </div>
-
-        <div class="section">
-          <h3>Consultation Details</h3>
-          ${session.doctor_name ? `<p><strong>Doctor:</strong> ${session.doctor_name}</p>` : ''}
-          ${session.clinic_name ? `<p><strong>Clinic:</strong> ${session.clinic_name}</p>` : ''}
-          ${session.room_name ? `<p><strong>Room:</strong> ${session.room_name}</p>` : ''}
-          <p><strong>Date & Time:</strong> ${formatDate(session.started_at)} ${formatTime(session.started_at)}</p>
-          ${(() => {
-            const dur = session.ended_at && session.started_at
-              ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes'
-              : session.started_at
-                ? Math.round((Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes (ongoing)'
-                : '';
-            return dur ? `<p><strong>Duration:</strong> ${dur}</p>` : '';
-          })()}
-        </div>
-
-        ${Object.keys(vitalsObj).length > 0 ? `
-        <div class="section">
-          <h3>Vital Signs</h3>
-          <div class="vitals-grid">
-            ${Object.entries(vitalsObj).map(([key, value]: [string, any]) =>
-              `<div class="vital-item"><strong>${vitalLabel(key)}</strong><br>${formatVitalDisplay(key, value)}</div>`
-            ).join('')}
-          </div>
-        </div>
-        ` : ''}
-
-        <div class="section">
-          <h3>Clinical Notes</h3>
-          ${session.presentation_complaint ? `<p><strong>Presentation:</strong> ${session.presentation_complaint}</p>` : ''}
-          ${session.history_of_presenting_illness ? `<p><strong>History:</strong> ${session.history_of_presenting_illness.replace(/\n/g, '<br>')}</p>` : ''}
-          ${session.physical_examination ? `<p><strong>Physical Exam:</strong> ${session.physical_examination.replace(/\n/g, '<br>')}</p>` : ''}
-          ${session.assessment ? `<p><strong>Assessment:</strong> ${session.assessment}</p>` : ''}
-          ${session.plan ? `<p><strong>Treatment Plan:</strong> ${session.plan}</p>` : ''}
-        </div>
-
-        ${session.diagnoses && session.diagnoses.length > 0 ? `
-        <div class="section">
-          <h3>Diagnoses</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>ICD-10 Code</th>
-                <th>Diagnosis</th>
-                <th>Diagnosis Type</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${session.diagnoses.map((dx: any) => `
-                <tr>
-                  <td>${dx.code || 'N/A'}</td>
-                  <td>${dx.name || 'Unknown'}</td>
-                  <td>${dx.type || 'Unknown'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${prescriptions.length > 0 ? `
-        <div class="section">
-          <h3>Prescriptions</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Medication</th>
-                <th>Dose</th>
-                <th>Frequency</th>
-                <th>Duration</th>
-                <th>Quantity</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${prescriptions.map((rx: any) => `
-                <tr>
-                  <td>${rx.medication || 'Unknown'}</td>
-                  <td>${rx.dosage || 'N/A'}</td>
-                  <td>${rx.frequency || 'N/A'}</td>
-                  <td>${rx.duration || 'N/A'}</td>
-                  <td>${rx.quantity || 'N/A'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${labOrders.length > 0 ? `
-        <div class="section">
-          <h3>Laboratory Orders</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Test</th>
-                <th>Priority</th>
-                <th>Status</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${labOrders.map((lab: any) => {
-                const resultText = formatResultWithPending(
-                  lab.result ? formatLabResult(lab.result) : '',
-                  lab.status,
-                  ['verified', 'completed', 'results_ready']
-                );
-                return `
-                <tr>
-                  <td>${escapeHtml(lab.test ?? '')}</td>
-                  <td>${escapeHtml(formatPriority(lab.priority))}</td>
-                  <td>${escapeHtml(lab.status ?? '')}</td>
-                  <td>${escapeHtml(resultText).replace(/\n/g, '<br>')}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${radiologyOrders.length > 0 ? `
-        <div class="section">
-          <h3>Radiology Orders</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Procedure</th>
-                <th>Priority</th>
-                <th>Status</th>
-                <th>Finding</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${radiologyOrders.map((rad: any) => {
-                const findingText = formatResultWithPending(
-                  rad.finding ? String(rad.finding) : '',
-                  rad.status,
-                  ['verified', 'completed', 'reported']
-                );
-                return `
-                <tr>
-                  <td>${escapeHtml(rad.procedure ?? '')}</td>
-                  <td>${escapeHtml(formatPriority(rad.priority))}</td>
-                  <td>${escapeHtml(rad.status ?? '')}</td>
-                  <td>${escapeHtml(findingText).replace(/\n/g, '<br>')}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${physioOrders.length > 0 ? `
-        <div class="section">
-          <h3>Physiotherapy Orders</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Diagnosis / Chief Complaint</th>
-                <th>Priority</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${physioOrders.map((p: any) => `
-                <tr>
-                  <td>${p.diagnosis ?? ''}</td>
-                  <td>${formatPriority(p.priority)}</td>
-                  <td>${p.status ?? ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${nursingOrders.length > 0 ? `
-        <div class="section">
-          <h3>Nursing Orders</h3>
-          <ul>
-            ${nursingOrders.map((order: any) => `<li>${order.type}: ${order.instructions}</li>`).join('')}
-          </ul>
-        </div>
-        ` : ''}
-
-        <div class="section">
-          <h3>Session Outcome</h3>
-          <p><strong>Status:</strong> ${session.status === 'completed' ? 'Completed' : 'In Progress'}</p>
-        </div>
-
-        <div class="footer">
-          <p>Generated: ${new Date().toLocaleString()} | Document ID: ${session.id}</p>
-        </div>
-      </body>
-      </html>
-    `;
-  };
-
   // Print session
   const printSession = (session: any) => {
     // In a real implementation, this would open print dialog
@@ -3294,23 +2711,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   // View lab result details (shared Lab Report dialog with Laboratory → Completed Tests)
   const viewLabResultDetails = (labResult: LabTestResult) => {
-    const raw = rawLabResults.find((r: any) => Number(r?.id) === Number(labResult.id));
-    if (!raw) {
-      toast.error('Could not open lab report. Try refreshing patient history.');
-      return;
-    }
-    setSelectedCompletedLabTest(transformApiRowToCompletedTest(raw, 'tests'));
+    setSelectedCompletedLabTest(transformApiRowToCompletedTest(labResult as any, 'tests'));
     setShowLabResultViewer(true);
   };
 
   // View imaging report (shared Radiology Report dialog with Radiology → Completed Studies)
   const viewImagingReportDetails = (img: ServiceRadiologyReport) => {
-    const raw = rawImagingResults.find((r: any) => Number(r?.id) === Number(img.id));
-    if (!raw) {
-      toast.error('Could not open imaging report. Try refreshing patient history.');
-      return;
-    }
-    setSelectedCompletedRadiologyReport(transformApiRadiologyReportToCompleted(raw));
+    setSelectedCompletedRadiologyReport(transformApiRadiologyReportToCompleted(img as any));
     setShowRadiologyReportViewer(true);
   };
 
@@ -3318,45 +2725,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const viewPrescriptionDetails = (prescription: any) => {
     setSelectedPrescription(prescription);
     setShowPrescriptionViewer(true);
-  };
-
-  const cancelHistoryPrescription = async (prescription: any) => {
-    if (!prescription?.id) {
-      toast.error('Prescription reference is not available.');
-      return;
-    }
-
-    const confirmed = window.confirm('Cancel this prescription from consultation history? Dispensed or partially dispensed prescriptions cannot be cancelled.');
-    if (!confirmed) return;
-
-    try {
-      const updated = await pharmacyService.cancelPrescription(prescription.id, 'Cancelled from consultation history');
-      setRawPrescriptions((prev) =>
-        prev.map((rx) => (String(rx.id) === String(prescription.id) ? { ...rx, ...updated } : rx))
-      );
-      setPrescriptionHistory((prev) =>
-        prev.map((rx) =>
-          String(rx.id) === String(prescription.id)
-            ? { ...rx, status: 'cancelled', canCancel: false }
-            : rx
-        )
-      );
-      if (selectedPrescription && String(selectedPrescription.id) === String(prescription.id)) {
-        setSelectedPrescription((prev: any) => prev ? { ...prev, status: 'cancelled', canCancel: false } : prev);
-      }
-      toast.success('Prescription cancelled');
-    } catch (err: any) {
-      toast.error(err?.message || 'Could not cancel prescription');
-    }
-  };
-
-  // Toggle lab result expansion in history
-  const toggleLabResultExpansion = (labId: string) => {
-    setExpandedLabResults(prev => 
-      prev.includes(labId) 
-        ? prev.filter(id => id !== labId)
-        : [...prev, labId]
-    );
   };
 
   const confirmEndSession = async () => {
@@ -4712,6 +4080,122 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
+  // Eye Care order functions
+  const addEyeOrder = () => {
+    if (!newEye.diagnosis.trim()) {
+      toast.error('Diagnosis is required');
+      return;
+    }
+
+    if (editingEyeIndex !== null) {
+      setEyeOrders(prev => prev.map((order, i) =>
+        i === editingEyeIndex
+          ? {
+              ...order,
+              chiefComplaint: newEye.chiefComplaint.trim(),
+              diagnosis: newEye.diagnosis.trim(),
+              treatmentPlan: newEye.treatmentPlan.trim(),
+              specialInstructions: newEye.specialInstructions.trim() || undefined,
+              priority: newEye.priority,
+            }
+          : order
+      ));
+      toast.success('Eye care order updated');
+    } else {
+      const newOrder = {
+        id: `eye-${Date.now()}`,
+        chiefComplaint: newEye.chiefComplaint?.trim() || '',
+        diagnosis: newEye.diagnosis.trim(),
+        treatmentPlan: newEye.treatmentPlan?.trim() || '',
+        specialInstructions: newEye.specialInstructions?.trim() || undefined,
+        priority: newEye.priority,
+        status: 'Draft' as const
+      };
+      setEyeOrders(prev => [...prev, newOrder]);
+      toast.success('Eye care order added');
+    }
+
+    setNewEye({
+      chiefComplaint: "",
+      diagnosis: "",
+      treatmentPlan: "",
+      specialInstructions: "",
+      priority: "normal"
+    });
+    setEditingEyeIndex(null);
+    setShowAddEye(false);
+  };
+
+  const editEyeOrder = (index: number) => {
+    const orderToEdit = eyeOrders[index];
+    setNewEye({
+      chiefComplaint: orderToEdit.chiefComplaint || "",
+      diagnosis: orderToEdit.diagnosis,
+      treatmentPlan: orderToEdit.treatmentPlan || "",
+      specialInstructions: orderToEdit.specialInstructions || "",
+      priority: orderToEdit.priority
+    });
+    setEditingEyeIndex(index);
+    setShowAddEye(true);
+  };
+
+  const sendEyeOrders = async () => {
+    const draftOrders = eyeOrders.filter(p => p.status === 'Draft');
+
+    if (draftOrders.length === 0) {
+      toast.info("No draft eye care orders to send");
+      return;
+    }
+
+    if (!currentPatient || !sessionId) {
+      toast.error('No active session. Please start a consultation session first.');
+      return;
+    }
+
+    try {
+      const numericPatientId = parseInt(currentPatient.id);
+      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+
+      if (isNaN(numericPatientId)) {
+        toast.error('Invalid patient ID');
+        return;
+      }
+
+      const priorityOrder: Record<string, number> = { 'stat': 0, 'urgent': 1, 'routine': 2 };
+      const orderPriority = draftOrders.reduce((highest, order) => {
+        const currentPriority = priorityOrder[order.priority] ?? 2;
+        const highestPriority = priorityOrder[highest] ?? 2;
+        return currentPriority < highestPriority ? order.priority : highest;
+      }, 'routine');
+
+      for (const order of draftOrders) {
+        await eyeCareService.createOrder({
+          patient: numericPatientId,
+          visit: numericVisitId && !isNaN(numericVisitId) ? numericVisitId : undefined,
+          chief_complaint: order.chiefComplaint,
+          diagnosis: order.diagnosis,
+          treatment_plan: order.treatmentPlan,
+          special_instructions: order.specialInstructions || undefined,
+          priority: orderPriority,
+          consultation_session: sessionId,
+        } as any);
+      }
+
+      setEyeOrders(prev => prev.filter(o => !draftOrders.some(d => d.id === o.id)));
+      try {
+        const updated = await eyeCareService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        setEyeOrdersFromApi(updated?.results ?? []);
+      } catch {
+        // non-fatal: orders were created
+      }
+
+      toast.success(`${draftOrders.length} eye care order(s) sent to Eye Care department`);
+    } catch (err: any) {
+      console.error('Error creating eye care order:', err);
+      toast.error(err.message || 'Failed to send eye care order');
+    }
+  };
+
   const editRadiologyOrder = (orderId: string) => {
     const orderToEdit = radiologyOrders.find(o => o.id === orderId);
     if (!orderToEdit) return;
@@ -5527,7 +5011,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Tabs Section */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-8">
+          <TabsList className="grid w-full grid-cols-9">
             <TabsTrigger value="notes" className="flex items-center gap-1">
               <FileText className="h-4 w-4" />
               <span className="hidden lg:inline">Notes</span>
@@ -5547,6 +5031,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <TabsTrigger value="physiotherapy" className="flex items-center gap-1">
               <Activity className="h-4 w-4" />
               <span className="hidden lg:inline">Physio</span>
+            </TabsTrigger>
+            <TabsTrigger value="eyecare" className="flex items-center gap-1">
+              <Eye className="h-4 w-4" />
+              <span className="hidden lg:inline">Eye</span>
             </TabsTrigger>
             <TabsTrigger value="nursing" className="flex items-center gap-1">
               <Syringe className="h-4 w-4" />
@@ -6184,6 +5672,126 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </Card>
           </TabsContent>
 
+          <TabsContent value="eyecare">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Eye className="h-5 w-5 text-cyan-600" />
+                      Eye Care Orders
+                    </CardTitle>
+                    <CardDescription>
+                      Order eye care evaluation — will be sent to Eye Care queue.
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setShowAddEye(true)}>
+                      <Plus className="mr-2 h-4 w-4" />Add Eye Order
+                    </Button>
+                    {eyeOrders.some(p => p.status === 'Draft') && (
+                      <Button onClick={sendEyeOrders} className="bg-cyan-600 hover:bg-cyan-700">
+                        <Eye className="mr-2 h-4 w-4" />
+                        Send to Eye ({eyeOrders.filter(p => p.status === 'Draft').length})
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(() => {
+                  const apiDisplay = (eyeOrdersFromApi || []).map((o: any) => ({
+                    id: o.id,
+                    chiefComplaint: o.chief_complaint || '',
+                    diagnosis: o.diagnosis || '',
+                    treatmentPlan: o.treatment_plan || '',
+                    specialInstructions: o.special_instructions || '',
+                    priority: o.priority || 'normal',
+                    status: (o.status === 'pending' ? 'Sent to Eye Care' : o.status === 'scheduled' ? 'Scheduled' : o.status === 'in_progress' ? 'In Progress' : o.status === 'completed' ? 'Completed' : String(o.status || '')) as any,
+                    fromApi: true
+                  }));
+                  const draftsWithIndex = eyeOrders.map((o, i) => ({ ...o, draftIndex: i }));
+                  const allOrders = [...apiDisplay, ...draftsWithIndex];
+                  const getStatusBadge = (status: string) => {
+                    switch (status) {
+                      case 'Draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+                      case 'Sent to Eye Care': return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400';
+                      case 'Scheduled': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                      case 'In Progress': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+                      case 'Completed': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+                      default: return 'bg-gray-100 text-gray-800';
+                    }
+                  };
+                  const getPriorityBadge = (priority: string) => {
+                    switch (priority) {
+                      case 'stat': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+                      case 'urgent': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
+                      case 'routine': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                      default: return 'bg-gray-100 text-gray-800';
+                    }
+                  };
+                  return allOrders.length > 0 ? (
+                    <div className="space-y-3">
+                      {allOrders.map((order: any, index: number) => (
+                        <Card key={order.fromApi ? `api-${order.id}` : order.id || index} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Eye Care' ? 'border-l-cyan-500' : order.status === 'Completed' ? 'border-l-green-500' : 'border-l-cyan-500'} ${order.priority === 'stat' ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>
+                          <CardContent className="p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-2 flex-1">
+                                <div className={`p-1.5 rounded-full ${order.priority === 'stat' ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-cyan-100 dark:bg-cyan-900/30'}`}>
+                                  <Eye className={`h-3.5 w-3.5 ${order.priority === 'stat' ? 'text-rose-600' : 'text-cyan-600'}`} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <span className="font-semibold text-sm">{order.diagnosis || 'Eye Evaluation'}</span>
+                                    <Badge variant={order.priority === "stat" ? "destructive" : order.priority === "urgent" ? "default" : "secondary"} className={`text-xs px-1.5 py-0.5 ${order.priority === 'stat' ? 'bg-rose-500' : order.priority === 'urgent' ? 'bg-amber-500' : ''}`}>
+                                      {order.priority === 'stat' && <AlertTriangle className="h-3 w-3 mr-1" />}
+                                      {order.priority}
+                                    </Badge>
+                                    <Badge className={`text-xs px-1.5 py-0.5 ${getStatusBadge(order.status)}`}>{order.status}</Badge>
+                                  </div>
+                                  {order.chiefComplaint && <p className="text-xs text-muted-foreground mb-0.5">{order.chiefComplaint}</p>}
+                                  {order.treatmentPlan && <p className="text-xs text-muted-foreground">{order.treatmentPlan}</p>}
+                                  {order.status === 'Sent to Eye Care' && (
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                                      <Clock className="h-3 w-3" />
+                                      <span>Sent to Eye Care queue • Ready for scheduling</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {order.status === 'Draft' && typeof order.draftIndex === 'number' && (
+                                <div className="flex gap-1">
+                                  <Button variant="ghost" size="sm" onClick={() => editEyeOrder(order.draftIndex)} className="text-blue-500 hover:text-blue-600" title="Edit eye order">
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={() => setEyeOrders(prev => prev.filter((_, i) => i !== order.draftIndex))} className="text-rose-500 hover:text-rose-600" title="Remove eye order">
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
+                              {order.status === 'Sent to Eye Care' && (
+                                <Badge className="bg-cyan-500 text-white"><CheckCircle className="h-3 w-3 mr-1" />Queued</Badge>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 bg-gradient-to-b from-cyan-50 to-cyan-100/50 dark:from-cyan-900/10 dark:to-cyan-900/5 rounded-lg border-2 border-dashed border-cyan-200 dark:border-cyan-800">
+                      <Eye className="h-12 w-12 mx-auto mb-3 text-cyan-500 opacity-60" />
+                      <p className="font-medium text-cyan-900 dark:text-cyan-100 mb-1">No eye care orders yet</p>
+                      <p className="text-sm text-muted-foreground mb-4">Order evaluations to be processed by Eye Care department</p>
+                      <Button variant="outline" size="sm" onClick={() => setShowAddEye(true)} className="border-cyan-300 text-cyan-700 hover:bg-cyan-100">
+                        <Plus className="h-4 w-4 mr-1" />Order First Evaluation
+                      </Button>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="nursing">
             <Card>
               <CardHeader>
@@ -6678,1173 +6286,49 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
           <TabsContent value="history">
             <div className="space-y-4">
-              {/* Top Row: Allergies + Chronic Conditions Side by Side */}
-              <div className="grid gap-4 lg:grid-cols-2">
-                {/* Allergies Card */}
-                <Card className={`${medicalHistory.allergies && medicalHistory.allergies.length > 0 ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : 'border-muted'}`}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <AlertTriangle className={`h-4 w-4 ${medicalHistory.allergies && medicalHistory.allergies.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
-                      Allergies
-                      {medicalHistory.allergies && medicalHistory.allergies.length > 0 && (
-                        <Badge variant="outline" className="ml-auto bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                          {medicalHistory.allergies.length}
-                        </Badge>
-                      )}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {medicalHistory.allergies && medicalHistory.allergies.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {medicalHistory.allergies.map((allergy: string, index: number) => (
-                          <Badge key={index} className="bg-red-600 text-white hover:bg-red-700">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            {allergy}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-4 text-sm text-muted-foreground">
-                        <AlertTriangle className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                        <p>No known allergies</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Chronic Conditions Card */}
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Stethoscope className="h-4 w-4 text-amber-500" />
-                      Chronic Conditions
-                      {medicalHistory.diagnoses && medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 && (
-                        <Badge variant="outline" className="ml-auto bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
-                          {medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length}
-                        </Badge>
-                      )}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {medicalHistory.diagnoses && medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').map((diagnosis: { name: string; code?: string; diagnosedDate?: string }, index: number) => (
-                          <div key={index} className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs">
-                                {diagnosis.code || 'N/A'}
-                              </Badge>
-                              <span className="font-medium text-sm">{diagnosis.name}</span>
-                            </div>
-                            {diagnosis.diagnosedDate && (
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Diagnosed: {diagnosis.diagnosedDate}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-4 text-sm text-muted-foreground">
-                        <Stethoscope className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                        <p>No chronic conditions</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* History Tables in Tabs */}
-              <Card>
-                <CardHeader className="pb-0">
-                    <Tabs defaultValue="consultations" className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
-                      <TabsTrigger value="consultations" className="text-xs">
-                        <ClipboardList className="h-3 w-3 mr-1" />
-                        Consultations ({consultationHistory.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="labs" className="text-xs">
-                        <TestTube className="h-3 w-3 mr-1" />
-                        Lab Results ({labHistory.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="imaging" className="text-xs">
-                        <ScanLine className="h-3 w-3 mr-1" />
-                        Imaging ({imagingHistory.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="prescriptions" className="text-xs">
-                        <Pill className="h-3 w-3 mr-1" />
-                        Prescriptions ({prescriptionHistory.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="vitals" className="text-xs">
-                        <Heart className="h-3 w-3 mr-1" />
-                        Vitals ({vitalsHistory.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="physio" className="text-xs">
-                        <Activity className="h-3 w-3 mr-1" />
-                        Physio ({physioHistory.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="wards" className="text-xs">
-                        <Building2 className="h-3 w-3 mr-1" />
-                        Observation Admissions ({wardAdmissions.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="background" className="text-xs">
-                        <User className="h-3 w-3 mr-1" />
-                        Background
-                      </TabsTrigger>
-                    </TabsList>
-
-                    {/* Consultations Tab */}
-                    <TabsContent value="consultations" className="mt-4">
-                      {(() => {
-                        const totalConsultations = consultationHistory.length;
-                        const totalConsultationPages = Math.ceil(totalConsultations / consultationsPerPage);
-                        const paginatedConsultations = consultationHistory.slice(
-                          (consultationsPage - 1) * consultationsPerPage, 
-                          consultationsPage * consultationsPerPage
-                        );
-                        return (
-                          <>
-                            <div className="flex items-center justify-between mb-3">
-                              <select
-                                value={sessionDateFilter}
-                                onChange={(e) => { setSessionDateFilter(e.target.value); setConsultationsPage(1); }}
-                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                              >
-                                <option value="all">All Time</option>
-                                <option value="30">Last 30 Days</option>
-                                <option value="90">Last 3 Months</option>
-                                <option value="365">Last Year</option>
-                              </select>
-                            </div>
-                            <div className="border rounded-lg overflow-hidden">
-                              <table className="w-full text-sm">
-                                <thead className="bg-muted/50">
-                                  <tr>
-                                    <th className="px-4 py-2 text-left font-medium">Date</th>
-                                    <th className="px-4 py-2 text-left font-medium">Doctor</th>
-                                    <th className="px-4 py-2 text-left font-medium">Clinic</th>
-                                    <th className="px-4 py-2 text-center font-medium">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {paginatedConsultations.map((session) => (
-                                    <tr key={session.id} className="hover:bg-muted/30">
-                                      <td className="px-4 py-3 text-muted-foreground">{session.date}</td>
-                                      <td className="px-4 py-3">{session.doctor}</td>
-                                      <td className="px-4 py-3">
-                                        <Badge variant="outline">{session.clinic}</Badge>
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        <Button variant="ghost" size="sm" onClick={() => viewSessionDetails(session)}>
-                                          <Eye className="h-4 w-4 mr-1" /> View
-                                        </Button>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {/* Pagination */}
-                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
-                              <div className="flex items-center gap-4">
-                                <p className="text-sm text-muted-foreground">
-                                  Showing {totalConsultations === 0 ? 0 : `${(consultationsPage - 1) * consultationsPerPage + 1}-${Math.min(totalConsultations, consultationsPage * consultationsPerPage)}`} of {totalConsultations}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <label className="text-sm text-muted-foreground">Per page:</label>
-                                  <Select value={String(consultationsPerPage)} onValueChange={(value) => { setConsultationsPerPage(Number(value)); setConsultationsPage(1); }}>
-                                    <SelectTrigger className="w-16 h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="5">5</SelectItem>
-                                      <SelectItem value="10">10</SelectItem>
-                                      <SelectItem value="25">25</SelectItem>
-                                      <SelectItem value="50">50</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" disabled={consultationsPage === 1} onClick={() => setConsultationsPage(p => p - 1)}>
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: Math.min(5, totalConsultationPages) }, (_, i) => {
-                                    let pageNum: number;
-                                    if (totalConsultationPages <= 5) pageNum = i + 1;
-                                    else if (consultationsPage <= 3) pageNum = i + 1;
-                                    else if (consultationsPage >= totalConsultationPages - 2) pageNum = totalConsultationPages - 4 + i;
-                                    else pageNum = consultationsPage - 2 + i;
-                                    if (pageNum > totalConsultationPages || pageNum < 1) return null;
-                                    return (
-                                      <Button key={pageNum} variant={consultationsPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setConsultationsPage(pageNum)}>
-                                        {pageNum}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
-                                <Button variant="outline" size="sm" disabled={consultationsPage >= totalConsultationPages} onClick={() => setConsultationsPage(p => p + 1)}>
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </TabsContent>
-
-                    {/* Lab Results Tab */}
-                    <TabsContent value="labs" className="mt-4">
-                      {(() => {
-                        const filteredLabs = labHistory.filter((lab: LabTestResult) => labStatusFilter === 'all' || lab.status === labStatusFilter);
-                        const totalLabs = filteredLabs.length;
-                        const totalLabPages = Math.ceil(totalLabs / labResultsPerPage);
-                        const paginatedLabs = filteredLabs.slice((labResultsPage - 1) * labResultsPerPage, labResultsPage * labResultsPerPage);
-                        return (
-                          <>
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-3">
-                                <select
-                                  value={labDateFilter}
-                                  onChange={(e) => { setLabDateFilter(e.target.value); setLabResultsPage(1); }}
-                                  className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                                >
-                                  <option value="all">All Time</option>
-                                  <option value="30">Last 30 Days</option>
-                                  <option value="90">Last 3 Months</option>
-                                  <option value="365">Last Year</option>
-                                </select>
-                                <select
-                                  value={labStatusFilter}
-                                  onChange={(e) => { setLabStatusFilter(e.target.value); setLabResultsPage(1); }}
-                                  className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                                >
-                                  <option value="all">All Status</option>
-                                  <option value="Normal">Normal</option>
-                                  <option value="Abnormal">Abnormal</option>
-                                </select>
-                              </div>
-                            </div>
-                            <div className="border rounded-lg overflow-hidden">
-                              <table className="w-full text-sm">
-                                <thead className="bg-muted/50">
-                                  <tr>
-                                    <th className="px-4 py-2 text-left font-medium">Date</th>
-                                    <th className="px-4 py-2 text-left font-medium">Test</th>
-                                    <th className="px-4 py-2 text-left font-medium">Processed By</th>
-                                    <th className="px-4 py-2 text-left font-medium">Verified By</th>
-                                    <th className="px-4 py-2 text-center font-medium">Status</th>
-                                    <th className="px-4 py-2 text-center font-medium">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {paginatedLabs.map((lab: LabTestResult) => (
-                                    <tr key={lab.id} className="hover:bg-muted/30">
-                                      <td className="px-4 py-3 text-muted-foreground">{lab.date || lab.completed_at || ''}</td>
-                                      <td className="px-4 py-3 font-medium">{lab.test_name || ''}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{lab.performedBy || ''}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{lab.verifiedBy || ''}</td>
-                                      <td className="px-4 py-3 text-center">
-                                        <Badge className={lab.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}>
-                                          {lab.status}
-                                        </Badge>
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        <Button variant="ghost" size="sm" onClick={() => viewLabResultDetails(lab)}>
-                                          <Eye className="h-4 w-4 mr-1" /> View
-                                        </Button>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {/* Pagination */}
-                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
-                              <div className="flex items-center gap-4">
-                                <p className="text-sm text-muted-foreground">
-                                  Showing {totalLabs === 0 ? 0 : `${(labResultsPage - 1) * labResultsPerPage + 1}-${Math.min(totalLabs, labResultsPage * labResultsPerPage)}`} of {totalLabs}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <label className="text-sm text-muted-foreground">Per page:</label>
-                                  <Select value={String(labResultsPerPage)} onValueChange={(value) => { setLabResultsPerPage(Number(value)); setLabResultsPage(1); }}>
-                                    <SelectTrigger className="w-16 h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="5">5</SelectItem>
-                                      <SelectItem value="10">10</SelectItem>
-                                      <SelectItem value="25">25</SelectItem>
-                                      <SelectItem value="50">50</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" disabled={labResultsPage === 1} onClick={() => setLabResultsPage(p => p - 1)}>
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: Math.min(5, totalLabPages) }, (_, i) => {
-                                    let pageNum: number;
-                                    if (totalLabPages <= 5) pageNum = i + 1;
-                                    else if (labResultsPage <= 3) pageNum = i + 1;
-                                    else if (labResultsPage >= totalLabPages - 2) pageNum = totalLabPages - 4 + i;
-                                    else pageNum = labResultsPage - 2 + i;
-                                    if (pageNum > totalLabPages || pageNum < 1) return null;
-                                    return (
-                                      <Button key={pageNum} variant={labResultsPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setLabResultsPage(pageNum)}>
-                                        {pageNum}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
-                                <Button variant="outline" size="sm" disabled={labResultsPage >= totalLabPages || totalLabPages === 0} onClick={() => setLabResultsPage(p => p + 1)}>
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </TabsContent>
-
-                    {/* Imaging Tab */}
-                    <TabsContent value="imaging" className="mt-4">
-                      {(() => {
-                        const filteredImaging = imagingHistory.filter((img: ServiceRadiologyReport) => {
-                          if (imagingStatusFilter === 'all') return true;
-                          return (
-                            String(img.overall_status || '').toLowerCase() === imagingStatusFilter.toLowerCase()
-                          );
-                        });
-                        const totalImaging = filteredImaging.length;
-                        const totalImagingPages = Math.ceil(totalImaging / imagingPerPage);
-                        const paginatedImaging = filteredImaging.slice((imagingPage - 1) * imagingPerPage, imagingPage * imagingPerPage);
-                        return (
-                          <>
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-3">
-                                <select
-                                  value={imagingDateFilter}
-                                  onChange={(e) => { setImagingDateFilter(e.target.value); setImagingPage(1); }}
-                                  className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                                >
-                                  <option value="all">All Time</option>
-                                  <option value="30">Last 30 Days</option>
-                                  <option value="90">Last 3 Months</option>
-                                  <option value="365">Last Year</option>
-                                </select>
-                                <select
-                                  value={imagingStatusFilter}
-                                  onChange={(e) => { setImagingStatusFilter(e.target.value); setImagingPage(1); }}
-                                  className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                                >
-                                  <option value="all">All Status</option>
-                                  <option value="normal">Normal</option>
-                                  <option value="abnormal">Abnormal</option>
-                                  <option value="critical">Critical</option>
-                                </select>
-                              </div>
-                            </div>
-                            <div className="border rounded-lg overflow-hidden">
-                              <table className="w-full text-sm">
-                                <thead className="bg-muted/50">
-                                  <tr>
-                                    <th className="px-4 py-2 text-left font-medium">Date</th>
-                                    <th className="px-4 py-2 text-left font-medium">Procedure</th>
-                                    <th className="px-4 py-2 text-left font-medium">Reported By</th>
-                                    <th className="px-4 py-2 text-left font-medium">Verified By</th>
-                                    <th className="px-4 py-2 text-center font-medium">Status</th>
-                                    <th className="px-4 py-2 text-center font-medium">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {paginatedImaging.map((img: ServiceRadiologyReport) => {
-                                    const st = String(img.overall_status || 'pending').toLowerCase();
-                                    const statusBadgeClass =
-                                      st === 'normal'
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : st === 'critical'
-                                          ? 'bg-rose-100 text-rose-800'
-                                          : 'bg-amber-100 text-amber-800';
-                                    const sd = img.study_details as Record<string, unknown> | undefined;
-                                    const reportedBy =
-                                      (sd?.reported_by_name as string) ||
-                                      (sd?.verified_by_name as string) ||
-                                      '';
-                                    const verifiedBy = (sd?.verified_by_name as string) || '';
-                                    return (
-                                    <tr key={img.id} className="hover:bg-muted/30">
-                                      <td className="px-4 py-3 text-muted-foreground">{formatDate(img.created_at)}</td>
-                                      <td className="px-4 py-3 font-medium">{img.study_details?.procedure || `Study ${img.study}`}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{reportedBy}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{verifiedBy}</td>
-                                      <td className="px-4 py-3 text-center">
-                                        <Badge className={statusBadgeClass}>
-                                          {img.overall_status || 'pending'}
-                                        </Badge>
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        <Button variant="ghost" size="sm" onClick={() => viewImagingReportDetails(img)}>
-                                          <Eye className="h-4 w-4 mr-1" /> View
-                                        </Button>
-                                      </td>
-                                    </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                            {/* Pagination */}
-                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
-                              <div className="flex items-center gap-4">
-                                <p className="text-sm text-muted-foreground">
-                                  Showing {totalImaging === 0 ? 0 : `${(imagingPage - 1) * imagingPerPage + 1}-${Math.min(totalImaging, imagingPage * imagingPerPage)}`} of {totalImaging}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <label className="text-sm text-muted-foreground">Per page:</label>
-                                  <Select value={String(imagingPerPage)} onValueChange={(value) => { setImagingPerPage(Number(value)); setImagingPage(1); }}>
-                                    <SelectTrigger className="w-16 h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="5">5</SelectItem>
-                                      <SelectItem value="10">10</SelectItem>
-                                      <SelectItem value="25">25</SelectItem>
-                                      <SelectItem value="50">50</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" disabled={imagingPage === 1} onClick={() => setImagingPage(p => p - 1)}>
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: Math.min(5, totalImagingPages) }, (_, i) => {
-                                    let pageNum: number;
-                                    if (totalImagingPages <= 5) pageNum = i + 1;
-                                    else if (imagingPage <= 3) pageNum = i + 1;
-                                    else if (imagingPage >= totalImagingPages - 2) pageNum = totalImagingPages - 4 + i;
-                                    else pageNum = imagingPage - 2 + i;
-                                    if (pageNum > totalImagingPages || pageNum < 1) return null;
-                                    return (
-                                      <Button key={pageNum} variant={imagingPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setImagingPage(pageNum)}>
-                                        {pageNum}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
-                                <Button variant="outline" size="sm" disabled={imagingPage >= totalImagingPages || totalImagingPages === 0} onClick={() => setImagingPage(p => p + 1)}>
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </TabsContent>
-
-                    {/* Prescriptions Tab */}
-                    <TabsContent value="prescriptions" className="mt-4">
-                      {(() => {
-                        // Filter prescriptions based on date and status filters
-                        let filteredPrescriptions = [...prescriptionHistory];
-                        
-                        // Apply date filter
-                        if (prescriptionsDateFilter !== 'all') {
-                          const days = parseInt(prescriptionsDateFilter);
-                          const cutoffDate = new Date();
-                          cutoffDate.setDate(cutoffDate.getDate() - days);
-                          filteredPrescriptions = filteredPrescriptions.filter(p => {
-                            const prescriptionDate = new Date(p.date);
-                            return prescriptionDate >= cutoffDate;
-                          });
-                        }
-                        
-                        // Apply status filter
-                        if (prescriptionsStatusFilter !== 'all') {
-                          filteredPrescriptions = filteredPrescriptions.filter(p => p.status === prescriptionsStatusFilter);
-                        }
-                        
-                        const totalPrescriptions = filteredPrescriptions.length;
-                        const totalPrescriptionsPages = Math.ceil(totalPrescriptions / prescriptionsPerPage);
-                        const paginatedPrescriptions = filteredPrescriptions.slice(
-                          (prescriptionsPage - 1) * prescriptionsPerPage, 
-                          prescriptionsPage * prescriptionsPerPage
-                        );
-                        return (
-                          <>
-                            <div className="flex items-center justify-between mb-3 gap-2">
-                              <select
-                                value={prescriptionsDateFilter}
-                                onChange={(e) => { setPrescriptionsDateFilter(e.target.value); setPrescriptionsPage(1); }}
-                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                              >
-                                <option value="all">All Time</option>
-                                <option value="30">Last 30 Days</option>
-                                <option value="90">Last 3 Months</option>
-                                <option value="365">Last Year</option>
-                              </select>
-                              <select
-                                value={prescriptionsStatusFilter}
-                                onChange={(e) => { setPrescriptionsStatusFilter(e.target.value); setPrescriptionsPage(1); }}
-                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                              >
-                                <option value="all">All Status</option>
-                                <option value="pending">Pending</option>
-                                <option value="dispensing">Processing</option>
-                                <option value="partially_dispensed">Partially Dispensed</option>
-                                <option value="dispensed">Dispensed</option>
-                                <option value="cancelled">Cancelled</option>
-                              </select>
-                            </div>
-                            <div className="border rounded-lg overflow-hidden">
-                              <table className="w-full text-sm">
-                                <thead className="bg-muted/50">
-                                  <tr>
-                                    <th className="px-4 py-2 text-left font-medium">Date</th>
-                                    <th className="px-4 py-2 text-left font-medium">Doctor</th>
-                                    <th className="px-4 py-2 text-left font-medium">Medications</th>
-                                    <th className="px-4 py-2 text-center font-medium">Status</th>
-                                    <th className="px-4 py-2 text-center font-medium">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {paginatedPrescriptions.map((prescription) => (
-                                    <tr key={prescription.id} className="hover:bg-muted/30">
-                                      <td className="px-4 py-3 text-muted-foreground">{prescription.date}</td>
-                                      <td className="px-4 py-3">{prescription.doctor}</td>
-                                      <td className="px-4 py-3">
-                                        <div className="flex flex-wrap gap-1">
-                                          {prescription.medications.map((med: any, idx: number) => (
-                                            <Badge key={idx} variant="outline" className="text-xs">
-                                              {med.medication_name || med.medication?.name || med.name || 'Unknown'}
-                                            </Badge>
-                                          ))}
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        <Badge 
-                                          variant="outline" 
-                                          className={
-                                            prescription.status === 'dispensed' 
-                                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                              : prescription.status === 'partially_dispensed'
-                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
-                                              : prescription.status === 'cancelled'
-                                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400'
-                                              : prescription.status === 'dispensing'
-                                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
-                                              : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-                                          }
-                                        >
-                                          {prescription.status === 'dispensed' ? 'Dispensed' : 
-                                           prescription.status === 'partially_dispensed' ? 'Partially Dispensed' : 
-                                           prescription.status === 'cancelled' ? 'Cancelled' :
-                                           prescription.status === 'dispensing' ? 'Processing' :
-                                           'Pending'}
-                                        </Badge>
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        <div className="flex items-center justify-center gap-1">
-                                        <Button variant="ghost" size="sm" onClick={() => viewPrescriptionDetails(prescription)}>
-                                          <Eye className="h-4 w-4 mr-1" /> View
-                                        </Button>
-                                        {prescription.canCancel && (
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => cancelHistoryPrescription(prescription)}
-                                            className="text-rose-600 hover:text-rose-700"
-                                          >
-                                            <X className="h-4 w-4 mr-1" /> Cancel
-                                          </Button>
-                                        )}
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {/* Pagination */}
-                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
-                              <div className="flex items-center gap-4">
-                                <p className="text-sm text-muted-foreground">
-                                  Showing {totalPrescriptions === 0 ? 0 : `${(prescriptionsPage - 1) * prescriptionsPerPage + 1}-${Math.min(totalPrescriptions, prescriptionsPage * prescriptionsPerPage)}`} of {totalPrescriptions}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <label className="text-sm text-muted-foreground">Per page:</label>
-                                  <Select value={String(prescriptionsPerPage)} onValueChange={(value) => { setPrescriptionsPerPage(Number(value)); setPrescriptionsPage(1); }}>
-                                    <SelectTrigger className="w-16 h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="5">5</SelectItem>
-                                      <SelectItem value="10">10</SelectItem>
-                                      <SelectItem value="25">25</SelectItem>
-                                      <SelectItem value="50">50</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" disabled={prescriptionsPage === 1} onClick={() => setPrescriptionsPage(p => p - 1)}>
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: Math.min(5, totalPrescriptionsPages) }, (_, i) => {
-                                    let pageNum: number;
-                                    if (totalPrescriptionsPages <= 5) pageNum = i + 1;
-                                    else if (prescriptionsPage <= 3) pageNum = i + 1;
-                                    else if (prescriptionsPage >= totalPrescriptionsPages - 2) pageNum = totalPrescriptionsPages - 4 + i;
-                                    else pageNum = prescriptionsPage - 2 + i;
-                                    if (pageNum > totalPrescriptionsPages || pageNum < 1) return null;
-                                    return (
-                                      <Button key={pageNum} variant={prescriptionsPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setPrescriptionsPage(pageNum)}>
-                                        {pageNum}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
-                                <Button variant="outline" size="sm" disabled={prescriptionsPage >= totalPrescriptionsPages || totalPrescriptionsPages === 0} onClick={() => setPrescriptionsPage(p => p + 1)}>
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </TabsContent>
-
-                    {/* Vitals Tab */}
-                    <TabsContent value="vitals" className="mt-4">
-                      {(() => {
-                        // Filter vitals based on date filter
-                        let filteredVitals = [...vitalsHistory];
-                        if (vitalsDateFilter !== 'all') {
-                          const days = parseInt(vitalsDateFilter);
-                          const cutoffDate = new Date();
-                          cutoffDate.setDate(cutoffDate.getDate() - days);
-                          filteredVitals = filteredVitals.filter(v => {
-                            if (!v.recordedAt) return false;
-                            const vitalDate = new Date(v.recordedAt);
-                            return vitalDate >= cutoffDate;
-                          });
-                        }
-
-                        const totalVitals = filteredVitals.length;
-                        const totalVitalsPages = Math.ceil(totalVitals / vitalsPerPage);
-                        const paginatedVitals = filteredVitals.slice(
-                          (vitalsPage - 1) * vitalsPerPage, 
-                          vitalsPage * vitalsPerPage
-                        );
-                        
-                        return (
-                          <>
-                            <div className="flex items-center justify-between mb-3">
-                              <select
-                                value={vitalsDateFilter}
-                                onChange={(e) => { setVitalsDateFilter(e.target.value); setVitalsPage(1); }}
-                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                              >
-                                <option value="all">All Time</option>
-                                <option value="30">Last 30 Days</option>
-                                <option value="90">Last 3 Months</option>
-                                <option value="365">Last Year</option>
-                              </select>
-                            </div>
-                            {loadingVitals ? (
-                              <div className="text-center py-12">
-                                <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
-                                <p className="text-sm text-muted-foreground">Loading vitals...</p>
-                              </div>
-                            ) : paginatedVitals.length === 0 ? (
-                              <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                                <Heart className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                                <p className="font-medium text-muted-foreground mb-1">No vitals records found</p>
-                                <p className="text-sm text-muted-foreground">Vitals will appear here once recorded</p>
-                              </div>
-                            ) : (
-                              <div className="border rounded-lg overflow-hidden">
-                                <table className="w-full text-sm">
-                                  <thead className="bg-muted/50">
-                                    <tr>
-                                      <th className="px-4 py-2 text-left font-medium">Date</th>
-                                      <th className="px-4 py-2 text-left font-medium">Summary</th>
-                                      <th className="px-4 py-2 text-left font-medium">Recorded By</th>
-                                      <th className="px-4 py-2 text-center font-medium">Action</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y">
-                                    {paginatedVitals.map((vital) => (
-                                      <tr key={vital.id} className="hover:bg-muted/30">
-                                        <td className="px-4 py-3 text-muted-foreground">
-                                          <div className="font-medium">{vital.date}</div>
-                                          <div className="text-xs text-muted-foreground">{vital.time}</div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                          <div className="flex flex-wrap gap-2 text-xs">
-                                            {vital.temperature && (
-                                              <Badge variant="outline" className="text-xs">
-                                                T: {vital.temperature}°C
-                                              </Badge>
-                                            )}
-                                            {vital.bloodPressure && (
-                                              <Badge variant="outline" className="text-xs">
-                                                BP: {vital.bloodPressure}
-                                              </Badge>
-                                            )}
-                                            {vital.heartRate && (
-                                              <Badge variant="outline" className="text-xs">
-                                                HR: {vital.heartRate} bpm
-                                              </Badge>
-                                            )}
-                                            {vital.oxygenSaturation && (
-                                              <Badge variant="outline" className="text-xs">
-                                                SpO2: {vital.oxygenSaturation}%
-                                              </Badge>
-                                            )}
-                                          </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-muted-foreground text-sm">{vital.recordedBy}</td>
-                                        <td className="px-4 py-3 text-center">
-                                          <Button variant="ghost" size="sm" onClick={() => viewVitalsDetails(vital)}>
-                                            <Eye className="h-4 w-4 mr-1" /> View
-                                          </Button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                            {/* Pagination */}
-                            {totalVitals > 0 && (
-                              <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
-                              <div className="flex items-center gap-4">
-                                <p className="text-sm text-muted-foreground">
-                                  Showing {totalVitals === 0 ? 0 : `${(vitalsPage - 1) * vitalsPerPage + 1}-${Math.min(totalVitals, vitalsPage * vitalsPerPage)}`} of {totalVitals}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <label className="text-sm text-muted-foreground">Per page:</label>
-                                  <Select value={String(vitalsPerPage)} onValueChange={(value) => { setVitalsPerPage(Number(value)); setVitalsPage(1); }}>
-                                    <SelectTrigger className="w-16 h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="5">5</SelectItem>
-                                      <SelectItem value="10">10</SelectItem>
-                                      <SelectItem value="25">25</SelectItem>
-                                      <SelectItem value="50">50</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" disabled={vitalsPage === 1} onClick={() => setVitalsPage(p => p - 1)}>
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: Math.min(5, totalVitalsPages) }, (_, i) => {
-                                    let pageNum: number;
-                                    if (totalVitalsPages <= 5) pageNum = i + 1;
-                                    else if (vitalsPage <= 3) pageNum = i + 1;
-                                    else if (vitalsPage >= totalVitalsPages - 2) pageNum = totalVitalsPages - 4 + i;
-                                    else pageNum = vitalsPage - 2 + i;
-                                    if (pageNum > totalVitalsPages || pageNum < 1) return null;
-                                    return (
-                                      <Button key={pageNum} variant={vitalsPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setVitalsPage(pageNum)}>
-                                        {pageNum}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
-                                <Button variant="outline" size="sm" disabled={vitalsPage >= totalVitalsPages || totalVitalsPages === 0} onClick={() => setVitalsPage(p => p + 1)}>
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </TabsContent>
-
-                    {/* Physio Tab */}
-                    <TabsContent value="physio" className="mt-4">
-                      {(() => {
-                        const filteredPhysio = physioHistory.filter(order => {
-                          const matchesSearch =
-                            order.patient_name?.toLowerCase().includes(physioSearchQuery.toLowerCase()) ||
-                            order.diagnosis?.toLowerCase().includes(physioSearchQuery.toLowerCase()) ||
-                            order.id?.toString().includes(physioSearchQuery);
-
-                          const matchesStatus = physioStatusFilter === 'all' || order.status === physioStatusFilter;
-
-                          let matchesDate = true;
-                          if (physioDateFilter !== 'all') {
-                            const orderDate = new Date(order.ordered_at);
-                            const now = new Date();
-                            const diffTime = now.getTime() - orderDate.getTime();
-                            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                            const daysFilter = parseInt(physioDateFilter);
-                            matchesDate = diffDays <= daysFilter;
-                          }
-
-                          return matchesSearch && matchesStatus && matchesDate;
-                        });
-
-                        const totalPhysio = filteredPhysio.length;
-                        const totalPhysioPages = Math.ceil(totalPhysio / physioPerPage);
-                        const paginatedPhysio = filteredPhysio.slice(
-                          (physioPage - 1) * physioPerPage,
-                          physioPage * physioPerPage
-                        );
-
-                        return (
-                          <>
-                            <div className="flex items-center justify-between mb-3">
-                              <select
-                                value={physioDateFilter}
-                                onChange={(e) => { setPhysioDateFilter(e.target.value); setPhysioPage(1); }}
-                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
-                              >
-                                <option value="all">All Time</option>
-                                <option value="30">Last 30 Days</option>
-                                <option value="90">Last 3 Months</option>
-                                <option value="365">Last Year</option>
-                              </select>
-                            </div>
-                            <div className="border rounded-lg overflow-hidden">
-                              <table className="w-full text-sm">
-                                <thead className="bg-muted/50">
-                                  <tr>
-                                    <th className="px-4 py-2 text-left font-medium">Date</th>
-                                    <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
-                                    <th className="px-4 py-2 text-left font-medium">Status</th>
-                                    <th className="px-4 py-2 text-center font-medium">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {paginatedPhysio.map((order) => (
-                                    <tr key={order.id} className="hover:bg-muted/30">
-                                      <td className="px-4 py-3 text-muted-foreground">
-                                        {new Date(order.ordered_at).toLocaleDateString()}
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <div>
-                                          <div className="font-medium">{order.patient_name}</div>
-                                          <div className="text-sm text-muted-foreground">{order.diagnosis || 'N/A'}</div>
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <div className="flex items-center gap-2">
-                                          <Badge variant="outline" className={`text-xs ${
-                                            order.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600' :
-                                            order.status === 'in_progress' ? 'bg-orange-500/10 text-orange-600' :
-                                            order.status === 'scheduled' ? 'bg-blue-500/10 text-blue-600' :
-                                            'bg-gray-500/10 text-gray-600'
-                                          }`}>
-                                            {order.status.replace('_', ' ')}
-                                          </Badge>
-                                          <span className="text-xs text-muted-foreground">
-                                            {order.sessions_completed}/{order.total_sessions}
-                                          </span>
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        <Button variant="ghost" size="sm" onClick={() => openPhysioOrderDialog(order)}>
-                                          <Eye className="h-4 w-4 mr-1" /> View
-                                        </Button>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {/* Pagination */}
-                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
-                              <div className="flex items-center gap-4">
-                                <p className="text-sm text-muted-foreground">
-                                  Showing {totalPhysio === 0 ? 0 : `${(physioPage - 1) * physioPerPage + 1}-${Math.min(totalPhysio, physioPage * physioPerPage)}`} of {totalPhysio}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <label className="text-sm text-muted-foreground">Per page:</label>
-                                  <Select value={String(physioPerPage)} onValueChange={(value) => { setPhysioPerPage(Number(value)); setPhysioPage(1); }}>
-                                    <SelectTrigger className="w-16 h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="5">5</SelectItem>
-                                      <SelectItem value="10">10</SelectItem>
-                                      <SelectItem value="25">25</SelectItem>
-                                      <SelectItem value="50">50</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" disabled={physioPage === 1} onClick={() => setPhysioPage(p => p - 1)}>
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: Math.min(5, totalPhysioPages) }, (_, i) => {
-                                    let pageNum: number;
-                                    const halfVisible = Math.floor(5 / 2);
-                                    if (totalPhysioPages <= 5) {
-                                      pageNum = i + 1;
-                                    } else if (physioPage <= halfVisible) {
-                                      pageNum = i + 1;
-                                    } else if (physioPage >= totalPhysioPages - halfVisible) {
-                                      pageNum = totalPhysioPages - 4 + i;
-                                    } else {
-                                      pageNum = physioPage - halfVisible + i;
-                                    }
-                                    return (
-                                      <Button
-                                        key={pageNum}
-                                        variant={physioPage === pageNum ? "default" : "outline"}
-                                        size="sm"
-                                        onClick={() => setPhysioPage(pageNum)}
-                                        className="w-8 h-8 p-0"
-                                      >
-                                        {pageNum}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
-                                <Button variant="outline" size="sm" disabled={physioPage === totalPhysioPages} onClick={() => setPhysioPage(p => p + 1)}>
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </TabsContent>
-
-                    <TabsContent value="wards" className="mt-4">
-                      {(() => {
-                        const totalAdmissions = wardAdmissions.length;
-                        const totalPages = Math.ceil(totalAdmissions / 10);
-                        const paginatedAdmissions = wardAdmissions.slice(0, 10); // Simple pagination
-
-                        return (
-                          <>
-                            <div className="flex items-center justify-between mb-3">
-                              <h3 className="text-sm font-medium">Observation Admission History</h3>
-                            </div>
-                            {totalAdmissions === 0 ? (
-                              <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
-                                <Building2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                                <p className="font-medium text-muted-foreground mb-1">No observation admissions found</p>
-                                <p className="text-sm text-muted-foreground">Observation admission history will appear here</p>
-                              </div>
-                            ) : (
-                              <div className="border rounded-lg overflow-hidden">
-                                <table className="w-full text-sm">
-                                  <thead className="bg-muted/50">
-                                    <tr>
-                                      <th className="px-4 py-2 text-left font-medium">Admission Date</th>
-                                      <th className="px-4 py-2 text-left font-medium">Ward</th>
-                                      <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
-                                      <th className="px-4 py-2 text-left font-medium">Days</th>
-                                      <th className="px-4 py-2 text-left font-medium">Status</th>
-                                      <th className="px-4 py-2 text-center font-medium">Action</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y">
-                                    {paginatedAdmissions.map((admission) => (
-                                      <tr key={admission.id} className="hover:bg-muted/30">
-                                        <td className="px-4 py-3 text-muted-foreground">
-                                          <div className="font-medium">{formatDate(admission.admission_date)}</div>
-                                          <div className="text-xs text-muted-foreground">{formatTime(admission.admission_date)}</div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                          <div className="font-medium">{admission.ward_name}</div>
-                                          <div className="text-xs text-muted-foreground">{admission.admission_type}</div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                          <p className="text-sm max-w-[200px] truncate" title={admission.admission_diagnosis}>
-                                            {admission.admission_diagnosis}
-                                          </p>
-                                        </td>
-                                        <td className="px-4 py-3">{admission.length_of_stay} days</td>
-                                        <td className="px-4 py-3">
-                                          <Badge className={`${
-                                            admission.status === 'admitted' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
-                                            admission.status === 'discharged' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                                            'bg-gray-100 text-gray-800'
-                                          }`}>
-                                            {admission.status}
-                                          </Badge>
-                                        </td>
-                                        <td className="px-4 py-3 text-center">
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={async () => {
-                                              try {
-                                                const admissionDetail = await wardService.getAdmission(admission.id);
-                                                setSelectedWardAdmission(admissionDetail);
-                                                setShowWardAdmissionDetail(true);
-                                              } catch (error) {
-                                                console.error('Failed to load ward admission details:', error);
-                                                toast.error('Failed to load admission details');
-                                              }
-                                            }}
-                                          >
-                                            <Eye className="h-4 w-4 mr-1" /> View
-                                          </Button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                            </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </TabsContent>
-
-                    {/* Background Tab */}
-                    <TabsContent value="background" className="mt-4">
-                      <div className="flex justify-end mb-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setShowEditMedicalHistory(true)}
-                          disabled={!currentPatient}
-                        >
-                          <Edit className="h-4 w-4 mr-2" />
-                          Edit Medical History
-                        </Button>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        {/* Surgical History */}
-                        <Card>
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <Activity className="h-4 w-4 text-rose-500" />
-                              Surgical History
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            {medicalHistory.surgicalHistory && medicalHistory.surgicalHistory.length > 0 ? (
-                              <div className="space-y-3">
-                                {medicalHistory.surgicalHistory.map((surgery: { procedure: string; date: string; hospital?: string }, index: number) => (
-                                  <div key={index} className="p-3 bg-rose-50 dark:bg-rose-900/20 rounded-lg border border-rose-200 dark:border-rose-800">
-                                    <div className="flex items-start justify-between mb-1">
-                                      <span className="font-medium text-sm">{surgery.procedure}</span>
-                                      <Badge variant="outline" className="text-xs">{surgery.date}</Badge>
-                                    </div>
-                                    {surgery.hospital && (
-                                      <div className="text-xs text-muted-foreground mt-1">
-                                        <MapPin className="h-3 w-3 inline mr-1" />
-                                        {surgery.hospital}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-center py-8 text-sm text-muted-foreground">
-                                <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                <p>No surgical history recorded</p>
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-
-                        {/* Family History */}
-                        <Card>
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <Users className="h-4 w-4 text-blue-500" />
-                              Family History
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            {medicalHistory.familyHistory && medicalHistory.familyHistory.length > 0 ? (
-                              <div className="space-y-3">
-                                {medicalHistory.familyHistory.map((fh: { relation: string; condition: string }, index: number) => (
-                                  <div key={index} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                                    <div className="flex items-start justify-between">
-                                      <div className="flex-1">
-                                        <div className="font-medium text-sm mb-1">{fh.relation}</div>
-                                        <div className="text-xs text-muted-foreground">{fh.condition}</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-center py-8 text-sm text-muted-foreground">
-                                <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                <p>No family history recorded</p>
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-
-                        {/* Social History */}
-                        <Card className="md:col-span-2">
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <User className="h-4 w-4 text-emerald-500" />
-                              Social History
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                              <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800 text-center">
-                                <div className="text-xs text-muted-foreground mb-2">Smoking</div>
-                                <div className="font-semibold text-emerald-700 dark:text-emerald-300">{medicalHistory.socialHistory?.smoking || 'Not recorded'}</div>
-                              </div>
-                              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-center">
-                                <div className="text-xs text-muted-foreground mb-2">Alcohol</div>
-                                <div className="font-semibold text-blue-700 dark:text-blue-300">{medicalHistory.socialHistory?.alcohol || 'Not recorded'}</div>
-                              </div>
-                              <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800 text-center">
-                                <div className="text-xs text-muted-foreground mb-2">Exercise</div>
-                                <div className="font-semibold text-purple-700 dark:text-purple-300">{medicalHistory.socialHistory?.exercise || 'Not recorded'}</div>
-                              </div>
-                              {medicalHistory.socialHistory?.occupation && (
-                                <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800 text-center">
-                                  <div className="text-xs text-muted-foreground mb-2">Occupation</div>
-                                  <div className="font-semibold text-amber-700 dark:text-amber-300">{medicalHistory.socialHistory.occupation}</div>
-                                </div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </CardHeader>
-              </Card>
+              <PatientHistoryTabs
+                patientId={currentPatient?.id ? Number(currentPatient.id) : 0}
+                defaultTab="background"
+                showVisits
+                showCertificates
+                showReferrals
+                showBackground
+                onViewVisit={(v) => {
+                  const rawId = v?.id;
+                  const numericId = typeof rawId === 'string' && rawId.startsWith('session-')
+                    ? Number(rawId.replace('session-', ''))
+                    : Number(rawId);
+                  if (Number.isFinite(numericId) && numericId > 0) {
+                    viewSessionDetails({ id: numericId });
+                  } else {
+                    toast.error('Visit details are not available.');
+                  }
+                }}
+                onViewConsultation={viewSessionDetails}
+                onViewLab={viewLabResultDetails}
+                onViewImaging={viewImagingReportDetails}
+                onViewPrescription={viewPrescriptionDetails}
+                onViewVital={viewVitalsDetails}
+                onViewPhysio={openPhysioOrderDialog}
+                onViewEyeOrder={openEyeOrderDialog}
+                onViewWard={(a) => { setSelectedWardAdmission(a); setShowWardAdmissionDetail(true); }}
+                backgroundExtra={
+                  <div className="flex justify-end mb-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowEditMedicalHistory(true)}
+                      disabled={!currentPatient}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit Medical History
+                    </Button>
+                  </div>
+                }
+              />
             </div>
           </TabsContent>
         </Tabs>
-
         {/* Add Diagnosis Dialog */}
         <Dialog open={showAddDiagnosis} onOpenChange={(open) => { setShowAddDiagnosis(open); if (!open) { setDiagnosisSearch(""); setShowDiagnosisDropdown(false); setDiagnosisNotes(""); } }}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -9062,6 +7546,107 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
+        {/* Add/Edit Eye Care Order Dialog */}
+        <Dialog open={showAddEye} onOpenChange={(open) => {
+          setShowAddEye(open);
+          if (!open) {
+            setEditingEyeIndex(null);
+            setNewEye({ chiefComplaint: "", diagnosis: "", treatmentPlan: "", specialInstructions: "", priority: "normal" });
+          }
+        }}>
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Eye className="h-5 w-5 text-cyan-500" />
+                {editingEyeIndex !== null ? 'Edit Eye Care Order' : 'Order Eye Care'}
+              </DialogTitle>
+              <DialogDescription>
+                {editingEyeIndex !== null
+                  ? 'Update the eye care order details'
+                  : 'Create an eye care evaluation order - will be sent to Eye Care pool queue'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Chief Complaint</Label>
+                <Textarea
+                  value={newEye.chiefComplaint}
+                  onChange={(e) => setNewEye({ ...newEye, chiefComplaint: e.target.value })}
+                  placeholder="Patient's chief complaint and reason for eye evaluation..."
+                  rows={3}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Diagnosis *</Label>
+                <Textarea
+                  value={newEye.diagnosis}
+                  onChange={(e) => setNewEye({ ...newEye, diagnosis: e.target.value })}
+                  placeholder="Primary diagnosis or clinical impression"
+                  rows={2}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Treatment Plan</Label>
+                <Textarea
+                  value={newEye.treatmentPlan}
+                  onChange={(e) => setNewEye({ ...newEye, treatmentPlan: e.target.value })}
+                  placeholder="Proposed treatment plan or evaluation goals..."
+                  rows={2}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <Select value={newEye.priority} onValueChange={(v) => setNewEye({ ...newEye, priority: v as 'low' | 'normal' | 'high' | 'urgent' })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Special Instructions</Label>
+                <Textarea
+                  value={newEye.specialInstructions}
+                  onChange={(e) => setNewEye({ ...newEye, specialInstructions: e.target.value })}
+                  placeholder="Any special requirements, contraindications, or notes for eye care provider..."
+                  rows={2}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddEye(false)}>Cancel</Button>
+              <Button
+                onClick={addEyeOrder}
+                disabled={!newEye.diagnosis.trim()}
+                className="bg-cyan-600 hover:bg-cyan-700"
+              >
+                {editingEyeIndex !== null ? (
+                  <>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Update Order
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Eye Care Order
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Add Referral Dialog */}
         <Dialog open={showAddReferral} onOpenChange={setShowAddReferral}>
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
@@ -9673,379 +8258,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
-        {/* Session Viewer Dialog */}
-        <Dialog open={showSessionViewer} onOpenChange={setShowSessionViewer}>
-          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
-            {selectedSession && (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <DialogTitle className="flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-emerald-500" />
-                        Consultation Report
-                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700">
-                          {selectedSession.id}
-                        </Badge>
-                      </DialogTitle>
-                      <DialogDescription>
-                        {formatDate(selectedSession.started_at)} • {formatTime(selectedSession.started_at)} • {selectedSession.room_name || 'Consulting Room'}
-                      </DialogDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => downloadConsultationReport(selectedSession)}>
-                        <Download className="h-4 w-4 mr-1" />
-                        Download
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => printConsultationReport(selectedSession)}>
-                        <Printer className="h-4 w-4 mr-1" />
-                        Print
-                      </Button>
-                    </div>
-                  </div>
-                </DialogHeader>
-
-                <div className="space-y-6 py-4">
-                  {/* Header Info */}
-                  <div className="grid md:grid-cols-2 gap-4 p-4 bg-muted/30 rounded-lg">
-                    <div>
-                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">PATIENT INFORMATION</h4>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{selectedSession.patient_name ?? ''}</span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Patient ID: {selectedSession.patient_id || 'N/A'} • Age: {selectedSession.patient_age || 'N/A'} • Gender: {selectedSession.patient_gender || 'N/A'}
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">CONSULTATION DETAILS</h4>
-                      <div className="space-y-1 text-sm">
-                        {selectedSession.doctor_name?.trim() && (
-                          <div><strong>Doctor:</strong> {selectedSession.doctor_name}</div>
-                        )}
-                        {selectedSession.clinic_name?.trim() && (
-                          <div><strong>Clinic:</strong> {selectedSession.clinic_name}</div>
-                        )}
-                        {(() => {
-                          const durationText =
-                            selectedSession.ended_at && selectedSession.started_at
-                              ? Math.round(
-                                  (new Date(selectedSession.ended_at).getTime() -
-                                    new Date(selectedSession.started_at).getTime()) /
-                                    (1000 * 60)
-                                ) + ' min'
-                              : selectedSession.started_at
-                                ? Math.round(
-                                    (Date.now() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)
-                                  ) + ' min (ongoing)'
-                                : '';
-                          return durationText ? (
-                            <div>
-                              <strong>Duration:</strong> {durationText}
-                            </div>
-                          ) : null;
-                        })()}
-                        {selectedSession.room_name?.trim() && (
-                          <div><strong>Room:</strong> {selectedSession.room_name}</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Vitals */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-blue-600 mb-2">VITAL SIGNS</h4>
-                    <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                      {Object.entries((selectedSession as ExtendedConsultationSession).vitals || {}).map(([key, value]: [string, unknown]) => (
-                        <div key={key} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
-                          <div className="text-xs text-muted-foreground">{vitalLabel(key)}</div>
-                          <div className="font-medium">{formatVitalDisplay(key, value)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Medical Notes */}
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-semibold text-amber-600">CLINICAL NOTES</h4>
-                    
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Presentation Complaint</label>
-                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.presentation_complaint}</p>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">History of Present Illness</label>
-                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.history_of_presenting_illness}</p>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Physical Examination</label>
-                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.physical_examination}</p>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Assessment</label>
-                      <p className="mt-1 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800">
-                        {selectedSession.assessment}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Treatment Plan</label>
-                      <p className="mt-1 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-sm border border-emerald-200 dark:border-emerald-800 whitespace-pre-line">
-                        {selectedSession.plan}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Diagnoses */}
-                  {selectedSession.diagnoses && selectedSession.diagnoses.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-red-600 mb-2 flex items-center gap-2">
-                        <Stethoscope className="h-4 w-4" />
-                        DIAGNOSES
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-red-50 dark:bg-red-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">ICD-10 Code</th>
-                              <th className="px-3 py-2 text-left font-medium">Diagnosis</th>
-                              <th className="px-3 py-2 text-center font-medium">Diagnosis Type</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {((selectedSession as ExtendedConsultationSession).diagnoses || []).map((diagnosis: any, index: number) => (
-                              <tr key={diagnosis.id || index} className="hover:bg-muted/50">
-                                <td className="px-3 py-2 font-mono text-xs">{diagnosis.code}</td>
-                                <td className="px-3 py-2">
-                                  <div>
-                                    <div className="font-medium text-sm">{diagnosis.name}</div>
-                                    {diagnosis.notes && (
-                                      <div className="text-xs text-muted-foreground mt-1">{diagnosis.notes}</div>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="px-3 py-2 text-center">
-                                  <Badge variant="outline" className={`text-xs ${
-                                    diagnosis.type === 'Primary' ? 'bg-red-500/10 text-red-600 border-red-500/30' :
-                                    diagnosis.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                                    'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                                  }`}>
-                                    {diagnosis.type}
-                                  </Badge>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Prescriptions */}
-                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'prescriptions').length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-violet-600 mb-2 flex items-center gap-2">
-                        <Pill className="h-4 w-4" />
-                        PRESCRIPTIONS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-violet-50 dark:bg-violet-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Medication</th>
-                              <th className="px-3 py-2 text-left font-medium">Dose</th>
-                              <th className="px-3 py-2 text-left font-medium">Frequency</th>
-                              <th className="px-3 py-2 text-left font-medium">Duration</th>
-                              <th className="px-3 py-2 text-center font-medium">Qty</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'prescriptions').map((rx: { medication: string; dosage: string; frequency: string; duration: string; quantity: number }, index: number) => (
-                              <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{rx.medication}</td>
-                                <td className="px-3 py-2">{rx.dosage}</td>
-                                <td className="px-3 py-2">{rx.frequency}</td>
-                                <td className="px-3 py-2">{rx.duration}</td>
-                                <td className="px-3 py-2 text-center">{rx.quantity}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Lab Orders */}
-                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'labOrders').length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-amber-600 mb-2 flex items-center gap-2">
-                        <TestTube className="h-4 w-4" />
-                        LABORATORY ORDERS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-amber-50 dark:bg-amber-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Test</th>
-                              <th className="px-3 py-2 text-left font-medium">Priority</th>
-                              <th className="px-3 py-2 text-left font-medium">Status</th>
-                              <th className="px-3 py-2 text-left font-medium">Result</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'labOrders').map((lab: { test?: string; status?: string; priority?: string; result?: string }, index: number) => (
-                              <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{lab.test ?? ''}</td>
-                                <td className="px-3 py-2">{formatPriority(lab.priority)}</td>
-                                <td className="px-3 py-2">
-                                  <Badge className="bg-emerald-100 text-emerald-800">{lab.status ?? ''}</Badge>
-                                </td>
-                                <td className="px-3 py-2 text-sm whitespace-pre-line break-words max-w-[28rem]">
-                                  {formatResultWithPending(
-                                    lab.result ? formatLabResult(lab.result) : '',
-                                    lab.status,
-                                    ['verified', 'completed', 'results_ready']
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Radiology Orders */}
-                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'radiologyOrders').length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-indigo-600 mb-2 flex items-center gap-2">
-                        <ScanLine className="h-4 w-4" />
-                        RADIOLOGY ORDERS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-indigo-50 dark:bg-indigo-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Procedure</th>
-                              <th className="px-3 py-2 text-left font-medium">Priority</th>
-                              <th className="px-3 py-2 text-left font-medium">Status</th>
-                              <th className="px-3 py-2 text-left font-medium">Finding</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'radiologyOrders').map((img: { procedure?: string; priority?: string; status?: string; finding?: string }, index: number) => (
-                              <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{img.procedure ?? ''}</td>
-                                <td className="px-3 py-2">{formatPriority(img.priority)}</td>
-                                <td className="px-3 py-2">
-                                  <Badge className="bg-emerald-100 text-emerald-800">{img.status ?? ''}</Badge>
-                                </td>
-                                <td className="px-3 py-2 text-sm whitespace-pre-line break-words max-w-[28rem]">
-                                  {formatResultWithPending(
-                                    img.finding ? String(img.finding) : '',
-                                    img.status,
-                                    ['verified', 'completed', 'reported']
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Physiotherapy Orders */}
-                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'physioOrders').length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-emerald-600 mb-2 flex items-center gap-2">
-                        <Activity className="h-4 w-4" />
-                        PHYSIOTHERAPY ORDERS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-emerald-50 dark:bg-emerald-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Diagnosis / Chief Complaint</th>
-                              <th className="px-3 py-2 text-left font-medium">Priority</th>
-                              <th className="px-3 py-2 text-left font-medium">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'physioOrders').map((p: { diagnosis?: string; priority?: string; status?: string }, index: number) => (
-                              <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{p.diagnosis ?? ''}</td>
-                                <td className="px-3 py-2">{formatPriority(p.priority)}</td>
-                                <td className="px-3 py-2">
-                                  <Badge className="bg-emerald-100 text-emerald-800">{p.status ?? ''}</Badge>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Nursing Orders */}
-                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'nursingOrders').length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-cyan-600 mb-2 flex items-center gap-2">
-                        <Syringe className="h-4 w-4" />
-                        NURSING ORDERS
-                      </h4>
-                      <div className="space-y-2">
-                        {getSessionProperty(selectedSession as ExtendedConsultationSession, 'nursingOrders').map((no: { type: string; instructions: string; status?: string }, index: number) => (
-                          <div key={index} className="p-3 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800">
-                            <div className="font-medium">{no.type}</div>
-                            <div className="text-sm text-muted-foreground">{no.instructions}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Follow-up */}
-                  {((selectedSession as ExtendedConsultationSession).followUp) && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-blue-600 mb-2 flex items-center gap-2">
-                        <Calendar className="h-4 w-4" />
-                        FOLLOW-UP APPOINTMENT
-                      </h4>
-                      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <div className="font-medium">{(selectedSession as ExtendedConsultationSession).followUp!.date}</div>
-                        <div className="text-sm text-muted-foreground">{(selectedSession as ExtendedConsultationSession).followUp!.reason}</div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Outcome */}
-                  <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                    <h4 className="text-sm font-semibold text-emerald-600 mb-1">SESSION OUTCOME</h4>
-                    <p className="text-sm">{(selectedSession as ExtendedConsultationSession).outcome || selectedSession.status}</p>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="border-t pt-4 text-xs text-muted-foreground">
-                    <div className="flex justify-between">
-                      <span>Generated: {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}</span>
-                      <span>Document ID: {selectedSession.id}</span>
-                    </div>
-                    <div className="mt-2 text-center">
-{getOrganizationHeader()}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
+        <ConsultationReportModal
+          open={consultationReportSession !== null}
+          onOpenChange={(o) => { if (!o) setConsultationReportSession(null); }}
+          session={consultationReportSession}
+          loading={isConsultationReportLoading}
+        />
 
         <LabCompletedReportDialog
           open={showLabResultViewer}
@@ -10073,6 +8291,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             if (!o) setSelectedPrescription(null);
           }}
           prescription={selectedPrescription}
+          prescriptionDbId={selectedPrescription?.id ?? null}
           patient={
             currentPatient
               ? {
@@ -11192,6 +9411,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ViewEyeOrderModal
+        open={showEyeOrderModal}
+        onOpenChange={setShowEyeOrderModal}
+        orderId={selectedEyeOrderId}
+      />
     </DashboardLayout>
   );
 }

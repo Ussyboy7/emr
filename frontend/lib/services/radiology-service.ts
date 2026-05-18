@@ -247,13 +247,6 @@ class RadiologyService {
   }
 
   /**
-   * Get a single radiology order
-   */
-  async getOrder(orderId: number): Promise<RadiologyOrder> {
-    return apiFetch<RadiologyOrder>(`/radiology/orders/${orderId}/`);
-  }
-
-  /**
    * Create a radiology order
    */
   async createOrder(data: Partial<RadiologyOrder>): Promise<RadiologyOrder> {
@@ -310,6 +303,10 @@ class RadiologyService {
   /**
    * Create a study within an existing order
    */
+  async getOrder(orderId: number): Promise<RadiologyOrder> {
+    return apiFetch<RadiologyOrder>(`/radiology/orders/${orderId}/`);
+  }
+
   async createStudy(data: Partial<RadiologyStudy> & { order: number }): Promise<RadiologyStudy> {
     return apiFetch<RadiologyStudy>('/radiology/studies/', {
       method: 'POST',
@@ -648,7 +645,7 @@ class RadiologyService {
   async updateStudyResults(studyId: number, data: {
     report: string;
     critical: boolean;
-    reportFile?: File | null;
+    reportFiles?: File[];
     customReports?: CustomRadiologyReportRow[];
     customReportFiles?: Record<string, File | null>;
     status: string;
@@ -658,8 +655,11 @@ class RadiologyService {
     formData.append('critical', data.critical.toString());
     formData.append('status', data.status);
 
-    if (data.reportFile) {
-      formData.append('report_file', data.reportFile);
+    if (data.reportFiles?.length) {
+      data.reportFiles.forEach((file, idx) => {
+        formData.append(`report_file_${idx}`, file);
+      });
+      formData.append('report_file_count', String(data.reportFiles.length));
     }
     if (data.customReports) {
       formData.append('custom_reports', JSON.stringify(data.customReports));

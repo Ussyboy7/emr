@@ -307,9 +307,20 @@ export default function EyeClinicOrdersPage() {
           setLoading(true);
           setError(null);
         }
-        const res = await eyeCareService.getOrders(buildOrdersListParams());
+        const [res, ...statsResponses] = await Promise.all([
+          eyeCareService.getOrders(buildOrdersListParams()),
+          ...(['pending', 'in_progress', 'cancelled', 'completed'] as const).map((tab) =>
+            eyeCareService.getOrders({ ...buildOrdersStatsBase(), page: 1, page_size: 1, status_tab: tab })
+          ),
+        ]);
         setOrders(res.results || []);
         setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
+        setStats({
+          pending: statsResponses[0]?.count ?? 0,
+          inProgress: statsResponses[1]?.count ?? 0,
+          cancelled: statsResponses[2]?.count ?? 0,
+          completed: statsResponses[3]?.count ?? 0,
+        });
       } catch (err) {
         console.error('Error loading eye clinic orders:', err);
         if (isAuthenticationError(err)) {
@@ -322,35 +333,12 @@ export default function EyeClinicOrdersPage() {
         if (!silent) setLoading(false);
       }
     },
-    [buildOrdersListParams]
+    [buildOrdersListParams, buildOrdersStatsBase]
   );
 
   useEffect(() => {
     void loadOrders();
   }, [loadOrders]);
-
-  useEffect(() => {
-    const loadStats = async () => {
-      try {
-        const base = { ...buildOrdersStatsBase(), page: 1, page_size: 1 };
-        const [pendingRes, inProgressRes, cancelledRes, completedRes] = await Promise.all([
-          eyeCareService.getOrders({ ...base, status_tab: 'pending' }),
-          eyeCareService.getOrders({ ...base, status_tab: 'in_progress' }),
-          eyeCareService.getOrders({ ...base, status_tab: 'cancelled' }),
-          eyeCareService.getOrders({ ...base, status_tab: 'completed' }),
-        ]);
-        setStats({
-          pending: pendingRes.count ?? 0,
-          inProgress: inProgressRes.count ?? 0,
-          cancelled: cancelledRes.count ?? 0,
-          completed: completedRes.count ?? 0,
-        });
-      } catch {
-        /* keep previous stats */
-      }
-    };
-    void loadStats();
-  }, [buildOrdersStatsBase]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -465,6 +453,11 @@ export default function EyeClinicOrdersPage() {
   };
 
   const startProcessing = async (order: EyeOrder) => {
+    if (!order?.id) {
+      toast.error('Cannot start processing: invalid order');
+      setIsSubmitting(false);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
@@ -507,6 +500,7 @@ export default function EyeClinicOrdersPage() {
         });
       }
 
+      console.log('startProcessing: updating order', { orderId: order.id, orderStatus: order.status, orderScheduledAt: order.scheduled_at });
       await eyeCareService.updateOrder(order.id, {
         status: 'in_progress',
         scheduled_at: order.scheduled_at || new Date().toISOString(),
@@ -518,7 +512,12 @@ export default function EyeClinicOrdersPage() {
       await openSessionDialog(activeSession, refreshedOrder);
     } catch (err) {
       console.error('Error starting eye clinic processing:', err);
-      toast.error('Failed to start processing');
+      const apiStatus = (err as any)?.status;
+      if (apiStatus === 404) {
+        toast.error('Order no longer exists in the system. Refresh the page.');
+      } else {
+        toast.error('Failed to start processing');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -566,6 +565,11 @@ export default function EyeClinicOrdersPage() {
   };
 
   const addSessionForOrder = async (order: EyeOrder) => {
+    if (!order?.id) {
+      toast.error('Cannot add session: invalid order');
+      setIsSubmitting(false);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
@@ -1700,28 +1704,6 @@ export default function EyeClinicOrdersPage() {
                         <Textarea value={sessionForm.soap_note.plan.opticalCorrection} onChange={(e) => updatePlan('opticalCorrection', e.target.value)} rows={3} className="resize-none" />
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <Label>Medications / Prescriptions</Label>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setIsPrescriptionDialogOpen(true)}
-                            className="h-8"
-                          >
-                            <Pill className="h-3 w-3 mr-1" />
-                            Send to Pharmacy
-                          </Button>
-                        </div>
-                        <Textarea
-                          value={sessionForm.soap_note.plan.medications}
-                          onChange={(e) => updatePlan('medications', e.target.value)}
-                          placeholder="Medication notes or prescription references..."
-                          rows={3}
-                          className="resize-none"
-                        />
-                      </div>
-                      <div className="space-y-2">
                         <Label>Management Plan</Label>
                         <Textarea value={sessionForm.soap_note.plan.managementPlan} onChange={(e) => updatePlan('managementPlan', e.target.value)} placeholder="Surgery, referral, or test sent..." rows={3} className="resize-none" />
                       </div>
@@ -1729,6 +1711,17 @@ export default function EyeClinicOrdersPage() {
                         <Label>Follow-up Date</Label>
                         <Input type="date" value={sessionForm.soap_note.plan.followUpDate} onChange={(e) => updatePlan('followUpDate', e.target.value)} />
                       </div>
+                    </div>
+                    <div className="pt-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setIsPrescriptionDialogOpen(true)}
+                      >
+                        <Pill className="h-3 w-3 mr-1" />
+                        Send to Pharmacy
+                      </Button>
                     </div>
                   </div>
                 </div>

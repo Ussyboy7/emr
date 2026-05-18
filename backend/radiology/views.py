@@ -994,11 +994,23 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
                     study.reported_at = timezone.now()
                     logger.debug("Set reported_by to %s", request.user.get_full_name())
 
-            # Handle file upload
-            if request.FILES.get('report_file'):
-                logger.debug("Saving file: %s", request.FILES['report_file'].name)
-                study.report_file = request.FILES['report_file']
-                logger.debug("File assigned to study %s", study.id)
+            # Handle file uploads (multiple files via indexed keys)
+            report_file_count = int(request.POST.get('report_file_count', 0))
+            if report_file_count > 0:
+                report_files = [request.FILES.get(f'report_file_{i}') for i in range(report_file_count)]
+                report_files = [f for f in report_files if f]
+                if report_files:
+                    study.report_file = report_files[0]
+                    logger.debug("Primary file assigned to study %s: %s", study.id, report_files[0].name)
+                    for f in report_files[1:]:
+                        RadiologyStudyReportAttachment.objects.create(
+                            study=study,
+                            row_id='',
+                            row_name=f.name[:200],
+                            file=f,
+                            uploaded_by=request.user,
+                        )
+                        logger.debug("Additional file saved as attachment: %s", f.name)
             else:
                 logger.debug("No report_file in request.FILES")
 

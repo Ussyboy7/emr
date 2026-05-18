@@ -127,6 +127,7 @@ export const eyeCareService = {
     date_filter?: 'today' | 'week' | 'month' | 'all' | string;
     ordered_at_after?: string;
     ordered_at_before?: string;
+    consultation_session?: number;
   }): Promise<{ results: EyeOrder[]; count: number }> {
     const qs = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
     return apiFetch<{ results: EyeOrder[]; count: number }>(`/eyecare/orders${qs || ''}`);

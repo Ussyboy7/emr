@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Download, FileText, Pill, Printer, Stethoscope } from 'lucide-react';
 import { toast } from 'sonner';
-import { getOrganizationHeader } from '@/lib/constants/organization';
+import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 
 export interface PrescriptionReportMedicationRow {
   medication_name?: string;
@@ -24,6 +24,10 @@ export interface PrescriptionReportMedicationRow {
   frequency?: string;
   duration?: string;
   quantity?: string | number;
+  instructions?: string;
+  is_dispensed?: boolean;
+  isDispensed?: boolean;
+  unit?: string;
 }
 
 export interface PrescriptionReportDiagnosisRow {
@@ -43,6 +47,20 @@ export interface PrescriptionReportData {
   diagnoses?: PrescriptionReportDiagnosisRow[];
   /** Optional pharmacy / dispensing notes when no structured diagnoses are returned. */
   notes?: string;
+  /** Optional free-text diagnosis for non-consultation contexts. */
+  diagnosis?: string;
+  /** Clinic name. */
+  clinic?: string;
+  /** Doctor name (separate from 'doctor' for contexts that distinguish ordering doctor). */
+  doctor_name?: string;
+  /** Display-friendly prescription ID (RX-...). */
+  prescription_id?: string;
+  /** ISO date when prescribed. */
+  prescribed_at?: string;
+  /** ISO date when dispensed. */
+  dispensed_at?: string;
+  /** Name of user who dispensed. */
+  dispensed_by_name?: string;
 }
 
 export interface PrescriptionReportPatient {
@@ -99,20 +117,42 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function formatDateStr(d: string | undefined): string {
+  if (!d) return '';
+  try {
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return d;
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  } catch { return d; }
+}
+
+function formatTimeStr(d: string | undefined): string {
+  if (!d) return '';
+  try {
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  } catch { return ''; }
+}
+
 function buildPrescriptionReportHTML(
   rx: PrescriptionReportData,
   patient: PrescriptionReportPatient | undefined
 ): string {
   const rows = (rx.medications || [])
     .map(
-      (m) => `
+      (m) => {
+        const dispensed = m.is_dispensed ?? m.isDispensed ?? false;
+        return `
     <tr>
       <td>${escapeHtml(medLabel(m))}</td>
       <td>${escapeHtml(medDose(m))}</td>
       <td>${escapeHtml(String(m.frequency ?? '').trim())}</td>
       <td>${escapeHtml(String(m.duration ?? '').trim())}</td>
-      <td>${escapeHtml(m.quantity != null && m.quantity !== '' ? String(m.quantity) : '')}</td>
-    </tr>`
+      <td style="text-align:center">${escapeHtml(m.quantity != null && m.quantity !== '' ? String(m.quantity) + (m.unit ? ' ' + m.unit : '') : '')}</td>
+      <td style="text-align:center">${dispensed ? 'Yes' : 'No'}</td>
+    </tr>`;
+      }
     )
     .join('');
 
@@ -121,18 +161,21 @@ function buildPrescriptionReportHTML(
     .join(' / ');
   const patientBlock = patient
     ? `
-  <div class="section">
-    <h3>PATIENT INFORMATION</h3>
-    <p><strong>Name:</strong> ${escapeHtml(patient.name)}</p>
-    ${patient.patientId ? `<p><strong>Patient ID:</strong> ${escapeHtml(String(patient.patientId))}</p>` : ''}
-    ${ageGenderLine ? `<p><strong>Age / Gender:</strong> ${escapeHtml(ageGenderLine)}</p>` : ''}
+  <div class="section patient-info">
+    <table class="meta-table">
+      <tr><td><strong>Patient Name</strong></td><td>${escapeHtml(patient.name)}</td>
+          <td><strong>Patient ID</strong></td><td>${escapeHtml(String(patient.patientId ?? ''))}</td></tr>
+      <tr><td><strong>Age / Gender</strong></td><td>${escapeHtml(ageGenderLine)}</td>
+          <td><strong>Clinic</strong></td><td>${escapeHtml(String(rx.clinic ?? ''))}</td></tr>
+    </table>
   </div>`
     : '';
+  const metaPatient = patient ? `, ${escapeHtml(patient.name)}` : '';
 
   const dx = rx.diagnoses || [];
-  const diagnosisBlock =
-    dx.length > 0
-      ? `
+  let diagnosisBlock = '';
+  if (dx.length > 0) {
+    diagnosisBlock = `
   <div class="section">
     <h3>DIAGNOSIS (ICD-10)</h3>
     <table>
@@ -152,11 +195,17 @@ function buildPrescriptionReportHTML(
           .join('')}
       </tbody>
     </table>
-  </div>`
-      : '';
+  </div>`;
+  } else if (rx.diagnosis?.trim()) {
+    diagnosisBlock = `
+  <div class="section">
+    <h3>DIAGNOSIS</h3>
+    <p>${escapeHtml(rx.diagnosis).replace(/\n/g, '<br>')}</p>
+  </div>`;
+  }
 
   const notesBlock =
-    dx.length === 0 && rx.notes?.trim()
+    dx.length === 0 && !rx.diagnosis?.trim() && rx.notes?.trim()
       ? `
   <div class="section">
     <h3>NOTES</h3>
@@ -164,13 +213,20 @@ function buildPrescriptionReportHTML(
   </div>`
       : '';
 
+  const prescribedStr = rx.prescribed_at || rx.date
+    ? `${formatDateStr(rx.prescribed_at || rx.date)} ${formatTimeStr(rx.prescribed_at || rx.date)}`
+    : '';
+  const dispensedStr = rx.dispensed_at
+    ? `${formatDateStr(rx.dispensed_at)} ${formatTimeStr(rx.dispensed_at)}`
+    : '';
+
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Prescription Report</title>
+  <title>Prescription${metaPatient}</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; color: #111; font-size: 12pt; }
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; font-size: 11pt; }
     .banner { text-align: center; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 20px; }
     .banner h1 { margin: 0; font-size: 18pt; }
     .banner p { margin: 4px 0 0; font-size: 10pt; color: #444; }
@@ -179,8 +235,13 @@ function buildPrescriptionReportHTML(
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
     th { background: #f5f5f5; font-weight: 600; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 11pt; }
+    .meta-table td { border: none; padding: 3px 8px; }
+    .meta-table td:first-child, .meta-table td:nth-child(3) { font-weight: 600; white-space: nowrap; }
     .footer { margin-top: 28px; text-align: center; font-size: 9pt; color: #666; border-top: 1px solid #ddd; padding-top: 12px; }
+    .ts-grid { display: flex; gap: 16px; margin-top: 12px; }
+    .ts-box { border: 1px solid #ccc; border-radius: 4px; padding: 8px 12px; flex: 1; }
+    .ts-box .label { font-size: 9pt; color: #666; }
+    .ts-box .value { font-weight: 600; }
     @media print {
       html, body { height: auto !important; overflow: visible !important; margin: 0; }
     }
@@ -188,22 +249,27 @@ function buildPrescriptionReportHTML(
 </head>
 <body>
   <div class="banner">
-    <h1>PRESCRIPTION REPORT</h1>
-    <p>Nigerian Ports Authority Medical Services</p>
+    <h1>PRESCRIPTION</h1>
+    <p>${escapeHtml(getOrganizationServicesHeader())}</p>
   </div>
   ${patientBlock}
   <div class="section">
     <h3>PRESCRIPTION DETAILS</h3>
-    <div class="meta">
-      ${rx.date ? `<div><strong>Date prescribed:</strong> ${escapeHtml(rx.date)}</div>` : ''}
-      ${rx.doctor ? `<div><strong>Prescribing doctor:</strong> ${escapeHtml(rx.doctor)}</div>` : ''}
-      <div><strong>Status:</strong> ${escapeHtml(statusLabel(rx.status))}</div>
-    </div>
+    <table class="meta-table">
+      <tr>
+        <td>Ordering Doctor</td><td>${escapeHtml(rx.doctor_name || rx.doctor || '')}</td>
+        <td>Prescription ID</td><td>${escapeHtml(rx.prescription_id || rx.id || '')}</td>
+      </tr>
+      <tr>
+        <td>Status</td><td>${escapeHtml(statusLabel(rx.status))}</td>
+        <td></td><td></td>
+      </tr>
+    </table>
   </div>
   ${diagnosisBlock}
   ${notesBlock}
   <div class="section">
-    <h3>PRESCRIPTIONS</h3>
+    <h3>Medications</h3>
     <table>
       <thead>
         <tr>
@@ -211,14 +277,25 @@ function buildPrescriptionReportHTML(
           <th>Dose</th>
           <th>Frequency</th>
           <th>Duration</th>
-          <th>Qty</th>
+          <th style="text-align:center">Qty</th>
+          <th style="text-align:center">Dispensed</th>
         </tr>
       </thead>
-      <tbody>${rows || '<tr><td colspan="5">No medications listed</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="6" style="text-align:center">No medications listed</td></tr>'}</tbody>
     </table>
   </div>
+  <div class="ts-grid">
+    <div class="ts-box">
+      <div class="label">Prescribed</div>
+      <div class="value">${escapeHtml(prescribedStr)}</div>
+    </div>
+    <div class="ts-box">
+      <div class="label">Dispensed</div>
+      <div class="value">${escapeHtml(dispensedStr)}${rx.dispensed_by_name ? `<br><span style="font-size:9pt;color:#666">by ${escapeHtml(rx.dispensed_by_name)}</span>` : ''}</div>
+    </div>
+  </div>
   <div class="footer">
-    <p>${escapeHtml(getOrganizationHeader())}</p>
+    <p>${escapeHtml(getOrganizationServicesHeader())}</p>
     <p>Generated: ${escapeHtml(new Date().toLocaleString())}</p>
   </div>
 </body>
@@ -230,6 +307,8 @@ export interface PrescriptionReportDialogProps {
   onOpenChange: (open: boolean) => void;
   prescription: PrescriptionReportData | null;
   patient?: PrescriptionReportPatient | null;
+  /** Numeric database ID for PDF download. Falls back to prescription.id. */
+  prescriptionDbId?: string | number | null;
 }
 
 export function PrescriptionReportDialog({
@@ -237,44 +316,74 @@ export function PrescriptionReportDialog({
   onOpenChange,
   prescription,
   patient,
+  prescriptionDbId,
 }: PrescriptionReportDialogProps) {
-  const handlePrint = () => {
-    if (!prescription) return;
-    const html = buildPrescriptionReportHTML(prescription, patient ?? undefined);
-    const w = window.open('', '_blank');
-    if (!w) {
-      toast.error('Please allow popups to print.');
-      return;
-    }
-    w.document.write(html);
-    w.document.close();
-    w.onload = () => {
-      w.print();
-      w.close();
-    };
-    toast.success('Prescription report sent to printer');
-  };
-
-  const handleDownload = () => {
-    if (!prescription) return;
-    const html = buildPrescriptionReportHTML(prescription, patient ?? undefined);
-    const w = window.open('', '_blank');
-    if (!w) {
-      toast.error('Please allow popups to save as PDF.');
-      return;
-    }
-    w.document.write(html);
-    w.document.close();
-    w.onload = () => {
-      setTimeout(() => {
-        w.print();
-        w.close();
-        toast.success('Use Print → Save as PDF in the dialog');
-      }, 400);
-    };
-  };
-
   const rx = prescription;
+
+  const getPdfId = (): string | null => {
+    if (prescriptionDbId != null) return String(prescriptionDbId);
+    if (rx?.id) return String(rx.id);
+    return null;
+  };
+
+  const handlePrint = async () => {
+    const id = getPdfId();
+    if (!id) {
+      toast.error('Prescription ID not available for printing.');
+      return;
+    }
+    try {
+      const { printPrescriptionPdf } = await import('@/lib/pharmacy/prescriptionPdf');
+      await printPrescriptionPdf(id);
+    } catch {
+      toast.error('Unable to print prescription');
+    }
+  };
+
+  const handleDownload = async () => {
+    const id = getPdfId();
+    if (!id) {
+      toast.error('Prescription ID not available for download.');
+      return;
+    }
+    try {
+      const label = rx?.prescription_id || rx?.id || 'prescription';
+      const { downloadPrescriptionPdf } = await import('@/lib/pharmacy/prescriptionPdf');
+      await downloadPrescriptionPdf(id, String(label));
+    } catch {
+      toast.error('Unable to download prescription');
+    }
+  };
+
+  const formatDate = (d: string | undefined): string => {
+    if (!d) return '';
+    try {
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return d;
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+    } catch {
+      return d;
+    }
+  };
+
+  const formatTime = (d: string | undefined): string => {
+    if (!d) return '';
+    try {
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return '';
+      return date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      return '';
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -282,60 +391,52 @@ export function PrescriptionReportDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-violet-500" />
-            Prescription Report
+            Prescription
           </DialogTitle>
           <DialogDescription>
-            {prescription?.date ? `${prescription.date}` : 'Prescription'}
-            {prescription?.doctor ? ` • ${prescription.doctor}` : ''}
+            {rx ? `${rx.prescription_id || rx.id || ''} - ${patient?.name || ''}` : 'Prescription'}
           </DialogDescription>
         </DialogHeader>
 
         {rx && (
           <div className="space-y-6 py-4">
             <div className="text-center p-4 border-b">
-              <h2 className="text-xl font-bold">PRESCRIPTION REPORT</h2>
-              <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
+              <h2 className="text-xl font-bold">PRESCRIPTION</h2>
+              <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
             </div>
 
-            {patient && (
-              <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-                <div>
-                  <p className="text-xs text-muted-foreground">Patient Name</p>
-                  <p className="font-medium">{patient.name}</p>
-                </div>
-                {patient.patientId != null && String(patient.patientId).trim() !== '' && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">Patient ID</p>
-                    <p className="font-medium">{patient.patientId}</p>
-                  </div>
-                )}
-                {(() => {
-                  const ag = [patient.age != null && patient.age !== '' ? `${patient.age} years` : null, patient.gender || null]
-                    .filter(Boolean)
-                    .join(' / ');
-                  return ag ? (
-                    <div className="col-span-2">
-                      <p className="text-xs text-muted-foreground">Age / Gender</p>
-                      <p className="font-medium">{ag}</p>
-                    </div>
-                  ) : null;
-                })()}
-              </div>
-            )}
-
             <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-              {rx.date && (
-                <div>
-                  <p className="text-xs text-muted-foreground">Date prescribed</p>
-                  <p className="font-medium">{rx.date}</p>
-                </div>
-              )}
-              {rx.doctor && (
-                <div>
-                  <p className="text-xs text-muted-foreground">Prescribing doctor</p>
-                  <p className="font-medium">{rx.doctor}</p>
-                </div>
-              )}
+              <div>
+                <p className="text-xs text-muted-foreground">Patient Name</p>
+                <p className="font-medium">{patient?.name || ''}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Patient ID</p>
+                <p className="font-medium">{patient?.patientId ?? ''}</p>
+              </div>
+              {(() => {
+                const ag = patient ? [patient.age != null && patient.age !== '' ? `${patient.age} years` : null, patient.gender || null]
+                  .filter(Boolean)
+                  .join(' / ') : '';
+                return (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Age / Gender</p>
+                    <p className="font-medium">{ag}</p>
+                  </div>
+                );
+              })()}
+              <div>
+                <p className="text-xs text-muted-foreground">Clinic</p>
+                <p className="font-medium">{rx.clinic || (rx as any)?.visit_details?.clinic || ''}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Ordering Doctor</p>
+                <p className="font-medium">{rx.doctor_name || rx.doctor || ''}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Prescription ID</p>
+                <p className="font-medium">{rx.prescription_id || rx.id || ''}</p>
+              </div>
               <div className="col-span-2 flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Status</span>
                 <Badge variant="outline" className={statusBadgeClass(rx.status)}>
@@ -389,6 +490,14 @@ export function PrescriptionReportDialog({
                   </table>
                 </div>
               </div>
+            ) : rx.diagnosis?.trim() ? (
+              <div>
+                <h3 className="font-semibold mb-3 flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <Stethoscope className="h-4 w-4" />
+                  DIAGNOSIS
+                </h3>
+                <p className="p-3 rounded-lg bg-muted/50 border text-sm whitespace-pre-wrap">{rx.diagnosis}</p>
+              </div>
             ) : rx.notes?.trim() ? (
               <div>
                 <h3 className="text-sm font-semibold text-muted-foreground mb-2">NOTES</h3>
@@ -399,7 +508,7 @@ export function PrescriptionReportDialog({
             <div>
               <h3 className="font-semibold mb-3 flex items-center gap-2 text-violet-700 dark:text-violet-300">
                 <Pill className="h-4 w-4" />
-                PRESCRIPTIONS
+                Medications
               </h3>
               <div className="overflow-x-auto border rounded-lg">
                 <table className="w-full text-sm">
@@ -409,40 +518,73 @@ export function PrescriptionReportDialog({
                       <th className="text-left p-3 font-medium">Dose</th>
                       <th className="text-left p-3 font-medium">Frequency</th>
                       <th className="text-left p-3 font-medium">Duration</th>
-                      <th className="text-left p-3 font-medium">Qty</th>
+                      <th className="text-center p-3 font-medium">Qty</th>
+                      <th className="text-center p-3 font-medium">Dispensed</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rx.medications.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                        <td colSpan={6} className="p-4 text-center text-muted-foreground">
                           No medications listed
                         </td>
                       </tr>
                     ) : (
-                      rx.medications.map((m, i) => (
-                        <tr key={i} className="border-b">
-                          <td className="p-3 font-medium">{medLabel(m)}</td>
-                          <td className="p-3">{medDose(m)}</td>
-                          <td className="p-3 text-muted-foreground">
-                            {String(m.frequency ?? '').trim()}
-                          </td>
-                          <td className="p-3 text-muted-foreground">
-                            {String(m.duration ?? '').trim()}
-                          </td>
-                          <td className="p-3 text-muted-foreground">
-                            {m.quantity != null && m.quantity !== '' ? String(m.quantity) : ''}
-                          </td>
-                        </tr>
-                      ))
+                      rx.medications.map((m, i) => {
+                        const dispensed = m.is_dispensed ?? m.isDispensed ?? false;
+                        return (
+                          <tr key={i} className="border-b">
+                            <td className="p-3 font-medium">{medLabel(m)}</td>
+                            <td className="p-3">{medDose(m)}</td>
+                            <td className="p-3 text-muted-foreground">
+                              {String(m.frequency ?? '').trim()}
+                            </td>
+                            <td className="p-3 text-muted-foreground">
+                              {String(m.duration ?? '').trim()}
+                            </td>
+                            <td className="p-3 text-center text-muted-foreground">
+                              {m.quantity != null && m.quantity !== '' ? `${String(m.quantity)}${m.unit ? ` ${m.unit}` : ''}` : ''}
+                            </td>
+                            <td className="p-3 text-center">
+                              <Badge variant={dispensed ? 'default' : 'outline'} className={dispensed ? 'bg-emerald-600' : ''}>
+                                {dispensed ? 'Yes' : 'No'}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="p-3 rounded-lg border">
+                <p className="text-xs text-muted-foreground">Prescribed</p>
+                <p className="font-medium">
+                  {rx.prescribed_at || rx.date
+                    ? `${formatDate(rx.prescribed_at || rx.date)} ${formatTime(rx.prescribed_at || rx.date)}`
+                    : ''}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg border">
+                <p className="text-xs text-muted-foreground">Dispensed</p>
+                <p className="font-medium">
+                  {rx.dispensed_at
+                    ? `${formatDate(rx.dispensed_at)} ${formatTime(rx.dispensed_at)}`
+                    : ''}
+                </p>
+                {rx.dispensed_by_name && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    by {rx.dispensed_by_name}
+                  </p>
+                )}
+              </div>
+            </div>
+
             <div className="border-t pt-4 text-xs text-muted-foreground text-center">
-              {getOrganizationHeader()}
+              {getOrganizationServicesHeader()}
             </div>
           </div>
         )}

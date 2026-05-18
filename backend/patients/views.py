@@ -194,7 +194,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         # Filter by active status if not explicitly requested
         if self.request.query_params.get('include_inactive') != 'true':
             queryset = queryset.filter(is_active=True)
-        return queryset.select_related('principal_staff', 'created_by')
+        return queryset.select_related('principal_staff', 'created_by', 'updated_by')
     
     def get_serializer_class(self):
         """Use lightweight serializer for list, full serializer for detail."""
@@ -229,7 +229,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         # Check if category is changing and regenerate patient ID if needed
         category_changed = 'category' in serializer.validated_data and serializer.validated_data['category'] != old_instance.category
 
-        patient = serializer.save()
+        patient = serializer.save(updated_by=self.request.user)
 
         # Regenerate patient ID if category changed
         if category_changed:
@@ -260,7 +260,8 @@ class PatientViewSet(viewsets.ModelViewSet):
         patient_id = instance.id
         patient_repr = instance.get_full_name()
         instance.is_active = False
-        instance.save()
+        instance.updated_by = self.request.user
+        instance.save(update_fields=['is_active', 'updated_by'])
         AuditService.log_patient_action(
             user=self.request.user,
             action='delete',

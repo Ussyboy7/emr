@@ -11,11 +11,23 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { patientService } from '@/lib/services';
+import { patientService, radiologyService } from '@/lib/services';
 import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
-import { 
+import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
+import {
+  transformApiRowToCompletedTest,
+  type CompletedTest,
+} from '@/lib/laboratory/completedLabReport';
+import { RadiologyCompletedReportDialog } from '@/components/radiology/RadiologyCompletedReportDialog';
+import {
+  transformApiRadiologyReportToCompleted,
+  type CompletedRadiologyReport,
+} from '@/lib/radiology/completedRadiologyReport';
+import { PrescriptionReportDialog, type PrescriptionReportData } from '@/components/pharmacy/PrescriptionReportDialog';
+import { ViewEyeOrderModal } from '@/components/eyecare/ViewEyeOrderModal';
+import {
   FileText,
   Stethoscope,
   TestTube,
@@ -57,6 +69,32 @@ const escapeHtml = (value: string) => {
     .replaceAll("'", '&#039;');
 };
 
+const humanizeStatus = (value: unknown): string => {
+  const s = String(value ?? '').trim();
+  if (!s) return '';
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+const getImagingBadgeClass = (label: string) => {
+  if (label === 'Critical') return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
+  if (label === 'Abnormal') return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
+  if (label === 'Normal') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+  if (label === 'Verified') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+  if (label === 'Reported') return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
+  if (label === 'Pending') return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/50';
+  if (label === 'Admitted') return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
+  if (label === 'Discharged') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+  if (label === 'Transferred') return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/50';
+  return 'bg-muted/40 text-muted-foreground border-border/60';
+};
+
+const getLabStatusBadgeClass = (status: string) => {
+  if (status === 'Normal') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+  if (status === 'Abnormal') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+  if (status === 'Critical') return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400';
+  return 'bg-muted/40 text-muted-foreground border-border/60';
+};
+
 interface PatientDetail {
   allergies: string[];
   chronicConditions: string[];
@@ -88,6 +126,7 @@ interface MedicalHistoryTabProps {
   prescriptions: any[];
   vitalSigns: any[];
   physioOrders?: any[];
+  eyeOrders?: any[];
   wardAdmissions?: any[];
   medicalCertificates?: any[];
   historySubTab: string;
@@ -106,6 +145,7 @@ export function MedicalHistoryTab({
   prescriptions,
   vitalSigns,
   physioOrders = [],
+  eyeOrders = [],
   wardAdmissions = [],
   medicalCertificates = [],
   historySubTab,
@@ -123,6 +163,8 @@ export function MedicalHistoryTab({
   const [prescriptionsDateFilter, setPrescriptionsDateFilter] = useState<string>('all');
   const [prescriptionsStatusFilter, setPrescriptionsStatusFilter] = useState<string>('all');
   const [vitalsDateFilter, setVitalsDateFilter] = useState<string>('all');
+  const [selectedEyeOrderId, setSelectedEyeOrderId] = useState<number | undefined>(undefined);
+  const [showEyeOrderModal, setShowEyeOrderModal] = useState(false);
   
   const [consultationsPage, setConsultationsPage] = useState(1);
   const [labResultsPage, setLabResultsPage] = useState(1);
@@ -148,6 +190,16 @@ export function MedicalHistoryTab({
   // Medical certificate view/print state
   const [selectedCertificate, setSelectedCertificate] = useState<any>(null);
   const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
+
+  // Lab report dialog state
+  const [selectedLabReport, setSelectedLabReport] = useState<CompletedTest | null>(null);
+
+  // Imaging report dialog state
+  const [selectedImagingReport, setSelectedImagingReport] = useState<CompletedRadiologyReport | null>(null);
+
+  // Prescription dialog state
+  const [selectedPrescription, setSelectedPrescription] = useState<PrescriptionReportData | null>(null);
+  const [showPrescriptionDialog, setShowPrescriptionDialog] = useState(false);
 
   const openPrintWindow = (title: string, html: string) => {
     const popup = window.open("", "_blank", "width=900,height=1000");
@@ -414,6 +466,10 @@ export function MedicalHistoryTab({
                 <Activity className="h-3 w-3 mr-1" />
                 Physio ({physioOrders.length})
               </TabsTrigger>
+              <TabsTrigger value="eye" className="text-xs">
+                <Eye className="h-3 w-3 mr-1" />
+                Eye ({eyeOrders.length})
+              </TabsTrigger>
               <TabsTrigger value="wards" className="text-xs">
                 <Building2 className="h-3 w-3 mr-1" />
                 Wards ({wardAdmissions.length})
@@ -667,8 +723,7 @@ export function MedicalHistoryTab({
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Test</th>
-                      <th className="px-4 py-2 text-left font-medium">Result</th>
-                      <th className="px-4 py-2 text-center font-medium">Status</th>
+                      <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
                   </thead>
@@ -687,14 +742,25 @@ export function MedicalHistoryTab({
                       <tr key={lab.id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 text-muted-foreground">{lab.date}</td>
                         <td className="px-4 py-3 font-medium">{lab.test}</td>
-                        <td className="px-4 py-3">{lab.result || 'Pending'}</td>
-                        <td className="px-4 py-3 text-center">
-                          <Badge variant={lab.status === 'Normal' || lab.status === 'verified' ? 'default' : 'secondary'}>
-                            {lab.status}
+                        <td className="px-4 py-3">
+                          <Badge className={getLabStatusBadgeClass(lab.overallStatus)}>
+                            {lab.overallStatus || 'Pending'}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <Button variant="ghost" size="sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              try {
+                                const completed = transformApiRowToCompletedTest(lab._raw, 'tests');
+                                setSelectedLabReport(completed);
+                              } catch (e) {
+                                console.error('Failed to open lab report:', e);
+                                toast.error('Could not open lab report');
+                              }
+                            }}
+                          >
                             <Eye className="h-4 w-4 mr-1" /> View
                           </Button>
                         </td>
@@ -702,7 +768,7 @@ export function MedicalHistoryTab({
                     ))}
                     {labResults.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                        <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
                           No lab results found
                         </td>
                       </tr>
@@ -777,7 +843,6 @@ export function MedicalHistoryTab({
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Type</th>
                       <th className="px-4 py-2 text-left font-medium">Description</th>
-                      <th className="px-4 py-2 text-left font-medium">Result</th>
                       <th className="px-4 py-2 text-center font-medium">Status</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
@@ -798,14 +863,36 @@ export function MedicalHistoryTab({
                         <td className="px-4 py-3 text-muted-foreground">{img.date}</td>
                         <td className="px-4 py-3 font-medium">{img.type}</td>
                         <td className="px-4 py-3">{img.description}</td>
-                        <td className="px-4 py-3">{img.result || 'Pending'}</td>
                         <td className="px-4 py-3 text-center">
-                          <Badge variant={img.status === 'completed' || img.status === 'reported' ? 'default' : 'secondary'}>
-                            {img.status}
+                          <Badge variant="outline" className={getImagingBadgeClass(humanizeStatus(img.status))}>
+                            {humanizeStatus(img.status)}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <Button variant="ghost" size="sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              const studyId = img._rawStudy?.id;
+                              const patientId = patientNumericId;
+                              if (!studyId || !patientId) return;
+                              try {
+                                const response = await radiologyService.getVerifiedReports({
+                                  patient: String(patientId),
+                                  page_size: 50,
+                                });
+                                const match = response.results.find(
+                                  (r: any) => r.study === studyId || r.study_details?.id === studyId,
+                                );
+                                if (!match) throw new Error('Verified report not found');
+                                const report = transformApiRadiologyReportToCompleted(match as any);
+                                setSelectedImagingReport(report);
+                              } catch (e) {
+                                console.error('Failed to open imaging report:', e);
+                                toast.error('Could not open imaging report');
+                              }
+                            }}
+                          >
                             <Eye className="h-4 w-4 mr-1" /> View
                           </Button>
                         </td>
@@ -813,7 +900,7 @@ export function MedicalHistoryTab({
                     ))}
                     {imagingResults.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                        <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                           No imaging studies found
                         </td>
                       </tr>
@@ -936,6 +1023,34 @@ export function MedicalHistoryTab({
                           <span className="font-medium">Notes:</span> {rx.notes}
                         </div>
                       )}
+                      <div className="flex justify-end pt-2 border-t">
+                        <Button variant="ghost" size="sm" onClick={() => {
+                          setSelectedPrescription({
+                            id: rx.id,
+                            prescription_id: rx.prescriptionId,
+                            date: rx.date,
+                            doctor: rx.doctor,
+                            status: rx.status,
+                            diagnosis: rx.diagnosis || '',
+                            notes: rx.notes || '',
+                            clinic: (rx as any).clinic || '',
+                            medications: (rx.medications || []).map((med: any) => ({
+                              medication_name: med.name || med.medication_name || '',
+                              dosage: med.dosage || '',
+                              dose: med.dose || med.dosage || '',
+                              frequency: med.frequency || '',
+                              duration: med.duration || '',
+                              quantity: med.quantity != null ? med.quantity : '',
+                              unit: med.unit || '',
+                              instructions: med.instructions || '',
+                              is_dispensed: med.isDispensed || med.is_dispensed || false,
+                            })),
+                          });
+                          setShowPrescriptionDialog(true);
+                        }}>
+                          <Eye className="h-4 w-4 mr-1" /> View
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -1126,6 +1241,52 @@ export function MedicalHistoryTab({
                             </td>
                             <td className="px-4 py-3 text-muted-foreground">{order.priority ?? ''}</td>
                             <td className="px-4 py-3 text-muted-foreground">{order.sessions_completed ?? 0}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Eye Sub-Tab */}
+            <TabsContent value="eye" className="mt-4">
+              {eyeOrders.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No eye care orders found</p>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">Ordered</th>
+                        <th className="px-4 py-2 text-left font-medium">Status</th>
+                        <th className="px-4 py-2 text-left font-medium">Priority</th>
+                        <th className="px-4 py-2 text-left font-medium">Sessions</th>
+                        <th className="px-4 py-2 text-center font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {eyeOrders.map((order: any) => {
+                        const d = safeParseDate(order.ordered_at);
+                        return (
+                          <tr key={order.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {d ? d.toLocaleDateString() : order.ordered_at ?? ''}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline">{order.status ?? ''}</Badge>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{order.priority ?? ''}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{order.completed_sessions_count ?? 0}</td>
+                            <td className="px-4 py-3 text-center">
+                              <Button variant="ghost" size="sm" onClick={() => {
+                                setSelectedEyeOrderId(order.id);
+                                setShowEyeOrderModal(true);
+                              }}>
+                                <Eye className="h-4 w-4 mr-1" /> View
+                              </Button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -1378,6 +1539,43 @@ export function MedicalHistoryTab({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Lab Completed Report Dialog */}
+      <LabCompletedReportDialog
+        open={!!selectedLabReport}
+        onOpenChange={(open) => { if (!open) setSelectedLabReport(null); }}
+        test={selectedLabReport}
+        hideLabWorkflowActions
+      />
+
+      {/* Imaging Report Dialog */}
+      <RadiologyCompletedReportDialog
+        open={!!selectedImagingReport}
+        onOpenChange={(open) => { if (!open) setSelectedImagingReport(null); }}
+        report={selectedImagingReport}
+      />
+
+      {/* Prescription Report Dialog */}
+      <PrescriptionReportDialog
+        open={showPrescriptionDialog}
+        onOpenChange={(open) => {
+          setShowPrescriptionDialog(open);
+          if (!open) setSelectedPrescription(null);
+        }}
+        prescription={selectedPrescription}
+        prescriptionDbId={selectedPrescription?.id ?? null}
+        patient={patientDetail ? {
+          name: patientDetail.fullName || '',
+          patientId: patientDetail.patientId || '',
+          age: patientDetail.age,
+          gender: patientDetail.gender,
+        } : null}
+      />
+      <ViewEyeOrderModal
+        open={showEyeOrderModal}
+        onOpenChange={setShowEyeOrderModal}
+        orderId={selectedEyeOrderId}
+      />
     </div>
   );
 }

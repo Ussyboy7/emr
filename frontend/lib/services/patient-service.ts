@@ -110,6 +110,8 @@ export interface Patient {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  created_by_name?: string | null;
+  updated_by_name?: string | null;
   total_visits?: number;
   last_visit_at?: string | null;
 }

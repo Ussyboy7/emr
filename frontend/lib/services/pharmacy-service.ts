@@ -48,6 +48,7 @@ export interface Prescription {
   prescribed_at: string;
   created_at?: string;
   dispensed_at?: string;
+  dispensed_by_name?: string;
 }
 
 export interface PrescriptionItem {

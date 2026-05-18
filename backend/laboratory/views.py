@@ -841,6 +841,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         results = _parse_results_payload(request.data.get('results', {}))
         notes = request.data.get('notes', '')
         result_file = request.FILES.get('result_file')
+        report_file_count = int(request.POST.get('report_file_count', 0)) if request.content_type and 'multipart/form-data' in request.content_type else 0
         
         try:
             test = order.tests.get(id=test_id)
@@ -897,7 +898,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                     )
 
                 missing = [k for k in required_keys if not str(results.get(k, '')).strip()]
-                if missing and not result_file:
+                if missing and not (result_file or report_file_count > 0):
                     return Response(
                         {'error': f'Missing required result field(s): {", ".join(missing)}'},
                         status=status.HTTP_400_BAD_REQUEST
@@ -907,7 +908,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             was_rejected = test.status == 'rejected' or test.rejected_by is not None
             
             has_structured_results = _has_meaningful_results_payload(results)
-            has_result_file = bool(result_file)
+            has_result_file = bool(result_file or report_file_count > 0)
             if not (has_structured_results or has_result_file):
                 return Response(
                     {'error': 'No result values were provided. Enter at least one result or upload a result file.'},
@@ -916,8 +917,24 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
             test.results = results
             test.notes = notes
-            if result_file:
+
+            # Handle file uploads (multiple files via indexed keys)
+            if report_file_count > 0:
+                report_files = [request.FILES.get(f'report_file_{i}') for i in range(report_file_count)]
+                report_files = [f for f in report_files if f]
+                if report_files:
+                    test.result_file = report_files[0]
+                    for f in report_files[1:]:
+                        LabTestResultAttachment.objects.create(
+                            test=test,
+                            row_id='',
+                            row_name=f.name[:200],
+                            file=f,
+                            uploaded_by=request.user,
+                        )
+            elif result_file:
                 test.result_file = result_file
+
             test.status = 'results_ready'
             
             # If this was a rejected test being resubmitted, clear rejection fields
