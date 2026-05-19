@@ -1832,11 +1832,48 @@ export default function LabOrdersPage() {
     }
   };
 
+  // Get earliest collection date across all tests (for Processing/Results/Rework display)
+  const getFirstCollectedAt = (tests: LabTest[]): string | undefined => {
+    const dates = tests
+      .map(t => t.collectedAt)
+      .filter(Boolean) as string[];
+    if (dates.length === 0) return undefined;
+    dates.sort();
+    return dates[0];
+  };
+
+  const formatDisplayDate = (isoString: string | undefined): string => {
+    if (!isoString) return '—';
+    try {
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return '—';
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '—';
+    }
+  };
+
+  const testStatusBadgeClass = (status: string): string => {
+    switch (status) {
+      case LAB_TEST_STATUS.PENDING: return 'bg-gray-100 text-gray-600 border-gray-200';
+      case LAB_TEST_STATUS.SAMPLE_COLLECTED: return 'bg-blue-100 text-blue-700 border-blue-200';
+      case LAB_TEST_STATUS.PROCESSING: return 'bg-amber-100 text-amber-700 border-amber-200';
+      case LAB_TEST_STATUS.RESULTS_READY: return 'bg-violet-100 text-violet-700 border-violet-200';
+      case LAB_TEST_STATUS.VERIFIED: return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+      case LAB_TEST_STATUS.REJECTED: return 'bg-rose-100 text-rose-700 border-rose-200';
+      default: return 'bg-gray-100 text-gray-600 border-gray-200';
+    }
+  };
+
   // Simple Order Card - just basic info, click to view/manage
   const OrderCard = ({ order }: { order: LabOrder }) => {
     const orderProgressDisplay = getOrderProgressDisplay(order.tests);
     const orderStatus = getOrderStatus(order.tests);
     const isCompleted = orderStatus === LAB_ORDER_STATUS.COMPLETED;
+    const isPending = orderStatus === LAB_ORDER_STATUS.PENDING;
+    const firstCollectedAt = getFirstCollectedAt(order.tests);
+    const displayDate = isPending ? order.orderedAt : (firstCollectedAt || order.orderedAt);
+    const dateLabel = isPending ? 'Ordered' : 'First sample collected';
     
     return (
       <Card 
@@ -1871,7 +1908,14 @@ export default function LabOrdersPage() {
                     </TooltipContent>
                   </Tooltip>
                   {order.tests.map(test => (
-                    <Badge key={test.id} variant="secondary" className="text-[10px] px-1.5 py-0">{test.code}</Badge>
+                    <Tooltip key={test.id}>
+                      <TooltipTrigger asChild>
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${testStatusBadgeClass(test.status)} cursor-help`}>{test.code}</Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="text-xs">{test.name} — {test.status}</p>
+                      </TooltipContent>
+                    </Tooltip>
                   ))}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
@@ -1907,9 +1951,10 @@ export default function LabOrdersPage() {
                     : order.doctor.name}
                 </span>
                 <span>•</span>
-                <span className="flex items-center gap-1" title="When the order was placed">
+                <span className="flex items-center gap-1" title={isPending ? 'When the order was placed' : 'When the first sample was collected'}>
                   <Clock className="h-3 w-3 shrink-0" />
-                  {formatOrderedAtDisplay(order.orderedAt) || '—'}
+                  <span className="text-[10px] text-muted-foreground mr-0.5">{dateLabel}:</span>
+                  {formatDisplayDate(displayDate)}
                 </span>
                 <span>•</span>
                 <span>{order.tests.length} test{order.tests.length > 1 ? 's' : ''}</span>
