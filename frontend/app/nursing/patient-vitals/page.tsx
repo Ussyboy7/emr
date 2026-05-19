@@ -63,6 +63,15 @@ interface PatientVitals {
 
 // Patient vitals data will be loaded from API
 
+function VitalCard({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <div className="bg-muted/30 rounded-lg p-2 text-center">
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className="text-sm font-semibold text-foreground">{value}{unit ? <span className="text-xs text-muted-foreground font-normal ml-0.5">{unit}</span> : null}</p>
+    </div>
+  );
+}
+
 export default function PatientVitalsPage() {
   const serverToday = useServerToday();
   const [patients, setPatients] = useState<PatientVitals[]>([]);
@@ -647,11 +656,11 @@ export default function PatientVitalsPage() {
               {selectedPatient?.vitalsHistory.map((vitals, index) => (
                 <Card key={vitals.id} className={`${index === 0 ? 'border-rose-500/50 bg-rose-500/5' : ''}`}>
                   <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Clock className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="font-medium text-sm">
                             {new Date(vitals.recordedAt).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
                           </span>
                           <span className="text-sm text-muted-foreground">
@@ -659,15 +668,51 @@ export default function PatientVitalsPage() {
                           </span>
                           {index === 0 && <Badge className="bg-rose-500 text-white text-xs">Latest</Badge>}
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                          <span>BP: {vitals.bloodPressureSystolic}/{vitals.bloodPressureDiastolic}</span>
-                          <span>P: {vitals.pulse}</span>
-                          <span>T: {vitals.temperature}°C</span>
-                          <span>SpO2: {vitals.oxygenSaturation}%</span>
-                          {vitals.bloodSugar ? <span>FBS: {vitals.bloodSugar}</span> : null}
-                          {vitals.randomBloodSugar ? <span>RBS: {vitals.randomBloodSugar}</span> : null}
-                          {vitals.recordedBy && <span className="ml-auto">Recorded by: {vitals.recordedBy}</span>}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {vitals.bloodPressureSystolic || vitals.bloodPressureDiastolic ? (
+                            <VitalCard label="BP" value={`${vitals.bloodPressureSystolic || '—'}/${vitals.bloodPressureDiastolic || '—'}`} unit="mmHg" />
+                          ) : null}
+                          {vitals.pulse ? (
+                            <VitalCard label="Pulse" value={vitals.pulse} unit="bpm" />
+                          ) : null}
+                          {vitals.temperature ? (
+                            <VitalCard label="Temp" value={`${vitals.temperature}°C`} />
+                          ) : null}
+                          {vitals.oxygenSaturation ? (
+                            <VitalCard label="SpO2" value={`${vitals.oxygenSaturation}%`} />
+                          ) : null}
+                          {vitals.respiratoryRate ? (
+                            <VitalCard label="RR" value={vitals.respiratoryRate} unit="/min" />
+                          ) : null}
+                          {vitals.bloodSugar ? (
+                            <VitalCard label="FBS" value={vitals.bloodSugar} unit="mg/dL" />
+                          ) : null}
+                          {vitals.randomBloodSugar ? (
+                            <VitalCard label="RBS" value={vitals.randomBloodSugar} unit="mg/dL" />
+                          ) : null}
+                          {vitals.weight ? (
+                            <VitalCard label="Weight" value={vitals.weight} unit="kg" />
+                          ) : null}
+                          {vitals.height ? (
+                            <VitalCard label="Height" value={vitals.height} unit="cm" />
+                          ) : null}
+                          {vitals.bmi ? (
+                            <VitalCard label="BMI" value={vitals.bmi} />
+                          ) : null}
+                          {vitals.painScale ? (
+                            <VitalCard label="Pain" value={`${vitals.painScale}/10`} />
+                          ) : null}
                         </div>
+                        {vitals.recordedBy && (
+                          <p className="text-xs text-muted-foreground">
+                            Recorded by: {vitals.recordedBy}
+                          </p>
+                        )}
+                        {vitals.notes && (
+                          <p className="text-xs text-muted-foreground italic bg-muted/30 rounded p-2">
+                            {vitals.notes}
+                          </p>
+                        )}
                       </div>
                       <Button
                         variant="outline"
@@ -676,10 +721,10 @@ export default function PatientVitalsPage() {
                           setSelectedVitals(vitals);
                           setIsVitalsDetailModalOpen(true);
                         }}
-                        className="ml-4"
+                        className="shrink-0 mt-1"
                       >
                         <Eye className="h-4 w-4 mr-1" />
-                        View Details
+                        Details
                       </Button>
                     </div>
                   </CardContent>
