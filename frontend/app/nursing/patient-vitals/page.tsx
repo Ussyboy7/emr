@@ -656,20 +656,7 @@ export default function PatientVitalsPage() {
                           {index === 0 && <Badge className="bg-rose-500 text-white text-[10px] h-4">Latest</Badge>}
                           <span className="ml-auto">{vitals.recordedBy ? `by ${vitals.recordedBy}` : ''}</span>
                         </div>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-1 text-sm">
-                          {vitals.bloodPressureSystolic || vitals.bloodPressureDiastolic ? <div><span className="text-muted-foreground">BP:</span> <span className="font-medium">{vitals.bloodPressureSystolic || '—'}/{vitals.bloodPressureDiastolic || '—'}</span></div> : null}
-                          {vitals.pulse ? <div><span className="text-muted-foreground">Pulse:</span> <span className="font-medium">{vitals.pulse}</span> <span className="text-xs text-muted-foreground">bpm</span></div> : null}
-                          {vitals.temperature ? <div><span className="text-muted-foreground">Temp:</span> <span className="font-medium">{vitals.temperature}°C</span></div> : null}
-                          {vitals.oxygenSaturation ? <div><span className="text-muted-foreground">SpO2:</span> <span className="font-medium">{vitals.oxygenSaturation}%</span></div> : null}
-                          {vitals.respiratoryRate ? <div><span className="text-muted-foreground">RR:</span> <span className="font-medium">{vitals.respiratoryRate}</span> <span className="text-xs text-muted-foreground">/min</span></div> : null}
-                          {vitals.bloodSugar ? <div><span className="text-muted-foreground">FBS:</span> <span className="font-medium">{vitals.bloodSugar}</span> <span className="text-xs text-muted-foreground">mg/dL</span></div> : null}
-                          {vitals.randomBloodSugar ? <div><span className="text-muted-foreground">RBS:</span> <span className="font-medium">{vitals.randomBloodSugar}</span> <span className="text-xs text-muted-foreground">mg/dL</span></div> : null}
-                          {vitals.weight ? <div><span className="text-muted-foreground">Weight:</span> <span className="font-medium">{vitals.weight}</span> <span className="text-xs text-muted-foreground">kg</span></div> : null}
-                          {vitals.height ? <div><span className="text-muted-foreground">Height:</span> <span className="font-medium">{vitals.height}</span> <span className="text-xs text-muted-foreground">cm</span></div> : null}
-                          {vitals.bmi ? <div><span className="text-muted-foreground">BMI:</span> <span className="font-medium">{vitals.bmi}</span></div> : null}
-                          {vitals.painScale ? <div><span className="text-muted-foreground">Pain:</span> <span className="font-medium">{vitals.painScale}/10</span></div> : null}
-                        </div>
-                        {vitals.notes && <p className="text-xs text-muted-foreground italic mt-2">{vitals.notes}</p>}
+                        {vitals.notes && <p className="text-xs text-muted-foreground italic">{vitals.notes}</p>}
                       </div>
                       <Button variant="outline" size="sm" className="h-7 shrink-0 text-xs" onClick={() => { setSelectedVitals(vitals); setIsVitalsDetailModalOpen(true); }}>
                         <Eye className="h-3 w-3 mr-1" /> View
