@@ -624,11 +624,11 @@ export default function PatientVitalsPage() {
         )}
 
         {/* Pagination */}
-        {totalCount > 0 && (
+        {patients.length > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={totalCount}
+              totalItems={patients.length}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
