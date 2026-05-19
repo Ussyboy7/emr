@@ -388,14 +388,15 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
 
   const patientId = session.patient as number;
   const visitId = session.visit as number | undefined;
+  const consultationSessionId = session.id as number | undefined;
 
   // Fire all enrichment calls in parallel — they only depend on session/patient/visit IDs
   const [patient, prescriptionsResult, labOrders, radiologyOrders, vitals, physioOrders, eyeOrdersResult, diagnosesResult] = await Promise.all([
     patientId
       ? patientService.getPatient(patientId).catch(() => null)
       : Promise.resolve(null),
-    visitId
-      ? apiFetch<ApiResponse<PrescriptionApiResponse>>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+    consultationSessionId
+      ? apiFetch<ApiResponse<PrescriptionApiResponse>>(`/pharmacy/prescriptions/?consultation_session=${consultationSessionId}&page_size=100`).catch(() => ({ results: [] }))
       : Promise.resolve({ results: [] }),
     visitId
       ? apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
