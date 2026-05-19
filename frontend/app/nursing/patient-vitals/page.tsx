@@ -63,15 +63,6 @@ interface PatientVitals {
 
 // Patient vitals data will be loaded from API
 
-function VitalCard({ label, value, unit }: { label: string; value: string; unit?: string }) {
-  return (
-    <div className="bg-muted/30 rounded-lg p-2 text-center">
-      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className="text-sm font-semibold text-foreground">{value}{unit ? <span className="text-xs text-muted-foreground font-normal ml-0.5">{unit}</span> : null}</p>
-    </div>
-  );
-}
-
 export default function PatientVitalsPage() {
   const serverToday = useServerToday();
   const [patients, setPatients] = useState<PatientVitals[]>([]);
@@ -652,79 +643,36 @@ export default function PatientVitalsPage() {
                 {selectedPatient?.patientId} | {selectedPatient?.personalNumber} | {selectedPatient?.vitalsHistory?.length || 0} records
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 overflow-y-auto py-4 space-y-3">
+            <div className="flex-1 overflow-y-auto py-4 space-y-2">
               {selectedPatient?.vitalsHistory.map((vitals, index) => (
-                <Card key={vitals.id} className={`${index === 0 ? 'border-rose-500/50 bg-rose-500/5' : ''}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="font-medium text-sm">
-                            {new Date(vitals.recordedAt).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
-                          </span>
-                          <span className="text-sm text-muted-foreground">
-                            {new Date(vitals.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          {index === 0 && <Badge className="bg-rose-500 text-white text-xs">Latest</Badge>}
+                <Card key={vitals.id} className={`${index === 0 ? 'border-rose-500/50' : ''}`}>
+                  <CardContent className="p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          <span>{new Date(vitals.recordedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                          <span>{new Date(vitals.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          {index === 0 && <Badge className="bg-rose-500 text-white text-[10px] h-4">Latest</Badge>}
+                          <span className="ml-auto">{vitals.recordedBy ? `by ${vitals.recordedBy}` : ''}</span>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          {vitals.bloodPressureSystolic || vitals.bloodPressureDiastolic ? (
-                            <VitalCard label="BP" value={`${vitals.bloodPressureSystolic || '—'}/${vitals.bloodPressureDiastolic || '—'}`} unit="mmHg" />
-                          ) : null}
-                          {vitals.pulse ? (
-                            <VitalCard label="Pulse" value={vitals.pulse} unit="bpm" />
-                          ) : null}
-                          {vitals.temperature ? (
-                            <VitalCard label="Temp" value={`${vitals.temperature}°C`} />
-                          ) : null}
-                          {vitals.oxygenSaturation ? (
-                            <VitalCard label="SpO2" value={`${vitals.oxygenSaturation}%`} />
-                          ) : null}
-                          {vitals.respiratoryRate ? (
-                            <VitalCard label="RR" value={vitals.respiratoryRate} unit="/min" />
-                          ) : null}
-                          {vitals.bloodSugar ? (
-                            <VitalCard label="FBS" value={vitals.bloodSugar} unit="mg/dL" />
-                          ) : null}
-                          {vitals.randomBloodSugar ? (
-                            <VitalCard label="RBS" value={vitals.randomBloodSugar} unit="mg/dL" />
-                          ) : null}
-                          {vitals.weight ? (
-                            <VitalCard label="Weight" value={vitals.weight} unit="kg" />
-                          ) : null}
-                          {vitals.height ? (
-                            <VitalCard label="Height" value={vitals.height} unit="cm" />
-                          ) : null}
-                          {vitals.bmi ? (
-                            <VitalCard label="BMI" value={vitals.bmi} />
-                          ) : null}
-                          {vitals.painScale ? (
-                            <VitalCard label="Pain" value={`${vitals.painScale}/10`} />
-                          ) : null}
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-1 text-sm">
+                          {vitals.bloodPressureSystolic || vitals.bloodPressureDiastolic ? <div><span className="text-muted-foreground">BP:</span> <span className="font-medium">{vitals.bloodPressureSystolic || '—'}/{vitals.bloodPressureDiastolic || '—'}</span></div> : null}
+                          {vitals.pulse ? <div><span className="text-muted-foreground">Pulse:</span> <span className="font-medium">{vitals.pulse}</span> <span className="text-xs text-muted-foreground">bpm</span></div> : null}
+                          {vitals.temperature ? <div><span className="text-muted-foreground">Temp:</span> <span className="font-medium">{vitals.temperature}°C</span></div> : null}
+                          {vitals.oxygenSaturation ? <div><span className="text-muted-foreground">SpO2:</span> <span className="font-medium">{vitals.oxygenSaturation}%</span></div> : null}
+                          {vitals.respiratoryRate ? <div><span className="text-muted-foreground">RR:</span> <span className="font-medium">{vitals.respiratoryRate}</span> <span className="text-xs text-muted-foreground">/min</span></div> : null}
+                          {vitals.bloodSugar ? <div><span className="text-muted-foreground">FBS:</span> <span className="font-medium">{vitals.bloodSugar}</span> <span className="text-xs text-muted-foreground">mg/dL</span></div> : null}
+                          {vitals.randomBloodSugar ? <div><span className="text-muted-foreground">RBS:</span> <span className="font-medium">{vitals.randomBloodSugar}</span> <span className="text-xs text-muted-foreground">mg/dL</span></div> : null}
+                          {vitals.weight ? <div><span className="text-muted-foreground">Weight:</span> <span className="font-medium">{vitals.weight}</span> <span className="text-xs text-muted-foreground">kg</span></div> : null}
+                          {vitals.height ? <div><span className="text-muted-foreground">Height:</span> <span className="font-medium">{vitals.height}</span> <span className="text-xs text-muted-foreground">cm</span></div> : null}
+                          {vitals.bmi ? <div><span className="text-muted-foreground">BMI:</span> <span className="font-medium">{vitals.bmi}</span></div> : null}
+                          {vitals.painScale ? <div><span className="text-muted-foreground">Pain:</span> <span className="font-medium">{vitals.painScale}/10</span></div> : null}
                         </div>
-                        {vitals.recordedBy && (
-                          <p className="text-xs text-muted-foreground">
-                            Recorded by: {vitals.recordedBy}
-                          </p>
-                        )}
-                        {vitals.notes && (
-                          <p className="text-xs text-muted-foreground italic bg-muted/30 rounded p-2">
-                            {vitals.notes}
-                          </p>
-                        )}
+                        {vitals.notes && <p className="text-xs text-muted-foreground italic mt-2">{vitals.notes}</p>}
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedVitals(vitals);
-                          setIsVitalsDetailModalOpen(true);
-                        }}
-                        className="shrink-0 mt-1"
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        Details
+                      <Button variant="outline" size="sm" className="h-7 shrink-0 text-xs" onClick={() => { setSelectedVitals(vitals); setIsVitalsDetailModalOpen(true); }}>
+                        <Eye className="h-3 w-3 mr-1" /> View
                       </Button>
                     </div>
                   </CardContent>
