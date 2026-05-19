@@ -459,11 +459,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         patientService.getPatientHistory(numericPatientId).catch(() => null),
       ]);
 
-      // Process visits
+      // Process visits (only Visit records, not consultation sessions)
       try {
         const list = Array.isArray(visitsResp) ? [...visitsResp] : [];
-        const combined = [...list, ...sessionRows];
-        combined.sort((a, b) => {
+        list.sort((a, b) => {
           const dateA = String(a.date || '').split('T')[0];
           const dateB = String(b.date || '').split('T')[0];
           const timeA = String(a.time || '00:00:00');
@@ -474,10 +473,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           const safeTb = Number.isFinite(tb) ? tb : 0;
           return safeTb - safeTa;
         });
-        setVisitHistory(combined);
+        setVisitHistory(list);
       } catch (err) {
         console.warn('Could not load visits:', err);
-        setVisitHistory([...sessionRows]);
+        setVisitHistory([]);
       }
 
       // Process referrals
