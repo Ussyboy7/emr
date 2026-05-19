@@ -57,7 +57,7 @@ interface PatientVitals {
   latestVitals: VitalsData;
   vitalsHistory: VitalsData[];
   status: 'normal' | 'warning' | 'critical';
-  nursingStatus: 'Pending Vitals' | 'Ready for Consultation' | 'Sent to Rooms';
+  nursingStatus: 'Awaiting Vitals' | 'Vitals Recorded';
   alerts: string[];
 }
 
@@ -133,12 +133,10 @@ export default function PatientVitalsPage() {
       }
 
       // Add nursing status filter (similar to pool queue)
-      if (statusFilter === 'Pending Vitals') {
+      if (statusFilter === 'Awaiting Vitals') {
         params.nursing_status = 'pending';
-      } else if (statusFilter === 'Ready for Consultation') {
+      } else if (statusFilter === 'Vitals Recorded') {
         params.nursing_status = 'ready';
-      } else if (statusFilter === 'Sent to Rooms') {
-        params.nursing_status = 'sent_to_room';
       }
 
       // Fetch visits with backend filtering and pagination
@@ -210,7 +208,7 @@ export default function PatientVitalsPage() {
           })() : false;
 
           // Determine nursing status
-          const nursingStatus = hasVitalsToday ? 'Ready for Consultation' : 'Pending Vitals';
+          const nursingStatus = hasVitalsToday ? 'Vitals Recorded' : 'Awaiting Vitals';
 
           // Calculate vitals status and alerts
           let vitalsStatus: 'normal' | 'warning' | 'critical' = 'normal';
@@ -347,9 +345,8 @@ export default function PatientVitalsPage() {
   // Stats (calculated from current page - would be better with separate stats endpoint like lab orders)
   const stats = useMemo(() => ({
     total: totalCount,
-    pendingVitals: patients.filter(p => p.nursingStatus === 'Pending Vitals').length,
-    readyForConsultation: patients.filter(p => p.nursingStatus === 'Ready for Consultation').length,
-    sentToRooms: patients.filter(p => p.nursingStatus === 'Sent to Rooms').length,
+    pendingVitals: patients.filter(p => p.nursingStatus === 'Awaiting Vitals').length,
+    readyForConsultation: patients.filter(p => p.nursingStatus === 'Vitals Recorded').length,
   }), [patients, totalCount]);
 
 
@@ -361,9 +358,8 @@ export default function PatientVitalsPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Pending Vitals': return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
-      case 'Ready for Consultation': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
-      case 'Sent to Rooms': return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
+      case 'Awaiting Vitals': return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
+      case 'Vitals Recorded': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
       case 'normal': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
       case 'warning': return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
       case 'critical': return 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-500/10';
@@ -457,9 +453,8 @@ export default function PatientVitalsPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {          [
             { label: 'Total Patients', value: stats.total, icon: User, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-            { label: 'Pending Vitals', value: stats.pendingVitals, icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-            { label: 'Ready for Consultation', value: stats.readyForConsultation, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-            { label: 'Sent to Rooms', value: stats.sentToRooms, icon: TrendingUp, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+            { label: 'Awaiting Vitals', value: stats.pendingVitals, icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+            { label: 'Vitals Recorded', value: stats.readyForConsultation, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
           ].map((stat, i) => (
             <Card key={i}>
               <CardContent className="p-4">
@@ -506,9 +501,8 @@ export default function PatientVitalsPage() {
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="Pending Vitals">Pending Vitals</SelectItem>
-                    <SelectItem value="Ready for Consultation">Ready for Consultation</SelectItem>
-                    <SelectItem value="Sent to Rooms">Sent to Rooms</SelectItem>
+                    <SelectItem value="Awaiting Vitals">Awaiting Vitals</SelectItem>
+                    <SelectItem value="Vitals Recorded">Vitals Recorded</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={genderFilter} onValueChange={setGenderFilter}>
