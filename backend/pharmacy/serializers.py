@@ -415,19 +415,17 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
             return None
 
     def get_medication_details(self, obj):
-        """Get medication details including current stock."""
+        """Get medication details including current stock (from dispensary)."""
         try:
             if obj.medication:
                 medication = obj.medication
-                # Calculate total available stock from inventory
-                from .models import MedicationInventory
+                from .models import DispensaryReceiptLine
                 from django.db.models import Sum
-                from django.utils import timezone
 
-                total_stock = (
-                    MedicationInventory.objects.filter(
-                        medication=medication, expiry_date__gt=timezone.now().date()
-                    ).aggregate(total=Sum("quantity"))["total"]
+                dispensary_stock = (
+                    DispensaryReceiptLine.objects.filter(
+                        medication=medication
+                    ).aggregate(total=Sum("quantity_remaining"))["total"]
                     or 0
                 )
 
@@ -435,7 +433,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
                     "id": getattr(medication, "id", None),
                     "name": getattr(medication, "name", None),
                     "code": getattr(medication, "code", None),
-                    "current_stock": float(total_stock),
+                    "current_stock": float(dispensary_stock),
                     "unit": getattr(medication, "unit", None),
                     "strength": getattr(medication, "strength", None),
                     "form": getattr(medication, "form", None),
