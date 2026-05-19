@@ -2632,6 +2632,12 @@ export default function PrescriptionsPage() {
                                               ...prev,
                                               [med.id]: inputValue
                                             }));
+                                            if (!usesPackDispensing) {
+                                              setDispenseCoverageQuantities(prev => ({
+                                                ...prev,
+                                                [med.id]: inputValue
+                                              }));
+                                            }
                                           }}
                                           className="h-8 mt-1"
                                         />

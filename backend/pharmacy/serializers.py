@@ -651,13 +651,12 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             quantity = item_data.get("quantity", 0)
 
             if medication_id and quantity > 0:
-                # Check if medication exists and has sufficient stock
-                from pharmacy.models import MedicationInventory
+                from pharmacy.models import DispensaryReceiptLine
 
                 available_stock = (
-                    MedicationInventory.objects.filter(
+                    DispensaryReceiptLine.objects.filter(
                         medication_id=medication_id
-                    ).aggregate(total_quantity=models.Sum("quantity"))["total_quantity"]
+                    ).aggregate(total=models.Sum("quantity_remaining"))["total"]
                     or 0
                 )
 

@@ -23,9 +23,22 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/medical-records/visits/new", name: "Create Visit", description: "Create new patient visits", module: "Medical Records" },
   { id: "/medical-records/visits", name: "Manage Visits", description: "View and manage patient visits", module: "Medical Records" },
   { id: "/medical-records/appointments", name: "Appointments", description: "Manage patient appointments", module: "Medical Records" },
-  { id: "/medical-records/dependents", name: "Dependents (legacy URL)", description: "Redirects to Manage Patients with dependents filter", module: "Medical Records" },
   { id: "/medical-records/reports", name: "Reports", description: "View and generate reports", module: "Medical Records" },
+  { id: "/medical-records/reports/attendance-summary", name: "Attendance Summary", description: "Attendance summary report", module: "Medical Records" },
+  { id: "/medical-records/reports/clinic-attendance", name: "Clinic Attendance", description: "Clinic attendance report", module: "Medical Records" },
+  { id: "/medical-records/reports/comprehensive", name: "Comprehensive Report", description: "Comprehensive medical records report", module: "Medical Records" },
+  { id: "/medical-records/reports/disease-pattern", name: "Disease Pattern", description: "Disease pattern analysis report", module: "Medical Records" },
+  { id: "/medical-records/reports/dispensed-prescriptions", name: "Dispensed Prescriptions", description: "Dispensed prescriptions report", module: "Medical Records" },
+  { id: "/medical-records/reports/escort-log", name: "Escort Log", description: "Escort/transfer log report", module: "Medical Records" },
+  { id: "/medical-records/reports/gop-attendance", name: "GOP Attendance", description: "General outpatient attendance report", module: "Medical Records" },
+  { id: "/medical-records/reports/laboratory-attendance", name: "Lab Attendance", description: "Laboratory attendance report", module: "Medical Records" },
+  { id: "/medical-records/reports/radiological-services", name: "Radiology Services", description: "Radiological services report", module: "Medical Records" },
+  { id: "/medical-records/reports/referral-tracking", name: "Referral Tracking", description: "Referral tracking report", module: "Medical Records" },
+  { id: "/medical-records/reports/services-activities", name: "Services Activities", description: "Services and activities report", module: "Medical Records" },
+  { id: "/medical-records/reports/weekend-duty", name: "Weekend Duty", description: "Weekend duty roster report", module: "Medical Records" },
+  { id: "/medical-records/reports/visit-statistics", name: "Visit Statistics", description: "Visit statistics report", module: "Medical Records" },
   { id: "/medical-records/referrals", name: "Referral queue (records)", description: "Review referrals for stamping and records workflow (same data as consultation referrals)", module: "Medical Records" },
+  { id: "/medical-records/settings/referral-facilities", name: "Referral Facilities", description: "Manage referral facilities and contacts", module: "Medical Records" },
 
   // Nursing
   { id: "/nursing", name: "Dashboard", description: "Nursing Dashboard", module: "Nursing" },
@@ -46,6 +59,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/consultation/history", name: "Consultation History", description: "View consultation history", module: "Consultation" },
   { id: "/consultation/wards", name: "Ward Overview", description: "View ward overview", module: "Consultation" },
   { id: "/consultation/referrals", name: "Referrals & forms", description: "Manage referrals and forms", module: "Consultation" },
+  { id: "/consultation/analytics", name: "Consultation Analytics", description: "View consultation analytics", module: "Consultation" },
 
   // Laboratory
   { id: "/laboratory", name: "Dashboard", description: "Laboratory Dashboard", module: "Laboratory" },
@@ -74,16 +88,20 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/radiology/completed", name: "Completed Studies", description: "View completed studies", module: "Radiology" },
   { id: "/radiology/templates", name: "Study Templates", description: "Manage radiology templates", module: "Radiology" },
   { id: "/radiology/analytics", name: "Radiology Analytics", description: "View radiology analytics", module: "Radiology" },
+  { id: "/radiology/viewer", name: "Image Viewer", description: "View radiology images", module: "Radiology" },
+  { id: "/radiology/studies", name: "Studies List", description: "View all radiology studies", module: "Radiology" },
 
   // Physiotherapy
   { id: "/physiotherapy", name: "Dashboard", description: "Physiotherapy Dashboard", module: "Physiotherapy" },
   { id: "/physiotherapy/orders", name: "Orders", description: "Manage physiotherapy orders", module: "Physiotherapy" },
   { id: "/physiotherapy/completed", name: "Completed Sessions", description: "Completed physiotherapy sessions", module: "Physiotherapy" },
+  { id: "/physiotherapy/analytics", name: "Physiotherapy Analytics", description: "View physiotherapy analytics", module: "Physiotherapy" },
 
   // Eye Clinic
   { id: "/eyecare", name: "Dashboard", description: "Eye Clinic Dashboard", module: "Eye Clinic" },
   { id: "/eyecare/orders", name: "Orders", description: "Manage eye clinic orders", module: "Eye Clinic" },
   { id: "/eyecare/completed", name: "Completed Sessions", description: "Completed eye clinic sessions", module: "Eye Clinic" },
+  { id: "/eyecare/analytics", name: "Eye Clinic Analytics", description: "View eye clinic analytics", module: "Eye Clinic" },
 
   // Analytics
   { id: "/analytics", name: "Clinical Reports", description: "Clinical reports & analytics", module: "Analytics" },
@@ -101,7 +119,6 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
 
 /** DB / seed paths that no longer match a route id — map to the canonical path used in the UI. */
 const LEGACY_PAGE_PATH_ALIASES: Record<string, string> = {
-  "/physiotherapy/pool-queue": "/physiotherapy/orders",
   "/consultation/dashboard": "/consultation",
 };
 

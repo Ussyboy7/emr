@@ -1230,9 +1230,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 {'error': 'Coverage quantity must be greater than zero'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        inventory_id = request.data.get('inventory_id')
         receipt_line_id = request.data.get('receipt_line_id')
-        inventory = None
         receipt_line = None
 
         try:
@@ -1254,17 +1252,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 dispensed_medication = receipt_line.medication
                 receipt_line.quantity_remaining -= quantity
                 receipt_line.save(update_fields=['quantity_remaining'])
-            elif inventory_id:
-                inventory = MedicationInventory.objects.get(id=inventory_id)
-                if inventory.quantity < quantity:
-                    return Response(
-                        {'error': 'Insufficient stock'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                inventory.quantity -= quantity
-                inventory.save()
-                dispensed_medication = inventory.medication
-            elif not dispensed_medication:
+            if not dispensed_medication:
                 return Response(
                     {'error': 'Cannot determine medication brand. Please select specific inventory or receipt.'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -1286,11 +1274,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                     # Never fail dispense because of fallback inference
                     pass
 
-            batch_number = ''
-            if receipt_line:
-                batch_number = receipt_line.batch_number or ''
-            elif inventory:
-                batch_number = inventory.batch_number or ''
+            batch_number = receipt_line.batch_number if receipt_line else ''
 
             # Snapshot prescribed context at dispense-time so history remains immutable.
             if not item.medication_id:
@@ -1310,7 +1294,6 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 prescription=prescription,
                 prescription_item=item,
                 medication=dispensed_medication,
-                inventory_item=inventory,
                 dispensary_receipt_line=receipt_line,
                 quantity=quantity,
                 unit=getattr(dispensed_medication, 'unit', None) or item.unit,
@@ -1355,7 +1338,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             )
             
             return Response(DispenseSerializer(dispense).data)
-        except (PrescriptionItem.DoesNotExist, MedicationInventory.DoesNotExist, DispensaryReceiptLine.DoesNotExist) as e:
+        except (PrescriptionItem.DoesNotExist, DispensaryReceiptLine.DoesNotExist) as e:
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_404_NOT_FOUND
