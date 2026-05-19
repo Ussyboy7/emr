@@ -66,32 +66,14 @@ export function usePatientHistory(patientId: number | null): UsePatientHistoryRe
         physioPromise, eyePromise, wardPromise, certsPromise, referralsPromise, historyPromise, visitsPromise,
       ]);
 
-      // Process consultations into session rows for visits
+      // Process consultations
       const consultationRows = (consultationsRes as any)?.results || [];
-      const sessionRows = consultationRows.map((session: any) => {
-        const startedAt = session?.started_at || '';
-        const [datePart, timePartRaw] = startedAt.includes('T') ? startedAt.split('T') : [startedAt, ''];
-        const timePart = timePartRaw ? String(timePartRaw).substring(0, 5) : '';
-        return {
-          id: `session-${session.id}`,
-          visit_id: session.session_id || `session-${session.id}`,
-          patient: session.patient,
-          date: datePart || '',
-          time: timePart || '',
-          visit_type: 'Consultation',
-          clinic: session.clinic_name || '',
-          clinics: Array.isArray((session as any).visit_clinics) ? (session as any).visit_clinics : undefined,
-          doctor_name: session.doctor_name || (session.doctor as any)?.name || '',
-          clinical_notes: session.notes || '',
-          status: session.status,
-        };
-      });
 
-      // Merge visits + consultation sessions
+      // Process visits (only Visit records, not consultation sessions)
       let combinedVisits: any[] = [];
       try {
         const list = Array.isArray(visitsRes) ? [...visitsRes] : [];
-        combinedVisits = [...list, ...sessionRows];
+        combinedVisits = [...list];
         combinedVisits.sort((a, b) => {
           const dateA = String(a.date || '').split('T')[0];
           const dateB = String(b.date || '').split('T')[0];
@@ -102,7 +84,7 @@ export function usePatientHistory(patientId: number | null): UsePatientHistoryRe
           return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
         });
       } catch {
-        combinedVisits = [...sessionRows];
+        combinedVisits = [];
       }
 
       // Process imaging - flatten studies
