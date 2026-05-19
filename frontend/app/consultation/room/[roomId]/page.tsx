@@ -1564,9 +1564,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const [diagnosesResult, prescriptionsResp, labResp, radiologyResp, nursingResp, physioResp, eyeResp, vitalsResp, historyResp] = await Promise.all([
         consultationService.getDiagnoses({ session: session.id, page_size: 100 }).catch(() => ({ results: [] })),
         session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        visitId ? apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        visitId ? apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        visitId ? apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/laboratory/orders/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/radiology/orders/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
+        session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
         physioService.getOrders({ consultation_session: session.id, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
         eyeCareService.getOrders({ consultation_session: session.id, patient: session.patient != null ? session.patient : undefined, page_size: 100 }).catch(() => ({ results: [] })),
         visitId ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),

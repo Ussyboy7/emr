@@ -397,18 +397,18 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
     sessionId && patientId
       ? apiFetch<ApiResponse<PrescriptionApiResponse>>(`/pharmacy/prescriptions/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
       : Promise.resolve({ results: [] }),
-    visitId
-      ? apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+    sessionId && patientId
+      ? apiFetch<{ results: any[] }>(`/laboratory/orders/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
       : Promise.resolve({ results: [] }),
-    visitId
-      ? apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+    sessionId && patientId
+      ? apiFetch<{ results: any[] }>(`/radiology/orders/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
       : Promise.resolve({ results: [] }),
     visitId
       ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`).catch(() => ({ results: [] }))
       : Promise.resolve({ results: [] }),
     physioService.getOrders({ consultation_session: sessionId, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
-    visitId
-      ? apiFetch<{ results: any[] }>(`/eyecare/orders/?visit=${visitId}&page_size=100`).catch(() => ({ results: [] }))
+    sessionId && patientId
+      ? apiFetch<{ results: any[] }>(`/eyecare/orders/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
       : Promise.resolve({ results: [] }),
     consultationService.getDiagnoses({ session: sessionId, page_size: 100 }).catch(() => ({ results: [] })),
   ]);
