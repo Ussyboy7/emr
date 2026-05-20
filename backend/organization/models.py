@@ -34,6 +34,21 @@ class Clinic(models.Model):
         return self.name
 
 
+class WorkLocation(models.Model):
+    """Employee work station / port location (e.g. Lagos Port Complex, HQ Marina)."""
+
+    name = models.CharField(max_length=100, unique=True, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "work_locations"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class OutpatientClinicType(models.Model):
     """Master catalogue of visit-level OPD clinics (GOPD, Eye Clinic, Dental, …)."""
 

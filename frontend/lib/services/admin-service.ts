@@ -344,6 +344,14 @@ class AdminService {
     return apiFetch<{ results: Clinic[]; count: number }>(`/organization/clinics/${query}`);
   }
 
+  async getWorkLocations(params?: {
+    is_active?: boolean;
+    search?: string;
+  }): Promise<{ results: { id: number; name: string }[] }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: { id: number; name: string }[] }>(`/organization/work-locations/${query}`);
+  }
+
   /** Full-org KPIs for Admin → Facilities & Departments (not paginated). */
   async getClinicAdminStats(): Promise<{
     total_clinics: number;

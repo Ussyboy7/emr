@@ -38,7 +38,7 @@ import { StandardPagination } from '@/components/shared/StandardPagination';
 import { PatientOverviewModal } from '@/components/shared/PatientOverviewModal';
 import { PrincipalDependentsModal } from '@/components/shared/PrincipalDependentsModal';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
-import { useLocationOptions } from '@/hooks/use-location-options';
+import { useWorkLocationOptions } from '@/hooks/use-work-location-options';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedFiltersButton } from '@/components/shared/AdvancedFiltersButton';
 
@@ -208,7 +208,7 @@ function PatientsListPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { currentUser } = useCurrentUser();
-  const { locations: locationOptions } = useLocationOptions({ includeAll: true });
+  const { locations: locationOptions } = useWorkLocationOptions();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1125,6 +1125,7 @@ function PatientsListPageContent() {
                     <Select value={locationFilter} onValueChange={setLocationFilter}>
                       <SelectTrigger className="w-[180px]"><SelectValue placeholder="Location" /></SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="all">All Locations</SelectItem>
                         {locationOptions.map((l) => (
                           <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
                         ))}

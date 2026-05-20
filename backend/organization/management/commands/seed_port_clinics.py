@@ -1,38 +1,33 @@
 from django.core.management.base import BaseCommand
-from organization.models import Clinic
+from organization.models import WorkLocation
 
 
-PORTS = [
-    {"name": "Lagos Port Complex", "code": "LAGOS-PORT", "location": "Apapa, Lagos"},
-    {"name": "Tin Can Island Port Complex", "code": "TIN-CAN", "location": "Tin Can Island, Lagos"},
-    {"name": "Rivers Port Complex", "code": "RIVERS-PORT", "location": "Port Harcourt, Rivers"},
-    {"name": "Onne Port Complex", "code": "ONNE-PORT", "location": "Onne, Rivers"},
-    {"name": "Delta Ports", "code": "DELTA-PORTS", "location": "Warri, Delta"},
-    {"name": "Calabar Port", "code": "CALABAR-PORT", "location": "Calabar, Cross River"},
-    {"name": "Lekki Deep Sea Port", "code": "LEKKI-PORT", "location": "Lekki, Lagos"},
-    {"name": "Headquarters Marina", "code": "HQ-MARINA", "location": "Marina, Lagos"},
+LOCATIONS = [
+    "Lagos Port Complex",
+    "Tin Can Island Port Complex",
+    "Rivers Port Complex",
+    "Onne Port Complex",
+    "Delta Ports",
+    "Calabar Port",
+    "Lekki Deep Sea Port",
+    "Headquarters Marina",
 ]
 
 
 class Command(BaseCommand):
-    help = "Seed port complex locations as Clinics"
+    help = "Seed employee work locations (port complexes)"
 
     def handle(self, *args, **options):
         created = 0
-        for port in PORTS:
-            _, was_created = Clinic.objects.get_or_create(
-                code=port["code"],
-                defaults={
-                    "name": port["name"],
-                    "location": port["location"],
-                    "is_active": True,
-                },
+        for name in LOCATIONS:
+            _, was_created = WorkLocation.objects.get_or_create(
+                name=name, defaults={"is_active": True}
             )
             if was_created:
                 created += 1
-                self.stdout.write(self.style.SUCCESS(f"Created: {port['name']}"))
+                self.stdout.write(self.style.SUCCESS(f"Created: {name}"))
 
         if created:
-            self.stdout.write(self.style.SUCCESS(f"\n{created} port clinics created"))
+            self.stdout.write(self.style.SUCCESS(f"\n{created} work locations created"))
         else:
-            self.stdout.write("All port clinics already exist")
+            self.stdout.write("All work locations already exist")

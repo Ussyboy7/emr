@@ -2,7 +2,7 @@
 Serializers for the Organization app.
 """
 from rest_framework import serializers
-from .models import Clinic, Department, Room, OutpatientClinicType
+from .models import Clinic, Department, Room, OutpatientClinicType, WorkLocation
 
 
 class ClinicSerializer(serializers.ModelSerializer):
@@ -100,6 +100,13 @@ class RoomSerializer(serializers.ModelSerializer):
         model = Room
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
+
+
+class WorkLocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkLocation
+        fields = ["id", "name", "is_active", "created_at"]
+        read_only_fields = ["id", "created_at"]
 
 
 class OutpatientClinicTypeSerializer(serializers.ModelSerializer):

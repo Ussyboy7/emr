@@ -22,7 +22,7 @@ import {
   Briefcase, MapPin, Upload, Camera, FileText, Save, Trash2, 
   CheckCircle2, Clock, Loader2, Plus, X, AlertTriangle, Search
 } from 'lucide-react';
-import { useLocationOptions } from '@/hooks/use-location-options';
+import { useWorkLocationOptions } from '@/hooks/use-work-location-options';
 import {
   NPA_DIVISIONS,
   NON_NPA_TYPES,
@@ -54,7 +54,7 @@ const STEPS: { id: FormStep; label: string; icon: React.ReactNode }[] = [
 export default function NewPatientPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { locations: locationOptions } = useLocationOptions();
+  const { locations: locationOptions } = useWorkLocationOptions();
   const [patientCategory, setPatientCategory] = useState<'employee' | 'retiree' | 'nonnpa' | 'dependent'>('employee');
   const [currentStep, setCurrentStep] = useState<FormStep>('personal');
   const [isSubmitting, setIsSubmitting] = useState(false);

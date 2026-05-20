@@ -13,12 +13,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Clinic, Department, Room, OutpatientClinicType, FacilityOutpatientClinic
+from .models import Clinic, Department, Room, OutpatientClinicType, FacilityOutpatientClinic, WorkLocation
 from .serializers import (
     ClinicSerializer,
     DepartmentSerializer,
     RoomSerializer,
     OutpatientClinicTypeSerializer,
+    WorkLocationSerializer,
 )
 from audit.services import AuditService
 
@@ -363,4 +364,18 @@ class RoomViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
         instance.delete()
+
+
+class WorkLocationViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for employee work locations (port complexes)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = WorkLocationSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["is_active"]
+    search_fields = ["name"]
+    ordering = ["name"]
+
+    def get_queryset(self):
+        return WorkLocation.objects.all()
 
