@@ -51,6 +51,14 @@ class PhysioOrder(models.Model):
     consultation_session = models.ForeignKey(
         'consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True
     )
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='physio_orders',
+        help_text="Clinic where this physiotherapy order was created",
+    )
 
     history_clinical_findings = models.TextField(blank=True)
     diagnosis = models.TextField()

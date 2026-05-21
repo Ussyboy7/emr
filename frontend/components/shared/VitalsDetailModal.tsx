@@ -54,6 +54,7 @@ interface VitalsDetail {
   diastolic?: string | number;
   recorded_at?: string;
   recorded_by_name?: string;
+  location_clinic_name?: string;
 }
 
 export interface VitalsDetailModalProps {
@@ -98,6 +99,7 @@ export function VitalsDetailModal({
     bloodSugar: vitalFieldToString(vitals.bloodSugar),
     randomBloodSugar: vitalFieldToString(vitals.randomBloodSugar),
     notes: vitals.notes != null ? String(vitals.notes).trim() : "",
+    location_clinic_name: vitals.location_clinic_name,
   };
 
   const recordedRaw = vitals.recordedAt ?? vitals.recorded_at;
@@ -177,7 +179,7 @@ export function VitalsDetailModal({
             Vitals - {name}
           </DialogTitle>
           <DialogDescription>
-            {[pid ? `${pid}` : null, recordedAtStr ? `Recorded: ${recordedAtStr}` : null].filter(Boolean).join(" | ")}
+            {[pid ? `${pid}` : null, normalized.location_clinic_name, recordedAtStr ? `Recorded: ${recordedAtStr}` : null].filter(Boolean).join(" | ")}
           </DialogDescription>
         </DialogHeader>
         <div className="py-4">

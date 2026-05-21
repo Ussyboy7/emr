@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type Medication } from "@/lib/services";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
+import { useClinic } from "@/hooks/use-clinic";
 import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye, HelpCircle, Building2 } from "lucide-react";
 
 const MEDICATION_SEARCH_LIMIT = 20;
@@ -30,6 +31,7 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 }
 
 export default function DispensaryRequestsPage() {
+  const { activeClinicName } = useClinic();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalRequests, setTotalRequests] = useState(0);
@@ -272,8 +274,8 @@ export default function DispensaryRequestsPage() {
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Stock Requests</h1>
             <p className="text-muted-foreground mt-1">
               {requestTab === "dispensary"
-                ? "Dispensary requests from Central Store"
-                : "Ward Care requests from Central Store (nursing)"}
+                ? `Requests — ${activeClinicName || 'Loading...'} — Dispensary requests from Central Store`
+                : `Requests — ${activeClinicName || 'Loading...'} — Ward Care requests from Central Store (nursing)`}
             </p>
           </div>
           {requestTab === "dispensary" && (
@@ -391,21 +393,41 @@ export default function DispensaryRequestsPage() {
                 </Card>
               ) : (
                 requests.map((req) => (
-                  <Card key={req.id} className="border-l-4 border-l-violet-500/50 hover:shadow-md transition-shadow">
+                  <Card key={req.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setSelectedRequest(req); setShowDetailsModal(true); }}>
                     <CardContent className="py-3 px-4">
                       <div className="flex items-center gap-3">
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-foreground">{req.request_id}</span>
-                            {getStatusBadge(req.status)}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {req.items?.length || 0} item(s) • Created {new Date(req.created_at).toLocaleDateString()}
-                          </div>
+                        <div className="flex-shrink-0">
+                          <Send className="h-8 w-8 text-violet-500" />
                         </div>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setSelectedRequest(req); setShowDetailsModal(true); }} title="View details">
-                          <Eye className="h-3.5 w-3.5" />
-                        </Button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                              <span className="font-semibold text-foreground truncate">
+                                {req.to_location || 'Dispensary'} Request
+                              </span>
+                              {getStatusBadge(req.status)}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => { setSelectedRequest(req); setShowDetailsModal(true); }}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                            <span>{req.items?.length || 0} item(s)</span>
+                            <span>•</span>
+                            <span>{new Date(req.created_at).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span>From: {req.from_location || 'Store'}</span>
+                            {req.requested_by_name && (
+                              <>
+                                <span>•</span>
+                                <span>Requested by: {req.requested_by_name}</span>
+                              </>
+                            )}
+                          </div>
+                          {req.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-md">{req.notes}</p>}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

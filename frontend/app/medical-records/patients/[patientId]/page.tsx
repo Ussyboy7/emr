@@ -1248,6 +1248,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                 <div className="mt-4 space-y-2 text-sm text-left bg-muted/30 p-4 rounded-lg">
                   <div><span className="text-muted-foreground">Order Status:</span> <Badge variant="outline" className="ml-2">{selectedPhysio.status ?? ''}</Badge></div>
                   <div><span className="text-muted-foreground">Diagnosis:</span> {selectedPhysio.diagnosis ?? ''}</div>
+                  <div><span className="text-muted-foreground">Location:</span> {selectedPhysio.location_clinic_name ?? '—'}</div>
                   {selectedPhysio.chief_complaint && <div><span className="text-muted-foreground">Chief Complaint:</span> {selectedPhysio.chief_complaint}</div>}
                   {selectedPhysio.treatment_goal && <div><span className="text-muted-foreground">Treatment Goal:</span> {selectedPhysio.treatment_goal}</div>}
                 </div>
@@ -1347,6 +1348,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <div>
                         <p className="text-xs text-muted-foreground">Ward</p>
                         <p className="font-medium">{selectedWard.ward_name ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Location</p>
+                        <p className="font-medium">{selectedWard.location_clinic_name ?? '—'}</p>
                       </div>
                       {selectedWard.bed_number != null && String(selectedWard.bed_number).trim() !== '' && (
                         <div>

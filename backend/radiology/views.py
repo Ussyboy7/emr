@@ -17,6 +17,7 @@ from django.http import HttpResponse
 
 from laboratory.pagination import FlexiblePageNumberPagination
 
+from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
 from .models import (
     RadiologyTemplate,
     RadiologyOrder,
@@ -171,7 +172,7 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
         })
 
 
-class RadiologyOrderViewSet(viewsets.ModelViewSet):
+class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing radiology orders."""
 
     permission_classes = [IsAuthenticated]
@@ -239,7 +240,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(**{f'{date_lookup}__lte': end_date})
             if start_date or end_date:
                 qs = qs.distinct()
-        return qs
+        return self.scope_queryset(qs)
 
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
@@ -392,6 +393,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         order = serializer.save(created_by=self.request.user)
         
         # Log audit
@@ -867,9 +869,10 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         return response
 
 
-class RadiologyStudyViewSet(viewsets.ModelViewSet):
+class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing individual radiology studies (like lab tests)."""
 
+    clinic_filter_field = 'order__processing_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = RadiologyStudySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -879,9 +882,11 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return RadiologyStudy.objects.all().select_related(
-            'order', 'order__patient', 'order__doctor', 'template',
-            'scheduled_by', 'acquired_by', 'reported_by', 'verified_by'
+        return self.scope_queryset(
+            RadiologyStudy.objects.all().select_related(
+                'order', 'order__patient', 'order__doctor', 'template',
+                'scheduled_by', 'acquired_by', 'reported_by', 'verified_by'
+            )
         )
 
     @action(detail=True, methods=['post'])
@@ -1121,9 +1126,9 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def create_reports_for_reported_studies(self, request):
         """Create RadiologyReport records for all studies with 'reported' status that don't have them."""
-        from .models import RadiologyStudy, RadiologyReport
-
-        reported_studies = RadiologyStudy.objects.filter(status='reported')
+        reported_studies = self.scope_queryset(
+            RadiologyStudy.objects.filter(status='reported')
+        )
         created_count = 0
 
         logger.debug("Found %s studies with status='reported'", reported_studies.count())
@@ -1155,9 +1160,10 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
         })
 
 
-class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
+class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing radiology reports awaiting verification."""
 
+    clinic_filter_field = 'order__processing_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = RadiologyReportSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -1174,28 +1180,6 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
 
     def list(self, request, *args, **kwargs):
         logger.debug("RadiologyReportViewSet.list() called")
-
-        # Check all RadiologyReport records
-        all_reports = RadiologyReport.objects.all()
-        logger.debug("Total RadiologyReport records: %s", all_reports.count())
-
-        for report in all_reports:
-            logger.debug(
-                "Report %s: study_id=%s, study_status=%s, patient=%s",
-                report.id,
-                report.study_id,
-                report.study.status,
-                report.patient_id,
-            )
-
-        # Check studies with reported status
-        reported_studies = RadiologyStudy.objects.filter(status='reported')
-        logger.debug("Studies with status='reported': %s", reported_studies.count())
-
-        for study in reported_studies:
-            has_report = RadiologyReport.objects.filter(study=study).exists()
-            logger.debug("Study %s (%s) has RadiologyReport: %s", study.id, study.procedure, has_report)
-
         return super().list(request, *args, **kwargs)
     
     def get_queryset(self):
@@ -1204,22 +1188,12 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
 
         queryset = RadiologyReport.objects.select_related('study', 'order', 'patient', 'order__doctor', 'study__reported_by')
 
-        logger.debug("RadiologyReportViewSet.get_queryset called with status_filter='%s'", status_filter)
-        logger.debug("Total RadiologyReport records in DB: %s", RadiologyReport.objects.count())
-        logger.debug("RadiologyReport records before filtering: %s", queryset.count())
-
         if status_filter == 'reported':
-            # Only show reports that are ready for verification (exclude rejected)
             queryset = queryset.filter(study__status='reported')
-            logger.debug("After filtering for study__status='reported': %s", queryset.count())
         elif status_filter == 'verified':
-            # Show verified reports
             queryset = queryset.filter(study__status='verified')
-            logger.debug("After filtering for study__status='verified': %s", queryset.count())
         elif status_filter == 'all':
-            # Show all reports (both pending and verified)
             queryset = queryset.filter(study__status__in=['reported', 'verified'])
-            logger.debug("After filtering for study__status in ['reported', 'verified']: %s", queryset.count())
 
         clinic = self.request.query_params.get('clinic')
         if clinic:
@@ -1246,8 +1220,7 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
             if end_date:
                 queryset = queryset.filter(**{f'{date_field}__lte': end_date})
 
-        logger.debug("Final queryset count: %s", queryset.count())
-        return queryset
+        return self.scope_queryset(queryset)
 
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):

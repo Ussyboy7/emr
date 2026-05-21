@@ -1421,6 +1421,10 @@ export default function WardCarePage() {
                         <p className="font-medium text-sm mt-0.5">{selectedAdmission.ward_name}</p>
                       </div>
                       <div>
+                        <Label className="text-muted-foreground text-xs">Location</Label>
+                        <p className="font-medium text-sm mt-0.5">{selectedAdmission.location_clinic_name || '—'}</p>
+                      </div>
+                      <div>
                         <Label className="text-muted-foreground text-xs">Admission type</Label>
                         <p className="font-medium text-sm mt-0.5 capitalize">
                           {selectedAdmission.admission_type?.replace(/_/g, ' ') || '—'}

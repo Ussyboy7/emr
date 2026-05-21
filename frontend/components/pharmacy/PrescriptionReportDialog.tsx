@@ -51,6 +51,7 @@ export interface PrescriptionReportData {
   diagnosis?: string;
   /** Clinic name. */
   clinic?: string;
+  location_clinic_name?: string;
   /** Doctor name (separate from 'doctor' for contexts that distinguish ordering doctor). */
   doctor_name?: string;
   /** Display-friendly prescription ID (RX-...). */
@@ -166,7 +167,8 @@ function buildPrescriptionReportHTML(
       <tr><td><strong>Patient Name</strong></td><td>${escapeHtml(patient.name)}</td>
           <td><strong>Patient ID</strong></td><td>${escapeHtml(String(patient.patientId ?? ''))}</td></tr>
       <tr><td><strong>Age / Gender</strong></td><td>${escapeHtml(ageGenderLine)}</td>
-          <td><strong>Clinic</strong></td><td>${escapeHtml(String(rx.clinic ?? ''))}</td></tr>
+          <td><strong>Location</strong></td><td>${escapeHtml(rx.location_clinic_name ?? '')}</td></tr>
+      <tr><td><strong>Clinic</strong></td><td colspan="3">${escapeHtml(String(rx.clinic ?? ''))}</td></tr>
     </table>
   </div>`
     : '';
@@ -425,6 +427,10 @@ export function PrescriptionReportDialog({
                   </div>
                 );
               })()}
+              <div>
+                <p className="text-xs text-muted-foreground">Location</p>
+                <p className="font-medium">{rx.location_clinic_name || '—'}</p>
+              </div>
               <div>
                 <p className="text-xs text-muted-foreground">Clinic</p>
                 <p className="font-medium">{rx.clinic || (rx as any)?.visit_details?.clinic || ''}</p>

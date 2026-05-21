@@ -34,6 +34,11 @@ import {
   WardsAdminManager,
   type WardsAdminManagerHandle,
 } from "@/components/admin/WardsAdminManager";
+import {
+  RoomsAdminManager,
+  type RoomsAdminManagerHandle,
+} from "@/components/admin/RoomsAdminManager";
+import { DepartmentStaffDialog } from "@/components/admin/DepartmentStaffDialog";
 
 interface Clinic {
   id: string;
@@ -94,9 +99,10 @@ function parseSystemRolesResponse(raw: unknown): SystemRoleRow[] {
 }
 
 export default function ClinicDepartmentPage() {
-  const [activeTab, setActiveTab] = useState<'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards'>('facilities');
+  const [activeTab, setActiveTab] = useState<'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards' | 'rooms'>('facilities');
   const referralFacilitiesRef = useRef<ReferralFacilitiesManagerHandle>(null);
   const wardsAdminRef = useRef<WardsAdminManagerHandle>(null);
+  const roomsAdminRef = useRef<RoomsAdminManagerHandle>(null);
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +128,7 @@ export default function ClinicDepartmentPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeptStaffDialogOpen, setIsDeptStaffDialogOpen] = useState(false);
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -178,13 +185,7 @@ export default function ClinicDepartmentPage() {
       setClinicsTotalCount(typeof clinicsResponse.count === "number" ? clinicsResponse.count : (clinicsResponse.results || []).length);
       setDepartmentsTotalCount(typeof deptsResponse.count === "number" ? deptsResponse.count : (deptsResponse.results || []).length);
 
-      // Calculate clinical staff count from aggregated stats.
-      const clinicalStaffCount = Array.from(clinicalRoles).reduce(
-        (acc, roleName) => acc + (roleCounts[roleName] || 0),
-        0,
-      );
-
-      // Transform clinics - use calculated staff count since assignments were removed
+      // Transform clinics — use the API's staff_count per clinic
       const transformedClinics: Clinic[] = clinicsResponse.results.map((clinic: ApiClinic) => ({
         id: clinic.id.toString(),
         code: clinic.code,
@@ -193,45 +194,21 @@ export default function ClinicDepartmentPage() {
         location: clinic.location || '',
         phone: clinic.phone || '',
         email: clinic.email || '',
-        staffCount: clinicalStaffCount, // All clinical staff work at the facility
+        staffCount: clinic.staff_count ?? 0,
         roomCount: clinic.room_count || 0,
         isActive: clinic.is_active,
         createdAt: clinic.created_at?.split('T')[0] || '',
       }));
 
-      // Calculate staff counts based on user roles
-      const calculateStaffCountForDepartment = (deptCode: string, deptName: string): number => {
-        // Map department codes/names to corresponding user roles
-        const roleMappings: Record<string, string[]> = {
-          'CONSULT': ['Medical Doctor'],
-          'LAB': ['Laboratory Scientist'],
-          'MED-REC': ['Medical Records Officer'],
-          'NURSING': ['Nursing Officer'],
-          'PHARM': ['Pharmacist'],
-          'PHYSIO': ['Physiotherapist'],
-          'RAD': ['Radiologist'],
-          // Also check by name for flexibility
-          'Consultation': ['Medical Doctor'],
-          'Laboratory': ['Laboratory Scientist'],
-          'Medical Records': ['Medical Records Officer'],
-          'Nursing': ['Nursing Officer'],
-          'Pharmacy': ['Pharmacist'],
-          'Physiotherapy': ['Physiotherapist'],
-          'Radiology': ['Radiologist'],
-        };
-
-        const matchingRoles = roleMappings[deptCode] || roleMappings[deptName] || [];
-        return matchingRoles.reduce((acc, roleName) => acc + (roleCounts[roleName] || 0), 0);
-      };
-
-      // Transform departments
+      // Transform departments — use the API's staff_count which counts all
+      // active users assigned to the department regardless of system_role.
       const transformedDepts: Department[] = deptsResponse.results.map((dept: ApiDepartment) => ({
         id: dept.id.toString(),
         code: dept.code,
         name: dept.name,
         description: dept.description || '',
         head: dept.head_name || '',
-        staffCount: calculateStaffCountForDepartment(dept.code, dept.name),
+        staffCount: dept.staff_count ?? 0,
         clinics: dept.clinic_name ? [dept.clinic_name] : [],
         clinic: dept.clinic?.toString() || '',
         isActive: dept.is_active,
@@ -330,12 +307,13 @@ export default function ClinicDepartmentPage() {
       };
     }
 
-    // Total clinical staff = active users whose system_role is in the live
-    // catalog and not flagged non-clinical. New System Roles (e.g.
-    // Cardiologist, Ophthalmologist) auto-roll into this count.
-    const totalStaffCalculated = availableUsers.filter((user) =>
-      user.is_active && clinicalSystemRoleNames.has(user.system_role),
-    ).length;
+    // Total clinical staff = sum of role counts for every active system role
+    // that isn't flagged as non-clinical. New System Roles (e.g. Cardiologist,
+    // Ophthalmologist) auto-roll into this count without a full user fetch.
+    const totalStaffCalculated = Array.from(clinicalSystemRoleNames).reduce(
+      (acc, roleName) => acc + (userRoleCounts[roleName] || 0),
+      0,
+    );
 
     return {
       totalClinics: kpiStats.total_clinics,
@@ -344,7 +322,7 @@ export default function ClinicDepartmentPage() {
       totalStaff: totalStaffCalculated,
       totalRooms: kpiStats.total_rooms,
     };
-  }, [kpiStats, availableUsers, clinicalSystemRoleNames]);
+  }, [kpiStats, userRoleCounts, clinicalSystemRoleNames]);
 
   const resetClinicForm = () => {
     setClinicForm({ code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true });
@@ -813,6 +791,7 @@ export default function ClinicDepartmentPage() {
               else if (activeTab === 'departments') openCreateDept();
               else if (activeTab === 'visit_types') openCreateVisitType();
               else if (activeTab === 'wards') wardsAdminRef.current?.openCreate();
+              else if (activeTab === 'rooms') roomsAdminRef.current?.openCreate();
               else referralFacilitiesRef.current?.openCreate();
             }}
             className="bg-teal-600 hover:bg-teal-700 text-white"
@@ -826,7 +805,9 @@ export default function ClinicDepartmentPage() {
                   ? 'Visit clinic'
                   : activeTab === 'wards'
                     ? 'Ward'
-                    : 'Referral facility'}
+                    : activeTab === 'rooms'
+                      ? 'Room'
+                      : 'Referral facility'}
           </Button>
         </div>
 
@@ -849,16 +830,17 @@ export default function ClinicDepartmentPage() {
           <Card className="border-l-4 border-l-amber-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Rooms</p><p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.totalRooms}</p></div><DoorOpen className="h-8 w-8 text-amber-500 opacity-50" /></div></CardContent></Card>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards')}>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards' | 'rooms')}>
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="facilities">Facilities</TabsTrigger>
             <TabsTrigger value="departments">Departments</TabsTrigger>
+            <TabsTrigger value="rooms">Rooms</TabsTrigger>
             <TabsTrigger value="visit_types">Visit clinics (OPD)</TabsTrigger>
             <TabsTrigger value="wards">Wards (inpatient)</TabsTrigger>
             <TabsTrigger value="referral_facilities">Referral facilities</TabsTrigger>
           </TabsList>
 
-          {activeTab !== 'referral_facilities' && activeTab !== 'wards' && (
+          {activeTab !== 'referral_facilities' && activeTab !== 'wards' && activeTab !== 'rooms' && (
             <Card className="mt-4">
               <CardContent className="p-4">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
@@ -912,9 +894,6 @@ export default function ClinicDepartmentPage() {
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewClinic(clinic)}>
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditClinic(clinic)}>
-                              <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                             </Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700" onClick={() => openDeleteClinic(clinic)}>
                               <Trash2 className="h-4 w-4" />
@@ -979,11 +958,11 @@ export default function ClinicDepartmentPage() {
                             </Badge>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
+                            <Button variant="ghost" size="sm" className="h-7 p-0 px-1.5 text-xs" onClick={() => { setSelectedDepartment(dept as any); setIsDeptStaffDialogOpen(true); }}>
+                              <Users className="h-3.5 w-3.5 mr-1" />Staff
+                            </Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDept(dept)}>
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditDept(dept)}>
-                              <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                             </Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700" onClick={() => openDeleteDept(dept)}>
                               <Trash2 className="h-4 w-4" />
@@ -1076,6 +1055,10 @@ export default function ClinicDepartmentPage() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="rooms" className="mt-4">
+            <RoomsAdminManager ref={roomsAdminRef} showHeader={false} />
           </TabsContent>
 
           <TabsContent value="wards" className="mt-4">
@@ -1192,33 +1175,21 @@ export default function ClinicDepartmentPage() {
                 <div><p className="text-muted-foreground">Head</p><p className="font-medium">{selectedDepartment.head || 'Not assigned'}</p></div>
                 <div><p className="text-muted-foreground">Staff Count</p><p className="font-medium">{selectedDepartment.staffCount}</p></div>
               </div>
-              
-              {/* Staff Section */}
-              <div>
-                <p className="text-muted-foreground mb-2 font-semibold flex items-center gap-2"><Users className="h-4 w-4" />Staff ({deptUsers.length})</p>
-                {loadingDetails ? (
-                  <div className="text-center py-4 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />Loading staff...</div>
-                ) : deptUsers.length > 0 ? (
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {deptUsers.map((user: any) => (
-                      <div key={user.id} className="flex items-center justify-between p-2 bg-muted/50 rounded text-sm">
-                        <div>
-                          <span className="font-medium">{user.first_name} {user.last_name}</span>
-                          <span className="text-muted-foreground ml-2">({user.username})</span>
-                          {user.clinic_name && <span className="text-muted-foreground ml-2">• {user.clinic_name}</span>}
-                        </div>
-                        <Badge variant={user.is_active ? 'default' : 'secondary'} className="text-xs">{user.system_role || 'Staff'}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No staff assigned to this department</p>
-                )}
-              </div>
             </div>)}
             <DialogFooter><Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button><Button onClick={() => { setIsViewDialogOpen(false); if (selectedDepartment) openEditDept(selectedDepartment); }}><Edit className="h-4 w-4 mr-2" />Edit</Button></DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Department Staff Dialog */}
+        <DepartmentStaffDialog
+          department={isDeptStaffDialogOpen && selectedDepartment ? { id: Number(selectedDepartment.id), name: selectedDepartment.name, clinicName: selectedDepartment.clinic || null, headName: selectedDepartment.head || null } : null}
+          open={isDeptStaffDialogOpen}
+          onOpenChange={setIsDeptStaffDialogOpen}
+          onStaffChanged={() => {
+            loadData();
+            loadKpiStats();
+          }}
+        />
 
         {/* Delete Confirmation */}
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

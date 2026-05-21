@@ -24,6 +24,7 @@ export interface CompletedRadiologyReport {
   verifiedAt: string;
   clinic: string;
   turnaroundTime: string;
+  location_clinic_name?: string;
   report?: string;
   reportFile?: { name: string; url: string };
   reportAttachments?: Array<{ name: string; url: string }>;
@@ -160,6 +161,7 @@ export function transformApiRadiologyReportToCompleted(apiReport: Record<string,
     verifiedBy: (sd as any).verified_by_name || 'Unknown',
     verifiedAt: (sd as any).verified_at || '',
     clinic: apiReportAny.order_details?.clinic || '',
+    location_clinic_name: apiReportAny.location_clinic_name || apiReportAny.study_details?.location_clinic_name || apiReportAny.order_details?.location_clinic_name || '',
     turnaroundTime: calculateRadiologyTurnaroundTime((sd as any).created_at, (sd as any).verified_at),
     report: mergedReportText || undefined,
     customReports,

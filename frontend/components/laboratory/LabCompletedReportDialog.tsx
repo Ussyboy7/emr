@@ -139,6 +139,10 @@ export function LabCompletedReportDialog({
                 <p className="text-xs text-muted-foreground">Clinic</p>
                 <p className="font-medium">{test.clinic}</p>
               </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Location</p>
+                <p className="font-medium">{test.location_clinic_name || '—'}</p>
+              </div>
             </div>
 
             <div>

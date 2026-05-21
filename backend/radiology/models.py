@@ -169,6 +169,22 @@ class RadiologyOrder(models.Model):
     
     ordered_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_radiology_orders')
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='radiology_orders',
+        help_text="Clinic where this radiology order was placed (requesting clinic)",
+    )
+    processing_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='radiology_orders_processed',
+        help_text="Clinic processing this radiology order (defaults from requesting clinic's config, overridable)",
+    )
 
     # Simplified workflow fields (like lab orders)
     STATUS_CHOICES = [

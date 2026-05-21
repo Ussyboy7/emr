@@ -13,6 +13,7 @@ export interface Room {
   capacity: number;
   is_active: boolean;
   clinic?: number | null;
+  clinic_name?: string;
   created_at: string;
   updated_at: string;
 }

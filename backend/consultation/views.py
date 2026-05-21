@@ -46,6 +46,9 @@ from .serializers import (
 )
 from audit.services import AuditService
 from patients.workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
+from common.mixins import ClinicScopedMixin
+from accounts.utils import resolve_clinic_id
+from organization.models import SystemConfig
 
 
 class ReferralFacilityViewSet(viewsets.ModelViewSet):
@@ -65,9 +68,10 @@ class ReferralFacilityViewSet(viewsets.ModelViewSet):
         return ReferralFacility.objects.all()
 
 
-class ConsultationRoomViewSet(viewsets.ModelViewSet):
+class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation rooms."""
     
+    clinic_filter_field = 'clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = ConsultationRoomSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -79,7 +83,9 @@ class ConsultationRoomViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         # Admin listing must include inactive / maintenance rows so filters work.
         # Use ``is_active`` / ``status`` query params to narrow results.
-        return ConsultationRoom.objects.all().select_related('clinic')
+        return self.scope_queryset(
+            ConsultationRoom.objects.all().select_related('clinic')
+        )
     
     @action(detail=True, methods=['get'])
     def queue(self, request, pk=None):
@@ -95,7 +101,7 @@ class ConsultationRoomViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class ConsultationSessionViewSet(viewsets.ModelViewSet):
+class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation sessions."""
     
     permission_classes = [IsAuthenticated]
@@ -138,7 +144,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         if clinic:
             qs = qs.filter(visit__clinic=clinic)
 
-        return qs
+        return self.scope_queryset(qs)
 
     def create(self, request, *args, **kwargs):
         """
@@ -167,6 +173,8 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         save_kwargs = {'created_by': request.user}
         if doctor:
             save_kwargs['doctor'] = doctor
+
+        self.auto_set_clinic(serializer)
 
         try:
             with transaction.atomic():
@@ -594,6 +602,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             .filter(started_at__gte=start_date, started_at__lte=end_date)
             .exclude(status='cancelled')
         )
+        base = self.scope_queryset(base)
 
         analytics = build_comprehensive_consultation_analytics(base, start_date, end_date)
 
@@ -613,6 +622,12 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             referred_at__gte=start_date,
             referred_at__lte=end_date
         )
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None:
+                period_referrals = period_referrals.filter(
+                    Q(visit__location_clinic=clinic_id) | Q(session__location_clinic=clinic_id)
+                )
         analytics['referrals'] = {
             'total': period_referrals.count(),
             'pending': period_referrals.exclude(status__in=['closed', 'cancelled']).count(),
@@ -623,6 +638,12 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             diagnosed_at__gte=start_date,
             diagnosed_at__lte=end_date
         )
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None:
+                period_diagnoses = period_diagnoses.filter(
+                    Q(visit__location_clinic=clinic_id) | Q(session__location_clinic=clinic_id)
+                )
         analytics['diagnoses'] = {
             'total': period_diagnoses.count(),
             'by_certainty': {
@@ -651,6 +672,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             sessions_qs = ConsultationSession.objects.filter(doctor_id=doctor_id)
         else:
             sessions_qs = ConsultationSession.objects.all()
+        sessions_qs = self.scope_queryset(sessions_qs)
         
         # Today's stats
         today_sessions = sessions_qs.filter(started_at__gte=today_start)
@@ -757,10 +779,22 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             })
         
         # Queue stats
-        queue_count = ConsultationQueue.objects.filter(is_active=True).count()
+        queue_qs = ConsultationQueue.objects.filter(is_active=True)
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            q_clinic_id = resolve_clinic_id(self.request.user)
+            if q_clinic_id is not None:
+                queue_qs = queue_qs.filter(room__clinic=q_clinic_id)
+        queue_count = queue_qs.count()
         
         # Referrals stats
-        pending_referrals = Referral.objects.filter(status__in=['draft', 'sent']).count()
+        pending_qs = Referral.objects.filter(status__in=['draft', 'sent'])
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            r_clinic_id = resolve_clinic_id(self.request.user)
+            if r_clinic_id is not None:
+                pending_qs = pending_qs.filter(
+                    Q(visit__location_clinic=r_clinic_id) | Q(session__location_clinic=r_clinic_id)
+                )
+        pending_referrals = pending_qs.count()
         
         return Response({
             'today': today_stats,
@@ -785,9 +819,10 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         return build_consultation_report_pdf(session)
 
 
-class ConsultationQueueViewSet(viewsets.ModelViewSet):
+class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation queue."""
     
+    clinic_filter_field = 'room__clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = ConsultationQueueSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -817,7 +852,7 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         elif end_date:
             qs = qs.filter(queued_at__date__lte=end_date)
 
-        return qs
+        return self.scope_queryset(qs)
 
     @action(detail=False, methods=['get'], url_path='by-visits')
     def by_visits(self, request):
@@ -841,7 +876,9 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                 continue
         if not ids:
             return Response({'results': []})
-        qs = self.get_queryset().filter(visit_id__in=ids, is_active=True)
+        qs = self.scope_queryset(
+            self.get_queryset().filter(visit_id__in=ids, is_active=True)
+        )
         return Response({'results': ConsultationQueueByVisitSerializer(qs, many=True).data})
 
     def perform_create(self, serializer):
@@ -852,11 +889,17 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         from django.db import IntegrityError
         from organization.models import Clinic
         
-        # Check if patient is already in queue for this room (active)
         room = serializer.validated_data.get('room')
         patient = serializer.validated_data.get('patient')
         visit = serializer.validated_data.get('visit')
         
+        # Deactivate any existing active queue items for this patient
+        ConsultationQueue.objects.filter(
+            patient=patient,
+            is_active=True
+        ).exclude(room=room).update(is_active=False)
+        
+        # Check if patient is already in queue for this room (active)
         existing = ConsultationQueue.objects.filter(
             room=room,
             patient=patient,
@@ -1146,7 +1189,7 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         return Response({'detail': 'Patient marked left from queue.', **result})
 
 
-class ReferralViewSet(viewsets.ModelViewSet):
+class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing referrals."""
 
     permission_classes = [IsAuthenticated]
@@ -1206,6 +1249,15 @@ class ReferralViewSet(viewsets.ModelViewSet):
         elif end_date:
             qs = qs.filter(referred_at__date__lte=end_date)
 
+        return self.scope_queryset(qs)
+
+    def scope_queryset(self, qs):
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None:
+                qs = qs.filter(
+                    Q(visit__location_clinic=clinic_id) | Q(session__location_clinic=clinic_id)
+                )
         return qs
 
     def perform_create(self, serializer):
@@ -1726,9 +1778,10 @@ class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
         return ICD10Code.objects.filter(is_active=True)
 
 
-class DiagnosisViewSet(viewsets.ModelViewSet):
+class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing patient diagnoses."""
 
+    clinic_filter_field = 'visit__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = DiagnosisSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -1738,7 +1791,9 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
     ordering = ['-diagnosed_at']
 
     def get_queryset(self):
-        return Diagnosis.objects.all().select_related('patient', 'visit', 'session', 'icd10_code', 'diagnosed_by')
+        return self.scope_queryset(
+            Diagnosis.objects.all().select_related('patient', 'visit', 'session', 'icd10_code', 'diagnosed_by')
+        )
 
     def perform_create(self, serializer):
         """Create diagnosis and log audit."""

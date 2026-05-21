@@ -495,6 +495,7 @@ export default function PhysioCompletedPage() {
                     <p className="text-xs text-muted-foreground mb-1">Patient</p>
                     <p className="font-medium text-base">{selectedSession.patient_name}</p>
                     <p className="text-sm text-muted-foreground font-mono">{selectedSession.patient_id}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Location: {selectedSession.order_details?.location_clinic_name || (selectedSession as any).location_clinic_name || '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">Physiotherapist</p>

@@ -502,6 +502,10 @@ export default function EyeClinicCompletedSessionsPage() {
                     <p className="text-xs text-muted-foreground mb-1">Order</p>
                     <p className="font-medium">#{selectedSession.order_details?.id ?? selectedSession.order}</p>
                   </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Location</p>
+                    <p className="font-medium">{selectedSession.order_details?.location_clinic_name || '—'}</p>
+                  </div>
                 </div>
 
                 {selectedSession.order_details?.diagnosis && (

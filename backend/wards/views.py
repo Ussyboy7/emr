@@ -33,24 +33,28 @@ from .serializers import (
     AdmissionTreatmentRowSerializer,
     AdmissionEscortSerializer,
 )
+from common.mixins import ClinicScopedMixin
+from organization.models import SystemConfig
 from audit.services import AuditService
 
 
-class WardViewSet(viewsets.ModelViewSet):
+class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing wards."""
 
+    clinic_filter_field = 'clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = WardSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['ward_type', 'status', 'floor', 'building']
+    filterset_fields = ['ward_type', 'status', 'floor', 'building', 'clinic']
     search_fields = ['name', 'ward_code', 'description']
     ordering_fields = ['name', 'ward_code', 'created_at']
     ordering = ['name']
 
     def get_queryset(self):
-        return Ward.objects.all().prefetch_related('beds')
+        return self.scope_queryset(Ward.objects.all().prefetch_related('beds'))
 
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         ward = serializer.save(created_by=self.request.user)
 
         # Log audit
@@ -89,9 +93,10 @@ class WardViewSet(viewsets.ModelViewSet):
         })
 
 
-class BedViewSet(viewsets.ModelViewSet):
+class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing beds."""
 
+    clinic_filter_field = 'ward__clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = BedSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -101,7 +106,9 @@ class BedViewSet(viewsets.ModelViewSet):
     ordering = ['bed_number']
 
     def get_queryset(self):
-        return Bed.objects.all().select_related('ward', 'current_patient')
+        return self.scope_queryset(
+            Bed.objects.all().select_related('ward', 'current_patient')
+        )
 
     def perform_create(self, serializer):
         bed = serializer.save()
@@ -174,9 +181,10 @@ class BedViewSet(viewsets.ModelViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class PatientAdmissionViewSet(viewsets.ModelViewSet):
+class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing patient admissions."""
 
+    clinic_filter_field = 'visit__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = PatientAdmissionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -212,7 +220,7 @@ class PatientAdmissionViewSet(viewsets.ModelViewSet):
             if values:
                 qs = qs.filter(status__in=values)
 
-        return qs
+        return self.scope_queryset(qs)
 
     def perform_create(self, serializer):
         admission = serializer.save(created_by=self.request.user)
@@ -1054,9 +1062,10 @@ class PatientAdmissionViewSet(viewsets.ModelViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class WardAssignmentViewSet(viewsets.ModelViewSet):
+class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing ward assignments."""
 
+    clinic_filter_field = 'admission__visit__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = WardAssignmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -1066,7 +1075,9 @@ class WardAssignmentViewSet(viewsets.ModelViewSet):
     ordering = ['-assigned_at']
 
     def get_queryset(self):
-        return WardAssignment.objects.all().select_related('admission__patient', 'admission__ward', 'nurse', 'assigned_by')
+        return self.scope_queryset(
+            WardAssignment.objects.all().select_related('admission__patient', 'admission__ward', 'nurse', 'assigned_by')
+        )
 
     def perform_create(self, serializer):
         assignment = serializer.save(assigned_by=self.request.user)
@@ -1154,9 +1165,10 @@ class WardAssignmentViewSet(viewsets.ModelViewSet):
         return Response({'results': data, 'count': len(data)})
 
 
-class AdmissionObservationVitalViewSet(viewsets.ModelViewSet):
+class AdmissionObservationVitalViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Continuous observation vitals for a ward admission (filter: ?admission=)."""
 
+    clinic_filter_field = 'admission__visit__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = AdmissionObservationVitalSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -1164,13 +1176,15 @@ class AdmissionObservationVitalViewSet(viewsets.ModelViewSet):
     ordering = ["-recorded_at"]
 
     def get_queryset(self):
-        return AdmissionObservationVital.objects.select_related("admission", "recorded_by")
+        return self.scope_queryset(
+            AdmissionObservationVital.objects.select_related("admission", "recorded_by")
+        )
 
     def perform_create(self, serializer):
         serializer.save(recorded_by=self.request.user)
 
 
-class AdmissionEscortViewSet(viewsets.ModelViewSet):
+class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Escort assignments for ward admissions.
 
     Listing supports the nurse "patients leaving with us" queue via
@@ -1179,6 +1193,7 @@ class AdmissionEscortViewSet(viewsets.ModelViewSet):
     captures the call-back from the receiving facility.
     """
 
+    clinic_filter_field = 'admission__visit__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = AdmissionEscortSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -1201,7 +1216,7 @@ class AdmissionEscortViewSet(viewsets.ModelViewSet):
             qs = qs.filter(arrival_confirmed_at__isnull=True)
         elif status_filter == 'confirmed':
             qs = qs.filter(arrival_confirmed_at__isnull=False)
-        return qs
+        return self.scope_queryset(qs)
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -1285,9 +1300,10 @@ class AdmissionEscortViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class AdmissionTreatmentRowViewSet(viewsets.ModelViewSet):
+class AdmissionTreatmentRowViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Treatment sheet rows for a ward admission (filter: ?admission=)."""
 
+    clinic_filter_field = 'admission__visit__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = AdmissionTreatmentRowSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -1295,7 +1311,9 @@ class AdmissionTreatmentRowViewSet(viewsets.ModelViewSet):
     ordering = ["-created_at"]
 
     def get_queryset(self):
-        return AdmissionTreatmentRow.objects.select_related("admission", "recorded_by")
+        return self.scope_queryset(
+            AdmissionTreatmentRow.objects.select_related("admission", "recorded_by")
+        )
 
     def perform_create(self, serializer):
         serializer.save(recorded_by=self.request.user)

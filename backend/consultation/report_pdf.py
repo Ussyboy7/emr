@@ -85,7 +85,7 @@ def build_consultation_report_pdf(session):
     )
 
     clinic_name = (
-        getattr(session.visit, "clinic", None) if session.visit else "—"
+        session.room.clinic.name if session.room and session.room.clinic else "—"
     )
 
     duration_str = (

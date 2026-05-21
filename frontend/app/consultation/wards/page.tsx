@@ -956,6 +956,7 @@ export default function WardOverviewPage() {
                     <span className="font-mono text-xs">{selectedAdmission.admission_id}</span>
                     <span className="text-muted-foreground">·</span>
                     <span>{selectedAdmission.ward_name}</span>
+                    {selectedAdmission.location_clinic_name && (<><span className="text-muted-foreground">·</span><span>{selectedAdmission.location_clinic_name}</span></>)}
                     {selectedAdmission.bed_number ? (
                       <>
                         <span className="text-muted-foreground">·</span>
@@ -1025,6 +1026,10 @@ export default function WardOverviewPage() {
                       <Badge variant="outline" className={`text-xs mt-0.5 ${getStatusBadgeClass(selectedAdmission.status)}`}>
                         {formatStatus(selectedAdmission.status)}
                       </Badge>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground text-xs">Location</Label>
+                      <p className="font-medium text-sm mt-0.5">{selectedAdmission.location_clinic_name || '—'}</p>
                     </div>
                   </div>
                   <div>

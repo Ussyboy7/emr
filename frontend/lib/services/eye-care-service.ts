@@ -28,6 +28,7 @@ export interface EyeOrder {
   scheduled_at: string | null;
   completed_at: string | null;
   completed_sessions_count?: number;
+  location_clinic_name?: string;
 }
 
 export type EyeRefractionEntry = {

@@ -120,6 +120,7 @@ export interface PatientAdmission {
   confirmed_by_nurse_name?: string | null;
   // Embedded escort (read-only)
   escort?: AdmissionEscort | null;
+  location_clinic_name?: string;
 }
 
 export interface WardAssignment {

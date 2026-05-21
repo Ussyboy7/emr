@@ -28,6 +28,7 @@ export interface User {
   license_number?: string;
   license_expiry?: string;
   qualification?: string;
+  clinics?: number[];  // Multi-clinic M2M assignments
 }
 
 export interface Role {
@@ -138,6 +139,7 @@ class AdminService {
   async getUsers(params?: {
     system_role?: string;
     is_active?: boolean;
+    department?: number;
     search?: string;
     page?: number;
     page_size?: number;
@@ -182,6 +184,7 @@ class AdminService {
     if (data.is_active !== undefined) createData.is_active = data.is_active;
     if ((data as any).employee_id) createData.employee_id = (data as any).employee_id;
     if ((data as any).access_role_id !== undefined) createData.access_role_id = (data as any).access_role_id;
+    if (data.clinics !== undefined) createData.clinics = data.clinics;
     
     return apiFetch<User>('/accounts/users/', {
       method: 'POST',
@@ -209,6 +212,7 @@ class AdminService {
     // Note: is_active may not be in UserUpdateSerializer - would need backend update
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
     if ((data as any).employee_id !== undefined) updateData.employee_id = (data as any).employee_id;
+    if (data.clinics !== undefined) updateData.clinics = data.clinics;
     
     return apiFetch<User>(`/accounts/users/${userId}/`, {
       method: 'PATCH',
@@ -836,6 +840,21 @@ class AdminService {
       backupStatus: metrics?.backupStatus,
       metricSources: metrics?.sources,
     };
+  }
+
+  async getOnlineUsers(): Promise<{
+    users: Array<{
+      id: number;
+      name: string;
+      email: string;
+      role: string;
+      clinic: string | null;
+      lastActivity: string | null;
+    }>;
+    count: number;
+    presenceWindowSeconds: number;
+  }> {
+    return apiFetch('/common/online-users/');
   }
 
   private getRelativeTime(timestamp: string): string {

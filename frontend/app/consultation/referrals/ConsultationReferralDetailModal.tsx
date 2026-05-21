@@ -153,6 +153,12 @@ export function ConsultationReferralDetailModal(props: {
                   <p>{referral.referred_by_name}</p>
                 </div>
               )}
+              {referral.location_clinic_name && (
+                <div>
+                  <Label className="text-muted-foreground">Location</Label>
+                  <p>{referral.location_clinic_name}</p>
+                </div>
+              )}
               <div className="col-span-2">
                 <Label className="text-muted-foreground">Reason</Label>
                 <p className="p-2 bg-muted/50 rounded mt-1">{referral.reason}</p>

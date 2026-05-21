@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useClinic } from '@/hooks/use-clinic';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -29,6 +30,7 @@ interface MedicationBatch {
   expiryDate: string;
   receivedDate: string;
   supplier: string;
+  locationClinicName?: string;
   sourceFromCentralStore?: { request_id?: string; issue_id?: string; issued_at?: string; from_location?: string } | null;
 }
 
@@ -47,6 +49,7 @@ interface MedicationInventoryItem {
   minimumStock: number;
   lastRestocked: string;
   expiryDate: string;
+  locationClinicName?: string;
   batches: MedicationBatch[];
 }
 
@@ -55,6 +58,7 @@ const EXPIRY_WARNING_DAYS = 180;
 
 export default function InventoryPage() {
   const location = PHARMACY_LOCATIONS.DISPENSARY;
+  const { activeClinicName } = useClinic();
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +171,7 @@ export default function InventoryPage() {
         minimumStock: Number(item.min_stock_level),
         lastRestocked: (item as any).created_at?.split('T')[0] || (item as any).updated_at?.split('T')[0] || '',
         expiryDate: item.expiry_date,
+        locationClinicName: item.location_clinic_name || '',
           batches: [{
             id: item.id.toString(),
             batchNumber: item.batch_number,
@@ -174,6 +179,7 @@ export default function InventoryPage() {
             expiryDate: item.expiry_date,
             receivedDate: (item.source_from_central_store?.issued_at?.split('T')[0]) || (item as any).created_at?.split('T')[0] || '',
             supplier: item.supplier || '',
+            locationClinicName: item.location_clinic_name || '',
             sourceFromCentralStore: item.source_from_central_store || null,
           }] as MedicationBatch[],
       };
@@ -246,7 +252,7 @@ export default function InventoryPage() {
               <Database className="h-8 w-8 text-violet-500" />
               Dispensary inventory
             </h1>
-            <p className="text-muted-foreground mt-1">Manage dispensary stock and track inventory levels</p>
+            <p className="text-muted-foreground mt-1">Dispensary &mdash; {activeClinicName || 'Loading...'} &mdash; Manage dispensary stock and track inventory levels</p>
           </div>
           <div className="flex gap-2">
             <Button asChild variant="outline">
@@ -532,6 +538,7 @@ export default function InventoryPage() {
                   <div><span className="text-muted-foreground">Pack Size:</span> <span className="font-medium">{selectedMedication.packSize}</span></div>
                   <div><span className="text-muted-foreground">Manufacturer:</span> <span className="font-medium">{selectedMedication.manufacturer}</span></div>
                   <div><span className="text-muted-foreground">Last Restocked:</span> <span className="font-medium">{selectedMedication.lastRestocked}</span></div>
+                  <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{selectedMedication.locationClinicName}</span></div>
                 </div>
 
                 <div className="bg-muted/50 rounded-lg p-4">
@@ -632,6 +639,12 @@ export default function InventoryPage() {
                               <div>
                                 <span className="text-muted-foreground">Request:</span>{' '}
                                 <span className="font-medium">{requestId}</span>
+                              </div>
+                            ) : null}
+                            {batch.locationClinicName ? (
+                              <div>
+                                <span className="text-muted-foreground">Location:</span>{' '}
+                                <span className="font-medium">{batch.locationClinicName}</span>
                               </div>
                             ) : null}
                           </div>

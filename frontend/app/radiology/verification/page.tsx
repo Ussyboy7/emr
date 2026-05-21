@@ -65,6 +65,7 @@ interface RadiologyReport {
   study: ImagingStudy;
   priority: 'Routine' | 'Urgent' | 'STAT';
   clinic: string;
+  location_clinic_name?: string;
   clinicalIndication?: string;
   provisionalDiagnosis?: string;
   lmp?: string;
@@ -136,6 +137,7 @@ const transformReport = (apiReport: any): RadiologyReport => {
   
   // Extract clinic and clinical indication
   const clinic = orderDetails.clinic || (apiReport as any).clinic || '';
+  const locationClinicName = orderDetails.location_clinic_name || (studyObj as any).location_clinic_name || (apiReport as any).location_clinic_name || '';
   const clinicalIndication = orderDetails.clinical_notes || apiReport.clinical_notes || '';
   const provisionalDiagnosis = orderDetails.provisional_diagnosis || (apiReport as any).provisional_diagnosis || '';
   const lmp = orderDetails.lmp || (apiReport as any).lmp || '';
@@ -184,6 +186,7 @@ const transformReport = (apiReport: any): RadiologyReport => {
     },
     priority: transformPriority(apiReport.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     clinic,
+    location_clinic_name: locationClinicName,
     clinicalIndication,
     provisionalDiagnosis: provisionalDiagnosis || undefined,
     lmp: lmp || undefined,
@@ -935,7 +938,7 @@ export default function RadiologyVerificationPage() {
                 <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
                   <div><p className="text-xs text-muted-foreground">Patient</p><p className="font-medium">{selectedReport.patient.name}</p><p className="text-xs text-muted-foreground">{selectedReport.patient.age}y {selectedReport.patient.gender}</p></div>
                   <div><p className="text-xs text-muted-foreground">Ordering Doctor</p><p className="font-medium">{selectedReport.doctor.name}</p><p className="text-xs text-muted-foreground">{selectedReport.doctor.specialty}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Order ID</p><p className="font-medium">{selectedReport.orderId}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Location</p><p className="font-medium">{selectedReport.location_clinic_name || '—'}</p></div>
                   <div><p className="text-xs text-muted-foreground">Reported By</p><p className="font-medium">{selectedReport.study.reportedBy}</p><p className="text-xs text-muted-foreground">{formatTime(selectedReport.study.reportedAt || '')}</p></div>
                 </div>
                 {selectedReport.clinicalIndication && (

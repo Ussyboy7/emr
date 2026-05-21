@@ -95,6 +95,10 @@ export function RadiologyCompletedReportDialog({
                 <p className="text-xs text-muted-foreground">Category</p>
                 <p className="font-medium">{report.category}</p>
               </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Location</p>
+                <p className="font-medium">{report.location_clinic_name || '—'}</p>
+              </div>
             </div>
 
             <div>

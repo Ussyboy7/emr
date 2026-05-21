@@ -134,6 +134,22 @@ class LabOrder(models.Model):
     
     ordered_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_lab_orders')
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lab_orders',
+        help_text="Clinic where this lab order was placed (requesting clinic)",
+    )
+    processing_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lab_orders_processed',
+        help_text="Clinic processing this lab order (defaults from requesting clinic's config, overridable)",
+    )
     
     class Meta:
         db_table = 'lab_orders'

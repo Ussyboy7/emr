@@ -68,6 +68,7 @@ import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/comp
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser } from "@/lib/home-route";
+import { useClinic } from "@/hooks/use-clinic";
 
 // Types for menu structure
 interface MenuItem {
@@ -237,7 +238,6 @@ const menuSections: MenuSection[] = [
       { label: "User Management", href: "/admin/users", icon: UserCog },
       { label: "Roles & Permissions", href: "/admin/roles", icon: Shield },
       { label: "Clinics & Departments", href: "/admin/clinics", icon: Building2 },
-      { label: "Room Management", href: "/admin/rooms", icon: DoorOpen },
       { label: "System Settings", href: "/admin/settings", icon: Settings },
       { label: "Audit Trail", href: "/admin/audit", icon: ClipboardList },
     ],
@@ -249,6 +249,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const isCollapsed = state === "collapsed";
   const { currentUser, hydrated } = useCurrentUser();
+  const { activeClinicId } = useClinic();
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
   const canViewOverviewDashboard =
     Boolean(currentUser?.isSuperuser) || Boolean(currentUser?.permissions?.includes("/dashboard"));
@@ -310,6 +311,10 @@ export function AppSidebar() {
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
 
     return menuSections.filter(section => {
+      // Department heads automatically get access to the Administration section
+      if (section.basePath === '/admin' && currentUser.department) {
+        return true;
+      }
       // Check if user has access to any page in this section
       return section.items.some(item => allowedPages.includes(item.href));
     });
@@ -321,15 +326,28 @@ export function AppSidebar() {
       return [];
     }
 
+    // Filter out Central store and Store Requests if not on Bode Thomas (superusers bypass)
+    const storeHrefs = ['/pharmacy/store', '/pharmacy/store/requests'];
+    const baseItems = section.items.filter(item => {
+      if (storeHrefs.includes(item.href) && activeClinicId !== 5 && !currentUser.isSuperuser) {
+        return false;
+      }
+      return true;
+    });
+
     // Super admin users see ALL items in ALL sections
     if (currentUser.isSuperuser) {
-      return section.items;
+      return baseItems;
     }
 
     // Check if user has access to specific pages
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
 
-    return section.items.filter(item => {
+    return baseItems.filter(item => {
+      // Department heads automatically get access to User Management
+      if (item.href === '/admin/users' && currentUser.department) {
+        return true;
+      }
       // Check if the specific page URL is in the allowed pages
       return allowedPages.includes(item.href);
     });

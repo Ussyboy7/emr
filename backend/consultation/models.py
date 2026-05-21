@@ -23,8 +23,8 @@ class ConsultationRoom(models.Model):
         ('examination', 'Examination'),
     ]
     
-    name = models.CharField(max_length=100, unique=True)
-    room_number = models.CharField(max_length=50, unique=True, db_index=True)
+    name = models.CharField(max_length=100)
+    room_number = models.CharField(max_length=50, db_index=True)
     clinic = models.ForeignKey(
         'organization.Clinic',
         on_delete=models.CASCADE,
@@ -51,6 +51,10 @@ class ConsultationRoom(models.Model):
     class Meta:
         db_table = 'consultation_rooms'
         ordering = ['room_number']
+        constraints = [
+            models.UniqueConstraint(fields=['name', 'clinic'], name='uq_room_name_per_clinic'),
+            models.UniqueConstraint(fields=['room_number', 'clinic'], name='uq_room_number_per_clinic'),
+        ]
         indexes = [
             models.Index(fields=['clinic', 'status']),
             models.Index(fields=['room_number']),
@@ -77,6 +81,14 @@ class ConsultationSession(models.Model):
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='consultation_sessions')
     doctor = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='consultation_sessions')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='consultation_sessions')
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='consultation_sessions',
+        help_text="Clinic where this consultation session takes place",
+    )
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     presentation_complaint = models.TextField(blank=True, help_text="Chief complaint or presenting symptoms")
@@ -132,6 +144,15 @@ class ConsultationSession(models.Model):
                 new_num = 1
             
             self.session_id = f'SESS-{date_str}-{new_num:06d}'
+
+        # Auto-populate location_clinic from the room if not explicitly set
+        if self.location_clinic_id is None and self.room_id:
+            try:
+                room = self.room
+                if room.clinic_id:
+                    self.location_clinic_id = room.clinic_id
+            except Exception:
+                pass
 
         if self.status == 'active' and not self.last_resumed_at:
             self.last_resumed_at = timezone.now()

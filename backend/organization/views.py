@@ -13,13 +13,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Clinic, Department, Room, OutpatientClinicType, FacilityOutpatientClinic, WorkLocation
+from .models import Clinic, Department, Room, OutpatientClinicType, FacilityOutpatientClinic, WorkLocation, SystemConfig
 from .serializers import (
     ClinicSerializer,
     DepartmentSerializer,
     RoomSerializer,
     OutpatientClinicTypeSerializer,
     WorkLocationSerializer,
+    SystemConfigSerializer,
 )
 from audit.services import AuditService
 
@@ -378,4 +379,17 @@ class WorkLocationViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return WorkLocation.objects.all()
+
+
+class SystemConfigViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only view of system configuration values for the frontend."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = SystemConfigSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ['key']
+    ordering = ['key']
+
+    def get_queryset(self):
+        return SystemConfig.objects.all()
 

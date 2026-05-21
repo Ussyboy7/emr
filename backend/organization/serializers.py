@@ -2,7 +2,7 @@
 Serializers for the Organization app.
 """
 from rest_framework import serializers
-from .models import Clinic, Department, Room, OutpatientClinicType, WorkLocation
+from .models import Clinic, Department, Room, OutpatientClinicType, WorkLocation, SystemConfig
 
 
 class ClinicSerializer(serializers.ModelSerializer):
@@ -44,8 +44,8 @@ class ClinicSerializer(serializers.ModelSerializer):
         ]
     
     def get_staff_count(self, obj):
-        """Get count of staff assigned to this clinic."""
-        return obj.staff.filter(is_active=True).count()
+        """Get count of staff assigned to this clinic (via M2M)."""
+        return obj.assigned_staff.filter(is_active=True).count()
     
     def get_room_count(self, obj):
         """Get count of rooms assigned to this clinic.
@@ -107,6 +107,13 @@ class WorkLocationSerializer(serializers.ModelSerializer):
         model = WorkLocation
         fields = ["id", "name", "is_active", "created_at"]
         read_only_fields = ["id", "created_at"]
+
+
+class SystemConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemConfig
+        fields = ['key', 'value', 'description', 'updated_at']
+        read_only_fields = ['key', 'description', 'updated_at']
 
 
 class OutpatientClinicTypeSerializer(serializers.ModelSerializer):

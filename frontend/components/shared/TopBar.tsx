@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { NotificationBell } from "../notifications/NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useClinic } from "@/hooks/use-clinic";
 import { NPA_LOGO_URL, NPA_EMR_TITLE } from "@/lib/branding";
 import { hasTokens, logout } from "@/lib/api-client";
 import { getHomeRouteForUser } from "@/lib/home-route";
@@ -26,6 +27,7 @@ import { LogOut, Shield, Clock, Calendar, Bell, HelpCircle, Settings, Stethoscop
 export const TopBar = () => {
   const router = useRouter();
   const { currentUser, hydrated } = useCurrentUser();
+  const { activeClinicId, activeClinicName, clinics, isMultiClinic, switchClinic, loading: clinicLoading } = useClinic();
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
@@ -163,6 +165,51 @@ export const TopBar = () => {
             </span>
           </div>
         </div>
+
+        {/* Clinic Switcher */}
+        {isMultiClinic && (
+          <div className="flex items-center">
+            <div className="h-4 w-px bg-sidebar-border mr-2 hidden md:block" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-sidebar-foreground hover:bg-sidebar-accent px-1.5 md:px-2">
+                  <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                  <span className="max-w-[80px] md:max-w-[120px] truncate font-medium">
+                    {clinicLoading ? "..." : activeClinicName || "Select clinic"}
+                  </span>
+                  <svg className="h-3 w-3 text-sidebar-foreground/50 hidden md:block" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                  Switch clinic
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {clinics.map((clinic) => (
+                  <DropdownMenuItem
+                    key={clinic.id}
+                    onClick={() => switchClinic(clinic.id)}
+                    className={clinic.id === activeClinicId ? "bg-accent font-medium" : ""}
+                  >
+                    <div
+                      className={`h-1.5 w-1.5 rounded-full flex-shrink-0 mr-2 ${
+                        clinic.id === activeClinicId ? "bg-emerald-400" : "bg-sidebar-foreground/30"
+                      }`}
+                    />
+                    <span className="truncate">{clinic.name}</span>
+                    {clinic.id === activeClinicId && (
+                      <svg className="h-4 w-4 ml-auto text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />

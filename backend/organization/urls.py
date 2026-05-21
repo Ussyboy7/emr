@@ -9,6 +9,7 @@ from .views import (
     RoomViewSet,
     OutpatientClinicTypeViewSet,
     WorkLocationViewSet,
+    SystemConfigViewSet,
 )
 
 router = DefaultRouter()
@@ -21,6 +22,7 @@ router.register(
     basename='outpatient-clinic-type',
 )
 router.register(r'work-locations', WorkLocationViewSet, basename='work-location')
+router.register(r'system-config', SystemConfigViewSet, basename='system-config')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -147,6 +147,7 @@ interface LabOrder {
   priority: 'Routine' | 'Urgent' | 'STAT';
   orderedAt: string;
   clinic: string;
+  location_clinic_name?: string;
   clinicalNotes?: string;
   sourceType?: 'internal_emr' | 'external_manual';
   externalClinic?: { id: number; name: string; code?: string } | null;
@@ -230,6 +231,7 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
     priority: transformPriority(apiOrder.priority) as 'Routine' | 'Urgent' | 'STAT',
     orderedAt: apiOrder.ordered_at,
     clinic: apiOrder.clinic || '',
+    location_clinic_name: apiOrder.location_clinic_name || undefined,
     sourceType: ((apiOrder as any).source_type || 'internal_emr') as 'internal_emr' | 'external_manual',
     externalClinic: (apiOrder as any).external_clinic_details || null,
     externalRequestingDoctorName: (apiOrder as any).external_requesting_doctor_name || '',
@@ -2508,6 +2510,7 @@ export default function LabOrdersPage() {
                     {(selectedOrder.patient as any).division && (
                       <p className="text-xs text-muted-foreground">Division: {(selectedOrder.patient as any).division}</p>
                     )}
+                    <p className="text-xs text-muted-foreground mt-1">Location: {selectedOrder.location_clinic_name || '—'}</p>
                   </div>
                   <div>
                     {selectedOrder.sourceType === 'external_manual' ? (

@@ -146,6 +146,12 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
     report_file_url = serializers.SerializerMethodField()
     report_attachments = RadiologyStudyReportAttachmentSerializer(many=True, read_only=True)
 
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj.order, 'location_clinic', None) if obj.order else None
+        return clinic.name if clinic else None
+
     def get_report_file_url(self, obj):
         """Get the URL for the uploaded report file."""
         if obj.report_file:
@@ -168,6 +174,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
     doctor_name = serializers.SerializerMethodField()
     doctor_details = serializers.SerializerMethodField()
     external_clinic_details = serializers.SerializerMethodField()
+    location_clinic_name = serializers.SerializerMethodField()
     studies = RadiologyStudySerializer(many=True, read_only=True)
     icd10_diagnoses = serializers.SerializerMethodField()
 
@@ -211,6 +218,10 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
                 'name': obj.external_requesting_doctor_name,
             }
         return None
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None)
+        return clinic.name if clinic else None
 
     def get_external_clinic_details(self, obj):
         clinic = getattr(obj, 'external_clinic', None)
@@ -390,6 +401,7 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
                 'doctor_name': obj.order.doctor.get_full_name() if obj.order.doctor else obj.order.external_requesting_doctor_name or None,
                 'doctor_specialty': getattr(obj.order.doctor, 'specialty', None) if obj.order.doctor else None,
                 'clinic': obj.order.clinic,
+                'location_clinic_name': obj.order.location_clinic.name if obj.order.location_clinic else None,
                 'clinical_notes': obj.order.clinical_notes,
                 'provisional_diagnosis': obj.order.provisional_diagnosis,
                 'lmp': str(obj.order.lmp) if obj.order.lmp else None,

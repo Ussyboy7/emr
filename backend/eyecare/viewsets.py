@@ -20,6 +20,9 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.session_report_pdf import build_eye_session_pdf_bytes
+from accounts.utils import resolve_clinic, resolve_clinic_id
+from common.mixins import ClinicScopedMixin
+from organization.models import SystemConfig
 from patients.models import Visit
 
 from .filters import EyeSessionFilter
@@ -42,7 +45,7 @@ class StandardResultsPagination(PageNumberPagination):
 ACTIVE_EYE_ORDER_STATUSES = ("pending", "scheduled", "in_progress")
 
 
-class EyeOrderViewSet(viewsets.ModelViewSet):
+class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Eye clinic orders (queue + CRUD)."""
 
     permission_classes = [IsAuthenticated]
@@ -104,7 +107,7 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
                     qs = qs.filter(ordered_at__date__gte=today - timedelta(days=31))
                 # "all" — no extra date constraint
 
-        return qs
+        return self.scope_queryset(qs)
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -112,6 +115,7 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
         return EyeOrderSerializer
 
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         serializer.save(ordered_by=self.request.user)
 
     @action(detail=True, methods=["post"], url_path="complete")
@@ -142,7 +146,9 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
             return Response({"results": {}})
 
         orders = (
-            EyeOrder.objects.filter(visit_id__in=visit_ids, status__in=ACTIVE_EYE_ORDER_STATUSES)
+            self.scope_queryset(
+                EyeOrder.objects.filter(visit_id__in=visit_ids, status__in=ACTIVE_EYE_ORDER_STATUSES)
+            )
             .order_by("-ordered_at")
         )
         best: dict[int, EyeOrder] = {}
@@ -171,24 +177,31 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
         if visit_id <= 0:
             return Response({"detail": "Invalid visit id"}, status=status.HTTP_400_BAD_REQUEST)
 
-        visit = Visit.objects.select_related("patient").filter(pk=visit_id).first()
+        visit_qs = Visit.objects.select_related("patient").filter(pk=visit_id)
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            v_clinic_id = resolve_clinic_id(self.request.user)
+            if v_clinic_id is not None:
+                visit_qs = visit_qs.filter(location_clinic=v_clinic_id)
+        visit = visit_qs.first()
         if visit is None:
             return Response({"detail": "Visit not found."}, status=status.HTTP_404_NOT_FOUND)
         if visit.patient_id is None:
             return Response({"detail": "Visit has no patient."}, status=status.HTTP_400_BAD_REQUEST)
 
         order = (
-            EyeOrder.objects.filter(
-                visit_id=visit_id,
-                patient_id=visit.patient_id,
-                status__in=ACTIVE_EYE_ORDER_STATUSES,
+            self.scope_queryset(
+                EyeOrder.objects.filter(
+                    visit_id=visit_id,
+                    patient_id=visit.patient_id,
+                    status__in=ACTIVE_EYE_ORDER_STATUSES,
+                )
             )
             .order_by("-ordered_at")
             .first()
         )
         created = False
         if order is None:
-            order = EyeOrder.objects.create(
+            create_kwargs = dict(
                 patient_id=visit.patient_id,
                 visit_id=visit_id,
                 ordered_by=request.user,
@@ -206,6 +219,11 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
                 status="scheduled",
                 scheduled_at=timezone.now(),
             )
+            if SystemConfig.is_enabled('multi_clinic_enabled'):
+                clinic = resolve_clinic(self.request.user)
+                if clinic is not None:
+                    create_kwargs['location_clinic'] = clinic
+            order = EyeOrder.objects.create(**create_kwargs)
             created = True
         elif order.status == "pending":
             order.status = "scheduled"
@@ -217,7 +235,7 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
         return Response(data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
-class EyeSessionViewSet(viewsets.ModelViewSet):
+class EyeSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Eye clinic clinical sessions."""
 
     permission_classes = [IsAuthenticated]
@@ -227,9 +245,10 @@ class EyeSessionViewSet(viewsets.ModelViewSet):
     filterset_class = EyeSessionFilter
     ordering_fields = ["scheduled_at", "created_at", "status", "session_number"]
     ordering = ["-scheduled_at"]
+    clinic_filter_field = 'order__location_clinic'
 
     def get_queryset(self):
-        return (
+        return self.scope_queryset(
             EyeSession.objects.select_related("order", "order__patient", "order__ordered_by")
             .prefetch_related("diagnostic_uploads")
             .all()
@@ -278,13 +297,7 @@ class EyeSessionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="session_report_pdf")
     def session_report_pdf(self, request, pk=None):
-        session = (
-            EyeSession.objects.select_related("order", "order__patient")
-            .filter(pk=pk)
-            .first()
-        )
-        if session is None:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        session = self.get_object()
         pdf_bytes = build_eye_session_pdf_bytes(session)
         filename = f"eye_session_{pk}.pdf"
         return HttpResponse(

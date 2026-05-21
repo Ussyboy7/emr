@@ -11,6 +11,11 @@ class EyeOrderSerializer(serializers.ModelSerializer):
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     ordered_by_name = serializers.CharField(source='ordered_by.get_full_name', read_only=True, allow_null=True)
     completed_sessions_count = serializers.SerializerMethodField()
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None)
+        return clinic.name if clinic else None
 
     class Meta:
         model = EyeOrder
@@ -21,7 +26,7 @@ class EyeOrderSerializer(serializers.ModelSerializer):
             'refraction_od', 'refraction_os', 'iop_od', 'iop_os',
             'diagnosis', 'treatment_plan', 'special_instructions',
             'priority', 'status', 'ordered_at', 'scheduled_at', 'completed_at',
-            'completed_sessions_count',
+            'completed_sessions_count', 'location_clinic_name',
         ]
         read_only_fields = ['id', 'ordered_at']
 

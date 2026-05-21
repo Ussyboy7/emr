@@ -98,6 +98,9 @@ export type User = {
   active: boolean;
   username?: string;
   isSuperuser?: boolean;
+  clinics_ids?: number[];
+  active_clinic_id?: number | null;
+  multi_clinic_enabled?: boolean;
 };
 
 export function getGradeLevels(): GradeLevel[] {

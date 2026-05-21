@@ -174,6 +174,9 @@ export function ReferralsList({
                       <User className="h-3 w-3" />
                       {referral.referred_by_name || "Unknown"}
                     </span>
+                    {referral.location_clinic_name && (
+                      <><span>•</span><span>{referral.location_clinic_name}</span></>
+                    )}
                   </div>
                 </div>
               </div>

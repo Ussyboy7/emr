@@ -10,6 +10,7 @@ from .views import (
     server_time,
     SystemMetricsView,
     LiveDashboardView,
+    OnlineUsersView,
 )
 
 urlpatterns = [
@@ -20,6 +21,7 @@ urlpatterns = [
     # users count + live system health). Designed to be cheap enough
     # to call every 30 s without dragging in users/roles/audit fetches.
     path('common/dashboard/live/', LiveDashboardView.as_view(), name='dashboard-live'),
+    path('common/online-users/', OnlineUsersView.as_view(), name='online-users'),
     path('common/upload/', FileUploadView.as_view(), name='file-upload'),
     path('common/send-email/', SendEmailView.as_view(), name='send-email'),
     path('common/export/', ExportDataView.as_view(), name='export-data'),

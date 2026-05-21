@@ -110,6 +110,11 @@ class LabTestSerializer(serializers.ModelSerializer):
     lab_result_id = serializers.SerializerMethodField()
     overall_status = serializers.SerializerMethodField()
     result_attachments = LabTestResultAttachmentSerializer(many=True, read_only=True)
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj.order, 'location_clinic', None) if obj.order else None
+        return clinic.name if clinic else None
 
     def get_overall_status(self, obj):
         try:
@@ -284,6 +289,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
     patient_details = serializers.SerializerMethodField()
     doctor_details = serializers.SerializerMethodField()
     external_clinic_details = serializers.SerializerMethodField()
+    location_clinic_name = serializers.SerializerMethodField()
     tests = LabTestSerializer(many=True, read_only=True)
     # Allow tests to be written during creation (using nested serializer without order field)
     tests_data = LabTestCreateSerializer(many=True, write_only=True, required=False)
@@ -332,6 +338,10 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'name': str(obj.doctor) if obj.doctor else None,
                 'specialty': '',
             }
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None)
+        return clinic.name if clinic else None
 
     def get_external_clinic_details(self, obj):
         clinic = getattr(obj, 'external_clinic', None)

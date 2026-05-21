@@ -25,6 +25,7 @@ interface Visit {
   time: string;
   type: string;
   department: string;
+  location_clinic_name?: string;
   doctor: string;
   status: string;
   notes?: string;
@@ -125,6 +126,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
         time: rawVisitData.time || '',
         type: rawVisitData.visit_type || 'consultation',
         department: rawVisitData.clinic || '',
+        location_clinic_name: rawVisitData.location_clinic_name || (rawVisitData as any).location_clinic_name || undefined,
         doctor: rawVisitData.doctor_name || 'Doctor',
         status: rawVisitData.status || 'scheduled',
         notes: rawVisitData.clinical_notes || '',
@@ -629,6 +631,12 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
                     <span className="text-muted-foreground">Clinic:</span>
                     <span>{visit?.department || 'N/A'}</span>
                   </div>
+                  {visit?.location_clinic_name && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Location:</span>
+                      <span>{visit.location_clinic_name}</span>
+                    </div>
+                  )}
                   {visit?.notes && (
                     <div className="mt-3 pt-3 border-t">
                       <span className="text-muted-foreground block mb-2">Notes / Special Instructions:</span>

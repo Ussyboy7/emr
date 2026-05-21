@@ -254,6 +254,7 @@ export function PatientHistoryTabs({
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">Date</th>
                         <th className="px-4 py-2 text-left font-medium">Doctor</th>
+                        <th className="px-4 py-2 text-left font-medium">Location</th>
                         <th className="px-4 py-2 text-left font-medium">Clinic</th>
                         <th className="px-4 py-2 text-center font-medium">Action</th>
                       </tr>
@@ -263,6 +264,7 @@ export function PatientHistoryTabs({
                         <tr key={s.id} className="hover:bg-muted/30">
                           <td className="px-4 py-3 text-muted-foreground">{formatDate(s.started_at)}</td>
                           <td className="px-4 py-3">{s.doctor_name || '—'}</td>
+                          <td className="px-4 py-3">{s.location_clinic_name || '—'}</td>
                           <td className="px-4 py-3">{s.clinic_name || '—'}</td>
                           <td className="px-4 py-3 text-center">
                             <Button variant="ghost" size="sm" onClick={() => triggerView(onViewConsultation, s)}>
@@ -295,6 +297,7 @@ export function PatientHistoryTabs({
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Test</th>
+                      <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
@@ -309,6 +312,7 @@ export function PatientHistoryTabs({
                             {(lab.name || lab.test_name) && lab.panel_name && <div className="text-xs text-muted-foreground">{lab.panel_name}</div>}
                           </div>
                         </td>
+                        <td className="px-4 py-3">{lab.location_clinic_name || '—'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={`text-xs ${statusBadgeClass((lab.status || lab.overall_status || '').toLowerCase())}`}>
                             {humanizeStatus(lab.status || lab.overall_status)}
@@ -338,6 +342,7 @@ export function PatientHistoryTabs({
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Procedure</th>
+                      <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
@@ -347,6 +352,7 @@ export function PatientHistoryTabs({
                       <tr key={img.id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 text-muted-foreground">{formatDate(img.created_at)}</td>
                         <td className="px-4 py-3 font-medium">{img.study_details?.procedure || 'Imaging'}</td>
+                        <td className="px-4 py-3">{img.study_details?.location_clinic_name || '—'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={`text-xs ${statusBadgeClass((img.study_details?.overall_status || img.study_details?.status || '').toLowerCase())}`}>
                             {humanizeStatus(img.study_details?.overall_status || img.study_details?.status)}
@@ -375,26 +381,19 @@ export function PatientHistoryTabs({
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
-                      <th className="px-4 py-2 text-left font-medium">Prescription ID</th>
                       <th className="px-4 py-2 text-left font-medium">Doctor</th>
-                      <th className="px-4 py-2 text-left font-medium">Medications</th>
+                      <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {data.prescriptions.map((p: any) => {
-                      const meds = p.medications || (p.medication_name ? [p] : []);
-                      const medCount = meds.length;
-                      const firstMeds = meds.slice(0, 3).map((m: any) => m.medication_name || m.medication?.name || m.medication).filter(Boolean);
                       return (
                         <tr key={p.id} className="hover:bg-muted/30">
                           <td className="px-4 py-3 text-muted-foreground">{formatDate(p.prescribed_at || p.created_at)}</td>
-                          <td className="px-4 py-3 font-mono text-xs">{p.prescription_id || p.id}</td>
                           <td className="px-4 py-3">{p.doctor_name || '—'}</td>
-                          <td className="px-4 py-3">
-                            {firstMeds.join(', ')}{medCount > 3 ? ` +${medCount - 3} more` : ''}
-                          </td>
+                          <td className="px-4 py-3">{p.location_clinic_name || '—'}</td>
                           <td className="px-4 py-3">
                             <Badge variant="outline" className={`text-xs ${statusBadgeClass((p.status || '').toLowerCase())}`}>
                               {humanizeStatus(p.status)}
@@ -424,35 +423,24 @@ export function PatientHistoryTabs({
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
-                      <th className="px-4 py-2 text-left font-medium">Summary</th>
+                      <th className="px-4 py-2 text-left font-medium">Recorded By</th>
+                      <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {data.vitals.slice(0, 20).map((v: any, i: number) => {
-                      const items: { label: string; value: string; color: string }[] = [];
-                      if (v.temperature) items.push({ label: 'Temp', value: `${v.temperature}°C`, color: 'bg-red-100 text-red-700' });
-                      if (v.blood_pressure_systolic && v.blood_pressure_diastolic) items.push({ label: 'BP', value: `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`, color: 'bg-blue-100 text-blue-700' });
-                      if (v.heart_rate) items.push({ label: 'HR', value: `${v.heart_rate} bpm`, color: 'bg-emerald-100 text-emerald-700' });
-                      if (v.oxygen_saturation) items.push({ label: 'SpO₂', value: `${v.oxygen_saturation}%`, color: 'bg-purple-100 text-purple-700' });
-                      return (
+                    {data.vitals.slice(0, 20).map((v: any, i: number) => (
                         <tr key={v.id ?? i} className="hover:bg-muted/30">
                           <td className="px-4 py-3 text-muted-foreground">{formatDate(v.recorded_at)}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {items.map((it, ii) => (
-                                <Badge key={ii} variant="outline" className={`text-xs ${it.color}`}>{it.label}: {it.value}</Badge>
-                              ))}
-                            </div>
-                          </td>
+                          <td className="px-4 py-3">{v.recorded_by_name || '—'}</td>
+                          <td className="px-4 py-3">{v.location_clinic_name || '—'}</td>
                           <td className="px-4 py-3 text-center">
                             <Button variant="ghost" size="sm" onClick={() => triggerView(onViewVital, v)}>
                               <Eye className="h-4 w-4 mr-1" /> View
                             </Button>
                           </td>
                         </tr>
-                      );
-                    })}
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -470,6 +458,7 @@ export function PatientHistoryTabs({
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
+                      <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
@@ -481,6 +470,7 @@ export function PatientHistoryTabs({
                         <td className="px-4 py-3">
                           <span className="font-medium">{o.diagnosis || 'N/A'}</span>
                         </td>
+                        <td className="px-4 py-3">{o.location_clinic_name || '—'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={`text-xs ${statusBadgeClass(o.status)}`}>
                             {humanizeStatus(o.status)}
@@ -510,6 +500,7 @@ export function PatientHistoryTabs({
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
+                      <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-left font-medium">Priority</th>
                       <th className="px-4 py-2 text-left font-medium">Sessions</th>
@@ -523,6 +514,7 @@ export function PatientHistoryTabs({
                         <td className="px-4 py-3">
                           <span className="font-medium">{o.diagnosis || o.chief_complaint || 'N/A'}</span>
                         </td>
+                        <td className="px-4 py-3">{o.location_clinic_name || '—'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={`text-xs ${statusBadgeClass(o.status)}`}>
                             {humanizeStatus(o.status)}
@@ -559,6 +551,7 @@ export function PatientHistoryTabs({
                       <th className="px-4 py-2 text-left font-medium">Admitted</th>
                       <th className="px-4 py-2 text-left font-medium">Ward</th>
                       <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
+                      <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-left font-medium">Days</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
@@ -574,6 +567,7 @@ export function PatientHistoryTabs({
                           <td className="px-4 py-3 text-muted-foreground">{formatDate(a.admitted_at)}</td>
                           <td className="px-4 py-3 font-medium">{a.ward_name || '—'}</td>
                           <td className="px-4 py-3">{a.diagnosis || a.history || '—'}</td>
+                          <td className="px-4 py-3">{a.location_clinic_name || '—'}</td>
                           <td className="px-4 py-3 text-muted-foreground">{days} days</td>
                           <td className="px-4 py-3">
                             <Badge variant="outline" className={`text-xs ${statusBadgeClass(a.status)}`}>

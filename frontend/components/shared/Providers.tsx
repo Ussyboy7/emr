@@ -8,6 +8,7 @@ import { ClientErrorBoundary } from '@/components/shared/ClientErrorBoundary';
 import { Toaster as ToastToaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { OrganizationProvider } from "@/contexts/OrganizationContext";
+import { ClinicProvider } from "@/contexts/ClinicContext";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
 
@@ -77,13 +78,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
       disableTransitionOnChange
     >
       <OrganizationProvider>
-        <ClientErrorBoundary>
-          <TooltipProvider>
-            <AuthzGate>{children}</AuthzGate>
-            <Toaster />
-            <ToastToaster />
-          </TooltipProvider>
-        </ClientErrorBoundary>
+        <ClinicProvider>
+          <ClientErrorBoundary>
+            <TooltipProvider>
+              <AuthzGate>{children}</AuthzGate>
+              <Toaster />
+              <ToastToaster />
+            </TooltipProvider>
+          </ClientErrorBoundary>
+        </ClinicProvider>
       </OrganizationProvider>
     </ThemeProvider>
   );

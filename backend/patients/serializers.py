@@ -199,7 +199,12 @@ class VisitSerializer(serializers.ModelSerializer):
     gender = serializers.SerializerMethodField()
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     created_by_name = serializers.SerializerMethodField()
+    location_clinic_name = serializers.SerializerMethodField()
     is_new_registration = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None)
+        return clinic.name if clinic else None
 
     def get_created_by_name(self, obj):
         user = getattr(obj, 'created_by', None)
@@ -373,7 +378,7 @@ class VisitSerializer(serializers.ModelSerializer):
         model = Visit
         fields = [
             'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'age', 'gender', 'visit_type', 'status',
-            'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'location_clinic', 'doctor', 'doctor_name',
+            'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'location_clinic', 'location_clinic_name', 'doctor', 'doctor_name',
             'clinical_notes', 'vitals',
             'is_new_registration', 'is_first_visit', 'is_returning_visit', 'patient_visit_status',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
@@ -391,7 +396,12 @@ class VitalReadingSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True, allow_null=True)
-    
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj.visit, 'location_clinic', None) if obj.visit else None
+        return clinic.name if clinic else None
+
     class Meta:
         model = VitalReading
         fields = [
@@ -400,6 +410,7 @@ class VitalReadingSerializer(serializers.ModelSerializer):
             'heart_rate', 'respiratory_rate', 'oxygen_saturation',
             'weight', 'height', 'bmi', 'pain_scale', 'blood_sugar', 'random_blood_sugar',
             'notes', 'recorded_at', 'recorded_by', 'recorded_by_name',
+            'location_clinic_name',
         ]
         read_only_fields = ['id', 'bmi', 'recorded_at']
     

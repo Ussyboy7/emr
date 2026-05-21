@@ -1116,6 +1116,7 @@ export default function EyeClinicOrdersPage() {
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
                       <p className="font-medium text-base">{selectedOrder.patient_name ?? ''}</p>
                       <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Location: {(selectedOrder as any).location_clinic_name || '—'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Ordering Doctor</p>

@@ -106,6 +106,7 @@ export interface ConsultationRecord {
   time: string;
   clinic: string;
   room: string;
+  location_clinic_name?: string;
   diagnosis: string;
   presentationComplaint?: string;
   diagnosisCodes?: { code: string; description: string; type: 'Primary' | 'Secondary' | 'Differential' }[];
@@ -224,6 +225,7 @@ export interface ConsultationSessionData {
   created_by_name?: string;
   clinic?: string;
   clinic_name?: string;
+  location_clinic_name?: string;
   visit_clinics?: string[];
   date?: string;
   time?: string;
@@ -1005,6 +1007,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
         clinics: visit.clinics || visit.visit_clinics,
       }),
       room: consultationSession?.room_name || visit.room_name || '',
+      location_clinic_name: consultationSession?.location_clinic_name || (visit as any).location_clinic_name || undefined,
       diagnosis: cleanClinicalText(consultationSession?.assessment || visit.diagnosis || ''),
       presentationComplaint: consultationSession?.presentation_complaint || '',
       historyOfPresentIllness: cleanClinicalText(consultationSession?.history_of_presenting_illness || ''),
@@ -1384,6 +1387,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
         clinics: session.visit_clinics,
       }),
       room: session.room_name || '',
+      location_clinic_name: (session as any).location_clinic_name || undefined,
       diagnosis: session.assessment || '',
       presentationComplaint: session.presentation_complaint || '',
       diagnosisCodes: (() => {
@@ -1728,6 +1732,12 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                       <span className="font-medium text-gray-700 dark:text-gray-300">Room:</span>
                       <span className="ml-2 text-gray-600 dark:text-gray-400">{safeConsultation.room}</span>
                     </div>
+                    {safeConsultation.location_clinic_name && (
+                      <div>
+                        <span className="font-medium text-gray-700 dark:text-gray-300">Location:</span>
+                        <span className="ml-2 text-gray-600 dark:text-gray-400">{safeConsultation.location_clinic_name}</span>
+                      </div>
+                    )}
                     <div>
                       <span className="font-medium text-gray-700 dark:text-gray-300">Status:</span>
                       <Badge className={`ml-2 ${getStatusBadge(safeConsultation.status)}`}>{safeConsultation.status}</Badge>

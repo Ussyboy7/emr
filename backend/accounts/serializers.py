@@ -15,6 +15,9 @@ class UserSerializer(serializers.ModelSerializer):
     clinic_name = serializers.CharField(source="clinic.name", read_only=True)
     department_name = serializers.CharField(source="department.name", read_only=True)
     permissions = serializers.SerializerMethodField()
+    multi_clinic_enabled = serializers.SerializerMethodField()
+    clinics_ids = serializers.SerializerMethodField()
+    active_clinic_id = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -48,6 +51,10 @@ class UserSerializer(serializers.ModelSerializer):
             "last_activity",
             "last_login",
             "date_joined",
+            # Multi-clinic fields
+            "clinics_ids",
+            "active_clinic_id",
+            "multi_clinic_enabled",
         ]
         read_only_fields = [
             "id",
@@ -56,6 +63,8 @@ class UserSerializer(serializers.ModelSerializer):
             "last_login",
             "clinic_name",
             "department_name",
+            "clinics_ids",
+            "multi_clinic_enabled",
         ]
         extra_kwargs = {
             "password": {"write_only": True, "required": False},
@@ -63,6 +72,16 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_full_name(self, obj):
         return obj.get_full_name()
+
+    def get_multi_clinic_enabled(self, obj):
+        from organization.models import SystemConfig
+        return SystemConfig.is_enabled('multi_clinic_enabled')
+
+    def get_clinics_ids(self, obj):
+        return list(obj.clinics.values_list('id', flat=True))
+
+    def get_active_clinic_id(self, obj):
+        return obj.active_clinic_id
 
     def get_permissions(self, obj):
         """Get user permissions from their roles, with optional per-user page overrides."""
@@ -308,6 +327,9 @@ class UserDirectorySerializer(serializers.ModelSerializer):
 class UserCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new users."""
 
+    clinics = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.clinics.rel.model.objects.all(), required=False
+    )
     password = serializers.CharField(write_only=True, validators=[validate_password])
     password_confirm = serializers.CharField(write_only=True)
 
@@ -336,11 +358,12 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "is_staff",
             "custom_pages_mode",
             "custom_pages",
+            "clinics",  # Multi-clinic assignments
         ]
         read_only_fields = ["id"]
 
     def validate(self, attrs):
-        if attrs["password"] != attrs["password_confirm"]:
+        if attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError(
                 {"password": "Password fields didn't match."}
             )
@@ -349,14 +372,21 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("password_confirm")
         password = validated_data.pop("password")
+        clinics_data = validated_data.pop("clinics", None)
         user = User.objects.create_user(**validated_data)
         user.set_password(password)
         user.save()
+        if clinics_data is not None:
+            user.clinics.set(clinics_data)
         return user
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating user profile."""
+
+    clinics = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.clinics.rel.model.objects.all(), required=False
+    )
 
     class Meta:
         model = User
@@ -377,6 +407,8 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             "is_active",
             "custom_pages_mode",
             "custom_pages",
+            "active_clinic",  # Allow switching active clinic via update_me
+            "clinics",  # Multi-clinic assignments
         ]
 
 

@@ -192,6 +192,7 @@ export interface StockRequest {
   to_location: string;
   requested_by?: number;
   requested_by_name?: string;
+  clinic_name?: string;
   approved_by?: number;
   approved_by_name?: string;
   approved_at?: string;

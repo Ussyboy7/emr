@@ -110,6 +110,10 @@ export function ConsultationReportModal({
                 </p>
               </div>
               <div>
+                <p className="text-xs text-muted-foreground">Location</p>
+                <p className="font-medium">{session.location_clinic_name}</p>
+              </div>
+              <div>
                 <p className="text-xs text-muted-foreground">Clinic</p>
                 <p className="font-medium">{session.clinic_name ?? ''}</p>
               </div>

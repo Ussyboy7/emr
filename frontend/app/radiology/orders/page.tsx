@@ -2363,6 +2363,7 @@ export default function RadiologyOrdersPage() {
                           {selectedPatientFull?.category === 'dependent' && selectedPrincipalPersonalNumber && (
                             <p>Principal P.N.: {selectedPrincipalPersonalNumber}</p>
                           )}
+                          <p>Location: {(selectedOrder as any).location_clinic_name || '—'}</p>
                         </div>
                       </div>
                     </div>

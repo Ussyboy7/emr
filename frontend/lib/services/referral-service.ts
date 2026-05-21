@@ -44,6 +44,7 @@ export interface Referral {
   session?: number;
   referred_by?: number;
   referred_by_name?: string;
+  location_clinic_name?: string;
   created_by?: number;
   specialty: string;
   /**

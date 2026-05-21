@@ -43,6 +43,16 @@ class Ward(models.Model):
     description = models.TextField(blank=True, help_text="Ward description and facilities")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
 
+    # Clinic association
+    clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='wards',
+        help_text="Care facility this ward belongs to",
+    )
+
     # Contact and supervision
     head_nurse = models.ForeignKey(
         'accounts.User',

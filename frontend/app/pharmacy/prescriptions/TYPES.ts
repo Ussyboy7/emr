@@ -49,6 +49,7 @@ export interface Prescription {
   doctor_name?: string;
   clinic: string;
   location: string;
+  location_clinic_name?: string;
   date: string;
   time: string;
   prescribed_at?: string;

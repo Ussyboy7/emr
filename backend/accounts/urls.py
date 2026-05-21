@@ -18,8 +18,7 @@ urlpatterns = [
     path('auth/token/blacklist/', CustomTokenBlacklistView.as_view(), name='token_blacklist'),
 
     # User endpoints
-    path('auth/me/', UserViewSet.as_view({'get': 'me'}), name='user-me'),
-    path('auth/me/', UserViewSet.as_view({'patch': 'update_me'}), name='user-update-me'),
+    path('auth/me/', UserViewSet.as_view({'get': 'me', 'patch': 'update_me'}), name='user-me'),
     path('auth/change-password/', UserViewSet.as_view({'post': 'change_password'}), name='user-change-password'),
 
     # Include router URLs

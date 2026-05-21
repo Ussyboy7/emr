@@ -35,6 +35,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from decimal import Decimal, InvalidOperation
 
+from common.mixins import ClinicScopedMixin
 from .combo_utils import combo_component_names_from_display_name
 from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine
 from .serializers import (
@@ -52,6 +53,8 @@ from .serializers import (
 from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
 from audit.models import ActivityLog
+from organization.models import SystemConfig
+from accounts.utils import resolve_clinic_id
 
 
 class GenericMedicationViewSet(viewsets.ModelViewSet):
@@ -401,14 +404,15 @@ class MedicationViewSet(viewsets.ModelViewSet):
             return Response({'detail': detail, 'error': detail, 'errors': {'message': msg}}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class MedicationInventoryViewSet(viewsets.ModelViewSet):
+class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing medication inventory."""
     
+    clinic_filter_field = 'location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = MedicationInventorySerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['medication', 'location', 'medication__category', 'medication__generic']
+    filterset_fields = ['medication', 'location', 'location_clinic', 'medication__category', 'medication__generic']
     search_fields = ['medication__name', 'medication__generic__name', 'batch_number']
     ordering_fields = ['expiry_date', 'created_at']
     ordering = ['expiry_date']
@@ -417,14 +421,30 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
         loc = (self.request.query_params.get('location') or '').strip().lower()
         return loc == 'dispensary'
 
+    def _validate_store_access(self):
+        """Block store access if active clinic is not Bode Thomas (pk=5)."""
+        if self.request.user.is_superuser:
+            return
+        loc = (self.request.query_params.get('location') or '').strip().lower()
+        if loc == 'store':
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None and clinic_id != 5:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("Central store is only accessible from Bode Thomas Clinic")
+
     def get_queryset(self):
+        self._validate_store_access()
         if self._is_dispensary_request():
-            # List view applies quantity filters in _list_dispensary_receipts (incl. zero-qty "out").
-            return DispensaryReceiptLine.objects.all().select_related(
+            qs = DispensaryReceiptLine.objects.all().select_related(
                 'medication', 'medication__generic', 'request', 'issue', 'issue__request',
                 'stock_issue_line', 'stock_issue_line__source_inventory_item'
-            ).order_by('received_at')
-        queryset = MedicationInventory.objects.all().select_related('medication')
+            )
+            if SystemConfig.is_enabled('multi_clinic_enabled'):
+                clinic_id = resolve_clinic_id(self.request.user)
+                if clinic_id is not None:
+                    qs = qs.filter(location_clinic=clinic_id)
+            return qs.order_by('received_at')
+        queryset = self.scope_queryset(MedicationInventory.objects.all().select_related('medication'))
         stock_status = self.request.query_params.get('stock_status')
         if stock_status:
             if stock_status == 'out':
@@ -712,7 +732,7 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
         )
 
 
-class PrescriptionViewSet(viewsets.ModelViewSet):
+class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing prescriptions."""
     
     permission_classes = [IsAuthenticated]
@@ -763,7 +783,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         qs = self._prescription_base_qs()
         if getattr(self, 'action', None) == 'list':
             qs = self._apply_prescription_list_filters(self.request, qs)
-        return qs
+        return self.scope_queryset(qs)
 
     @action(detail=False, methods=['get'], url_path='queue-stats')
     def queue_stats(self, request):
@@ -811,6 +831,10 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             .select_related("medication")
             .order_by("received_at")
         )
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            clinic_id = resolve_clinic_id(request.user)
+            if clinic_id is not None:
+                receipt_qs = receipt_qs.filter(location_clinic=clinic_id)
 
         batches_by_medication = {}
         totals_by_medication = {}
@@ -896,6 +920,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         )
     
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         # Set doctor from request user if not provided
         if not serializer.validated_data.get('doctor') and self.request.user.is_authenticated:
             prescription = serializer.save(created_by=self.request.user, doctor=self.request.user)
@@ -1244,6 +1269,13 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
             if receipt_line_id:
                 receipt_line = DispensaryReceiptLine.objects.select_related('medication').get(id=receipt_line_id)
+                if SystemConfig.is_enabled('multi_clinic_enabled'):
+                    clinic_id = resolve_clinic_id(request.user)
+                    if clinic_id is not None and receipt_line.location_clinic_id != clinic_id:
+                        return Response(
+                            {'error': 'This receipt line belongs to a different clinic'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
                 if receipt_line.quantity_remaining < quantity:
                     return Response(
                         {'error': 'Insufficient stock'},
@@ -1532,9 +1564,10 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         return build_prescription_pdf(prescription)
 
 
-class DispenseViewSet(viewsets.ReadOnlyModelViewSet):
+class DispenseViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing dispense history."""
     
+    clinic_filter_field = 'prescription__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = DispenseSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -1574,9 +1607,11 @@ class DispenseViewSet(viewsets.ReadOnlyModelViewSet):
         return qs
 
     def _base_dispense_qs(self):
-        return Dispense.objects.all().select_related(
-            'prescription', 'medication', 'dispensed_by', 'inventory_item',
-            'prescription_item', 'prescription_item__generic', 'prescription_item__medication'
+        return self.scope_queryset(
+            Dispense.objects.all().select_related(
+                'prescription', 'medication', 'dispensed_by', 'inventory_item',
+                'prescription_item', 'prescription_item__generic', 'prescription_item__medication'
+            )
         )
 
     def get_queryset(self):
@@ -1624,9 +1659,10 @@ class DispenseViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
-class InventoryAlertViewSet(viewsets.ReadOnlyModelViewSet):
+class InventoryAlertViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for inventory alerts (low stock, expiring items)."""
     
+    clinic_filter_field = 'location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = MedicationInventorySerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -1636,7 +1672,7 @@ class InventoryAlertViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         """Get inventory items that need attention."""
         alert_type = self.request.query_params.get('type', 'all')
-        queryset = MedicationInventory.objects.all().select_related('medication')
+        queryset = self.scope_queryset(MedicationInventory.objects.all().select_related('medication'))
         
         if alert_type == 'low_stock':
             # Items below minimum stock level
@@ -1665,21 +1701,22 @@ class InventoryAlertViewSet(viewsets.ReadOnlyModelViewSet):
         """Get summary of inventory alerts."""
         from datetime import timedelta
         
+        base = self.scope_queryset(MedicationInventory.objects.all())
         expiry_threshold = timezone.now().date() + timedelta(days=30)
         today = timezone.now().date()
         
         summary = {
-            'low_stock_count': MedicationInventory.objects.filter(
+            'low_stock_count': base.filter(
                 quantity__lte=F('min_stock_level')
             ).count(),
-            'expiring_count': MedicationInventory.objects.filter(
+            'expiring_count': base.filter(
                 expiry_date__lte=expiry_threshold,
                 expiry_date__gte=today
             ).count(),
-            'expired_count': MedicationInventory.objects.filter(
+            'expired_count': base.filter(
                 expiry_date__lt=today
             ).count(),
-            'total_alerts': MedicationInventory.objects.filter(
+            'total_alerts': base.filter(
                 Q(quantity__lte=F('min_stock_level')) |
                 Q(expiry_date__lte=expiry_threshold)
             ).count(),
@@ -1688,22 +1725,46 @@ class InventoryAlertViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(summary)
 
 
-class StockRequestViewSet(viewsets.ModelViewSet):
+class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing stock requests."""
     
+    clinic_filter_field = 'clinic'
     queryset = StockRequest.objects.all()
     permission_classes = [IsAuthenticated]
     serializer_class = StockRequestSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'from_location', 'to_location', 'requested_by']
+    filterset_fields = ['status', 'from_location', 'to_location', 'requested_by', 'clinic']
     search_fields = ['request_id', 'notes']
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
+    def _validate_store_access(self):
+        """Block store-related operations if active clinic is not Bode Thomas (pk=5)."""
+        if self.request.user.is_superuser:
+            return
+        from_location = (self.request.query_params.get('from_location') or '').strip().lower()
+        to_location = (self.request.query_params.get('to_location') or '').strip().lower()
+        is_store_op = 'store' in from_location or 'store' in to_location
+        if is_store_op:
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None and clinic_id != 5:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("Central store operations are only accessible from Bode Thomas Clinic")
+
+    def scope_queryset(self, qs):
+        """Superusers bypass scoping on detail routes; list scoped unless show_all=true."""
+        if self.request.user.is_superuser:
+            if self.action in ('retrieve', 'update', 'partial_update', 'destroy', 'fulfill', 'approve', 'reject'):
+                return qs
+            if self.request.query_params.get('show_all') == 'true':
+                return qs
+        return super().scope_queryset(qs)
+
     def get_queryset(self):
+        self._validate_store_access()
         from datetime import datetime
-        qs = StockRequest.objects.all()
+        qs = self.scope_queryset(StockRequest.objects.all())
         date_after = self.request.query_params.get('date_after')
         date_before = self.request.query_params.get('date_before')
         if date_after:
@@ -1721,6 +1782,7 @@ class StockRequestViewSet(viewsets.ModelViewSet):
         return qs
     
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         serializer.save(requested_by=self.request.user)
 
     def partial_update(self, request, *args, **kwargs):
@@ -1959,6 +2021,7 @@ class StockRequestViewSet(viewsets.ModelViewSet):
                         request=stock_request,
                         issue=issue,
                         stock_issue_line=issue_line,
+                        location_clinic=stock_request.clinic,
                         batch_number=inv_item.batch_number or '',
                         expiry_date=inv_item.expiry_date
                     )
@@ -2070,8 +2133,9 @@ class StockRequestViewSet(viewsets.ModelViewSet):
         })
 
 
-class StockIssueViewSet(viewsets.ReadOnlyModelViewSet):
+class StockIssueViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for listing stock issues (e.g. receipts from Central Store to Dispensary)."""
+    clinic_filter_field = 'request__clinic'
     queryset = StockIssue.objects.select_related('request', 'issued_by').prefetch_related('lines__medication').all()
     permission_classes = [IsAuthenticated]
     serializer_class = StockIssueSerializer
@@ -2082,4 +2146,4 @@ class StockIssueViewSet(viewsets.ReadOnlyModelViewSet):
         to_location = self.request.query_params.get('to_location', '').strip()
         if to_location:
             qs = qs.filter(request__to_location__icontains=to_location)
-        return qs.order_by('-issued_at')
+        return self.scope_queryset(qs).order_by('-issued_at')

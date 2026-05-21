@@ -82,7 +82,16 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     clinic_name = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
+    location_clinic_name = serializers.SerializerMethodField()
     active_duration_seconds = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj.room, 'clinic', None) if obj.room else None
+        if clinic:
+            return clinic.name
+        if obj.location_clinic_id:
+            return obj.location_clinic.name
+        return None
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -237,6 +246,13 @@ class ReferralSerializer(serializers.ModelSerializer):
     responsibility_forms_count = serializers.IntegerField(source='responsibility_forms.count', read_only=True)
     latest_responsibility_form = serializers.SerializerMethodField()
     facility_partner_detail = ReferralFacilityMiniSerializer(source='facility_partner', read_only=True)
+    location_clinic_name = serializers.SerializerMethodField()
+    
+    def get_location_clinic_name(self, obj):
+        if obj.session_id:
+            clinic = getattr(obj.session, 'location_clinic', None) or getattr(getattr(obj.session, 'room', None), 'clinic', None)
+            return clinic.name if clinic else None
+        return None
 
     class Meta:
         model = Referral

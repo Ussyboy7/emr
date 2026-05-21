@@ -108,6 +108,7 @@ export interface CompletedTest {
   verifiedAt: string;
   submittedBy: string;
   clinic: string;
+  location_clinic_name?: string;
   turnaroundTime: string;
   processing_method?: 'in_house' | 'outsourced';
   outsourced_lab?: string;
@@ -247,6 +248,7 @@ export function transformApiRowToCompletedTest(
     verifiedAt: (test as any).verified_at || new Date().toISOString(),
     submittedBy: (test as any).processed_by_name || (test as any).processed_by || '',
     clinic,
+    location_clinic_name: (row as any).location_clinic_name || (test as any).location_clinic_name || '',
     turnaroundTime,
     result_file: resultFileUrl,
     result_file_exists: resultFileExists,

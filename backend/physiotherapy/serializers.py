@@ -27,7 +27,8 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             'visit',
             'history_clinical_findings', 'diagnosis', 'drug_history', 'special_instructions',
             'priority', 'status', 'referral_source', 'ordered_at', 'scheduled_at', 'completed_at',
-            'sessions_completed'
+            'sessions_completed',
+            'location_clinic_name',
         ]
         read_only_fields = ['id', 'ordered_at', 'patient_name', 'patient_id', 'ordered_by_name']
 
@@ -46,6 +47,12 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             return None
         except:
             return None
+
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None)
+        return clinic.name if clinic else None
 
     def get_patient_id(self, obj):
         try:

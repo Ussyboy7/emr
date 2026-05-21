@@ -244,6 +244,11 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
     medication_name = serializers.CharField(source="medication.name", read_only=True)
     source_from_central_store = serializers.SerializerMethodField()
     supplier = serializers.SerializerMethodField()
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None)
+        return clinic.name if clinic else None
 
     @staticmethod
     def _resolve_source_location(obj):
@@ -290,6 +295,7 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
             "issue",
             "supplier",
             "source_from_central_store",
+            "location_clinic_name",
         ]
         read_only_fields = [
             "quantity",
@@ -551,6 +557,11 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     items = PrescriptionItemSerializer(many=True, write_only=True, required=False)
     icd10_diagnoses = serializers.SerializerMethodField()
     dispensed_by_name = serializers.SerializerMethodField()
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None)
+        return clinic.name if clinic else None
 
     def get_dispensed_by_name(self, obj):
         latest_dispense = obj.dispenses.order_by("-dispensed_at").first()
@@ -695,10 +706,15 @@ class DispenseSerializer(serializers.ModelSerializer):
         source="dispensed_by.get_full_name", read_only=True, allow_null=True
     )
     prescription_details = PrescriptionSerializer(source="prescription", read_only=True)
+    location_clinic_name = serializers.SerializerMethodField()
     prescribed_generic_name = serializers.SerializerMethodField()
     prescribed_medication_name = serializers.SerializerMethodField()
     prescribed_unit = serializers.SerializerMethodField()
     dispense_context = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj, 'location_clinic', None) or getattr(obj.prescription, 'location_clinic', None) if obj.prescription_id else None
+        return clinic.name if clinic else None
 
     def get_prescribed_generic_name(self, obj):
         # No fallback: use immutable dispense-time snapshot only.
@@ -757,12 +773,18 @@ class StockRequestSerializer(serializers.ModelSerializer):
     items = StockRequestItemSerializer(many=True)
     requested_by_name = serializers.SerializerMethodField(read_only=True)
     confirmed_by_name = serializers.SerializerMethodField(read_only=True)
+    clinic_name = serializers.SerializerMethodField(read_only=True)
 
     def get_requested_by_name(self, obj):
         return obj.requested_by.get_full_name() if obj.requested_by else ""
 
     def get_confirmed_by_name(self, obj):
         return obj.confirmed_by.get_full_name() if obj.confirmed_by else ""
+
+    def get_clinic_name(self, obj):
+        if hasattr(obj, 'clinic') and obj.clinic:
+            return obj.clinic.name
+        return None
 
     class Meta:
         model = StockRequest

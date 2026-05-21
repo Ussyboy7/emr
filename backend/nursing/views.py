@@ -10,12 +10,15 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
+from common.mixins import ClinicScopedMixin
+from accounts.utils import resolve_clinic_id
+from organization.models import SystemConfig
 from .models import NursingOrder, Procedure
 from .serializers import NursingOrderSerializer, ProcedureSerializer
 from audit.services import AuditService
 
 
-class NursingOrderViewSet(viewsets.ModelViewSet):
+class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing nursing orders."""
     
     permission_classes = [IsAuthenticated]
@@ -88,7 +91,7 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
                     | Q(order_type__icontains='observation admission')
                 )
 
-        return qs
+        return self.scope_queryset(qs)
 
     def filter_queryset(self, queryset):
         queryset = super().filter_queryset(queryset)
@@ -108,6 +111,7 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         order = serializer.save(created_by=self.request.user)
         normalized_order_type = (order.order_type or '').strip().lower()
         handoff_suffix = ''
@@ -154,7 +158,7 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
             pass
 
 
-class ProcedureViewSet(viewsets.ModelViewSet):
+class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing procedures."""
     
     permission_classes = [IsAuthenticated]
@@ -172,6 +176,16 @@ class ProcedureViewSet(viewsets.ModelViewSet):
     ]
     ordering_fields = ['performed_at']
     ordering = ['-performed_at']
+    
+    def scope_queryset(self, qs):
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None:
+                qs = qs.filter(
+                    Q(nursing_order__location_clinic=clinic_id) |
+                    Q(visit__location_clinic=clinic_id)
+                )
+        return qs
     
     def get_queryset(self):
         qs = Procedure.objects.all().select_related(

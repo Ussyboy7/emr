@@ -116,6 +116,7 @@ export function buildReferralLetterHtml(referral: ReferralWithPatient) {
   const dateStr = escapeHtml(formatPrintDate(referral.referred_at));
   const referralId = escapeHtml(referral.referral_id || "");
   const urgency = escapeHtml(toLabel(referral.urgency || "routine"));
+  const locationClinic = escapeHtml(referral.location_clinic_name || "");
 
   return `<!doctype html>
 <html>
@@ -146,6 +147,7 @@ export function buildReferralLetterHtml(referral: ReferralWithPatient) {
     <p><span class="label">Date:</span> ${dateStr}</p>
     <p><span class="label">Referral ID:</span> ${referralId}</p>
     <p><span class="label">Urgency:</span> ${urgency}</p>
+    ${locationClinic ? `<p><span class="label">Originating Location:</span> ${locationClinic}</p>` : ''}
   </div>
 
   <div class="section">

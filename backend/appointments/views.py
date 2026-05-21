@@ -12,6 +12,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from datetime import datetime, timedelta
 
+from common.mixins import ClinicScopedMixin
 from .models import Appointment, AppointmentSlot
 from .serializers import AppointmentSerializer, AppointmentSlotSerializer
 from .filters import AppointmentFilter
@@ -20,9 +21,10 @@ from notifications.services import NotificationService
 logger = logging.getLogger(__name__)
 
 
-class AppointmentViewSet(viewsets.ModelViewSet):
+class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing appointments."""
     
+    clinic_filter_field = 'clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = AppointmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -39,16 +41,17 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     ordering = ['appointment_date', 'appointment_time']
     
     def get_queryset(self):
-        return Appointment.objects.all().select_related('patient', 'doctor', 'clinic', 'room', 'created_by')
+        return self.scope_queryset(
+            Appointment.objects.all().select_related('patient', 'doctor', 'clinic', 'room', 'created_by')
+        )
     
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         appointment = serializer.save(created_by=self.request.user)
 
         patient_user = getattr(appointment.patient, "user", None)
         if patient_user is not None:
             try:
-                # Future appointment confirmation — informational, not
-                # something that needs to chime in the user's ear.
                 NotificationService.create_notification(
                     user=patient_user,
                     title="Appointment Scheduled",
@@ -81,7 +84,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def upcoming(self, request):
         """Get upcoming appointments."""
         today = timezone.now().date()
-        appointments = Appointment.objects.filter(
+        appointments = self.get_queryset().filter(
             appointment_date__gte=today,
             status__in=['scheduled', 'confirmed']
         ).order_by('appointment_date', 'appointment_time')
@@ -92,14 +95,15 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def today(self, request):
         """Get today's appointments."""
         today = timezone.now().date()
-        appointments = Appointment.objects.filter(appointment_date=today)
+        appointments = self.get_queryset().filter(appointment_date=today)
         serializer = AppointmentSerializer(appointments, many=True)
         return Response(serializer.data)
 
 
-class AppointmentSlotViewSet(viewsets.ModelViewSet):
+class AppointmentSlotViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing appointment slots."""
     
+    clinic_filter_field = 'clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = AppointmentSlotSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -108,5 +112,11 @@ class AppointmentSlotViewSet(viewsets.ModelViewSet):
     ordering = ['day_of_week', 'start_time']
     
     def get_queryset(self):
-        return AppointmentSlot.objects.all().select_related('doctor', 'clinic', 'room')
+        return self.scope_queryset(
+            AppointmentSlot.objects.all().select_related('doctor', 'clinic', 'room')
+        )
+
+    def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
+        serializer.save()
 

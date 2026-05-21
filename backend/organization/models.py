@@ -18,6 +18,14 @@ class Clinic(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
+    default_processing_clinic = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='clinics_that_route_here',
+        help_text="Default clinic where lab/radiology orders are processed (e.g. Tin Can → Bode Thomas)"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -175,4 +183,41 @@ class Room(models.Model):
     
     def __str__(self):
         return f"{self.room_number} - {self.name}"
+
+
+class SystemConfig(models.Model):
+    """
+    Key-value configuration store for system-wide toggles and settings.
+    Managed via Django admin.
+    """
+    key = models.CharField(max_length=100, unique=True, db_index=True)
+    value = models.JSONField(default=dict, blank=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'system_config'
+        verbose_name = 'System configuration'
+        verbose_name_plural = 'System configurations'
+
+    def __str__(self):
+        return self.key
+
+    @classmethod
+    def is_enabled(cls, key: str, default: bool = False) -> bool:
+        """Check if a boolean config key is enabled."""
+        try:
+            entry = cls.objects.get(key=key)
+            return entry.value in ('true', 'True', '1', 'yes', 'Yes')
+        except cls.DoesNotExist:
+            return default
+
+    @classmethod
+    def get_value(cls, key: str, default=None):
+        """Get the value for a config key."""
+        try:
+            return cls.objects.get(key=key).value
+        except cls.DoesNotExist:
+            return default
 

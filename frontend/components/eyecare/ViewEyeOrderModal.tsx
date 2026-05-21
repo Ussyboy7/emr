@@ -91,6 +91,7 @@ export function ViewEyeOrderModal({ open, onOpenChange, orderId }: ViewEyeOrderM
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground">Patient ID: {order.patient_id}</p>
+                <p className="text-sm text-muted-foreground mt-1">Location: {order.location_clinic_name || '—'}</p>
               </CardContent>
             </Card>
 

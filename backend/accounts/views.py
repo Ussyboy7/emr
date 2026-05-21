@@ -264,6 +264,24 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['patch'], permission_classes=[permissions.IsAuthenticated])
     def update_me(self, request):
         """Update current user's profile."""
+        # Validate active_clinic is one of the user's assigned clinics
+        active_clinic_id = request.data.get('active_clinic')
+        if active_clinic_id is not None:
+            from organization.models import SystemConfig
+            if SystemConfig.is_enabled('multi_clinic_enabled'):
+                assigned_ids = set(request.user.clinics.values_list('id', flat=True))
+                try:
+                    clinic_id = int(active_clinic_id)
+                except (TypeError, ValueError):
+                    return Response(
+                        {"active_clinic": ["Invalid clinic ID."]},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if clinic_id not in assigned_ids:
+                    return Response(
+                        {"active_clinic": ["You are not assigned to this clinic."]},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
         serializer = UserUpdateSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()

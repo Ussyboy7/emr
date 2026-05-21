@@ -44,6 +44,9 @@ interface ApiUser {
   };
   is_active?: boolean;
   is_superuser?: boolean;
+  clinics_ids?: number[];
+  active_clinic_id?: number | null;
+  multi_clinic_enabled?: boolean;
   [key: string]: unknown; // Allow additional properties
 }
 
@@ -87,6 +90,9 @@ const mapApiUserToUser = (data: ApiUser): User => {
     avatar: undefined,
     active: data.is_active ?? true,
     isSuperuser: data.is_superuser ?? false,
+    clinics_ids: data.clinics_ids ?? undefined,
+    active_clinic_id: data.active_clinic_id ?? undefined,
+    multi_clinic_enabled: data.multi_clinic_enabled ?? false,
   };
 };
 

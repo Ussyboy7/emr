@@ -30,6 +30,7 @@ export function EyeSessionReportView({ reportSession }: Props) {
             <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
             <div className="space-y-1">
               <p><span className="font-medium">Session:</span> {reportSession.session_number ?? 'N/A'}</p>
+              <p><span className="font-medium">Location:</span> {reportSession.order_details?.location_clinic_name || 'N/A'}</p>
               {reportSession.scheduled_at && (
                 <p><span className="font-medium">Scheduled:</span> {new Date(reportSession.scheduled_at).toLocaleString()}</p>
               )}

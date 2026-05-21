@@ -285,6 +285,13 @@ class MedicationInventory(models.Model):
         help_text="Maximum stock level",
     )
     location = models.CharField(max_length=100, blank=True)
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='medication_inventories',
+        help_text="Care facility this inventory belongs to",
+    )
     supplier = models.CharField(max_length=200, blank=True)
     purchase_price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
@@ -364,6 +371,14 @@ class Prescription(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         related_name="created_prescriptions",
+    )
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='prescriptions',
+        help_text="Clinic where this prescription was issued",
     )
 
     class Meta:
@@ -675,6 +690,13 @@ class StockRequest(models.Model):
 
     from_location = models.CharField(max_length=100)
     to_location = models.CharField(max_length=100)
+    clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='stock_requests',
+        help_text="Care facility this stock request belongs to",
+    )
 
     requested_by = models.ForeignKey(
         "accounts.User",
@@ -854,6 +876,13 @@ class DispensaryReceiptLine(models.Model):
         null=True,
         blank=True,
         related_name="dispensary_receipt_line",
+    )
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='dispensary_receipt_lines',
+        help_text="Care facility this receipt line belongs to",
     )
     # Snapshot from source for display/FIFO (optional)
     batch_number = models.CharField(max_length=100, blank=True)

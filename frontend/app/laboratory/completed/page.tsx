@@ -423,9 +423,10 @@ export default function CompletedTestsPage() {
                            <span>•</span>
                            <span>{test.testName}</span>
                            <span>•</span>
-                           <span>{test.clinic}</span>
-                           <span>•</span>
-                           <span>{completed.date} {completed.time}</span>
+                            <span>{test.clinic}</span>
+                            {test.location_clinic_name && (<><span>•</span><span>{test.location_clinic_name}</span></>)}
+                            <span>•</span>
+                            <span>{completed.date} {completed.time}</span>
                            <span>•</span>
                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{test.turnaroundTime}</span>
                          </div>

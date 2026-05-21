@@ -86,6 +86,7 @@ interface LabResult {
   verifiedBy?: string;
   verifiedAt?: string;
   clinic: string;
+  location_clinic_name?: string;
   clinicalNotes?: string;
   processing_method?: 'in_house' | 'outsourced';
   outsourced_lab?: string;
@@ -236,6 +237,7 @@ const transformResult = (
     submittedBy: testDetails?.processed_by_name || testDetails?.processed_by || test?.processed_by_name || test?.processed_by || 'Lab Tech',
     submittedAt: testDetails?.processed_at || testDetails?.created_at || test?.processed_at || test?.created_at || new Date().toISOString(),
     clinic: order?.clinic || '',
+    location_clinic_name: (testDetails as any)?.location_clinic_name || (order as any)?.location_clinic_name || (apiResult as any).location_clinic_name || '',
     clinicalNotes: (() => {
       // Get clinical notes, avoiding duplication
       const notes = order?.clinical_notes || testDetails?.notes || test?.notes || '';
@@ -1030,7 +1032,9 @@ export default function ResultsVerificationPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
                   <div><p className="text-xs text-muted-foreground">Patient</p><p className="font-medium">{selectedResult.patient.name}</p><p className="text-xs text-muted-foreground">{selectedResult.patient.age}y {selectedResult.patient.gender}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Ordering Doctor</p><p className="font-medium">{selectedResult.doctor.name}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Ordering Doctor</p><p className="font-medium">{selectedResult.doctor.name}</p><p className="text-xs text-muted-foreground">{selectedResult.doctor.specialty}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Clinic</p><p className="font-medium">{selectedResult.clinic}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Location</p><p className="font-medium">{selectedResult.location_clinic_name || '—'}</p></div>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground mb-2">Test Results</p>

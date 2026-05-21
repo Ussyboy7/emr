@@ -29,7 +29,7 @@ export default function StoreRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("pending");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [dateFilter, setDateFilter] = useState("today");
@@ -72,6 +72,7 @@ export default function StoreRequestsPage() {
       if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
       Object.assign(baseParams, buildDateParams());
       baseParams.to_location = requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE;
+      baseParams.show_all = 'true';
       const [all, pending, approved, fulfilled, partResp] = await Promise.all([
         pharmacyService.getStockRequests(baseParams),
         pharmacyService.getStockRequests({ ...baseParams, status: "pending" }),
@@ -97,6 +98,7 @@ export default function StoreRequestsPage() {
         page: currentPage,
         page_size: itemsPerPage,
         to_location: requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE,
+        show_all: 'true',
       };
       if (statusFilter && statusFilter !== "all") params.status = statusFilter;
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
@@ -277,8 +279,8 @@ export default function StoreRequestsPage() {
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Store Requests</h1>
             <p className="text-muted-foreground mt-1">
               {requestTab === "dispensary"
-                ? "Review, approve, and issue stock to Dispensary"
-                : "Review, approve, and issue stock to Ward Care (nursing)"}
+                ? "Central Store — Bode Thomas Clinic — Review, approve, and issue stock to Dispensary"
+                : "Central Store — Bode Thomas Clinic — Review, approve, and issue stock to Ward Care"}
             </p>
           </div>
         </div>
@@ -388,33 +390,50 @@ export default function StoreRequestsPage() {
                 </Card>
               ) : (
                 paginatedRequests.map((req) => (
-                  <Card key={req.id} className="border-l-4 border-l-violet-500/50 hover:shadow-md transition-shadow">
+                  <Card key={req.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => handleOpenDetails(req)}>
                     <CardContent className="py-3 px-4">
                       <div className="flex items-center gap-3">
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-foreground">{req.request_id}</span>
-                            {getStatusBadge(req.status)}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {req.items?.length || 0} item(s) • Created {new Date(req.created_at).toLocaleDateString()}
-                          </div>
-                          {req.notes && <p className="text-xs text-muted-foreground mt-1 line-clamp-1">Notes: {req.notes}</p>}
+                        <div className="flex-shrink-0">
+                          <Building2 className="h-8 w-8 text-violet-500" />
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenDetails(req)} title="View details">
-                            <Eye className="h-3.5 w-3.5" />
-                          </Button>
-                          {req.status === "pending" && (
-                            <Button size="sm" onClick={() => handleApproveRequest(req.id)} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-700">
-                              Approve
-                            </Button>
-                          )}
-                          {req.status === "approved" && (
-                            <Button size="sm" onClick={() => handleFulfillRequest(req.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700">
-                              {isProcessing ? "Issuing..." : "Issue"}
-                            </Button>
-                          )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                              <span className="font-semibold text-foreground truncate">
+                                {req.clinic_name || 'Unknown clinic'}
+                              </span>
+                              {getStatusBadge(req.status)}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                              {req.status === "pending" && (
+                                <Button size="sm" onClick={() => handleApproveRequest(req.id)} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-700 h-8">
+                                  Approve
+                                </Button>
+                              )}
+                              {req.status === "approved" && (
+                                <Button size="sm" onClick={() => handleFulfillRequest(req.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700 h-8">
+                                  {isProcessing ? "Issuing..." : "Issue"}
+                                </Button>
+                              )}
+                              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleOpenDetails(req)}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                            <span>{req.items?.length || 0} item(s)</span>
+                            <span>•</span>
+                            <span>{new Date(req.created_at).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span>Store → {req.to_location || 'Dispensary'}</span>
+                            {req.requested_by_name && (
+                              <>
+                                <span>•</span>
+                                <span>Requested by: {req.requested_by_name}</span>
+                              </>
+                            )}
+                          </div>
+                          {req.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-md">{req.notes}</p>}
                         </div>
                       </div>
                     </CardContent>
@@ -453,6 +472,14 @@ export default function StoreRequestsPage() {
                   <div>
                     <p className="text-muted-foreground">Created</p>
                     <p className="font-medium">{new Date(selectedRequest.created_at).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Requesting Clinic</p>
+                    <p className="font-medium">{selectedRequest.clinic_name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Requested By</p>
+                    <p className="font-medium">{selectedRequest.requested_by_name || 'N/A'}</p>
                   </div>
                 </div>
                 {selectedRequest.notes && (

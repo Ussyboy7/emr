@@ -41,6 +41,9 @@ interface StaffMember {
   status: string;
   employeeId?: string;
   lastLogin?: string;
+  clinics?: number[];
+  departmentId?: number;
+  departmentName?: string;
 }
 
 interface Clinic {
@@ -99,6 +102,9 @@ export default function UserManagementPage() {
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
+  const [allClinics, setAllClinics] = useState<Clinic[]>([]);
+  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState('all');
 
   // System roles management state
   const [allSystemRoles, setAllSystemRoles] = useState<SystemRole[]>([]);
@@ -141,6 +147,24 @@ export default function UserManagementPage() {
       toast.error(
         err instanceof Error ? err.message : "Could not load professional identities from the server.",
       );
+    }
+  }, []);
+
+  const loadClinics = useCallback(async () => {
+    try {
+      const res = await adminService.getClinics({ page_size: 200 });
+      setAllClinics(res.results || []);
+    } catch (err: any) {
+      console.error('Error loading clinics:', err);
+    }
+  }, []);
+
+  const loadDepartments = useCallback(async () => {
+    try {
+      const res = await adminService.getDepartments({ page_size: 200 });
+      setAllDepartments(res.results || []);
+    } catch (err: any) {
+      console.error('Error loading departments:', err);
     }
   }, []);
 
@@ -224,7 +248,7 @@ export default function UserManagementPage() {
         page_size: itemsPerPage,
         search: searchQuery || undefined,
         system_role: roleFilter !== 'all' ? roleFilter : undefined,
-        // Note: department and clinic filtering not yet implemented in backend
+        department: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
       });
       setTotalCount(response.count || response.results.length);
@@ -244,6 +268,8 @@ export default function UserManagementPage() {
         employeeId: user.employee_id,
         status: user.is_active ? 'Active' : 'Inactive' as StaffMember['status'],
         lastLogin: user.last_login,
+        departmentId: user.department ?? undefined,
+        departmentName: user.department_name || undefined,
       }));
 
       setStaff(transformedStaff);
@@ -254,31 +280,29 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, roleFilter, statusFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, roleFilter, statusFilter, departmentFilter]);
 
 
 
   // Track previous filters and reset page to 1 when filters change
-  const prevFiltersRef = useRef<{ searchQuery: string; roleFilter: string; statusFilter: string } | null>(null);
+  const prevFiltersRef = useRef<{ searchQuery: string; roleFilter: string; statusFilter: string; departmentFilter: string } | null>(null);
 
   useEffect(() => {
     if (prevFiltersRef.current === null) {
       // First render - just store current values
-      prevFiltersRef.current = { searchQuery, roleFilter, statusFilter };
-      return;
+      prevFiltersRef.current = { searchQuery, roleFilter, statusFilter, departmentFilter };
     }
-
     const filtersChanged =
+      !prevFiltersRef.current ||
       prevFiltersRef.current.searchQuery !== searchQuery ||
       prevFiltersRef.current.roleFilter !== roleFilter ||
-      prevFiltersRef.current.statusFilter !== statusFilter;
-
-    if (filtersChanged && currentPage !== 1) {
+      prevFiltersRef.current.statusFilter !== statusFilter ||
+      prevFiltersRef.current.departmentFilter !== departmentFilter;
+    if (filtersChanged) {
       setCurrentPage(1);
     }
-
-    prevFiltersRef.current = { searchQuery, roleFilter, statusFilter };
-  }, [searchQuery, roleFilter, statusFilter]);
+    prevFiltersRef.current = { searchQuery, roleFilter, statusFilter, departmentFilter };
+  }, [searchQuery, roleFilter, statusFilter, departmentFilter]);
   
   // Also update ref when currentPage changes (for use in loadStaff)
   useEffect(() => {
@@ -289,6 +313,12 @@ export default function UserManagementPage() {
   useEffect(() => {
     loadStaff();
   }, [loadStaff]);
+
+  // Load clinics for multi-select
+  useEffect(() => {
+    loadClinics();
+    loadDepartments();
+  }, [loadClinics, loadDepartments]);
 
   // Calculate stats for metrics cards
   const stats = useMemo(() => ({
@@ -385,6 +415,12 @@ export default function UserManagementPage() {
           ? user.custom_pages
           : [];
       setFormData((prev) => ({ ...prev, restrictedPages: restricted }));
+      if (Array.isArray((user as any)?.clinics_ids)) {
+        setFormData((prev) => ({ ...prev, clinics: (user as any).clinics_ids }));
+      }
+      if ((user as any)?.department != null) {
+        setFormData((prev) => ({ ...prev, departmentId: (user as any).department }));
+      }
     } catch (e) {
       console.warn("Failed to load user role assignments", e);
     }
@@ -442,7 +478,9 @@ export default function UserManagementPage() {
         system_role: formData.systemRole,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
+        department: formData.departmentId || undefined,
         access_role_id: Number(formData.accessRoleId),
+        clinics: formData.clinics || [],
       } as any);
 
       console.log('Created user:', newUser, 'id:', newUser.id);
@@ -476,8 +514,10 @@ export default function UserManagementPage() {
         system_role: formData.systemRole,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
+        department: formData.departmentId || undefined,
         custom_pages_mode: (formData.restrictedPages && formData.restrictedPages.length > 0) ? "restrict" : "",
         custom_pages: formData.restrictedPages || [],
+        clinics: formData.clinics || [],
       });
 
       // Persist access role assignment (single-select UX).
@@ -698,6 +738,14 @@ export default function UserManagementPage() {
                   </SelectContent>
                 </Select>
 
+                <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                  <SelectTrigger className="w-[160px]"><SelectValue placeholder="Department" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Departments</SelectItem>
+                    {allDepartments.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
@@ -729,7 +777,6 @@ export default function UserManagementPage() {
                   <tr className="border-b bg-muted/50">
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Staff</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Role</th>
-
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Login</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
@@ -759,7 +806,6 @@ export default function UserManagementPage() {
                             {s.systemRole || "—"}
                       </Badge>
                         </td>
-
                         <td className="p-4">
                           <Badge variant="outline" className={getStatusBadge(s.status)}>{s.status}</Badge>
                         </td>
@@ -926,6 +972,19 @@ export default function UserManagementPage() {
                   <Input value={formData.employeeId || ''} onChange={(e) => setFormData(prev => ({ ...prev, employeeId: e.target.value }))} placeholder="e.g., NPA-2024-001" />
                   <p className="text-xs text-muted-foreground">Optional unique employee identifier</p>
                 </div>
+                <div className="space-y-2">
+                  <Label>Department</Label>
+                  <Select
+                    value={formData.departmentId?.toString() || 'none'}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, departmentId: v === 'none' ? undefined : Number(v) }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {allDepartments.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </TabsContent>
 
               <TabsContent value="assignment" className="space-y-4 mt-4">
@@ -947,6 +1006,38 @@ export default function UserManagementPage() {
                   <p className="text-xs text-muted-foreground">
                     This controls which module pages the user can access.
                   </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Clinics Assigned</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select the clinics this user can access. Users with 2+ clinics will see the clinic switcher.
+                  </p>
+                  <div className="rounded-md border p-3 max-h-[240px] overflow-y-auto space-y-1">
+                    {allClinics.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Loading clinics...</p>
+                    ) : (
+                      allClinics.map((c) => {
+                        const checked = (formData.clinics || []).includes(c.id);
+                        return (
+                          <label key={c.id} className="flex items-center gap-2 text-sm py-0.5 cursor-pointer hover:bg-muted/50 rounded px-1">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setFormData((prev) => {
+                                  const cur = new Set(prev.clinics || []);
+                                  if (cur.has(c.id)) cur.delete(c.id);
+                                  else cur.add(c.id);
+                                  return { ...prev, clinics: Array.from(cur) };
+                                });
+                              }}
+                            />
+                            <span>{c.name}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Restrict pages (per-user)</Label>

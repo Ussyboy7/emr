@@ -40,6 +40,7 @@ import { appointmentService, type Appointment } from "@/lib/services/appointment
 import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
 import { useOutpatientClinicTypes } from "@/hooks/use-outpatient-clinic-types";
 import { format } from "date-fns";
+import { useClinic } from "@/hooks/use-clinic";
 
 /** Deep link to New Visit with patient + appointment date/time/type prefilled */
 function buildScheduleVisitHref(a: Appointment): string {
@@ -85,6 +86,7 @@ export default function AppointmentsPage() {
   const [dateRange, setDateRange] = useState({ from: "", to: "" });
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [clinicFilter, setClinicFilter] = useState("all");
+  const { isMultiClinic } = useClinic();
   const [clinicOptions, setClinicOptions] = useState<{ id: number; name: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -220,7 +222,7 @@ export default function AppointmentsPage() {
       if (debouncedSearchQuery) params.search = debouncedSearchQuery;
       if (statusFilter !== "all") params.status = statusFilter;
       if (typeFilter !== "all") params.appointment_type = typeFilter;
-      if (clinicFilter !== "all") params.clinic = Number(clinicFilter);
+      if (!isMultiClinic && clinicFilter !== "all") params.clinic = Number(clinicFilter);
 
       const { appointment_date, start_date, end_date } = buildAppointmentDateParams();
       if (appointment_date) params.appointment_date = appointment_date;
@@ -256,7 +258,7 @@ export default function AppointmentsPage() {
       };
       if (debouncedSearchQuery) base.search = debouncedSearchQuery;
       if (typeFilter !== "all") base.appointment_type = typeFilter;
-      if (clinicFilter !== "all") base.clinic = Number(clinicFilter);
+      if (!isMultiClinic && clinicFilter !== "all") base.clinic = Number(clinicFilter);
 
       const { appointment_date, start_date, end_date } = buildAppointmentDateParams();
       if (appointment_date) base.appointment_date = appointment_date;
@@ -652,6 +654,7 @@ export default function AppointmentsPage() {
                     <SelectItem value="routine">Routine Checkup</SelectItem>
                   </SelectContent>
                 </Select>
+                {!isMultiClinic && (
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]">
                     <SelectValue placeholder="Clinic" />
@@ -665,6 +668,7 @@ export default function AppointmentsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                )}
               </div>
             </div>
           </CardContent>

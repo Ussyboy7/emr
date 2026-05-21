@@ -141,6 +141,11 @@ class PatientAdmissionSerializer(serializers.ModelSerializer):
     length_of_stay = serializers.ReadOnlyField()
     is_active = serializers.ReadOnlyField()
     escort = AdmissionEscortSerializer(read_only=True)
+    location_clinic_name = serializers.SerializerMethodField()
+
+    def get_location_clinic_name(self, obj):
+        clinic = getattr(obj.ward, 'clinic', None) if obj.ward else None
+        return clinic.name if clinic else None
 
     class Meta:
         model = PatientAdmission

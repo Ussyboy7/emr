@@ -39,6 +39,7 @@ export interface PhysioOrder {
   scheduled_at?: string;
   completed_at?: string;
   sessions_completed: number;
+  location_clinic_name?: string;
 }
 
 export interface PhysioSession {

@@ -47,6 +47,14 @@ class NursingOrder(models.Model):
     ordered_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_nursing_orders')
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='nursing_orders',
+        help_text="Clinic where this nursing order was created",
+    )
     
     class Meta:
         db_table = 'nursing_orders'

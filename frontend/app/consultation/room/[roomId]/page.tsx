@@ -248,6 +248,7 @@ interface WardAdmission {
   status: string;
   admission_diagnosis?: string;
   length_of_stay?: number;
+  location_clinic_name?: string;
 }
 
 interface VitalsData {
@@ -366,6 +367,7 @@ interface Patient {
 interface ConsultationRoom {
   id: string;
   name: string;
+  clinic?: string;
   status: "available" | "occupied";
   currentPatient?: string;
   startTime?: string;
@@ -1388,6 +1390,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const transformedRoom: ConsultationRoom = {
           id: String(roomData.id),
           name: roomData.name,
+          clinic: roomData.clinic_name || undefined,
           status: roomData.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
           currentPatient: validPatients.length > 0 ? validPatients[0].name : undefined,
           startTime: undefined,
@@ -2673,6 +2676,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           patient_gender: session.patient_gender ?? enrichedSession.patient_gender ?? undefined,
           doctor_name: session.doctor_name ?? enrichedSession.doctor_name ?? '',
           clinic_name: session.clinic_name ?? '',
+          location_clinic_name: session.location_clinic_name ?? '',
           room_name: session.room_name ?? 'Consulting Room',
           started_at: enrichedSession.started_at ?? session.date ?? '',
           ended_at: enrichedSession.ended_at ?? undefined,
@@ -4758,7 +4762,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Consultation Session</h1>
-            <p className="text-muted-foreground mt-1">Room: {room.name}{room.doctor ? ` • ${room.doctor}` : ''}</p>
+            <p className="text-muted-foreground mt-1">Room: {room.name}{room.clinic ? ` • ${room.clinic}` : ''}{room.doctor ? ` • ${room.doctor}` : ''}</p>
             <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span>Session Duration: {sessionDuration} min</span>
@@ -8217,6 +8221,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           <span className="text-sm">{selectedWardAdmission.bed_number}</span>
                         </div>
                       )}
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium">Location:</span>
+                        <span className="text-sm">{selectedWardAdmission.location_clinic_name || '—'}</span>
+                      </div>
                     </div>
                   </div>
 
@@ -8980,6 +8988,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <p className="text-xs text-muted-foreground mb-1">Patient</p>
                   <p className="font-medium">{selectedPhysioOrder.patient_name}</p>
                   <p className="text-sm text-muted-foreground font-mono">{selectedPhysioOrder.patient_id}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{selectedPhysioOrder.location_clinic_name || ''}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Order Status</p>

@@ -133,6 +133,7 @@ export interface Visit {
   clinics?: string[]; // Multiple clinics for this visit
   completed_clinics?: string[]; // Clinics that have been completed
   location?: string;
+  location_clinic_name?: string;
   doctor?: number;
   doctor_name?: string;
   created_by?: number | null;

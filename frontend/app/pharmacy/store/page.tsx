@@ -517,7 +517,7 @@ export default function WarehouseStorePage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Package className="h-8 w-8 text-violet-500" />
-              Central store
+              Central Store &mdash; Bode Thomas Clinic
             </h1>
             <p className="text-muted-foreground mt-1">Central inventory - receiving, batches, and stock levels</p>
           </div>

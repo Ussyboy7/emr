@@ -28,6 +28,7 @@ import {
   Stethoscope, RefreshCw, Download, Loader2, Printer
 } from 'lucide-react';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { useClinic } from "@/hooks/use-clinic";
 
 export default function CompletedReportsPage() {
   const serverToday = useServerToday();
@@ -40,6 +41,7 @@ export default function CompletedReportsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
+  const { isMultiClinic } = useClinic();
   const [genderFilter, setGenderFilter] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -112,7 +114,7 @@ export default function CompletedReportsPage() {
         page: currentPage,
         page_size: itemsPerPage,
         search: searchQuery.trim() || undefined,
-        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+        clinic: !isMultiClinic && clinicFilter !== 'all' ? clinicFilter : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
       };
       if (statusFilter !== 'all') {
@@ -135,7 +137,7 @@ export default function CompletedReportsPage() {
           status: 'verified',
           overall_status: statusFilter !== 'all' ? statusFilter : undefined,
           search: searchQuery.trim() || undefined,
-          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+          clinic: !isMultiClinic && clinicFilter !== 'all' ? clinicFilter : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
           ...(allTime
             ? {}
@@ -288,6 +290,7 @@ export default function CompletedReportsPage() {
                     <SelectItem value="critical">Critical</SelectItem>
                   </SelectContent>
                 </Select>
+                {!isMultiClinic && (
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[160px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
@@ -297,6 +300,7 @@ export default function CompletedReportsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                )}
                 <Select value={genderFilter} onValueChange={setGenderFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>
@@ -407,8 +411,9 @@ export default function CompletedReportsPage() {
                                 ),
                                 report.orderId,
                                 report.studyName,
-                                report.clinic,
-                                `${completed.date} ${completed.time}`.trim(),
+                                 report.clinic,
+                                 report.location_clinic_name || '',
+                                 `${completed.date} ${completed.time}`.trim(),
                               ])}
                             </span>
                             {report.turnaroundTime ? (

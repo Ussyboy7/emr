@@ -13,6 +13,9 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.shortcuts import get_object_or_404
 from django.db.models import OuterRef, Subquery, Exists, Q
 
+from common.mixins import ClinicScopedMixin
+from accounts.utils import resolve_clinic, resolve_clinic_id
+from organization.models import SystemConfig
 from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate
 from .serializers import (
     PatientSerializer,
@@ -166,7 +169,7 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     return qs
 
 
-class PatientViewSet(viewsets.ModelViewSet):
+class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing patients.
     
@@ -178,11 +181,12 @@ class PatientViewSet(viewsets.ModelViewSet):
     destroy: Soft delete a patient (set is_active=False)
     """
     
+    clinic_filter_field = 'location_clinic'
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Support file uploads
     pagination_class = PatientPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location', 'principal_staff']
+    filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location', 'principal_staff', 'location_clinic']
     # List search: names, patient ID, personal number (not phone/email — fewer false positives).
     search_fields = ['patient_id', 'surname', 'first_name', 'middle_name', 'personal_number']
     ordering_fields = ['created_at', 'surname', 'first_name']
@@ -194,7 +198,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         # Filter by active status if not explicitly requested
         if self.request.query_params.get('include_inactive') != 'true':
             queryset = queryset.filter(is_active=True)
-        return queryset.select_related('principal_staff', 'created_by', 'updated_by')
+        return self.scope_queryset(queryset).select_related('principal_staff', 'created_by', 'updated_by')
     
     def get_serializer_class(self):
         """Use lightweight serializer for list, full serializer for detail."""
@@ -204,6 +208,7 @@ class PatientViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Set created_by when creating a patient and log audit."""
+        self.auto_set_clinic(serializer)
         patient = serializer.save(created_by=self.request.user)
         AuditService.log_patient_action(
             user=self.request.user,
@@ -300,16 +305,18 @@ class PatientViewSet(viewsets.ModelViewSet):
     def visits(self, request, pk=None):
         """Get all visits for a patient."""
         patient = self.get_object()
-        visits = annotate_visit_history_flags(patient.visits.all()).order_by('-date', '-time')
-        serializer = VisitSerializer(visits, many=True)
+        qs = annotate_visit_history_flags(patient.visits.all()).order_by('-date', '-time')
+        qs = self.scope_queryset(qs)
+        serializer = VisitSerializer(qs, many=True)
         return Response(serializer.data)
     
     @action(detail=True, methods=['get'])
     def vitals(self, request, pk=None):
         """Get all vital readings for a patient."""
         patient = self.get_object()
-        vitals = patient.vital_readings.all().order_by('-recorded_at')
-        serializer = VitalReadingSerializer(vitals, many=True)
+        qs = patient.vital_readings.all().order_by('-recorded_at')
+        qs = self.scope_queryset(qs)
+        serializer = VitalReadingSerializer(qs, many=True)
         return Response(serializer.data)
     
     @action(detail=True, methods=['get'])
@@ -332,7 +339,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class VisitViewSet(viewsets.ModelViewSet):
+class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing patient visits.
     """
@@ -371,7 +378,7 @@ class VisitViewSet(viewsets.ModelViewSet):
         if nursing_status:
             queryset = apply_nursing_status_filter(queryset, nursing_status, self.request)
 
-        return queryset
+        return self.scope_queryset(queryset)
 
     @action(detail=False, methods=['get'], url_path='nursing-pool-metrics')
     def nursing_pool_metrics(self, request):
@@ -488,6 +495,7 @@ class VisitViewSet(viewsets.ModelViewSet):
             .exclude(status='cancelled')
         )
         base = annotate_visit_history_flags(base)
+        base = self.scope_queryset(base)
 
         from .nursing_analytics import build_comprehensive_nursing_analytics
         analytics = build_comprehensive_nursing_analytics(base, start_date, end_date)
@@ -557,6 +565,7 @@ class VisitViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Set created_by when creating a visit and log audit."""
+        self.auto_set_clinic(serializer)
         visit = serializer.save(created_by=self.request.user)
         AuditService.log_activity(
             user=self.request.user,
@@ -603,11 +612,12 @@ class VisitViewSet(viewsets.ModelViewSet):
         return Response({'detail': 'Visit workflow closed.', **result})
 
 
-class VitalReadingViewSet(viewsets.ModelViewSet):
+class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing vital readings.
     """
     
+    clinic_filter_field = 'visit__location_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = VitalReadingSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -616,7 +626,9 @@ class VitalReadingViewSet(viewsets.ModelViewSet):
     ordering = ['-recorded_at']
     
     def get_queryset(self):
-        return VitalReading.objects.all().select_related('patient', 'visit', 'recorded_by')
+        return self.scope_queryset(
+            VitalReading.objects.all().select_related('patient', 'visit', 'recorded_by')
+        )
 
     @action(detail=False, methods=['get'], url_path='latest-by-visits')
     def latest_by_visits(self, request):
@@ -652,9 +664,8 @@ class VitalReadingViewSet(viewsets.ModelViewSet):
             return Response({'results': {}})
 
         qs = (
-            VitalReading.objects
+            self.get_queryset()
             .filter(visit_id__in=visit_ids)
-            .select_related('patient', 'visit', 'recorded_by')
             .order_by('visit_id', '-recorded_at')
         )
 

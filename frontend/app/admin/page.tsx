@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { adminService } from "@/lib/services";
 import { toast } from "sonner";
@@ -54,6 +55,12 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [showGenericsModal, setShowGenericsModal] = useState(false);
+  const [showOnlineModal, setShowOnlineModal] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState<Array<{
+    id: number; name: string; email: string; role: string;
+    clinic: string | null; lastActivity: string | null;
+  }>>([]);
+  const [onlineUsersLoading, setOnlineUsersLoading] = useState(false);
   const [systemStats, setSystemStats] = useState({
     totalUsers: 0,
     activeUsers: 0,
@@ -337,10 +344,18 @@ export default function AdminDashboardPage() {
                   <span className="absolute inset-0 rounded-full bg-green-400 opacity-75 animate-ping" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                 </span>
-                <span className="text-sm text-slate-300">
+                <button onClick={async () => {
+                  setShowOnlineModal(true);
+                  setOnlineUsersLoading(true);
+                  try {
+                    const res = await adminService.getOnlineUsers();
+                    setOnlineUsers(res.users);
+                  } catch { setOnlineUsers([]); }
+                  setOnlineUsersLoading(false);
+                }} className="text-sm text-slate-300 hover:text-white transition-colors">
                   {systemStats.onlineNow} online now
                   <span className="text-slate-500"> (recent API activity · {presenceWindowLabel})</span>
-                </span>
+                </button>
               </div>
               <div className="hidden h-4 w-px bg-slate-600 sm:block" />
               <div className="flex items-center gap-2">
@@ -907,6 +922,43 @@ export default function AdminDashboardPage() {
         open={showGenericsModal} 
         onOpenChange={setShowGenericsModal} 
       />
+      <Dialog open={showOnlineModal} onOpenChange={setShowOnlineModal}>
+        <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-green-500" />
+              Online Users ({onlineUsers.length})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto space-y-2 flex-1">
+            {onlineUsersLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : onlineUsers.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">No users currently online</p>
+            ) : (
+              onlineUsers.map((u) => (
+                <div key={u.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+                  <div className="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-semibold text-green-700 dark:text-green-400">
+                      {u.name.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{u.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-xs font-medium">{u.role || 'Staff'}</p>
+                    {u.clinic && <p className="text-[11px] text-muted-foreground">{u.clinic}</p>}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

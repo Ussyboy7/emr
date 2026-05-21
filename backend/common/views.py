@@ -457,6 +457,20 @@ class LiveDashboardView(views.APIView):
         })
 
 
+class OnlineUsersView(views.APIView):
+    """Return list of currently online users."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from accounts.presence import list_online_users, presence_window_seconds
+        return Response({
+            'users': list_online_users(),
+            'count': len(list_online_users()),
+            'presenceWindowSeconds': presence_window_seconds(),
+        })
+
+
 class FileUploadView(views.APIView):
     """Handle file uploads."""
     

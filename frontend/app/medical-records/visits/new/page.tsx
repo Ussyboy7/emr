@@ -27,6 +27,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/hooks/use-location-options';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
+import { useClinic } from '@/hooks/use-clinic';
 
 // Visit Types (matching backend choices)
 const visitTypes = [
@@ -60,12 +61,15 @@ function NewVisitPageContent() {
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
   const [createdVisitData, setCreatedVisitData] = useState<{ visitId: string; patientName: string; date: string; time: string; location: string; clinic: string } | null>(null);
 
+  const { activeClinicId, clinics: userClinics, isMultiClinic } = useClinic();
+
   const [formData, setFormData] = useState({
     patientId: patientIdParam || '',
     visitType: '',
     clinic: '', // Primary clinic (for backward compatibility)
     clinics: [] as string[], // All clinics for this visit
     location: '',
+    locationClinic: null as number | null,
     visitDate: '',
     visitTime: '',
     notes: '',
@@ -83,6 +87,12 @@ function NewVisitPageContent() {
   useEffect(() => {
     setFormData((prev) => ({ ...prev, clinics: [] }));
   }, [facilityIdForLocation]);
+
+  useEffect(() => {
+    if (activeClinicId && !formData.locationClinic) {
+      setFormData((prev) => ({ ...prev, locationClinic: activeClinicId }));
+    }
+  }, [activeClinicId]);
 
   useEffect(() => {
     if (!facilityIdForLocation) {
@@ -283,6 +293,7 @@ function NewVisitPageContent() {
         time: formData.visitTime && formData.visitTime.length === 5 ? `${formData.visitTime}:00` : formData.visitTime,
         clinical_notes: formData.notes || '',
         status: 'scheduled',
+        location_clinic: formData.locationClinic || undefined,
       };
 
       console.log('Creating visit with data:', visitData);
@@ -519,6 +530,25 @@ function NewVisitPageContent() {
 
                 {/* Facility (site) and clinics */}
                 <div className="space-y-4">
+                  {isMultiClinic && (
+                    <div className="space-y-2">
+                      <Label>Care Facility *</Label>
+                      <p className="text-xs text-muted-foreground">Select the care facility for this visit.</p>
+                      <Select
+                        value={formData.locationClinic?.toString() || ''}
+                        onValueChange={(v) => setFormData((prev) => ({ ...prev, locationClinic: parseInt(v) }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select care facility" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {userClinics.map((c) => (
+                            <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label>Facility (location) *</Label>
                     <p className="text-xs text-muted-foreground">Select the physical site where this visit will take place.</p>
@@ -811,6 +841,7 @@ function NewVisitPageContent() {
                     clinic: '',
                     clinics: [],
                     location: '',
+                    locationClinic: activeClinicId ?? null,
                     visitDate: new Date().toISOString().split('T')[0],
                     visitTime: new Date().toTimeString().slice(0, 5),
                     notes: '',

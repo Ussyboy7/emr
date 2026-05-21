@@ -521,6 +521,7 @@ export default function PrescriptionsPage() {
         // Extract visit/clinic details
         const clinic = visitDetails.clinic || (visitDetails.consultation_room?.name) || '';
         const location = patientDetails.location || visitDetails.location || '';
+        const locationClinicName = rx.location_clinic_name || '';
         const visitNotes = visitDetails.clinical_notes || undefined;
         
         // Extract doctor details
@@ -602,6 +603,7 @@ export default function PrescriptionsPage() {
           doctor: doctorName,
           clinic,
           location,
+          location_clinic_name: locationClinicName,
           date: rx.prescribed_at.split('T')[0],
           time: new Date(rx.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
           status:
@@ -1612,6 +1614,7 @@ export default function PrescriptionsPage() {
                 : '',
               prescription.doctor ? `<strong>Doctor:</strong> ${prescription.doctor}` : '',
               prescription.clinic ? `<strong>Clinic:</strong> ${prescription.clinic}` : '',
+              (prescription as any).location_clinic_name ? `<strong>Location:</strong> ${(prescription as any).location_clinic_name}` : '',
             ].filter(Boolean).join('<br>')}
           </div>
 
@@ -2003,6 +2006,9 @@ export default function PrescriptionsPage() {
                   {((selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic) && (
                     <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{(selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic}</span></div>
                   )}
+                  {(selectedPrescription.location_clinic_name) && (
+                    <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{selectedPrescription.location_clinic_name}</span></div>
+                  )}
                   {(selectedPrescription.prescribed_at || selectedPrescription.date || selectedPrescription.time) && (
                     <div>
                       <span className="text-muted-foreground">Date:</span>{' '}
@@ -2215,6 +2221,9 @@ export default function PrescriptionsPage() {
                   )}
                   {selectedPrescription.visit_details?.clinic && (
                     <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{selectedPrescription.visit_details.clinic}</span></div>
+                  )}
+                  {selectedPrescription.location_clinic_name && (
+                    <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{selectedPrescription.location_clinic_name}</span></div>
                   )}
                   {(selectedPrescription.prescribed_at || selectedPrescription.date) && (
                     <div>

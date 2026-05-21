@@ -132,6 +132,7 @@ export default function VisitsPage() {
     department: getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
     notes: visit.clinical_notes || '',
     location: visit.location || '',
+    location_clinic_name: visit.location_clinic_name || undefined,
     isNewRegistration: Boolean(visit.is_new_registration),
     isFirstVisit: Boolean(visit.is_first_visit),
     isReturningVisit: Boolean(visit.is_returning_visit),
@@ -1118,12 +1119,18 @@ export default function VisitsPage() {
                     <p className="font-medium">{selectedVisit.status}</p>
                   </div>
                 </div>
-                {(selectedVisit.department || selectedVisit.location) && (
+                {(selectedVisit.department || selectedVisit.location || selectedVisit.location_clinic_name) && (
                   <div className="grid grid-cols-2 gap-4">
                     {selectedVisit.department ? (
                       <div className="space-y-2">
                         <Label className="text-muted-foreground">Clinic</Label>
                         <p className="font-medium">{selectedVisit.department}</p>
+                      </div>
+                    ) : null}
+                    {selectedVisit.location_clinic_name ? (
+                      <div className="space-y-2">
+                        <Label className="text-muted-foreground">Facility</Label>
+                        <p className="font-medium">{selectedVisit.location_clinic_name}</p>
                       </div>
                     ) : null}
                     {selectedVisit.location ? (

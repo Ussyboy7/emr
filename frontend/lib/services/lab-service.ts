@@ -24,6 +24,7 @@ export interface LabOrder {
   priority: 'routine' | 'urgent' | 'stat';
   ordered_at: string;
   clinic: string;
+  location_clinic_name?: string;
   source_type?: 'internal_emr' | 'external_manual';
   external_clinic?: number | null;
   external_clinic_details?: { id: number; name: string; code?: string; location?: string } | null;
@@ -63,6 +64,7 @@ export interface LabTest {
   rejected_at?: string;
   verification_notes?: string;
   notes?: string;
+  location_clinic_name?: string;
 }
 
 export interface LabResultAttachment {
@@ -800,8 +802,7 @@ class LabService {
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabTest[]; count: number }> {
-    const queryParams = { ...params, status: 'verified' };
-    const query = buildQueryString(queryParams);
+    const query = buildQueryString(params || {});
     return apiFetch<{ results: LabTest[]; count: number }>(`/laboratory/tests/${query}`);
   }
 

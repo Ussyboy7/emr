@@ -38,6 +38,7 @@ interface DispenseHistoryRecord {
   status: string;
   waitTime: string;
   substitutions: number;
+  location_clinic_name?: string;
 }
 
 export default function DispenseHistoryPage() {
@@ -119,6 +120,7 @@ export default function DispenseHistoryPage() {
         
         // Extract doctor details
         const doctorName = prescription.prescribed_by_name || prescription.doctor_name || '';
+        const locationClinicName = dispense.location_clinic_name || (prescription as any).location_clinic_name || '';
         
         const context = (dispense.dispense_context || undefined) as 'as_selected_brand' | 'brand_selected_from_generic' | 'substituted' | undefined;
         const prescribedName =
@@ -171,6 +173,7 @@ export default function DispenseHistoryPage() {
           status: 'Dispensed',
           waitTime,
           substitutions,
+          location_clinic_name: locationClinicName,
         };
       }));
       setHistory(transformed);
@@ -468,6 +471,12 @@ export default function DispenseHistoryPage() {
                       </Badge>
                     </div>
                   </div>
+                  {selectedRecord.location_clinic_name && (
+                    <div>
+                      <span className="text-muted-foreground">Location:</span>
+                      <p className="font-semibold">{selectedRecord.location_clinic_name}</p>
+                    </div>
+                  )}
                   {selectedRecord.substitutions > 0 && (
                     <div>
                       <span className="text-muted-foreground">Substitutions:</span>

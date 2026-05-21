@@ -43,6 +43,7 @@ from .serializers import (
     TemplateFieldOptionSerializer,
     OTHER_TEMPLATE_CODES,
 )
+from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
 from .pagination import FlexiblePageNumberPagination
 from .result_display import dedupe_result_alias_rows, sort_lab_result_rows_for_pdf
 from audit.services import AuditService
@@ -121,7 +122,7 @@ class LabTemplateViewSet(viewsets.ModelViewSet):
         return LabTemplate.objects.all()
 
 
-class LabOrderViewSet(viewsets.ModelViewSet):
+class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing lab orders."""
     
     permission_classes = [IsAuthenticated]
@@ -187,7 +188,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         source_type = self.request.query_params.get('source_type')
         if source_type in ('internal_emr', 'external_manual'):
             qs = qs.filter(source_type=source_type)
-        return qs
+        return self.scope_queryset(qs)
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -293,6 +294,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
+        self.auto_set_clinic(serializer)
         # Set the doctor field using multiple fallback strategies
         data = serializer.validated_data.copy()
         if data.get('source_type') != 'external_manual' and ('doctor' not in data or data['doctor'] is None):
@@ -1089,9 +1091,10 @@ class LabTestViewSet(viewsets.ModelViewSet):
             serializer.save()
 
 
-class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
+class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing lab results awaiting verification."""
     
+    clinic_filter_field = 'order__processing_clinic'
     permission_classes = [IsAuthenticated]
     serializer_class = LabResultSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -1176,7 +1179,7 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
                 valid_ids.append(row.id)
         queryset = queryset.filter(id__in=valid_ids)
 
-        return queryset
+        return self.scope_queryset(queryset)
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -1209,18 +1212,13 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
             'test',
             'order',
             'patient',
-            # Pull principal_staff so Dept./P.N. fallbacks for dependents
-            # don't trigger a second query inside `_division_line` /
-            # `_personal_number_line`.
             'patient__principal_staff',
             'order__doctor',
             'test__template',
             'test__processed_by',
             'test__verified_by',
         )
-        # ``pk`` must be ``LabResult.id``. Do not fall back to ``test_id=pk``:
-        # LabResult and LabTest use separate auto-increment PKs, so the same
-        # number can refer to two different patients (wrong PDF if we OR them).
+        base_qs = self.scope_queryset(base_qs)
         result = get_object_or_404(base_qs, pk=pk)
 
         from common.pdf import (

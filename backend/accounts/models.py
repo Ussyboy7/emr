@@ -51,7 +51,7 @@ class User(AbstractUser):
         null=True,
         blank=True,
         related_name='staff',
-        help_text="Clinic where the user works (e.g., Bode Thomas, HQ)"
+        help_text="Home clinic where the user primarily works (e.g., Bode Thomas, HQ)"
     )
     department = models.ForeignKey(
         'organization.Department',
@@ -60,6 +60,22 @@ class User(AbstractUser):
         blank=True,
         related_name='staff',
         help_text="Department/Module the user belongs to (e.g., Medical Records, Nursing, Consultation)"
+    )
+
+    # Multi-clinic support
+    clinics = models.ManyToManyField(
+        'organization.Clinic',
+        blank=True,
+        related_name='assigned_staff',
+        help_text="All clinics this user can access (for rotational staff)"
+    )
+    active_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='active_staff',
+        help_text="Current clinic the user is actively working from (set at login/switch)"
     )
     
     # Legacy fields (kept for backward compatibility, can be removed later)

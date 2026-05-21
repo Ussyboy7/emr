@@ -44,6 +44,14 @@ class EyeOrder(models.Model):
         blank=True,
         related_name="eye_orders",
     )
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='eye_orders',
+        help_text="Clinic where this eye order was created",
+    )
 
     chief_complaint = models.TextField(blank=True)
     visual_acuity_od = models.CharField(max_length=50, blank=True, help_text="Right eye visual acuity")

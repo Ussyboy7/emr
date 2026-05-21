@@ -69,6 +69,7 @@ export interface ConsultationReportSession {
   patient_gender?: string;
   doctor_name?: string;
   clinic_name?: string;
+  location_clinic_name?: string;
   room_name?: string;
   started_at?: string;
   ended_at?: string;
@@ -276,6 +277,7 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
         [session.patient_age != null && session.patient_age !== '' ? `${session.patient_age} years` : '', session.patient_gender || ''].filter(Boolean).join(' / ')
       )}</td>
           <td>Doctor</td><td>${escapeHtmlForHtml(session.doctor_name ?? '')}</td></tr>
+      <tr><td>Location</td><td colspan="3">${escapeHtmlForHtml(session.location_clinic_name ?? '')}</td></tr>
       <tr><td>Clinic</td><td>${escapeHtmlForHtml(session.clinic_name ?? '')}</td>
           <td>Room</td><td>${escapeHtmlForHtml(session.room_name ?? '')}</td></tr>
       ${durationStr ? `<tr><td>Duration</td><td>${escapeHtmlForHtml(durationStr)}</td><td>Status</td><td>${escapeHtmlForHtml(session.status === 'completed' ? 'Completed' : 'In Progress')}</td></tr>` : ''}
