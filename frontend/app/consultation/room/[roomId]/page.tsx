@@ -6297,15 +6297,22 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 showCertificates
                 showReferrals
                 showBackground
-                onViewVisit={(v) => {
-                  const rawId = v?.id;
-                  const numericId = typeof rawId === 'string' && rawId.startsWith('session-')
-                    ? Number(rawId.replace('session-', ''))
-                    : Number(rawId);
-                  if (Number.isFinite(numericId) && numericId > 0) {
-                    viewSessionDetails({ id: numericId });
-                  } else {
+                onViewVisit={async (v) => {
+                  const visitId = Number(v?.id);
+                  if (!Number.isFinite(visitId) || visitId <= 0) {
                     toast.error('Visit details are not available.');
+                    return;
+                  }
+                  try {
+                    const sessionsResp = await consultationService.getSessions({ visit: visitId, page_size: 1 });
+                    const session = sessionsResp.results?.[0];
+                    if (session?.id) {
+                      viewSessionDetails({ id: session.id });
+                    } else {
+                      toast.error('No consultation session found for this visit.');
+                    }
+                  } catch {
+                    toast.error('Failed to load visit details.');
                   }
                 }}
                 onViewConsultation={viewSessionDetails}
