@@ -108,3 +108,126 @@ export function orderInputsFromSelectedLines(
   }
   return items;
 }
+
+/** Local consultation draft row (room or history). */
+export function localDraftToOrderInput(rx: {
+  genericId?: number;
+  medicationId?: number;
+  medication?: string;
+  dosage?: string;
+  dose?: string;
+  frequency?: string;
+  duration?: string;
+  quantity?: number;
+  unit?: string;
+  form?: string;
+  strength?: string;
+  route?: string;
+  instructions?: string;
+}): PrescriptionOrderItemInput | null {
+  const genericPk =
+    typeof rx.genericId === "number" && rx.genericId > 0
+      ? rx.genericId
+      : typeof rx.medicationId === "number" && rx.medicationId > 0
+        ? rx.medicationId
+        : null;
+  if (!genericPk) return null;
+
+  const doseMatch = (rx.dosage || rx.dose || "").match(/^([\d.]+)/);
+  return {
+    generic: genericPk,
+    medication_name: rx.medication,
+    dosage: doseMatch?.[1] || rx.dosage || "1",
+    frequency: rx.frequency || "Once daily (OD)",
+    duration: rx.duration || "As directed",
+    quantity: rx.quantity || 1,
+    unit: rx.unit || "tablet",
+    dosage_form: rx.form,
+    strength: rx.strength,
+    route: rx.route || "Oral",
+    instructions: rx.instructions || "",
+  };
+}
+
+/** API medication line on a pending/dispensed prescription. */
+export function apiPrescriptionLineToOrderInput(m: Record<string, unknown>): PrescriptionOrderItemInput | null {
+  const generic =
+    typeof m.generic === "number" && m.generic > 0
+      ? m.generic
+      : typeof m.generic_id === "number" && m.generic_id > 0
+        ? m.generic_id
+        : null;
+  if (!generic) return null;
+
+  const med = m.medication as { name?: string } | undefined;
+  const medDetails = m.medication_details as { name?: string; form?: string; strength?: string } | undefined;
+  const doseRaw = (m.dose || m.dosage || "") as string;
+
+  return {
+    generic,
+    medication: null,
+    medication_name:
+      (m.medication_name as string) || med?.name || medDetails?.name || undefined,
+    unit: ((m.unit as string) || "tablet").trim().toLowerCase(),
+    dosage_form: (m.dosage_form as string) || medDetails?.form,
+    strength: (m.strength as string) || medDetails?.strength,
+    route: (m.route as string) || "Oral",
+    dosage: parseDosageNumber(doseRaw),
+    frequency: (m.frequency as string) || "Once daily (OD)",
+    duration: (m.duration as string) || "As directed",
+    quantity: Math.max(Number(m.quantity) || Number(m.dispensed_quantity) || 1, 1),
+    instructions: (m.instructions as string) || "",
+  };
+}
+
+/** Payload item for pharmacy createPrescription `items` array. */
+export function orderInputToCreateItem(i: PrescriptionOrderItemInput): Record<string, unknown> | null {
+  const generic =
+    typeof i.generic === "number" && Number.isFinite(i.generic) && i.generic > 0 ? i.generic : null;
+  if (!generic) return null;
+  return {
+    generic,
+    medication: null,
+    medication_name: i.medication_name,
+    quantity: i.quantity,
+    unit: i.unit,
+    dose: i.dosage,
+    frequency: i.frequency,
+    duration: i.duration,
+    route: i.route || "Oral",
+    instructions: i.instructions,
+    dispensed_quantity: 0,
+    is_dispensed: false,
+  };
+}
+
+export function apiPrescriptionLineToCreateItem(m: Record<string, unknown>): Record<string, unknown> | null {
+  const mapped = apiPrescriptionLineToOrderInput(m);
+  return mapped ? orderInputToCreateItem(mapped) : null;
+}
+
+export type PrescriptionModalIntent = "add" | "refill" | "edit";
+
+export function prescriptionModalCopy(intent: PrescriptionModalIntent | null): {
+  dialogTitle?: string;
+  dialogDescription?: string;
+  confirmLabel?: string;
+} {
+  if (intent === "edit") {
+    return {
+      dialogTitle: "Edit prescription",
+      dialogDescription:
+        "Update dose, frequency, duration, and instructions. Saving will replace the queued prescription line.",
+      confirmLabel: "Save changes",
+    };
+  }
+  if (intent === "refill") {
+    return {
+      dialogTitle: "Review refill prescription",
+      dialogDescription:
+        "Adjust dose, frequency, and duration as needed before adding or sending to pharmacy.",
+      confirmLabel: undefined,
+    };
+  }
+  return {};
+}

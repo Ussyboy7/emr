@@ -31,7 +31,20 @@ import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
-import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from "@/components/consultation/orders/PrescriptionOrderModal";
+import {
+  PrescriptionOrderModal,
+  type PrescriptionOrderItemInput,
+  type PrescriptionOrderSubmitInput,
+} from "@/components/consultation/orders/PrescriptionOrderModal";
+import { PrescriptionRefillDialog } from "@/components/consultation/orders/PrescriptionRefillDialog";
+import {
+  apiPrescriptionLineToCreateItem,
+  apiPrescriptionLineToOrderInput,
+  localDraftToOrderInput,
+  orderInputToCreateItem,
+  prescriptionModalCopy,
+  type PrescriptionModalIntent,
+} from "@/lib/consultation/prescription-refill";
 import { LabOrderModal, type LabOrderSubmitInput } from "@/components/consultation/orders/LabOrderModal";
 import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from "@/components/consultation/orders/RadiologyOrderModal";
 import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/consultation/orders/PhysioOrderModal";
@@ -238,6 +251,17 @@ export default function ConsultationHistoryPage() {
   const [editActiveTab, setEditActiveTab] = useState('notes');
   // Add-order dialogs (Option A: use session-style modals, submit immediately)
   const [showAddPrescription, setShowAddPrescription] = useState(false);
+  const [showPrescriptionRefill, setShowPrescriptionRefill] = useState(false);
+  const [prescriptionModalInitialItems, setPrescriptionModalInitialItems] = useState<
+    PrescriptionOrderItemInput[] | undefined
+  >(undefined);
+  const [prescriptionModalIntent, setPrescriptionModalIntent] = useState<PrescriptionModalIntent | null>(
+    null
+  );
+  const [editingQueuedPrescription, setEditingQueuedPrescription] = useState<{
+    prescriptionId: number;
+    itemId: number;
+  } | null>(null);
   const [showAddLabOrder, setShowAddLabOrder] = useState(false);
   const [showAddRadiologyOrder, setShowAddRadiologyOrder] = useState(false);
   const [showAddPhysioOrder, setShowAddPhysioOrder] = useState(false);
@@ -652,10 +676,62 @@ export default function ConsultationHistoryPage() {
     return sid && !isNaN(sid) ? sid : null;
   };
 
-  // Load allergies when opening prescription modal (best-effort)
+  const openAddPrescriptionModal = (initialItems?: PrescriptionOrderItemInput[]) => {
+    setPrescriptionModalInitialItems(initialItems);
+    setPrescriptionModalIntent(initialItems?.length ? null : "add");
+    setEditingQueuedPrescription(null);
+    setShowAddPrescription(true);
+  };
+
+  const handlePrescriptionModalOpenChange = (open: boolean) => {
+    setShowAddPrescription(open);
+    if (!open) {
+      setPrescriptionModalInitialItems(undefined);
+      setPrescriptionModalIntent(null);
+      setEditingQueuedPrescription(null);
+    }
+  };
+
+  const handleRefillContinue = (items: PrescriptionOrderItemInput[]) => {
+    setPrescriptionModalInitialItems(items);
+    setPrescriptionModalIntent("refill");
+    setEditingQueuedPrescription(null);
+    setShowAddPrescription(true);
+  };
+
+  const editDraftPrescription = (rx: { id: string; [key: string]: unknown }) => {
+    const initial = localDraftToOrderInput(rx as Parameters<typeof localDraftToOrderInput>[0]);
+    if (!initial) {
+      toast.error("Cannot edit this draft — missing generic. Remove and add again.");
+      return;
+    }
+    setDraftPrescriptions((prev) => prev.filter((p) => p.id !== rx.id));
+    setPrescriptionModalInitialItems([initial]);
+    setPrescriptionModalIntent("edit");
+    setEditingQueuedPrescription(null);
+    setShowAddPrescription(true);
+  };
+
+  const editQueuedPrescriptionLine = (rx: { id: number; medications?: unknown[]; items?: unknown[] }, m: Record<string, unknown>) => {
+    if (!canCancelPrescription(rx)) {
+      toast.error("This prescription can no longer be edited.");
+      return;
+    }
+    const initial = apiPrescriptionLineToOrderInput(m);
+    if (!initial) {
+      toast.error("Cannot edit — missing generic on this line.");
+      return;
+    }
+    setEditingQueuedPrescription({ prescriptionId: rx.id, itemId: Number(m.id) });
+    setPrescriptionModalInitialItems([initial]);
+    setPrescriptionModalIntent("edit");
+    setShowAddPrescription(true);
+  };
+
+  // Load allergies when opening prescription or refill dialogs (best-effort)
   useEffect(() => {
     const pid = getSelectedPatientId();
-    if (!showAddPrescription || !pid) return;
+    if ((!showAddPrescription && !showPrescriptionRefill) || !pid) return;
 
     const loadAllergies = async () => {
       try {
@@ -670,7 +746,7 @@ export default function ConsultationHistoryPage() {
       }
     };
     loadAllergies();
-  }, [showAddPrescription, selectedConsultation?.id]);
+  }, [showAddPrescription, showPrescriptionRefill, selectedConsultation?.id]);
 
   const handleSubmitPrescription = async (payload: PrescriptionOrderSubmitInput) => {
     const patientId = getSelectedPatientId();
@@ -692,28 +768,12 @@ export default function ConsultationHistoryPage() {
     const items: any[] = [];
     const rejected: string[] = [];
     payload.items.forEach((i, idx) => {
-      const generic =
-        typeof i.generic === 'number' && Number.isFinite(i.generic) && i.generic > 0
-          ? i.generic
-          : null;
-      if (!generic) {
+      const row = orderInputToCreateItem(i);
+      if (!row) {
         rejected.push(i.medication_name || `item #${idx + 1}`);
         return;
       }
-      items.push({
-        generic,
-        medication: null,
-        medication_name: i.medication_name,
-        quantity: i.quantity,
-        unit: i.unit,
-        dose: i.dosage,
-        frequency: i.frequency,
-        duration: i.duration,
-        route: i.route || 'Oral',
-        instructions: i.instructions,
-        dispensed_quantity: 0,
-        is_dispensed: false,
-      });
+      items.push(row);
     });
 
     if (rejected.length > 0) {
@@ -723,17 +783,46 @@ export default function ConsultationHistoryPage() {
     }
     if (items.length === 0) return;
 
+    let itemsToSend = items;
+
+    if (editingQueuedPrescription) {
+      const rx = editPrescriptions.find(
+        (p) => Number(p.id) === editingQueuedPrescription.prescriptionId
+      );
+      if (!rx) {
+        toast.error("Prescription no longer found. Refresh and try again.");
+        return;
+      }
+      const siblingLines = (rx.medications || rx.items || []) as Record<string, unknown>[];
+      const keepOthers = siblingLines
+        .filter((line) => Number(line.id) !== editingQueuedPrescription.itemId)
+        .map(apiPrescriptionLineToCreateItem)
+        .filter((row): row is Record<string, unknown> => row != null);
+      itemsToSend = [...keepOthers, ...items] as typeof items;
+    }
+
     const prescriptionPayload = {
       patient: patientId,
       visit: selectedConsultation.visitId,
       consultation_session: sessionId,
       notes: payload.clinicalIndication || undefined,
-      items,
+      items: itemsToSend,
     };
 
     try {
+      if (editingQueuedPrescription) {
+        await pharmacyService.cancelPrescription(
+          editingQueuedPrescription.prescriptionId,
+          "Replaced after edit from consultation history"
+        );
+      }
       await pharmacyService.createPrescription(prescriptionPayload as any);
-      toast.success("Prescription sent to pharmacy");
+      toast.success(
+        editingQueuedPrescription
+          ? "Prescription updated and sent to pharmacy"
+          : "Prescription sent to pharmacy"
+      );
+      setEditingQueuedPrescription(null);
       await loadEditOrdersRefetch();
     } catch (error) {
       console.error('Error creating prescription:', error);
@@ -1573,14 +1662,26 @@ export default function ConsultationHistoryPage() {
                                   <li key={rx.id} className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 text-sm">
                                     <div className="flex items-center justify-between mb-2">
                                       <Badge variant="outline" className="text-xs bg-amber-100 text-amber-800 border-amber-300">Draft</Badge>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setDraftPrescriptions(prev => prev.filter(p => p.id !== rx.id))}
-                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                                      >
-                                        <X className="h-3 w-3" />
-                                      </Button>
+                                      <div className="flex gap-1">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => editDraftPrescription(rx)}
+                                          className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                                          title="Edit draft"
+                                        >
+                                          <Edit className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setDraftPrescriptions(prev => prev.filter(p => p.id !== rx.id))}
+                                          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                          title="Remove draft"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </Button>
+                                      </div>
                                     </div>
                                     <div className="space-y-0.5">
                                       <div>{rx.medication} — {rx.dosage} {rx.frequency} {rx.duration}</div>
@@ -1628,9 +1729,21 @@ export default function ConsultationHistoryPage() {
                           </CardTitle>
                           <CardDescription>Prescribe medications - will be sent to Pharmacy queue</CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => setShowAddPrescription(true)}>
-                          <Plus className="h-4 w-4 mr-1" />Add Medication
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => openAddPrescriptionModal()}>
+                            <Plus className="h-4 w-4 mr-1" />Add Medication
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowPrescriptionRefill(true)}
+                            disabled={!getSelectedPatientId()}
+                            className="border-violet-200 text-violet-800 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-200"
+                          >
+                            <History className="h-4 w-4 mr-1" />
+                            Refill from previous
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -1641,9 +1754,20 @@ export default function ConsultationHistoryPage() {
                           <Pill className="h-12 w-12 mx-auto mb-3 text-violet-500 opacity-60" />
                           <p className="font-medium text-violet-900 dark:text-violet-100 mb-1">No prescriptions yet</p>
                           <p className="text-sm text-muted-foreground mb-4">Add medications to be sent to the Pharmacy</p>
-                          <Button variant="outline" size="sm" onClick={() => setShowAddPrescription(true)} className="border-violet-300 text-violet-700 hover:bg-violet-100">
-                            <Plus className="h-4 w-4 mr-1" />Add First Medication
-                          </Button>
+                          <div className="flex flex-wrap gap-2 justify-center">
+                            <Button variant="outline" size="sm" onClick={() => openAddPrescriptionModal()} className="border-violet-300 text-violet-700 hover:bg-violet-100">
+                              <Plus className="h-4 w-4 mr-1" />Add First Medication
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setShowPrescriptionRefill(true)}
+                              disabled={!getSelectedPatientId()}
+                              className="border-violet-300 text-violet-700 hover:bg-violet-100"
+                            >
+                              <History className="h-4 w-4 mr-1" />Refill from previous
+                            </Button>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-4">
@@ -1689,19 +1813,34 @@ export default function ConsultationHistoryPage() {
                                                 </div>
                                                 <div className="flex flex-col items-end gap-1 shrink-0">
                                                   {prescribedDate && <span className="text-xs text-muted-foreground">{prescribedDate}</span>}
-                                                  {canCancelPrescription(rx) && i === 0 && (
-                                                    <Button
-                                                      variant="ghost"
-                                                      size="sm"
-                                                      onClick={() => handleCancelEditPrescription(rx)}
-                                                      disabled={isSubmitting}
-                                                      className="h-7 px-2 text-rose-600 hover:text-rose-700"
-                                                      title="Cancel the whole prescription"
-                                                    >
-                                                      <X className="h-3.5 w-3.5 mr-1" />
-                                                      Cancel Prescription
-                                                    </Button>
-                                                  )}
+                                                  <div className="flex flex-col gap-1">
+                                                    {canCancelPrescription(rx) && (
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => editQueuedPrescriptionLine(rx, m)}
+                                                        disabled={isSubmitting}
+                                                        className="h-7 px-2 text-blue-600 hover:text-blue-700"
+                                                        title="Edit medication configuration"
+                                                      >
+                                                        <Edit className="h-3.5 w-3.5 mr-1" />
+                                                        Edit
+                                                      </Button>
+                                                    )}
+                                                    {canCancelPrescription(rx) && i === 0 && (
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => handleCancelEditPrescription(rx)}
+                                                        disabled={isSubmitting}
+                                                        className="h-7 px-2 text-rose-600 hover:text-rose-700"
+                                                        title="Cancel the whole prescription"
+                                                      >
+                                                        <X className="h-3.5 w-3.5 mr-1" />
+                                                        Cancel Prescription
+                                                      </Button>
+                                                    )}
+                                                  </div>
                                                 </div>
                                               </div>
                                             </li>
@@ -2201,11 +2340,31 @@ export default function ConsultationHistoryPage() {
         </Dialog>
 
         {/* Session-style order modals (submit immediately) */}
+        <PrescriptionRefillDialog
+          open={showPrescriptionRefill}
+          onOpenChange={setShowPrescriptionRefill}
+          patientId={getSelectedPatientId()}
+          patientAllergies={editOrderAllergies}
+          existingDraftGenericIds={draftPrescriptions
+            .map((rx) => rx.genericId ?? rx.medicationId)
+            .filter((id): id is number => typeof id === "number" && id > 0)}
+          onContinue={handleRefillContinue}
+        />
+
         <PrescriptionOrderModal
           open={showAddPrescription}
-          onOpenChange={setShowAddPrescription}
+          onOpenChange={handlePrescriptionModalOpenChange}
           patientAllergies={editOrderAllergies}
           onSubmit={handleSubmitPrescription}
+          initialItems={prescriptionModalInitialItems}
+          {...prescriptionModalCopy(prescriptionModalIntent)}
+          confirmLabel={
+            prescriptionModalIntent === "refill" || prescriptionModalIntent === "edit"
+              ? prescriptionModalIntent === "edit"
+                ? "Save changes"
+                : "Send to pharmacy"
+              : undefined
+          }
         />
 
         <LabOrderModal

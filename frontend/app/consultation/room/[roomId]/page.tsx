@@ -100,6 +100,11 @@ import {
 } from '@/components/consultation/orders/PrescriptionOrderModal';
 import { PrescriptionRefillDialog } from '@/components/consultation/orders/PrescriptionRefillDialog';
 import {
+  localDraftToOrderInput,
+  prescriptionModalCopy,
+  type PrescriptionModalIntent,
+} from '@/lib/consultation/prescription-refill';
+import {
   buildConsultationReportHTML,
   loadConsultationReportSession,
   summarizeLabTestForConsultationReport,
@@ -639,6 +644,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [prescriptionModalInitialPriority, setPrescriptionModalInitialPriority] = useState<
     'Routine' | 'Urgent' | 'STAT' | undefined
   >(undefined);
+  const [prescriptionModalIntent, setPrescriptionModalIntent] = useState<PrescriptionModalIntent | null>(
+    null
+  );
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
   const diagnosisDropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const labTemplateDropdownContainerRef = useRef<HTMLDivElement | null>(null);
@@ -3165,6 +3173,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const openAddPrescriptionModal = (initialItems?: PrescriptionOrderItemInput[]) => {
     setPrescriptionModalInitialItems(initialItems);
     setPrescriptionModalInitialPriority(undefined);
+    setPrescriptionModalIntent(initialItems?.length ? null : 'add');
     setShowAddPrescription(true);
   };
 
@@ -3173,12 +3182,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     if (!open) {
       setPrescriptionModalInitialItems(undefined);
       setPrescriptionModalInitialPriority(undefined);
+      setPrescriptionModalIntent(null);
     }
   };
 
   const handleRefillContinue = (items: PrescriptionOrderItemInput[]) => {
     setPrescriptionModalInitialItems(items);
     setPrescriptionModalInitialPriority('Routine');
+    setPrescriptionModalIntent('refill');
     setShowAddPrescription(true);
   };
 
@@ -3186,36 +3197,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const rx = prescriptions[index];
     if (!rx || rx.status !== 'Draft') return;
 
-    const genericPk =
-      typeof rx.genericId === 'number' && rx.genericId > 0
-        ? rx.genericId
-        : typeof rx.medicationId === 'number' && rx.medicationId > 0
-          ? rx.medicationId
-          : null;
-    if (!genericPk) {
+    const initial = localDraftToOrderInput(rx);
+    if (!initial) {
       toast.error('Cannot edit this draft — missing generic. Remove and add again.');
       return;
     }
 
-    const doseMatch = (rx.dosage || rx.dose || '').match(/^([\d.]+)/);
-    setPrescriptionModalInitialItems([
-      {
-        generic: genericPk,
-        medication_name: rx.medication,
-        dosage: doseMatch?.[1] || rx.dosage || '1',
-        frequency: rx.frequency || 'Once daily (OD)',
-        duration: rx.duration || 'As directed',
-        quantity: rx.quantity || 1,
-        unit: rx.unit || 'tablet',
-        dosage_form: rx.form,
-        strength: rx.strength,
-        route: rx.route || 'Oral',
-        instructions: rx.instructions || '',
-      },
-    ]);
+    setPrescriptionModalInitialItems([initial]);
     const priority =
       rx.priority === 'Urgent' || rx.priority === 'STAT' ? rx.priority : 'Routine';
     setPrescriptionModalInitialPriority(priority);
+    setPrescriptionModalIntent('edit');
     setPrescriptions(prescriptions.filter((_, i) => i !== index));
     setShowAddPrescription(true);
   };
@@ -6614,15 +6606,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           onSubmit={handleAddPrescriptionToOrder}
           initialItems={prescriptionModalInitialItems}
           initialPriority={prescriptionModalInitialPriority}
-          dialogTitle={
-            prescriptionModalInitialItems?.length ? 'Review refill prescription' : undefined
+          {...prescriptionModalCopy(prescriptionModalIntent)}
+          confirmLabel={
+            prescriptionModalIntent === 'refill'
+              ? 'Add as drafts'
+              : prescriptionModalIntent === 'edit'
+                ? 'Save changes'
+                : undefined
           }
-          dialogDescription={
-            prescriptionModalInitialItems?.length
-              ? 'Adjust dose, frequency, and duration as needed, then add as drafts for this visit. Send to Pharmacy when ready.'
-              : undefined
-          }
-          confirmLabel={prescriptionModalInitialItems?.length ? 'Add as drafts' : undefined}
         />
 
         <Dialog 
