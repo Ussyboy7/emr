@@ -95,8 +95,10 @@ import { PrescriptionReportDialog } from '@/components/pharmacy/PrescriptionRepo
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import {
   PrescriptionOrderModal,
+  type PrescriptionOrderItemInput,
   type PrescriptionOrderSubmitInput,
 } from '@/components/consultation/orders/PrescriptionOrderModal';
+import { PrescriptionRefillDialog } from '@/components/consultation/orders/PrescriptionRefillDialog';
 import {
   buildConsultationReportHTML,
   loadConsultationReportSession,
@@ -630,6 +632,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     status: 'Draft' | 'Sent to Pharmacy' | 'Processing' | 'Partially Dispensed' | 'Dispensed' | 'Cancelled';
   }[]>([]);
   const [showAddPrescription, setShowAddPrescription] = useState(false);
+  const [showPrescriptionRefill, setShowPrescriptionRefill] = useState(false);
+  const [prescriptionModalInitialItems, setPrescriptionModalInitialItems] = useState<
+    PrescriptionOrderItemInput[] | undefined
+  >(undefined);
+  const [prescriptionModalInitialPriority, setPrescriptionModalInitialPriority] = useState<
+    'Routine' | 'Urgent' | 'STAT' | undefined
+  >(undefined);
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
   const diagnosisDropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const labTemplateDropdownContainerRef = useRef<HTMLDivElement | null>(null);
@@ -3153,16 +3162,62 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  // "Edit" on a draft prescription row removes the draft and reopens the
-  // Add-Prescription modal so the clinician can re-enter the item. In-place
-  // editing of an existing draft is not yet supported by <PrescriptionOrderModal />.
-  const editPrescription = (index: number) => {
-    const prescriptionToEdit = prescriptions[index];
-    if (!prescriptionToEdit) return;
+  const openAddPrescriptionModal = (initialItems?: PrescriptionOrderItemInput[]) => {
+    setPrescriptionModalInitialItems(initialItems);
+    setPrescriptionModalInitialPriority(undefined);
+    setShowAddPrescription(true);
+  };
 
+  const handlePrescriptionModalOpenChange = (open: boolean) => {
+    setShowAddPrescription(open);
+    if (!open) {
+      setPrescriptionModalInitialItems(undefined);
+      setPrescriptionModalInitialPriority(undefined);
+    }
+  };
+
+  const handleRefillContinue = (items: PrescriptionOrderItemInput[]) => {
+    setPrescriptionModalInitialItems(items);
+    setPrescriptionModalInitialPriority('Routine');
+    setShowAddPrescription(true);
+  };
+
+  const editPrescription = (index: number) => {
+    const rx = prescriptions[index];
+    if (!rx || rx.status !== 'Draft') return;
+
+    const genericPk =
+      typeof rx.genericId === 'number' && rx.genericId > 0
+        ? rx.genericId
+        : typeof rx.medicationId === 'number' && rx.medicationId > 0
+          ? rx.medicationId
+          : null;
+    if (!genericPk) {
+      toast.error('Cannot edit this draft — missing generic. Remove and add again.');
+      return;
+    }
+
+    const doseMatch = (rx.dosage || rx.dose || '').match(/^([\d.]+)/);
+    setPrescriptionModalInitialItems([
+      {
+        generic: genericPk,
+        medication_name: rx.medication,
+        dosage: doseMatch?.[1] || rx.dosage || '1',
+        frequency: rx.frequency || 'Once daily (OD)',
+        duration: rx.duration || 'As directed',
+        quantity: rx.quantity || 1,
+        unit: rx.unit || 'tablet',
+        dosage_form: rx.form,
+        strength: rx.strength,
+        route: rx.route || 'Oral',
+        instructions: rx.instructions || '',
+      },
+    ]);
+    const priority =
+      rx.priority === 'Urgent' || rx.priority === 'STAT' ? rx.priority : 'Routine';
+    setPrescriptionModalInitialPriority(priority);
     setPrescriptions(prescriptions.filter((_, i) => i !== index));
     setShowAddPrescription(true);
-    toast.info(`Draft removed — re-enter ${prescriptionToEdit.medication} from Add Medication.`);
   };
 
   const handleAddPrescriptionToOrder = async (payload: PrescriptionOrderSubmitInput) => {
@@ -5280,9 +5335,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     </CardTitle>
                     <CardDescription>Prescribe medications - will be sent to Pharmacy queue</CardDescription>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setShowAddPrescription(true)}>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button variant="outline" onClick={() => openAddPrescriptionModal()}>
                       <Plus className="mr-2 h-4 w-4" />Add Medication
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowPrescriptionRefill(true)}
+                      disabled={!currentPatient?.id}
+                      className="border-violet-200 text-violet-800 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-200"
+                    >
+                      <History className="mr-2 h-4 w-4" />
+                      Refill from previous
                     </Button>
                     {prescriptions.length > 0 && prescriptions.some(rx => rx.status === 'Draft') && (
                       <Button onClick={sendPrescriptionsToPharmacy} className="bg-violet-600 hover:bg-violet-700">
@@ -5407,9 +5471,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <Pill className="h-12 w-12 mx-auto mb-3 text-violet-500 opacity-60" />
                     <p className="font-medium text-violet-900 dark:text-violet-100 mb-1">No prescriptions yet</p>
                     <p className="text-sm text-muted-foreground mb-4">Add medications to be sent to the Pharmacy</p>
-                    <Button variant="outline" size="sm" onClick={() => setShowAddPrescription(true)} className="border-violet-300 text-violet-700 hover:bg-violet-100">
-                      <Plus className="h-4 w-4 mr-1" />Add First Medication
-                    </Button>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      <Button variant="outline" size="sm" onClick={() => openAddPrescriptionModal()} className="border-violet-300 text-violet-700 hover:bg-violet-100">
+                        <Plus className="h-4 w-4 mr-1" />Add First Medication
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowPrescriptionRefill(true)}
+                        disabled={!currentPatient?.id}
+                        className="border-violet-300 text-violet-700 hover:bg-violet-100"
+                      >
+                        <History className="h-4 w-4 mr-1" />Refill from previous
+                      </Button>
+                    </div>
                   </div>
                 )}
 
@@ -6520,11 +6595,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
+        <PrescriptionRefillDialog
+          open={showPrescriptionRefill}
+          onOpenChange={setShowPrescriptionRefill}
+          patientId={currentPatient?.id ? Number(currentPatient.id) : null}
+          patientAllergies={currentPatient?.allergies || []}
+          existingDraftGenericIds={prescriptions
+            .filter((rx) => rx.status === 'Draft')
+            .map((rx) => rx.genericId ?? rx.medicationId)
+            .filter((id): id is number => typeof id === 'number' && id > 0)}
+          onContinue={handleRefillContinue}
+        />
+
         <PrescriptionOrderModal
           open={showAddPrescription}
-          onOpenChange={setShowAddPrescription}
+          onOpenChange={handlePrescriptionModalOpenChange}
           patientAllergies={currentPatient?.allergies || []}
           onSubmit={handleAddPrescriptionToOrder}
+          initialItems={prescriptionModalInitialItems}
+          initialPriority={prescriptionModalInitialPriority}
+          dialogTitle={
+            prescriptionModalInitialItems?.length ? 'Review refill prescription' : undefined
+          }
+          dialogDescription={
+            prescriptionModalInitialItems?.length
+              ? 'Adjust dose, frequency, and duration as needed, then add as drafts for this visit. Send to Pharmacy when ready.'
+              : undefined
+          }
+          confirmLabel={prescriptionModalInitialItems?.length ? 'Add as drafts' : undefined}
         />
 
         <Dialog 

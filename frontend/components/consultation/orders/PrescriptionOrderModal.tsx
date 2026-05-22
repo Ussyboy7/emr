@@ -133,18 +133,42 @@ function normalizeDoseUnit(unit: string | undefined): string {
   return "tablet";
 }
 
+function parseDurationDaysFromString(duration?: string): number | "" {
+  if (!duration) return "";
+  const m = String(duration).match(/(\d+)\s*day/i);
+  if (m) return parseInt(m[1], 10);
+  return "";
+}
+
+function parseDosageNumberFromString(dose?: string): string {
+  if (!dose) return "1";
+  const trimmed = String(dose).trim();
+  const m = trimmed.match(/^([\d.]+)/);
+  return m ? m[1] : trimmed;
+}
+
 export function PrescriptionOrderModal({
   open,
   onOpenChange,
   patientAllergies,
   onSubmit,
   confirmLabel,
+  initialItems,
+  initialPriority,
+  initialClinicalIndication,
+  dialogTitle,
+  dialogDescription,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patientAllergies?: string[];
   onSubmit: (payload: PrescriptionOrderSubmitInput) => Promise<void>;
   confirmLabel?: string;
+  initialItems?: PrescriptionOrderItemInput[];
+  initialPriority?: "Routine" | "Urgent" | "STAT";
+  initialClinicalIndication?: string;
+  dialogTitle?: string;
+  dialogDescription?: string;
 }) {
   const [generics, setGenerics] = useState<GenericLike[]>([]);
   const [loadingMedications, setLoadingMedications] = useState(false);
@@ -169,6 +193,36 @@ export function PrescriptionOrderModal({
     setGenerics([]);
     setPriority("Routine");
     setClinicalIndication("");
+    setSubmitting(false);
+  }, []);
+
+  const applyInitialItems = useCallback((items: PrescriptionOrderItemInput[]) => {
+    const ids: number[] = [];
+    const configs = new Map<number, MedicationConfig>();
+    for (const item of items) {
+      const medId = item.generic;
+      if (!medId || !Number.isFinite(medId) || medId <= 0) continue;
+      if (ids.includes(medId)) continue;
+      ids.push(medId);
+      const durationDays = parseDurationDaysFromString(item.duration);
+      configs.set(medId, {
+        dosage: parseDosageNumberFromString(item.dosage),
+        frequency: item.frequency || "Once daily (OD)",
+        durationDays,
+        route: item.route || "Oral",
+        unit: normalizeDoseUnit(item.unit),
+        strength: (item.strength || "").trim(),
+        form: (item.dosage_form || "").trim(),
+        quantity: item.quantity,
+        instructions: item.instructions || "",
+        name: item.medication_name,
+      });
+    }
+    setMedicationSearch("");
+    setShowMedicationDropdown(false);
+    setSelectedMedications(ids);
+    setMedicationConfigs(configs);
+    setGenerics([]);
     setSubmitting(false);
   }, []);
 
@@ -222,12 +276,17 @@ export function PrescriptionOrderModal({
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
   }, [open, showMedicationDropdown]);
 
-  // Reset modal state when opening
+  // Reset or prefill when opening
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    if (initialItems?.length) {
+      applyInitialItems(initialItems);
+      setPriority(initialPriority || "Routine");
+      setClinicalIndication(initialClinicalIndication || "");
+    } else {
       reset();
     }
-  }, [open, reset]);
+  }, [open, initialItems, initialPriority, initialClinicalIndication, reset, applyInitialItems]);
 
   const normalizeMedicationId = (id: number | string | undefined): number | null => {
     if (id == null) return null;
@@ -420,10 +479,11 @@ export function PrescriptionOrderModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Pill className="h-5 w-5 text-violet-500" />
-            Add Prescription
+            {dialogTitle || "Add Prescription"}
           </DialogTitle>
           <DialogDescription>
-            Prescribe by generic molecule — search the pharmacy generics catalogue, configure dose details for each, and send them as one prescription order. The pharmacist will pick the brand from dispensary stock when filling the order.
+            {dialogDescription ||
+              "Prescribe by generic molecule — search the pharmacy generics catalogue, configure dose details for each, and send them as one prescription order. The pharmacist will pick the brand from dispensary stock when filling the order."}
           </DialogDescription>
         </DialogHeader>
 
