@@ -32,13 +32,14 @@ class LabTemplate(models.Model):
     description = models.TextField(blank=True)
     normal_range = models.JSONField(default=dict, blank=True, help_text="Normal value ranges")
     turnaround_time = models.CharField(max_length=50, blank=True, help_text="Expected turnaround time (e.g., '30 min', '2 hours', '1 day')")
+    sort_order = models.IntegerField(default=0, help_text="Display order (lower = first)")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
         db_table = 'lab_templates'
-        ordering = ['name']
+        ordering = ['sort_order', 'name']
     
     def __str__(self):
         return f"{self.code} - {self.name}"

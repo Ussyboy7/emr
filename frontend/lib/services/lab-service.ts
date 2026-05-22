@@ -147,8 +147,9 @@ export interface LabTemplate {
   sample_type: string;
   description?: string;
   normal_range?: Record<string, any>; // JSON field storing parameter definitions
-  category?: string; // May not exist in backend, but used in frontend
+  category?: string;
   turnaround_time?: string;
+  sort_order?: number;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -663,6 +664,16 @@ class LabService {
   async deleteTemplate(templateId: number): Promise<void> {
     return apiFetch<void>(`/laboratory/templates/${templateId}/`, {
       method: 'DELETE',
+    });
+  }
+
+  /**
+   * Bulk-reorder lab templates
+   */
+  async reorderTemplates(orders: { id: number; sort_order: number }[]): Promise<void> {
+    return apiFetch<void>('/laboratory/templates/reorder/', {
+      method: 'PATCH',
+      body: JSON.stringify({ orders }),
     });
   }
 

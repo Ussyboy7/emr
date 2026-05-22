@@ -19,7 +19,8 @@ import { labService, radiologyService, type RadiologyTemplate as ApiRadiologyTem
 import {
   FileText, Search, Eye, Plus, Edit, Trash2, Copy, CheckCircle2,
   Loader2, Settings, ListPlus, ScanLine, Activity, Clock,
-  Heart, Scan, FlaskConical, Microscope, GripVertical
+  Heart, Scan, FlaskConical, Microscope, GripVertical,
+  ChevronUp, ChevronDown,
 } from 'lucide-react';
 
 interface TemplateField {
@@ -29,6 +30,8 @@ interface TemplateField {
   normalRangeMin?: string;
   normalRangeMax?: string;
   normalRangeText?: string;
+  criticalMin?: string;
+  criticalMax?: string;
   dataType: 'numeric' | 'text' | 'select';
   options?: string[];
   required: boolean;
@@ -151,10 +154,14 @@ export default function TestTemplatesPage() {
     normalRangeMin: string;
     normalRangeMax: string;
     normalRangeText: string;
+    criticalMin: string;
+    criticalMax: string;
     dataType: 'numeric' | 'text' | 'select';
+    options: string[];
     required: boolean;
   }>({
-    name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric', required: false
+    name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '',
+    criticalMin: '', criticalMax: '', dataType: 'numeric', options: [], required: false
   });
 
   const loadTemplateStats = useCallback(async () => {
@@ -240,16 +247,57 @@ export default function TestTemplatesPage() {
       unit: newField.unit,
       normalRangeMin: newField.normalRangeMin || undefined,
       normalRangeMax: newField.normalRangeMax || undefined,
+      normalRangeText: newField.normalRangeText || undefined,
+      criticalMin: newField.criticalMin || undefined,
+      criticalMax: newField.criticalMax || undefined,
       dataType: newField.dataType,
+      options: newField.dataType === 'select' ? newField.options : undefined,
       required: true
     };
     setFormData(prev => ({ ...prev, fields: [...prev.fields, field] }));
-    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric', required: false });
+    setNewField({
+      name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '',
+      criticalMin: '', criticalMax: '', dataType: 'numeric', options: [], required: false
+    });
     toast.success('Field added');
   };
 
   const removeField = (fieldId: string) => {
     setFormData(prev => ({ ...prev, fields: prev.fields.filter(f => f.id !== fieldId) }));
+  };
+
+  const [dragFieldIndex, setDragFieldIndex] = useState<number | null>(null);
+
+  const handleFieldDragStart = (index: number) => { setDragFieldIndex(index); };
+  const handleFieldDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (dragFieldIndex === null || dragFieldIndex === index) return;
+    setFormData(prev => {
+      const fields = [...prev.fields];
+      const [moved] = fields.splice(dragFieldIndex, 1);
+      fields.splice(index, 0, moved);
+      return { ...prev, fields };
+    });
+    setDragFieldIndex(index);
+  };
+  const handleFieldDragEnd = () => { setDragFieldIndex(null); };
+
+  const moveFieldUp = (index: number) => {
+    setFormData(prev => {
+      if (index <= 0) return prev;
+      const fields = [...prev.fields];
+      [fields[index - 1], fields[index]] = [fields[index], fields[index - 1]];
+      return { ...prev, fields };
+    });
+  };
+
+  const moveFieldDown = (index: number) => {
+    setFormData(prev => {
+      if (index >= prev.fields.length - 1) return prev;
+      const fields = [...prev.fields];
+      [fields[index], fields[index + 1]] = [fields[index + 1], fields[index]];
+      return { ...prev, fields };
+    });
   };
 
   const editField = (field: TemplateField) => {
@@ -260,7 +308,10 @@ export default function TestTemplatesPage() {
       normalRangeMin: field.normalRangeMin || '',
       normalRangeMax: field.normalRangeMax || '',
       normalRangeText: field.normalRangeText || '',
+      criticalMin: field.criticalMin || '',
+      criticalMax: field.criticalMax || '',
       dataType: field.dataType,
+      options: field.options || [],
       required: field.required
     });
     setIsFieldEditDialogOpen(true);
@@ -273,13 +324,28 @@ export default function TestTemplatesPage() {
       ...prev,
       fields: prev.fields.map(f =>
         f.id === editingField.id
-          ? { ...editingField, ...newField }
+          ? {
+              ...f,
+              name: newField.name,
+              unit: newField.unit,
+              normalRangeMin: newField.normalRangeMin || undefined,
+              normalRangeMax: newField.normalRangeMax || undefined,
+              normalRangeText: newField.normalRangeText || undefined,
+              criticalMin: newField.criticalMin || undefined,
+              criticalMax: newField.criticalMax || undefined,
+              dataType: newField.dataType,
+              options: newField.dataType === 'select' ? newField.options : undefined,
+              required: newField.required,
+            }
           : f
       )
     }));
 
     setEditingField(null);
-    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric' as const, required: false });
+    setNewField({
+      name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '',
+      criticalMin: '', criticalMax: '', dataType: 'numeric' as const, options: [], required: false
+    });
     setIsFieldEditDialogOpen(false);
   };
 
@@ -291,22 +357,28 @@ export default function TestTemplatesPage() {
     setIsSubmitting(true);
 
     try {
-      // Convert fields array to normal_range JSON format
-      const normalRange: Record<string, any> = {};
+      const fieldNames = formData.fields.map(f => f.name);
+
+      // Convert fields array to normal_range JSON format with display order
+      const normalRange: Record<string, any> = {
+        _order: fieldNames,
+      };
       formData.fields.forEach(field => {
-        normalRange[field.name] = {
+        const meta: Record<string, any> = {
           unit: field.unit,
-          min: field.normalRangeMin,
-          max: field.normalRangeMax,
-          range: field.normalRangeText,
           dataType: field.dataType,
-          options: field.options,
           required: field.required,
         };
+        if (field.normalRangeMin) meta.min = field.normalRangeMin;
+        if (field.normalRangeMax) meta.max = field.normalRangeMax;
+        if (field.normalRangeText) meta.range = field.normalRangeText;
+        if (field.criticalMin) meta.critical_min = field.criticalMin;
+        if (field.criticalMax) meta.critical_max = field.criticalMax;
+        if (field.dataType === 'select' && field.options?.length) meta.options = field.options;
+        normalRange[field.name] = meta;
       });
 
-      // Only send fields that exist in the backend model
-      const templateData = {
+      const templateData: Record<string, any> = {
         name: formData.name,
         code: formData.code,
         description: formData.description,
@@ -315,6 +387,7 @@ export default function TestTemplatesPage() {
         is_active: true,
         category: formData.category,
         turnaround_time: formData.turnaroundTime,
+        sort_order: totalCount, // New templates go to the end
       };
 
       await labService.createTemplate(templateData);
@@ -342,22 +415,28 @@ export default function TestTemplatesPage() {
         return;
       }
 
-      // Convert fields array to normal_range JSON format
-      const normalRange: Record<string, any> = {};
+      const fieldNames = formData.fields.map(f => f.name);
+
+      // Convert fields array to normal_range JSON format with display order
+      const normalRange: Record<string, any> = {
+        _order: fieldNames,
+      };
       formData.fields.forEach(field => {
-        normalRange[field.name] = {
+        const meta: Record<string, any> = {
           unit: field.unit,
-          min: field.normalRangeMin,
-          max: field.normalRangeMax,
-          range: field.normalRangeText,
           dataType: field.dataType,
-          options: field.options,
           required: field.required,
         };
+        if (field.normalRangeMin) meta.min = field.normalRangeMin;
+        if (field.normalRangeMax) meta.max = field.normalRangeMax;
+        if (field.normalRangeText) meta.range = field.normalRangeText;
+        if (field.criticalMin) meta.critical_min = field.criticalMin;
+        if (field.criticalMax) meta.critical_max = field.criticalMax;
+        if (field.dataType === 'select' && field.options?.length) meta.options = field.options;
+        normalRange[field.name] = meta;
       });
 
-      // Only send fields that exist in the backend model
-      const templateData = {
+      const templateData: Record<string, any> = {
         name: formData.name,
         code: formData.code,
         description: formData.description,
@@ -462,7 +541,10 @@ export default function TestTemplatesPage() {
 
   const resetForm = () => {
     setFormData({ name: '', code: '', category: 'chemistry', description: '', specimenType: '', turnaroundTime: '', fields: [] });
-    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric', required: false });
+    setNewField({
+      name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '',
+      criticalMin: '', criticalMax: '', dataType: 'numeric', options: [], required: false
+    });
   };
 
   const openViewDialog = (template: TestTemplate) => { setSelectedTemplate(template); setIsViewDialogOpen(true); };
@@ -592,7 +674,7 @@ export default function TestTemplatesPage() {
               <p>No templates found</p>
             </CardContent></Card>
           ) : (
-            templates.map(template => (
+            templates.map((template, index) => (
               <Card key={template.id} className={`border-l-4 hover:shadow-md transition-shadow ${
                 template.status === 'Inactive' ? 'border-l-gray-400 opacity-60' :
                 template.category === 'chemistry' ? 'border-l-amber-500' :
@@ -935,15 +1017,36 @@ export default function TestTemplatesPage() {
                 <h4 className="font-semibold flex items-center gap-2"><ListPlus className="h-4 w-4" />Parameters ({formData.fields.length})</h4>
                 {formData.fields.length > 0 && (
                   <div className="space-y-2">
-                    {formData.fields.map(field => (
-                      <div key={field.id} className="flex items-center gap-2 p-2 rounded border bg-muted/50">
-                        <span className="flex-1 font-medium">{field.name}</span>
-                        <span className="text-sm text-muted-foreground">{field.unit}</span>
-                        <span className="text-sm text-muted-foreground">{field.normalRangeMin && field.normalRangeMax ? `${field.normalRangeMin}-${field.normalRangeMax}` : field.normalRangeText || ''}</span>
-                        <Button variant="ghost" size="sm" onClick={() => editField(field)} className="text-blue-500">
+                    {formData.fields.map((field, index) => (
+                      <div
+                        key={field.id}
+                        draggable
+                        onDragStart={() => handleFieldDragStart(index)}
+                        onDragOver={(e) => handleFieldDragOver(e, index)}
+                        onDragEnd={handleFieldDragEnd}
+                        className={`flex items-center gap-2 p-2 rounded border bg-muted/50 ${
+                          dragFieldIndex === index ? 'opacity-50 ring-2 ring-blue-400' : ''
+                        }`}
+                      >
+                        <div className="cursor-grab active:cursor-grabbing text-muted-foreground/30 hover:text-muted-foreground flex-shrink-0">
+                          <GripVertical className="h-4 w-4" />
+                        </div>
+                        <span className="text-xs text-muted-foreground w-5 text-right">{index + 1}.</span>
+                        <span className="flex-1 font-medium text-sm">{field.name}</span>
+                        <span className="text-xs text-muted-foreground w-20 truncate">{field.unit}</span>
+                        <span className="text-xs text-muted-foreground w-24 truncate">{field.normalRangeMin && field.normalRangeMax ? `${field.normalRangeMin}-${field.normalRangeMax}` : field.normalRangeText || ''}</span>
+                        <div className="flex items-center gap-0.5">
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => moveFieldUp(index)} disabled={index === 0}>
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => moveFieldDown(index)} disabled={index === formData.fields.length - 1}>
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-500" onClick={() => editField(field)}>
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => removeField(field.id)} className="text-rose-500">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-rose-500" onClick={() => removeField(field.id)}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -1034,27 +1137,82 @@ export default function TestTemplatesPage() {
                 </Select>
               </div>
 
-              {newField.dataType === 'numeric' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Normal Range Min</Label>
-                    <Input
-                      type="number"
-                      value={newField.normalRangeMin}
-                      onChange={(e) => setNewField(p => ({ ...p, normalRangeMin: e.target.value }))}
-                      placeholder="e.g., 70"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Normal Range Max</Label>
-                    <Input
-                      type="number"
-                      value={newField.normalRangeMax}
-                      onChange={(e) => setNewField(p => ({ ...p, normalRangeMax: e.target.value }))}
-                      placeholder="e.g., 140"
-                    />
+              {newField.dataType === 'select' && (
+                <div className="space-y-2">
+                  <Label>Options</Label>
+                  <div className="space-y-1">
+                    {newField.options.map((opt, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <Input
+                          value={opt}
+                          onChange={(e) => {
+                            const next = [...newField.options];
+                            next[i] = e.target.value;
+                            setNewField(p => ({ ...p, options: next }));
+                          }}
+                          className="h-8 text-sm"
+                        />
+                        <Button
+                          variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500"
+                          onClick={() => setNewField(p => ({ ...p, options: p.options.filter((_, idx) => idx !== i) }))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline" size="sm" className="mt-1"
+                      onClick={() => setNewField(p => ({ ...p, options: [...p.options, ''] }))}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />Add option
+                    </Button>
                   </div>
                 </div>
+              )}
+
+              {newField.dataType === 'numeric' && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Normal Range Min</Label>
+                      <Input
+                        type="number" step="any"
+                        value={newField.normalRangeMin}
+                        onChange={(e) => setNewField(p => ({ ...p, normalRangeMin: e.target.value }))}
+                        placeholder="e.g., 70"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Normal Range Max</Label>
+                      <Input
+                        type="number" step="any"
+                        value={newField.normalRangeMax}
+                        onChange={(e) => setNewField(p => ({ ...p, normalRangeMax: e.target.value }))}
+                        placeholder="e.g., 140"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Critical Min</Label>
+                      <Input
+                        type="number" step="any"
+                        value={newField.criticalMin}
+                        onChange={(e) => setNewField(p => ({ ...p, criticalMin: e.target.value }))}
+                        placeholder="e.g., 50"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Critical Max</Label>
+                      <Input
+                        type="number" step="any"
+                        value={newField.criticalMax}
+                        onChange={(e) => setNewField(p => ({ ...p, criticalMax: e.target.value }))}
+                        placeholder="e.g., 180"
+                      />
+                    </div>
+                  </div>
+                </>
               )}
 
               <div className="space-y-2">

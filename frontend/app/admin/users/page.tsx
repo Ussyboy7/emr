@@ -777,6 +777,7 @@ export default function UserManagementPage() {
                   <tr className="border-b bg-muted/50">
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Staff</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Role</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Department</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Login</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
@@ -784,7 +785,7 @@ export default function UserManagementPage() {
                 </thead>
                 <tbody>
                   {paginatedStaff.length === 0 ? (
-                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No staff members found</td></tr>
+                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No staff members found</td></tr>
                   ) : (
                   paginatedStaff.map((s) => {
                 return (
@@ -806,6 +807,7 @@ export default function UserManagementPage() {
                             {s.systemRole || "—"}
                       </Badge>
                         </td>
+                        <td className="p-4 text-sm text-muted-foreground">{s.departmentName || "—"}</td>
                         <td className="p-4">
                           <Badge variant="outline" className={getStatusBadge(s.status)}>{s.status}</Badge>
                         </td>

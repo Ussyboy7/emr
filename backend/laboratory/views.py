@@ -113,13 +113,31 @@ class LabTemplateViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['sample_type', 'is_active', 'code', 'category']
     search_fields = ['name', 'code']
-    ordering_fields = ['name', 'code']
-    ordering = ['name']
+    ordering_fields = ['sort_order', 'name', 'code']
+    ordering = ['sort_order', 'name']
     pagination_class = FlexiblePageNumberPagination  # Allow large page sizes
     
     def get_queryset(self):
         # Return all templates (not just active) to allow status management
         return LabTemplate.objects.all()
+    
+    @action(detail=False, methods=['patch'], url_path='reorder')
+    def reorder(self, request):
+        """Bulk-update sort_order for templates.
+        Accepts: {"orders": [{"id": 1, "sort_order": 0}, ...]}
+        """
+        orders = request.data.get('orders', [])
+        if not orders:
+            return Response({'error': 'No orders provided'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        ids = [o['id'] for o in orders]
+        existing = set(LabTemplate.objects.filter(id__in=ids).values_list('id', flat=True))
+        
+        for o in orders:
+            if o['id'] in existing:
+                LabTemplate.objects.filter(id=o['id']).update(sort_order=o.get('sort_order', 0))
+        
+        return Response({'status': 'ok'})
 
 
 class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
