@@ -278,6 +278,19 @@ class PatientService {
       headers: {}, // Let browser set Content-Type for FormData
     });
   }
+
+  async promoteToOfficer(patientId: number, newPersonalNumber: string): Promise<Patient> {
+    return apiFetch<Patient>(`/patients/${patientId}/promote/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ new_personal_number: newPersonalNumber }),
+    });
+  }
+
+  async convertToCsr(patientId: number): Promise<{ patient: Patient; dependents_converted: number }> {
+    return apiFetch<{ patient: Patient; dependents_converted: number }>(`/patients/${patientId}/convert-to-csr/`, {
+      method: 'PATCH',
+    });
+  }
 }
 
 export const patientService = new PatientService();

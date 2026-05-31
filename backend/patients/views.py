@@ -338,6 +338,126 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    def _is_admin_user(self, user):
+        role = (getattr(user, 'system_role', '') or '').strip().lower()
+        return user.is_superuser or role in {'system administrator', 'admin staff'}
+
+    @action(detail=True, methods=['patch'], url_path='promote')
+    def promote(self, request, pk=None):
+        """Promote a Staff employee to Officer with a new personal number."""
+        if not self._is_admin_user(request.user):
+            raise PermissionDenied('Only super admin or admin users can promote patients to Officer.')
+        patient = self.get_object()
+        if patient.category != 'employee':
+            return Response({'error': 'Only Employee patients can be promoted.'}, status=status.HTTP_400_BAD_REQUEST)
+        if (patient.employee_type or '').lower() != 'staff':
+            return Response({'error': 'Only Staff employees can be promoted to Officer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_personal_number = request.data.get('new_personal_number', '').strip()
+        if not new_personal_number:
+            return Response({'error': 'New personal number is required for promotion.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .validators import validate_personal_number_uniqueness
+        try:
+            validate_personal_number_uniqueness(new_personal_number, patient_id=patient.id, category='employee')
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_values = {
+            'employee_type': patient.employee_type,
+            'personal_number': patient.personal_number,
+            'patient_id': patient.patient_id,
+        }
+
+        patient.employee_type = 'Officer'
+        patient.personal_number = new_personal_number
+        patient.updated_by = request.user
+        patient.regenerate_patient_id()
+        patient.save()
+
+        AuditService.log_patient_action(
+            user=request.user,
+            action='promote',
+            patient=patient,
+            module='medical_records',
+            description=f'Promoted {patient.get_full_name()} from Staff to Officer (new PN: {new_personal_number})',
+            old_values=old_values,
+            new_values={
+                'employee_type': patient.employee_type,
+                'personal_number': patient.personal_number,
+                'patient_id': patient.patient_id,
+            },
+            request=request,
+        )
+
+        serializer = self.get_serializer(patient)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['patch'], url_path='convert-to-csr')
+    def convert_to_csr(self, request, pk=None):
+        """Convert a Retiree patient to NonNPA (CSR) along with their dependents."""
+        if not self._is_admin_user(request.user):
+            raise PermissionDenied('Only super admin or admin users can convert patients to CSR.')
+        patient = self.get_object()
+        if patient.category != 'retiree':
+            return Response({'error': 'Only Retiree patients can be converted to CSR.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Find dependents before converting
+        dependents = list(Patient.objects.filter(principal_staff=patient, category='dependent'))
+        dependent_count = len(dependents)
+
+        old_values = {
+            'category': patient.category,
+            'patient_id': patient.patient_id,
+            'personal_number': patient.personal_number,
+        }
+
+        # Convert the retiree
+        patient.category = 'nonnpa'
+        patient.nonnpa_type = 'CSR'
+        patient.personal_number = None
+        patient.employee_type = None
+        patient.division = None
+        patient.location = None
+        patient.updated_by = request.user
+        patient.regenerate_patient_id()
+        patient.save()
+
+        # Convert dependents
+        for dep in dependents:
+            dep.category = 'nonnpa'
+            dep.nonnpa_type = 'CSR'
+            dep.dependent_type = None
+            dep.principal_staff = None
+            dep.personal_number = None
+            dep.employee_type = None
+            dep.division = None
+            dep.location = None
+            dep.updated_by = request.user
+            dep.regenerate_patient_id()
+            dep.save()
+
+        AuditService.log_patient_action(
+            user=request.user,
+            action='convert_to_csr',
+            patient=patient,
+            module='medical_records',
+            description=f'Converted {patient.get_full_name()} from Retiree to CSR ({dependent_count} dependent(s) also converted)',
+            old_values=old_values,
+            new_values={
+                'category': patient.category,
+                'patient_id': patient.patient_id,
+                'nonnpa_type': patient.nonnpa_type,
+            },
+            request=request,
+        )
+
+        serializer = self.get_serializer(patient)
+        return Response({
+            'patient': serializer.data,
+            'dependents_converted': dependent_count,
+        })
+
 
 class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """

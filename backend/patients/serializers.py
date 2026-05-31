@@ -144,6 +144,7 @@ class PatientListSerializer(serializers.ModelSerializer):
             'total_visits', 'last_visit_at',
             'dependent_type', 'principal_staff', 'nok_relationship',
             'principal_staff_full_name', 'principal_staff_patient_id', 'principal_staff_category',
+            'employee_type',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'age']
 

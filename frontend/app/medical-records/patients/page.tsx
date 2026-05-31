@@ -19,12 +19,15 @@ import { patientService, type Patient as ApiPatient } from '@/lib/services';
 import {
   PATIENT_TITLE_OPTIONS,
   normalizePatientTitleValue,
+  TITLES,
   MARITAL_STATUSES,
   RELIGIONS,
   NIGERIAN_TRIBES,
   NOK_RELATIONSHIPS,
   NPA_DIVISIONS,
-  NIGERIA_STATES
+  NON_NPA_TYPES,
+  DEPENDENT_TYPES,
+  NIGERIA_STATES_AND_LGAS,
 } from '@/lib/constants/patient';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -255,6 +258,8 @@ function PatientsListPageContent() {
     location: '',
     division: '',
     employeeType: '',
+    nonnpaType: '',
+    dependentType: '',
     nokSurname: '',
     nokFirstName: '',
     nokMiddleName: '',
@@ -273,16 +278,27 @@ function PatientsListPageContent() {
   const [isRetireeConversionOpen, setIsRetireeConversionOpen] = useState(false);
   const [convertingToRetiree, setConvertingToRetiree] = useState(false);
   const [patientToConvert, setPatientToConvert] = useState<Patient | null>(null);
+  // Promote to Officer state
+  const [isPromoteOpen, setIsPromoteOpen] = useState(false);
+  const [promotingOfficer, setPromotingOfficer] = useState(false);
+  const [patientToPromote, setPatientToPromote] = useState<Patient | null>(null);
+  const [newPersonalNumber, setNewPersonalNumber] = useState('');
+  // Convert to CSR state
+  const [isCsrConversionOpen, setIsCsrConversionOpen] = useState(false);
+  const [convertingToCsr, setConvertingToCsr] = useState(false);
+  const [patientToConvertCsr, setPatientToConvertCsr] = useState<Patient | null>(null);
+  const [csrDependentCount, setCsrDependentCount] = useState(0);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
   const [deletingPatient, setDeletingPatient] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
-  const canDeletePatients = useMemo(() => {
+  const isAdminUser = useMemo(() => {
     if (currentUser?.isSuperuser) return true;
     return (currentUser?.systemRole || '').toLowerCase().includes('admin');
   }, [currentUser?.isSuperuser, currentUser?.systemRole]);
+  const canDeletePatients = isAdminUser;
   
   // Reset form when selectedPatient changes (new patient selected for editing)
   useEffect(() => {
@@ -598,6 +614,56 @@ function PatientsListPageContent() {
     }
   };
 
+  // Promote to Officer handlers
+  const openPromoteDialog = (patient: Patient) => {
+    setPatientToPromote(patient);
+    setNewPersonalNumber('');
+    setIsPromoteOpen(true);
+  };
+
+  const handlePromote = async () => {
+    if (!patientToPromote || !newPersonalNumber.trim()) return;
+    setPromotingOfficer(true);
+    try {
+      const numericId = Number(patientToPromote.numericId || patientToPromote.id);
+      await patientService.promoteToOfficer(numericId, newPersonalNumber.trim());
+      toast.success(`${patientToPromote.name} has been promoted to Officer (PN: ${newPersonalNumber.trim()})`);
+      setIsPromoteOpen(false);
+      setPatientToPromote(null);
+      setNewPersonalNumber('');
+      await loadPatients();
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to promote patient to Officer');
+    } finally {
+      setPromotingOfficer(false);
+    }
+  };
+
+  // Convert to CSR handlers
+  const openCsrConversion = (patient: Patient) => {
+    setPatientToConvertCsr(patient);
+    setIsCsrConversionOpen(true);
+  };
+
+  const handleCsrConversion = async () => {
+    if (!patientToConvertCsr) return;
+    setConvertingToCsr(true);
+    try {
+      const numericId = Number(patientToConvertCsr.numericId || patientToConvertCsr.id);
+      const result = await patientService.convertToCsr(numericId);
+      toast.success(
+        `${patientToConvertCsr.name} converted to CSR. ${result.dependents_converted} dependent(s) also converted.`
+      );
+      setIsCsrConversionOpen(false);
+      setPatientToConvertCsr(null);
+      await loadPatients();
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to convert patient to CSR');
+    } finally {
+      setConvertingToCsr(false);
+    }
+  };
+
   const handleDeletePatient = async () => {
     if (!patientToDelete) return;
     const numericId = Number(patientToDelete.numericId || patientToDelete.id);
@@ -650,6 +716,8 @@ function PatientsListPageContent() {
       location: '',
       division: '',
       employeeType: '',
+      nonnpaType: '',
+      dependentType: '',
       nokSurname: '',
       nokFirstName: '',
       nokMiddleName: '',
@@ -758,6 +826,8 @@ function PatientsListPageContent() {
         location: apiPatient.location || '',
         division: apiPatient.division || '',
         employeeType: normalizedEmployeeType,
+        nonnpaType: apiPatient.nonnpa_type || '',
+        dependentType: apiPatient.dependent_type || '',
         nokSurname: apiPatient.nok_surname || '',
         nokFirstName: apiPatient.nok_first_name || '',
         nokMiddleName: apiPatient.nok_middle_name || '',
@@ -913,6 +983,8 @@ function PatientsListPageContent() {
         employee_type: editForm.employeeType.trim()
           ? editForm.employeeType.charAt(0).toUpperCase() + editForm.employeeType.slice(1).toLowerCase()
           : '',
+        nonnpa_type: editForm.nonnpaType.trim(),
+        dependent_type: editForm.dependentType.trim(),
         nok_surname: editForm.nokSurname.trim(),
         nok_first_name: editForm.nokFirstName.trim(),
         nok_middle_name: editForm.nokMiddleName.trim(),
@@ -1235,8 +1307,20 @@ function PatientsListPageContent() {
                                 </Button>
                               )}
                               {patient.category === 'Employee' && (
-                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRetireeConversion(patient)} title="Convert to Retiree">
-                                  <UserCheck className="h-4 w-4 text-muted-foreground hover:text-orange-500" />
+                                <>
+                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRetireeConversion(patient)} title="Convert to Retiree">
+                                    <UserCheck className="h-4 w-4 text-muted-foreground hover:text-orange-500" />
+                                  </Button>
+                                  {isAdminUser && patient.employeeType === 'Staff' && (
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openPromoteDialog(patient)} title="Promote to Officer">
+                                      <Activity className="h-4 w-4 text-muted-foreground hover:text-purple-500" />
+                                    </Button>
+                                  )}
+                                </>
+                              )}
+                              {isAdminUser && patient.category === 'Retiree' && (
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openCsrConversion(patient)} title="Convert to CSR">
+                                  <UserPlus className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                                 </Button>
                               )}
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => router.push(`/medical-records/visits/new?patient=${patient.id}`)} title="Create Visit">
@@ -1540,20 +1624,32 @@ function PatientsListPageContent() {
                             </div>
                           )}
                         {selectedPatient.category === "Dependent" && (
-                          <div className="space-y-2">
-                            <Label>Principal personal number</Label>
-                            <Input
-                              value={editPrincipalInfo?.personalNumber || ""}
-                              readOnly
-                              className="bg-muted"
-                              placeholder=""
-                            />
-                            <p className="text-xs text-muted-foreground">
-                              {editPrincipalInfo?.fullName
-                                ? `Linked to ${editPrincipalInfo.fullName}. Dependent IDs (ED-/RD-) follow the principal; changing the link is not supported in this form—register a new dependent under the correct principal if needed.`
-                                : "Principal record not loaded or not linked."}
-                            </p>
-                          </div>
+                          <>
+                            <div className="space-y-2">
+                              <Label>Dependent Type</Label>
+                              <Select value={editForm.dependentType || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, dependentType: v === 'not-specified' ? '' : v }))}>
+                                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="not-specified">Unspecified</SelectItem>
+                                  {DEPENDENT_TYPES.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Principal personal number</Label>
+                              <Input
+                                value={editPrincipalInfo?.personalNumber || ""}
+                                readOnly
+                                className="bg-muted"
+                                placeholder=""
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                {editPrincipalInfo?.fullName
+                                  ? `Linked to ${editPrincipalInfo.fullName}. Dependent IDs (ED-/RD-) follow the principal; changing the link is not supported in this form—register a new dependent under the correct principal if needed.`
+                                  : "Principal record not loaded or not linked."}
+                              </p>
+                            </div>
+                          </>
                         )}
                       </div>
                       <div className="grid grid-cols-4 gap-4">
@@ -1658,7 +1754,15 @@ function PatientsListPageContent() {
                       <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">
                           <Label>LGA</Label>
-                          <Input value={editForm.lga} onChange={(e) => setEditForm(prev => ({ ...prev, lga: e.target.value }))} placeholder="Local Government Area" />
+                          <Select value={editForm.lga || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, lga: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select LGA" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
+                              {NIGERIA_STATES_AND_LGAS
+                                .find(s => s.name === (editForm.stateOfOrigin || editForm.stateOfResidence))
+                                ?.lgas.map(lga => <SelectItem key={lga} value={lga}>{lga}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div className="space-y-2">
                           <Label>State of Residence</Label>
@@ -1666,7 +1770,7 @@ function PatientsListPageContent() {
                             <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
+                              {NIGERIA_STATES_AND_LGAS.map(s => <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1676,7 +1780,7 @@ function PatientsListPageContent() {
                             <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
+                              {NIGERIA_STATES_AND_LGAS.map(s => <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -2125,8 +2229,8 @@ function PatientsListPageContent() {
                       </div>
                     </div>
 
-                    {/* Work Info — same as registration (employee + retiree) */}
-                    {(selectedPatient.category === 'Employee' || selectedPatient.category === 'Retiree') && (
+                    {/* Work Info — same as registration (employee only, not retiree) */}
+                    {selectedPatient.category === 'Employee' && (
                       <>
                         <Separator />
                         <div className="space-y-4">
@@ -2170,13 +2274,23 @@ function PatientsListPageContent() {
                       </>
                     )}
 
-                    {/* Non-NPA: location / type (retiree work info handled above) */}
+                    {/* Non-NPA: type + location */}
                     {selectedPatient.category === 'NonNPA' && (
                       <>
                         <Separator />
                         <div className="space-y-4">
                           <h3 className="text-sm font-semibold text-foreground">Non-NPA Details</h3>
-                          <div className="grid grid-cols-1 gap-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>Type</Label>
+                              <Select value={editForm.nonnpaType || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, nonnpaType: v === 'not-specified' ? '' : v }))}>
+                                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="not-specified">Unspecified</SelectItem>
+                                  {NON_NPA_TYPES.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
                             <div className="space-y-2">
                               <Label>Location</Label>
                               <Select value={editForm.location || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v === 'not-specified' ? '' : v }))}>
@@ -2298,6 +2412,127 @@ function PatientsListPageContent() {
                   <>
                     <UserCheck className="h-4 w-4 mr-2" />
                     Convert to Retiree
+                  </>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Promote to Officer Dialog */}
+        <AlertDialog open={isPromoteOpen} onOpenChange={setIsPromoteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-purple-500" />
+                Promote to Officer
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {patientToPromote
+                  ? `Promote ${patientToPromote.name} from Staff to Officer?`
+                  : 'Promote this patient to Officer?'}
+              </AlertDialogDescription>
+              {patientToPromote && (
+                <div className="space-y-3">
+                  <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-3">
+                    <p className="text-sm text-purple-800 dark:text-purple-200">
+                      <strong>What happens:</strong>
+                    </p>
+                    <ul className="text-sm text-purple-700 dark:text-purple-300 mt-2 space-y-1">
+                      <li>• Employee type changes from "Staff" to "Officer"</li>
+                      <li>• A new personal number will be assigned</li>
+                      <li>• Patient ID will update (E-old# → E-new#)</li>
+                      <li>• All existing medical records and history are preserved</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-personal-number">New Personal Number</Label>
+                    <Input
+                      id="new-personal-number"
+                      placeholder="Enter new personal number (e.g. B1234)"
+                      value={newPersonalNumber}
+                      onChange={(e) => setNewPersonalNumber(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setIsPromoteOpen(false)}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handlePromote}
+                disabled={promotingOfficer || !newPersonalNumber.trim()}
+                className="bg-purple-600 hover:bg-purple-700"
+              >
+                {promotingOfficer ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Promoting...
+                  </>
+                ) : (
+                  <>
+                    <Activity className="h-4 w-4 mr-2" />
+                    Promote to Officer
+                  </>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Convert to CSR Dialog */}
+        <AlertDialog open={isCsrConversionOpen} onOpenChange={setIsCsrConversionOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-blue-500" />
+                Convert to CSR
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {patientToConvertCsr
+                  ? `Convert ${patientToConvertCsr.name} from Retiree to CSR (Non-NPA)?`
+                  : 'Convert this patient to CSR?'}
+              </AlertDialogDescription>
+              {patientToConvertCsr && (
+                <div className="space-y-3">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                    <p className="text-sm text-blue-800 dark:text-blue-200">
+                      <strong>What happens:</strong>
+                    </p>
+                    <ul className="text-sm text-blue-700 dark:text-blue-300 mt-2 space-y-1">
+                      <li>• Patient category changes from "Retiree" to "NonNPA (CSR)"</li>
+                      <li>• Patient ID will be updated (R-XXX → NN-CSR-XX format)</li>
+                      <li>• Personal number, employee type, division, and location will be cleared</li>
+                      <li>• All existing medical records and history are preserved</li>
+                      <li>• Linked dependents will also be converted to CSR</li>
+                    </ul>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    This is useful for retirees who are no longer eligible for retiree benefits but still need care.
+                  </p>
+                </div>
+              )}
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setIsCsrConversionOpen(false)}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleCsrConversion}
+                disabled={convertingToCsr}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {convertingToCsr ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Converting...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Convert to CSR
                   </>
                 )}
               </AlertDialogAction>
