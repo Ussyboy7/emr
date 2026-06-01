@@ -22,6 +22,12 @@ from .views import (
     GOPAttendanceReportView,
     WeekendCallDutyReportView,
     EscortLogReportView,
+    NewRegistrationsReportView,
+    DrugExpiryWatchReportView,
+    TopPrescribedDrugsReportView,
+    StaffProductivityReportView,
+    CriticalLabResultsReportView,
+    NotifiableDiseasesReportView,
 )
 
 urlpatterns = [
@@ -44,5 +50,11 @@ urlpatterns = [
     path('reports/gop-attendance/', GOPAttendanceReportView.as_view(), name='gop-attendance-report'),
     path('reports/weekend-duty/', WeekendCallDutyReportView.as_view(), name='weekend-duty-report'),
     path('reports/escort-log/', EscortLogReportView.as_view(), name='escort-log-report'),
+    path('reports/new-registrations/', NewRegistrationsReportView.as_view(), name='new-registrations-report'),
+    path('reports/drug-expiry/', DrugExpiryWatchReportView.as_view(), name='drug-expiry-report'),
+    path('reports/top-drugs/', TopPrescribedDrugsReportView.as_view(), name='top-drugs-report'),
+    path('reports/staff-productivity/', StaffProductivityReportView.as_view(), name='staff-productivity-report'),
+    path('reports/critical-lab/', CriticalLabResultsReportView.as_view(), name='critical-lab-report'),
+    path('reports/notifiable-diseases/', NotifiableDiseasesReportView.as_view(), name='notifiable-diseases-report'),
 ]
 

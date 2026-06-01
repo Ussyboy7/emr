@@ -7,16 +7,17 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from datetime import datetime, timedelta
 from django.db.models import Count, Q, Sum, Avg, F, OuterRef, Subquery, DateField
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 import csv
 import json
 
 from patients.models import Patient, Visit, MedicalCertificate
-from laboratory.models import LabOrder, LabTest
+from laboratory.models import LabOrder, LabTest, LabResult
 from pharmacy.models import Prescription, MedicationInventory, PrescriptionItem, Dispense
 from radiology.models import RadiologyOrder, RadiologyStudy
 from nursing.models import NursingOrder, Procedure
-from consultation.models import Referral, ConsultationSession
+from consultation.models import Referral, ConsultationSession, Diagnosis
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth, TruncDay, TruncWeek
 
 
@@ -2280,4 +2281,393 @@ class WeekendCallDutyReportView(views.APIView):
                 'total': total
             },
             'monthly_data': monthly_data
+        })
+
+
+class NewRegistrationsReportView(views.APIView):
+    """
+    New patient registrations in the selected period.
+
+    Returns a daily breakdown of newly registered patients by category,
+    plus a summary of total / by-category counts.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        qs = Patient.objects.filter(is_active=True)
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
+
+        total = qs.count()
+
+        # By category
+        by_category = {}
+        for category, _ in Patient.CATEGORY_CHOICES:
+            by_category[category] = qs.filter(category=category).count()
+
+        # Daily breakdown
+        daily_qs = (
+            qs.annotate(registration_date=TruncDay('created_at'))
+            .values('registration_date', 'category')
+            .annotate(count=Count('id'))
+            .order_by('registration_date', 'category')
+        )
+        daily_data = []
+        for row in daily_qs:
+            reg_date = row['registration_date']
+            daily_data.append({
+                'date': reg_date.date().isoformat() if reg_date else None,
+                'category': row['category'],
+                'count': row['count'],
+            })
+
+        return Response({
+            'total': total,
+            'by_category': by_category,
+            'daily_data': daily_data,
+            'start_date': start_date,
+            'end_date': end_date,
+        })
+
+
+class DrugExpiryWatchReportView(views.APIView):
+    """
+    Drug expiry watch — pharmacy inventory batches expiring within N days.
+
+    Query params:
+      days (int, default 90) — buckets of 0-30, 31-60, 61-90, 90+
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            days_window = int(request.query_params.get('days', 90))
+        except (ValueError, TypeError):
+            days_window = 90
+
+        today = timezone.now().date()
+        cutoff = today + timedelta(days=days_window)
+
+        qs = (
+            MedicationInventory.objects
+            .filter(expiry_date__gte=today, expiry_date__lte=cutoff, quantity__gt=0)
+            .select_related('medication', 'medication__generic')
+            .order_by('expiry_date')
+        )
+
+        buckets = {
+            '0_30': qs.filter(expiry_date__lte=today + timedelta(days=30)),
+            '31_60': qs.filter(expiry_date__gt=today + timedelta(days=30), expiry_date__lte=today + timedelta(days=60)),
+            '61_90': qs.filter(expiry_date__gt=today + timedelta(days=60), expiry_date__lte=today + timedelta(days=90)),
+            '90_plus': qs.filter(expiry_date__gt=today + timedelta(days=90), expiry_date__lte=cutoff),
+        }
+
+        summary = {key: qs_.count() for key, qs_ in buckets.items()}
+
+        # Already expired
+        already_expired = MedicationInventory.objects.filter(
+            expiry_date__lt=today,
+            quantity__gt=0,
+        ).count()
+        summary['already_expired'] = already_expired
+
+        items = []
+        for inv in qs[:500]:  # Cap the list
+            days_to_expiry = (inv.expiry_date - today).days
+            if days_to_expiry <= 30:
+                bucket = '0_30'
+            elif days_to_expiry <= 60:
+                bucket = '31_60'
+            elif days_to_expiry <= 90:
+                bucket = '61_90'
+            else:
+                bucket = '90_plus'
+            items.append({
+                'id': inv.id,
+                'medication_name': inv.medication.name if inv.medication else '',
+                'generic_name': inv.medication.generic.name if inv.medication and inv.medication.generic else '',
+                'batch_number': inv.batch_number,
+                'quantity': float(inv.quantity) if inv.quantity is not None else 0,
+                'unit': inv.unit if hasattr(inv, 'unit') else '',
+                'expiry_date': inv.expiry_date.isoformat(),
+                'days_to_expiry': days_to_expiry,
+                'bucket': bucket,
+            })
+
+        return Response({
+            'days_window': days_window,
+            'cutoff_date': cutoff.isoformat(),
+            'summary': summary,
+            'items': items,
+        })
+
+
+class TopPrescribedDrugsReportView(views.APIView):
+    """
+    Top prescribed drugs in the selected period, aggregated by medication (or generic).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get('limit', 20))
+        except (ValueError, TypeError):
+            limit = 20
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        qs = PrescriptionItem.objects.all()
+        if start_date:
+            qs = qs.filter(prescription__prescribed_at__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(prescription__prescribed_at__date__lte=end_date)
+
+        # Aggregate by medication (brand), falling back to generic for items without a brand.
+        from django.db.models import Sum, F
+        rows = (
+            qs.annotate(
+                drug_name=Coalesce('medication__name', 'generic__name'),
+                drug_id=Coalesce('medication__id', 'generic__id'),
+            )
+            .values('drug_name')
+            .annotate(
+                total_quantity=Sum('quantity'),
+                prescription_count=Count('prescription', distinct=True),
+            )
+            .order_by('-prescription_count', '-total_quantity')[:limit]
+        )
+
+        total_lines = qs.count()
+        results = []
+        for i, row in enumerate(rows, start=1):
+            count = row.get('prescription_count') or 0
+            results.append({
+                'sn': i,
+                'drug_name': row.get('drug_name') or 'Unknown',
+                'total_quantity': float(row.get('total_quantity') or 0),
+                'prescription_count': count,
+                'percentage': round((count / total_lines * 100), 1) if total_lines > 0 else 0,
+            })
+
+        return Response({
+            'total_lines': total_lines,
+            'limit': limit,
+            'data': results,
+        })
+
+
+class StaffProductivityReportView(views.APIView):
+    """
+    Staff productivity — visits/consultations handled by each medical doctor in period.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        from accounts.models import User
+        doctors_qs = User.objects.filter(system_role='Medical Doctor', is_active=True)
+        visit_qs = Visit.objects.filter(doctor__isnull=False)
+        if start_date:
+            visit_qs = visit_qs.filter(date__gte=start_date)
+        if end_date:
+            visit_qs = visit_qs.filter(date__lte=end_date)
+
+        rows = []
+        for doctor in doctors_qs:
+            doc_visits = visit_qs.filter(doctor=doctor)
+            total = doc_visits.count()
+            if total == 0:
+                continue
+            completed = doc_visits.filter(status='completed').count()
+            cancelled = doc_visits.filter(status='cancelled').count()
+            in_progress = doc_visits.filter(status='in_progress').count()
+            rows.append({
+                'doctor_id': doctor.id,
+                'doctor_name': doctor.get_full_name() or doctor.username,
+                'specialization': getattr(doctor, 'specialization', '') or '',
+                'total_visits': total,
+                'completed': completed,
+                'in_progress': in_progress,
+                'cancelled': cancelled,
+                'completion_rate': round((completed / total * 100), 1) if total > 0 else 0,
+            })
+
+        rows.sort(key=lambda r: r['total_visits'], reverse=True)
+
+        grand_total = sum(r['total_visits'] for r in rows)
+        return Response({
+            'total_visits': grand_total,
+            'staff_count': len(rows),
+            'data': rows,
+        })
+
+
+class CriticalLabResultsReportView(views.APIView):
+    """
+    Critical lab results — list of LabResult records flagged as critical in period.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        qs = (
+            LabResult.objects
+            .filter(overall_status='critical')
+            .select_related('test', 'test__order', 'patient', 'order__patient')
+        )
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
+
+        total = qs.count()
+        items = []
+        for r in qs.order_by('-created_at')[:500]:
+            test = r.test
+            order = test.order if test else r.order
+            patient = r.patient
+            items.append({
+                'id': r.id,
+                'patient_id': patient.patient_id if patient else '',
+                'patient_name': patient.get_full_name() if patient else '',
+                'test_name': test.name if test else '',
+                'test_code': test.code if test else '',
+                'priority': r.priority,
+                'order_id': order.order_id if order else '',
+                'created_at': r.created_at.isoformat() if r.created_at else None,
+            })
+
+        return Response({
+            'total': total,
+            'items': items,
+        })
+
+
+class NotifiableDiseasesReportView(views.APIView):
+    """
+    Notifiable diseases report — diagnoses whose ICD-10 code falls into Nigeria NCDC
+    immediately-notifiable disease categories.
+
+    ICD-10 prefixes covered (Nigeria NCDC list):
+      A00  Cholera
+      A01  Typhoid/Paratyphoid
+      A15-A19  Tuberculosis
+      A20  Plague
+      A22  Anthrax
+      A33-A35  Tetanus (neonatal, obstetric, other)
+      A36  Diphtheria
+      A39  Meningococcal infection
+      A80  Poliomyelitis
+      A90  Dengue
+      A95  Yellow fever
+      A96  Lassa fever
+      A98  Other viral haemorrhagic fevers (Ebola, Marburg)
+      B03  Smallpox
+      B04  Monkeypox
+      B05  Measles
+      B15-B19  Viral hepatitis
+      B50-B54  Malaria
+      U07  COVID-19
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    NOTIFIABLE_PREFIXES = (
+        'A00', 'A01', 'A15', 'A16', 'A17', 'A18', 'A19',
+        'A20', 'A22', 'A33', 'A34', 'A35', 'A36', 'A39',
+        'A80', 'A90', 'A95', 'A96', 'A98',
+        'B03', 'B04', 'B05',
+        'B15', 'B16', 'B17', 'B18', 'B19',
+        'B50', 'B51', 'B52', 'B53', 'B54',
+        'U07',
+    )
+
+    NOTIFIABLE_LABELS = {
+        'A00': 'Cholera',
+        'A01': 'Typhoid/Paratyphoid',
+        'A15': 'Tuberculosis (respiratory)',
+        'A16': 'Tuberculosis (respiratory)',
+        'A17': 'Tuberculosis (nervous system)',
+        'A18': 'Tuberculosis (other organs)',
+        'A19': 'Miliary tuberculosis',
+        'A20': 'Plague',
+        'A22': 'Anthrax',
+        'A33': 'Tetanus neonatorum',
+        'A34': 'Obstetric tetanus',
+        'A35': 'Other tetanus',
+        'A36': 'Diphtheria',
+        'A39': 'Meningococcal infection',
+        'A80': 'Poliomyelitis',
+        'A90': 'Dengue fever',
+        'A95': 'Yellow fever',
+        'A96': 'Lassa fever',
+        'A98': 'Viral haemorrhagic fevers (Ebola/Marburg)',
+        'B03': 'Smallpox',
+        'B04': 'Monkeypox',
+        'B05': 'Measles',
+        'B15': 'Acute hepatitis A',
+        'B16': 'Acute hepatitis B',
+        'B17': 'Other acute viral hepatitis',
+        'B18': 'Chronic viral hepatitis',
+        'B19': 'Unspecified viral hepatitis',
+        'B50': 'Plasmodium falciparum malaria',
+        'B51': 'Plasmodium vivax malaria',
+        'B52': 'Plasmodium malariae malaria',
+        'B53': 'Other parasitologically confirmed malaria',
+        'B54': 'Unspecified malaria',
+        'U07': 'COVID-19',
+    }
+
+    def get(self, request):
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        qs = Diagnosis.objects.filter(
+            icd10_code__code__startswith=tuple(self.NOTIFIABLE_PREFIXES),
+        ).select_related('icd10_code', 'patient', 'session', 'diagnosed_by')
+
+        if start_date:
+            qs = qs.filter(diagnosed_at__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(diagnosed_at__date__lte=end_date)
+
+        total = qs.count()
+        items = []
+        for d in qs.order_by('-diagnosed_at')[:500]:
+            code = d.icd10_code.code if d.icd10_code else ''
+            # Find which prefix matched
+            label = next(
+                (lbl for prefix, lbl in self.NOTIFIABLE_LABELS.items() if code.startswith(prefix)),
+                'Other notifiable',
+            )
+            items.append({
+                'id': d.id,
+                'patient_id': d.patient.patient_id if d.patient else '',
+                'patient_name': d.patient.get_full_name() if d.patient else '',
+                'icd10_code': code,
+                'icd10_description': d.icd10_code.description if d.icd10_code else '',
+                'disease_label': label,
+                'status': d.status,
+                'certainty': d.certainty,
+                'diagnosed_by': d.diagnosed_by.get_full_name() if d.diagnosed_by else '',
+                'diagnosed_at': d.diagnosed_at.isoformat() if d.diagnosed_at else None,
+            })
+
+        return Response({
+            'total': total,
+            'items': items,
         })
