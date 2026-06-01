@@ -296,15 +296,24 @@ class PhysioService {
 
   /**
    * Get per-status counts for physiotherapy orders (current clinic scope).
+   * Accepts the same date filter params as `getOrders` so the dashboard
+   * cards match the visible rows.
    */
-  async getOrderStats(): Promise<{
+  async getOrderStats(params?: {
+    ordered_at_after?: string;
+    ordered_at_before?: string;
+  }): Promise<{
     pending: number;
     scheduled: number;
     in_progress: number;
     cancelled: number;
     completed: number;
   }> {
-    return apiFetch('/orders/stats/');
+    const search = new URLSearchParams();
+    if (params?.ordered_at_after) search.set('ordered_at_after', params.ordered_at_after);
+    if (params?.ordered_at_before) search.set('ordered_at_before', params.ordered_at_before);
+    const qs = search.toString();
+    return apiFetch(`/orders/stats/${qs ? `?${qs}` : ''}`);
   }
 
   getAnalyticsSummary(params?: {

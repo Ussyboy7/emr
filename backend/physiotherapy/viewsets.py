@@ -103,8 +103,21 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
-        """Per-status counts for the current user/clinic scope."""
+        """Per-status counts for the current user/clinic scope.
+
+        Mirrors the list endpoint's date filter so the dashboard cards match
+        the visible rows (e.g. with `ordered_at_after=2026-06-01` and
+        `ordered_at_before=2026-06-01` the cards reflect "Today" only).
+        """
         qs = self.get_queryset()
+        # Apply date range only — do NOT honour `status` (we're counting
+        # per-status; honouring it would always return 1 status bucket).
+        date_after = request.query_params.get("ordered_at_after")
+        if date_after:
+            qs = qs.filter(ordered_at__date__gte=date_after)
+        date_before = request.query_params.get("ordered_at_before")
+        if date_before:
+            qs = qs.filter(ordered_at__date__lte=date_before)
         rows = qs.values("status").annotate(count=Count("id"))
         counts = {row["status"]: row["count"] for row in rows}
         return Response({

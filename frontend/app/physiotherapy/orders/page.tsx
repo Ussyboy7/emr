@@ -183,6 +183,40 @@ export default function PhysioPoolQueuePage() {
   // Patient vitals
   const [patientVitals, setPatientVitals] = useState<any>(null);
 
+  /**
+   * Build the `ordered_at_after` / `ordered_at_before` params from the
+   * current date filter state. Shared by `loadOrders` and `loadStats` so
+   * the cards always reflect the visible rows.
+   */
+  const buildDateFilterParams = useCallback((): {
+    ordered_at_after?: string;
+    ordered_at_before?: string;
+  } => {
+    const result: { ordered_at_after?: string; ordered_at_before?: string } = {};
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (dateRange.from || dateRange.to) {
+      if (dateRange.from) result.ordered_at_after = dateRange.from;
+      if (dateRange.to) result.ordered_at_before = dateRange.to;
+      return result;
+    }
+    if (dateFilter === 'all') return result;
+    const today = new Date();
+    if (dateFilter === 'today') {
+      result.ordered_at_after = fmt(today);
+      result.ordered_at_before = fmt(today);
+    } else if (dateFilter === 'week') {
+      const from = new Date(today);
+      from.setDate(from.getDate() - 7);
+      result.ordered_at_after = fmt(from);
+    } else if (dateFilter === 'month') {
+      const from = new Date(today);
+      from.setMonth(from.getMonth() - 1);
+      result.ordered_at_after = fmt(from);
+    }
+    return result;
+  }, [dateFilter, dateRange]);
+
   const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
     try {
@@ -202,26 +236,9 @@ export default function PhysioPoolQueuePage() {
       if (!searching && activeTab !== 'all') params.status = activeTab;
 
       if (!searching) {
-        if (dateRange.from || dateRange.to) {
-          if (dateRange.from) params.ordered_at_after = dateRange.from;
-          if (dateRange.to) params.ordered_at_before = dateRange.to;
-        } else if (dateFilter !== 'all') {
-          const today = new Date();
-          const pad = (n: number) => String(n).padStart(2, '0');
-          const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-          if (dateFilter === 'today') {
-            params.ordered_at_after = fmt(today);
-            params.ordered_at_before = fmt(today);
-          } else if (dateFilter === 'week') {
-            const from = new Date(today);
-            from.setDate(from.getDate() - 7);
-            params.ordered_at_after = fmt(from);
-          } else if (dateFilter === 'month') {
-            const from = new Date(today);
-            from.setMonth(from.getMonth() - 1);
-            params.ordered_at_after = fmt(from);
-          }
-        }
+        const dp = buildDateFilterParams();
+        if (dp.ordered_at_after) params.ordered_at_after = dp.ordered_at_after;
+        if (dp.ordered_at_before) params.ordered_at_before = dp.ordered_at_before;
       }
 
       const response = await physioService.getOrders(params);
@@ -240,17 +257,18 @@ export default function PhysioPoolQueuePage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, activeTab, dateFilter, dateRange]);
+  }, [currentPage, itemsPerPage, debouncedSearch, activeTab, buildDateFilterParams]);
 
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
 
-  // Stats: load separately so they reflect ALL records, not just the current page/tab.
+  // Stats: scoped by the same date filter as the list so the cards match
+  // the visible rows.
   const [stats, setStats] = useState({ pending: 0, scheduled: 0, inProgress: 0, cancelled: 0, completed: 0 });
   const loadStats = useCallback(async () => {
     try {
-      const data = await physioService.getOrderStats();
+      const data = await physioService.getOrderStats(buildDateFilterParams());
       setStats({
         pending: data.pending,
         scheduled: data.scheduled,
@@ -261,7 +279,7 @@ export default function PhysioPoolQueuePage() {
     } catch (err) {
       console.error('Failed to load physio order stats:', err);
     }
-  }, []);
+  }, [buildDateFilterParams]);
 
   const pollingPaused = useMemo(
     () =>
