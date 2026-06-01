@@ -434,23 +434,11 @@ export default function ReportsPage() {
       toast.error("Pop-up blocked — allow pop-ups to print the certificate.");
       return;
     }
-    printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
     printWindow.document.title = docTitle;
-    const triggerPrint = () => {
-      try {
-        printWindow.focus();
-        printWindow.print();
-      } catch {
-        // ignore — user can use the print button in the new window
-      }
-    };
-    if (printWindow.document.readyState === "complete") {
-      setTimeout(triggerPrint, 50);
-    } else {
-      printWindow.addEventListener("load", () => setTimeout(triggerPrint, 50), { once: true });
-    }
+    printWindow.focus();
+    printWindow.print();
   };
 
   const buildMedicalCertificateHtml = (args: {
