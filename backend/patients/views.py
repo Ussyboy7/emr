@@ -375,6 +375,12 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         patient.regenerate_patient_id()
         patient.save()
 
+        # Update dependents' patient IDs to reflect the new personal number
+        dependents = Patient.objects.filter(principal_staff=patient, category='dependent')
+        for dep in dependents:
+            dep.regenerate_patient_id()
+            dep.save(update_fields=['patient_id'])
+
         AuditService.log_patient_action(
             user=request.user,
             action='promote',
