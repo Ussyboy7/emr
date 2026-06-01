@@ -1774,8 +1774,13 @@ export default function NursingPoolQueuePage() {
           }
           patientName={selectedPatient?.name}
           patientId={selectedPatient?.patientId}
+          // Closed visits (Completed) get a read-only view — the vitals
+          // are part of a closed medical record; amendments need a
+          // separate audited workflow. Backend also blocks mutations.
+          // (Cancelled visits are already filtered out by the pool list.)
+          readonly={selectedPatient?.nursingStatus === 'Completed'}
           onEdit={
-            selectedPatient
+            selectedPatient && selectedPatient.nursingStatus !== 'Completed'
               ? () => {
                   setIsViewVitalsDialogOpen(false);
                   openRecordVitals(selectedPatient);

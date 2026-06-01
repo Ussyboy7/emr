@@ -66,6 +66,8 @@ export interface VitalsDetailModalProps {
   onClose: () => void;
   /** When set, shows "Edit Vitals" like nursing pool queue. */
   onEdit?: () => void;
+  /** When true, hide the "Edit Vitals" button (e.g. visit is closed). */
+  readonly?: boolean;
 }
 
 export function VitalsDetailModal({
@@ -75,6 +77,7 @@ export function VitalsDetailModal({
   isOpen,
   onClose,
   onEdit,
+  readonly,
 }: VitalsDetailModalProps) {
   if (!vitals) return null;
 
@@ -217,7 +220,7 @@ export function VitalsDetailModal({
           <Button type="button" variant="outline" onClick={onClose}>
             Close
           </Button>
-          {onEdit ? (
+          {onEdit && !readonly ? (
             <Button type="button" onClick={onEdit}>
               <Edit className="h-4 w-4 mr-2" />
               Edit Vitals

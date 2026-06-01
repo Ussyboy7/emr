@@ -899,9 +899,33 @@ class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response({'results': by_visit_id})
     
+    def _assert_visit_open(self, visit, action: str):
+        """Block mutation of vitals once a visit is in a terminal state.
+
+        Closed medical records should not be edited through the regular
+        vitals endpoint — amendments require a separate audited workflow.
+        Raises ValidationError so DRF returns a clean 400 to the client.
+        """
+        from rest_framework.exceptions import ValidationError
+        if visit is None:
+            return
+        if visit.status in ('completed', 'cancelled'):
+            raise ValidationError({
+                'visit': f'Cannot {action} vitals: visit is {visit.status}.',
+            })
+
     def perform_create(self, serializer):
-        """Set recorded_by when creating a vital reading."""
+        """Set recorded_by and block creation on closed visits."""
+        self._assert_visit_open(serializer.validated_data.get('visit'), 'record')
         serializer.save(recorded_by=self.request.user)
+
+    def perform_update(self, serializer):
+        self._assert_visit_open(serializer.instance.visit, 'edit')
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._assert_visit_open(instance.visit, 'delete')
+        instance.delete()
 
 
 class MedicalCertificateViewSet(viewsets.ModelViewSet):
