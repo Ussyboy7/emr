@@ -370,7 +370,6 @@ export default function ReportsPage() {
     recommendations: "",
     startDate: "",
     endDate: "",
-    referTo: "",
     sickLeaveDays: "",
   });
 
@@ -427,6 +426,31 @@ export default function ReportsPage() {
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
+  };
+
+  const openPrintWindow = (html: string, docTitle: string) => {
+    const printWindow = window.open("", "_blank", "width=900,height=1100");
+    if (!printWindow) {
+      toast.error("Pop-up blocked — allow pop-ups to print the certificate.");
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.document.title = docTitle;
+    const triggerPrint = () => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch {
+        // ignore — user can use the print button in the new window
+      }
+    };
+    if (printWindow.document.readyState === "complete") {
+      setTimeout(triggerPrint, 50);
+    } else {
+      printWindow.addEventListener("load", () => setTimeout(triggerPrint, 50), { once: true });
+    }
   };
 
   const buildMedicalCertificateHtml = (args: {
@@ -601,10 +625,11 @@ export default function ReportsPage() {
         doctorName: created.doctor_name_snapshot || created.issued_by_name || "",
         issueDate: formatDisplayDate(created.issued_at),
       });
-      void certificateHtml;
+
+      openPrintWindow(certificateHtml, `${purposeLabelMap[created.purpose] || "Certificate"} - ${created.certificate_number}`);
 
       toast.success(
-        `Medical certificate saved (${created.certificate_number}). Print from the patient Certificates tab when ready.`,
+        `Medical certificate saved (${created.certificate_number}). A print window has opened.`,
       );
     } catch (e: any) {
       toast.error(e?.message || "Failed to create medical certificate.");
@@ -620,7 +645,6 @@ export default function ReportsPage() {
       recommendations: "",
       startDate: "",
       endDate: "",
-      referTo: "",
       sickLeaveDays: "",
     });
   };
@@ -634,7 +658,6 @@ export default function ReportsPage() {
       recommendations: "",
       startDate: "",
       endDate: "",
-      referTo: "",
       sickLeaveDays: "",
     });
     setIsNewReportOpen(true);
@@ -1009,17 +1032,6 @@ export default function ReportsPage() {
                     </div>
                   )}
                 </>
-              )}
-
-              {newReport.type === "Referral Letter" && (
-                <div className="space-y-2">
-                  <Label>Refer to (specialist / hospital)</Label>
-                  <Input
-                    value={newReport.referTo}
-                    onChange={(e) => setNewReport((prev) => ({ ...prev, referTo: e.target.value }))}
-                    placeholder="e.g., Dr. Smith, Cardiologist"
-                  />
-                </div>
               )}
 
               <div className="space-y-2">
