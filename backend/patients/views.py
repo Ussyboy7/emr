@@ -81,13 +81,13 @@ def apply_nursing_status_filter(
 ):
     """
     Narrow visits for nursing pool queue (expects queryset already limited, e.g. in_progress + date).
-    nursing_status: pending | vitals_incomplete | ready | sent_to_room
+    nursing_status: pending | vitals_incomplete | ready | sent_to_room | completed
 
     sent_to_room_basis (only sent_to_room):
     - queued_at: restrict queue rows by queued_at date (legacy; matches historical dashboard cards).
     - visit_date: any active queue row for visits already in queryset (visit date defines the period).
     """
-    from consultation.models import ConsultationQueue
+    from consultation.models import ConsultationQueue, ConsultationSession
 
     ns = (nursing_status or '').strip().lower()
     if not ns or ns == 'all':
@@ -95,6 +95,20 @@ def apply_nursing_status_filter(
 
     if ns == 'pending':
         return queryset.filter(~Exists(VitalReading.objects.filter(visit_id=OuterRef('pk'))))
+
+    if ns == 'completed':
+        # Visit is fully closed out — either the visit status is completed, or a
+        # consultation session on the visit is completed (covers the case where
+        # the visit status hasn't transitioned yet).
+        return queryset.filter(
+            Q(status='completed')
+            | Exists(
+                ConsultationSession.objects.filter(
+                    visit_id=OuterRef('pk'),
+                    status='completed',
+                )
+            )
+        )
 
     lv_temp, lv_hr = _latest_vital_subqueries()
     qs = queryset.annotate(_lv_temp=lv_temp, _lv_hr=lv_hr).annotate(

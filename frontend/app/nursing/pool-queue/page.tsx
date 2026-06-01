@@ -257,17 +257,17 @@ export default function NursingPoolQueuePage() {
                 ? ('ready' as const)
                 : statusFilter === 'sent-to-room'
                   ? ('sent_to_room' as const)
-                  : undefined;
+                  : statusFilter === 'completed'
+                    ? ('completed' as const)
+                    : undefined;
 
         const usePhysioClientFilter = statusFilter === 'sent-to-physiotherapy';
-        const useCompletedClientFilter = statusFilter === 'completed';
 
         const visitFetch = visitService.getVisits({
           ...metricsParams,
-          nursing_status:
-            usePhysioClientFilter || useCompletedClientFilter ? undefined : nursingStatusApi,
-          page: usePhysioClientFilter || useCompletedClientFilter ? 1 : currentPage,
-          page_size: usePhysioClientFilter || useCompletedClientFilter ? 250 : itemsPerPage,
+          nursing_status: usePhysioClientFilter ? undefined : nursingStatusApi,
+          page: usePhysioClientFilter ? 1 : currentPage,
+          page_size: usePhysioClientFilter ? 250 : itemsPerPage,
         });
 
         const result = await visitFetch;
@@ -519,11 +519,6 @@ export default function NursingPoolQueuePage() {
           setPhysioClientBuffer(physioRows);
           setTotalVisitCount(physioRows.length);
           setPatients([]);
-        } else if (useCompletedClientFilter) {
-          const completedRows = sortedByStage.filter((p) => p.nursingStatus === 'Completed');
-          setPhysioClientBuffer(completedRows);
-          setTotalVisitCount(completedRows.length);
-          setPatients([]);
         } else {
           setPhysioClientBuffer(null);
           setPatients(sortedByStage);
@@ -532,9 +527,7 @@ export default function NursingPoolQueuePage() {
 
         return usePhysioClientFilter
           ? sortedByStage.filter((p) => p.nursingStatus === 'Sent to Physiotherapy')
-          : useCompletedClientFilter
-            ? sortedByStage.filter((p) => p.nursingStatus === 'Completed')
-            : sortedByStage;
+          : sortedByStage;
       } catch (err) {
         console.error('Error loading nursing pool data:', err);
         if (isAuthenticationError(err)) {
@@ -1275,9 +1268,10 @@ export default function NursingPoolQueuePage() {
               const isOnlyEye = hasEye && !hasOtherClinics;
               const isMultiClinic = (patient.clinics?.length ?? 0) > 1;
               const showMarkLeft =
-                isMultiClinic ||
-                (patient.nursingStatus !== 'Sent to Physiotherapy' &&
-                  patient.nursingStatus !== 'Sent to Eye Clinic');
+                patient.nursingStatus !== 'Completed' &&
+                (isMultiClinic ||
+                  (patient.nursingStatus !== 'Sent to Physiotherapy' &&
+                    patient.nursingStatus !== 'Sent to Eye Clinic'));
 
               return (
               <Card key={patient.id} className={`border-l-4 ${getVisitTypeBorderColor(patient.visitType)} hover:shadow-md transition-shadow`}>
@@ -1356,7 +1350,8 @@ export default function NursingPoolQueuePage() {
                             patient.nursingStatus === 'Ready for Consultation' ||
                             patient.nursingStatus === 'Sent to Physiotherapy' ||
                             patient.nursingStatus === 'Sent to Room' ||
-                            patient.nursingStatus === 'Sent to Eye Clinic') && (
+                            patient.nursingStatus === 'Sent to Eye Clinic' ||
+                            patient.nursingStatus === 'Completed') && (
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewVitals(patient)}>
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
@@ -1368,6 +1363,8 @@ export default function NursingPoolQueuePage() {
                           )}
                           {/* Action buttons for sending patient to rooms */}
                           {(() => {
+                            // Completed visits are read-only on the pool queue — no Send/Physio/Eye buttons.
+                            if (patient.nursingStatus === 'Completed') return null;
                             const canRoute = patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation';
 
                             // Multi-clinic: each routing leg is independent once vitals are no longer Pending.
@@ -1507,7 +1504,7 @@ export default function NursingPoolQueuePage() {
                               <CheckCircle2 className="h-4 w-4" />
                             </div>
                           )}
-                          {showMarkLeft && (
+                          {showMarkLeft && patient.nursingStatus !== 'Completed' && (
                             <Button
                               size="sm"
                               variant="destructive"

@@ -18,8 +18,8 @@ export interface VisitFilters {
   page_size?: number;
   /** Exclude visits that already have a completed consultation (nursing pool). */
   nursing_pool?: 1 | '1';
-  /** Server-side nursing queue segment (requires nursing_pool=1). */
-  nursing_status?: 'pending' | 'vitals_incomplete' | 'ready' | 'sent_to_room';
+  /** Server-side nursing queue segment. */
+  nursing_status?: 'pending' | 'vitals_incomplete' | 'ready' | 'sent_to_room' | 'completed';
 }
 
 /** Full nursing pool report (trends, legs, aligned vs queue-date room counts). */
