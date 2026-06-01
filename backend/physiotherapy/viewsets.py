@@ -76,6 +76,15 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self.auto_set_clinic(serializer)
+        # Prefer the patient's visit clinic as the order's location_clinic
+        # so the physio in that clinic can see it, regardless of the
+        # creator's active clinic (admin context, multi-clinic switching, etc.).
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            existing = serializer.validated_data.get('location_clinic')
+            if existing is None:
+                visit = serializer.validated_data.get('visit')
+                if visit is not None and getattr(visit, 'location_clinic_id', None) is not None:
+                    serializer.validated_data['location_clinic_id'] = visit.location_clinic_id
         serializer.save(ordered_by=self.request.user)
 
     @action(detail=True, methods=["post"])
@@ -203,7 +212,15 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     sessions_completed=0,
                 )
                 if SystemConfig.is_enabled('multi_clinic_enabled'):
-                    clinic = resolve_clinic(self.request.user)
+                    # File the order under the patient's visit clinic so any physio
+                    # assigned to that clinic can see it — not under the forwarder's
+                    # active clinic, which may differ (admin context, switching, etc.).
+                    clinic = None
+                    if getattr(visit, 'location_clinic_id', None) is not None:
+                        from organization.models import Clinic
+                        clinic = visit.location_clinic
+                    if clinic is None:
+                        clinic = resolve_clinic(self.request.user)
                     if clinic is not None:
                         create_kwargs['location_clinic'] = clinic
                 order = PhysioOrder.objects.create(**create_kwargs)
