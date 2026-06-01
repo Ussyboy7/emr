@@ -6,6 +6,7 @@ from __future__ import annotations
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.db.models import Count
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -90,6 +91,20 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         order.scheduled_at = scheduled_at
         order.save(update_fields=["status", "scheduled_at"])
         return Response(PhysioOrderSerializer(order).data)
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """Per-status counts for the current user/clinic scope."""
+        qs = self.get_queryset()
+        rows = qs.values("status").annotate(count=Count("id"))
+        counts = {row["status"]: row["count"] for row in rows}
+        return Response({
+            "pending": counts.get("pending", 0),
+            "scheduled": counts.get("scheduled", 0),
+            "in_progress": counts.get("in_progress", 0),
+            "cancelled": counts.get("cancelled", 0),
+            "completed": counts.get("completed", 0),
+        })
 
     @action(detail=False, methods=["get"], url_path="checkins-for-visits")
     def checkins_for_visits(self, request):

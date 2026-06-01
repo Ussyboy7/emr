@@ -246,6 +246,23 @@ export default function PhysioPoolQueuePage() {
     loadOrders();
   }, [loadOrders]);
 
+  // Stats: load separately so they reflect ALL records, not just the current page/tab.
+  const [stats, setStats] = useState({ pending: 0, scheduled: 0, inProgress: 0, cancelled: 0, completed: 0 });
+  const loadStats = useCallback(async () => {
+    try {
+      const data = await physioService.getOrderStats();
+      setStats({
+        pending: data.pending,
+        scheduled: data.scheduled,
+        inProgress: data.in_progress,
+        cancelled: data.cancelled,
+        completed: data.completed,
+      });
+    } catch (err) {
+      console.error('Failed to load physio order stats:', err);
+    }
+  }, []);
+
   const pollingPaused = useMemo(
     () =>
       isDateFilterDialogOpen ||
@@ -265,12 +282,17 @@ export default function PhysioPoolQueuePage() {
   );
 
   useEffect(() => {
+    void loadStats();
+  }, [loadStats]);
+
+  useEffect(() => {
     if (pollingPaused) return;
     const id = setInterval(() => {
       void loadOrders({ silent: true });
+      void loadStats();
     }, 15000);
     return () => clearInterval(id);
-  }, [loadOrders, pollingPaused]);
+  }, [loadOrders, loadStats, pollingPaused]);
 
   // Load sessions for the order when View dialog is open
   useEffect(() => {
@@ -445,6 +467,7 @@ export default function PhysioPoolQueuePage() {
       setIsEditSessionDialogOpen(false);
       setEditingSession(null);
       await loadOrders();
+      await loadStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update session');
     } finally {
@@ -551,6 +574,7 @@ export default function PhysioPoolQueuePage() {
       setCancelActiveSessions('no');
       setSelectedOrder(null);
       await loadOrders();
+      await loadStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to cancel order');
     } finally {
@@ -569,15 +593,7 @@ export default function PhysioPoolQueuePage() {
     }
   };
 
-  const getTimeSince = (isoString: string) => {
-    const diff = Date.now() - new Date(isoString).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d ago`;
-  };
+  const getTimeSince = (isoString: string) => formatRelativeTime(isoString);
 
   const filteredOrders = useMemo(() => {
     if (!debouncedSearch.trim()) return orders;
@@ -606,46 +622,6 @@ export default function PhysioPoolQueuePage() {
     () => getLatestUncompletedSession(orderSessionsList),
     [orderSessionsList]
   );
-
-  // Stats: load separately so they reflect ALL records, not just the current page/tab.
-  const [stats, setStats] = useState({ pending: 0, inProgress: 0, cancelled: 0, completed: 0, scheduled: 0 });
-  useEffect(() => {
-    let cancelled = false;
-    const loadStats = async () => {
-      try {
-        const [p, s, ip, can, c] = await Promise.all([
-          physioService.getOrders({ status: 'pending', page_size: 1 }),
-          physioService.getOrders({ status: 'scheduled', page_size: 1 }),
-          physioService.getOrders({ status: 'in_progress', page_size: 1 }),
-          physioService.getOrders({ status: 'cancelled', page_size: 1 }),
-          physioService.getOrders({ status: 'completed', page_size: 1 }),
-        ]);
-        if (!cancelled) {
-          setStats({
-            pending: (p.count || 0) + (s.count || 0),
-            inProgress: ip.count || 0,
-            cancelled: can.count || 0,
-            completed: c.count || 0,
-            scheduled: s.count || 0,
-          });
-        }
-      } catch {
-        // best-effort; fall back to current page counts
-        if (!cancelled) {
-          setStats({
-            pending: orders.filter(o => o.status === 'pending' || o.status === 'scheduled').length,
-            inProgress: orders.filter(o => o.status === 'in_progress').length,
-            cancelled: orders.filter(o => o.status === 'cancelled').length,
-            completed: orders.filter(o => o.status === 'completed').length,
-            scheduled: orders.filter(o => o.status === 'scheduled').length,
-          });
-        }
-      }
-    };
-    void loadStats();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleStartSession = async () => {
     if (!selectedOrder) return;
@@ -797,6 +773,7 @@ export default function PhysioPoolQueuePage() {
       });
 
       await loadOrders();
+      await loadStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to start session');
     } finally {
@@ -827,6 +804,7 @@ export default function PhysioPoolQueuePage() {
       setIsViewDialogOpen(false);
       setSelectedOrder(null);
       await loadOrders();
+      await loadStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to end treatment');
     } finally {
@@ -876,6 +854,7 @@ export default function PhysioPoolQueuePage() {
       setIsViewDialogOpen(false);
       setSelectedOrder(null);
       await loadOrders();
+      await loadStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to complete session');
     } finally {
@@ -922,6 +901,7 @@ export default function PhysioPoolQueuePage() {
           order.status === 'in_progress' ? 'border-l-orange-500' :
           order.status === 'scheduled' ? 'border-l-blue-500' :
           order.status === 'cancelled' ? 'border-l-red-500' :
+          order.status === 'completed' ? 'border-l-emerald-500' :
           'border-l-yellow-500'
         }`}
         onClick={() => openViewDialog(order)}
@@ -939,7 +919,7 @@ export default function PhysioPoolQueuePage() {
                             <span className="font-semibold text-foreground truncate">{order.patient_name ?? ''}</span>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(order.status)}`}>
                               {order.status === 'in_progress' && <Activity className="h-2 w-2 mr-0.5" />}
-                              {order.status.replace('_', ' ')}
+                              {order.status.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                             </Badge>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
                               order.status === 'in_progress'
@@ -1006,7 +986,7 @@ export default function PhysioPoolQueuePage() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Card className="border-l-4 border-l-yellow-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
@@ -1023,6 +1003,25 @@ export default function PhysioPoolQueuePage() {
               </TooltipTrigger>
               <TooltipContent>
                 <p className="text-xs">New referrals awaiting first session</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Card className="border-l-4 border-l-blue-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('scheduled')}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Scheduled</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.scheduled}</p>
+                      </div>
+                      <Calendar className="h-8 w-8 text-blue-400" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Orders with a future appointment scheduled</p>
               </TooltipContent>
             </Tooltip>
 

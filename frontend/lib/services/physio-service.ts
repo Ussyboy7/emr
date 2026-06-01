@@ -294,6 +294,19 @@ class PhysioService {
     return apiFetch('/stats/');
   }
 
+  /**
+   * Get per-status counts for physiotherapy orders (current clinic scope).
+   */
+  async getOrderStats(): Promise<{
+    pending: number;
+    scheduled: number;
+    in_progress: number;
+    cancelled: number;
+    completed: number;
+  }> {
+    return apiFetch('/orders/stats/');
+  }
+
   getAnalyticsSummary(params?: {
     start_date?: string;
     end_date?: string;
