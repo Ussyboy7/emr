@@ -83,6 +83,16 @@ def apply_nursing_status_filter(
     Narrow visits for nursing pool queue (expects queryset already limited, e.g. in_progress + date).
     nursing_status: pending | vitals_incomplete | ready | sent_to_room | completed
 
+    Stages are mutually exclusive (the three nursing cards on the dashboard
+    should sum to Today's Visits, modulo 'Completed'):
+      - pending:           no vitals AND not in queue/session
+      - vitals_incomplete: partial vitals AND not in queue/session
+      - ready:             complete vitals AND not in queue/session
+      - sent_to_room:      in active queue
+      - in_consultation:   sent_to_room OR has non-cancelled session
+                           (metric only — see nursing_pool_metrics)
+      - completed:         visit status completed OR session completed
+
     sent_to_room_basis (only sent_to_room):
     - queued_at: restrict queue rows by queued_at date (legacy; matches historical dashboard cards).
     - visit_date: any active queue row for visits already in queryset (visit date defines the period).
@@ -93,8 +103,25 @@ def apply_nursing_status_filter(
     if not ns or ns == 'all':
         return queryset
 
+    # Nursing-stage filter: visits still in the nursing workflow, i.e. not
+    # yet routed to a doctor / physio / eye clinic AND not yet closed out.
+    # Excludes visits that are in an active queue, have a non-cancelled
+    # session, or have status='completed'.
+    still_in_nursing = (
+        ~Exists(ConsultationQueue.objects.filter(is_active=True, visit_id=OuterRef('pk')))
+        & ~Exists(
+            ConsultationSession.objects.filter(visit_id=OuterRef('pk')).exclude(
+                status='cancelled'
+            )
+        )
+        & ~Q(status='completed')
+    )
+
     if ns == 'pending':
-        return queryset.filter(~Exists(VitalReading.objects.filter(visit_id=OuterRef('pk'))))
+        return queryset.filter(
+            ~Exists(VitalReading.objects.filter(visit_id=OuterRef('pk'))),
+            still_in_nursing,
+        )
 
     if ns == 'completed':
         # Visit is fully closed out — either the visit status is completed, or a
@@ -116,18 +143,27 @@ def apply_nursing_status_filter(
     )
 
     if ns == 'vitals_incomplete':
-        return qs.filter(_has_vitals=True).filter(
+        # Has at least one vital reading AND at least one of temp/HR is null.
+        # The `_has_vitals` filter is required: a visit with zero vitals
+        # has both _lv_temp and _lv_hr NULL, which would otherwise match
+        # (and double-count with the 'pending' bucket).
+        return qs.filter(still_in_nursing, _has_vitals=True).filter(
             Q(_lv_temp__isnull=True) | Q(_lv_hr__isnull=True)
         )
 
     if ns == 'ready':
-        return qs.filter(_has_vitals=True).filter(
+        return qs.filter(still_in_nursing).filter(
             _lv_temp__isnull=False,
             _lv_hr__isnull=False,
         )
 
     if ns == 'sent_to_room':
-        q_items = ConsultationQueue.objects.filter(is_active=True, visit_id__isnull=False)
+        # Exclude status='completed' so this bucket is mutually exclusive
+        # with the 'completed' bucket (a visit that lingered in the queue
+        # after being completed belongs in 'completed', not here).
+        q_items = ConsultationQueue.objects.filter(
+            is_active=True, visit_id__isnull=False
+        )
         basis = (sent_to_room_basis or 'queued_at').strip().lower()
         if basis == 'visit_date':
             visit_ids = q_items.values('visit_id')
@@ -144,7 +180,7 @@ def apply_nursing_status_filter(
         elif end_date:
             q_items = q_items.filter(queued_at__date__lte=end_date)
         visit_ids = q_items.values('visit_id')
-        return queryset.filter(id__in=visit_ids)
+        return queryset.filter(id__in=visit_ids).exclude(status='completed')
 
     return queryset
 
@@ -155,11 +191,6 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     date = request.query_params.get('date')
     start_date = request.query_params.get('start_date')
     end_date = request.query_params.get('end_date')
-    # Comprehensive analytics (and shared date parser) use `start` / `end` (YYYY-MM-DD).
-    if not start_date and request.query_params.get('start'):
-        start_date = request.query_params.get('start')
-    if not end_date and request.query_params.get('end'):
-        end_date = request.query_params.get('end')
     if date:
         qs = qs.filter(date=date)
     elif start_date:
@@ -169,15 +200,13 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     elif end_date:
         qs = qs.filter(date__lte=end_date)
 
-    # Pool snapshot (no module start/end): only visits currently in nursing workflow.
-    # Date-range reports AND single-day `date=` filters include all non-cancelled
-    # visits so the dashboard reflects "all activities of the day" (managed-visit
-    # style). The legacy narrow behaviour (status='in_progress') only applies when
-    # the caller sends no date filter at all.
-    if request.query_params.get('start') and request.query_params.get('end'):
+    # Pool snapshot (no date filter): only visits currently in nursing workflow
+    # (status='in_progress' only). Date-range reports AND single-day `date=`
+    # filters include all non-cancelled visits so the dashboard reflects
+    # "all activities of the day" (managed-visit style).
+    has_date = bool(date or start_date or end_date)
+    if has_date:
         qs = qs.exclude(status='cancelled')
-    elif request.query_params.get('date'):
-        qs = qs.filter(date=request.query_params.get('date')).exclude(status='cancelled')
     else:
         qs = qs.filter(status='in_progress')
     if request.query_params.get('nursing_pool') == '1':
@@ -515,6 +544,10 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         if self.request.query_params.get('nursing_pool') == '1':
             queryset = _exclude_visits_with_completed_consultation(queryset)
+            # The pool queue is for active nursing work; cancelled visits
+            # should never appear here (matches the metrics endpoint which
+            # excludes cancelled for date/range filters).
+            queryset = queryset.exclude(status='cancelled')
 
         queryset = annotate_visit_history_flags(queryset)
 
@@ -529,19 +562,20 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """
         Aggregate counts for nursing pool dashboard cards (same filters as list: date, search, clinic, type, nursing_pool).
 
-        Cards:
+        Cards are MUTUALLY EXCLUSIVE so the math works
+        (pending + ready + in_consultation + completed = total):
           - total:                  all non-cancelled today
-          - pending_vitals:         today's visits awaiting first vital signs
-          - ready_for_consultation: today's visits with complete vitals, not yet routed
-          - in_consultation:        today's visits currently in an active consultation
-                                    (room/physio/eye queue OR in-progress/completed session)
-          - completed:              today's visits whose consultation is finished
-                                    (status='completed' OR session.status='completed')
+          - pending_vitals:         no vitals AND not in queue/session AND not completed
+          - ready_for_consultation: complete vitals AND not in queue/session AND not completed
+          - in_consultation:        in active queue OR has non-cancelled session, AND not completed
+          - completed:              visit.status='completed' OR session.status='completed'
         """
         from consultation.models import ConsultationQueue, ConsultationSession
 
         base = _nursing_pool_base_queryset_for_metrics(self, request)
-        visit_ids = list(base.values_list('id', flat=True))
+        # Exclude status='completed' from the active buckets so the math sums cleanly.
+        active = base.exclude(status='completed')
+        visit_ids = list(active.values_list('id', flat=True))
         in_queue_ids = set(
             ConsultationQueue.objects.filter(is_active=True, visit_id__in=visit_ids)
             .values_list('visit_id', flat=True)
