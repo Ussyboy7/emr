@@ -78,7 +78,8 @@ class VisitService {
     total: number;
     pending_vitals: number;
     ready_for_consultation: number;
-    sent_to_room: number;
+    in_consultation: number;
+    completed: number;
   }> {
     const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
     // Trailing slash before query (same pattern as `/visits/?page=1`) — Django route is `nursing-pool-metrics/`.

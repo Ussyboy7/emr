@@ -156,10 +156,14 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
         qs = qs.filter(date__lte=end_date)
 
     # Pool snapshot (no module start/end): only visits currently in nursing workflow.
-    # Date-range reports send both `start` and `end` (parse_analytics_dates); include
-    # scheduled + in_progress + completed so the report matches calendar visit dates.
+    # Date-range reports AND single-day `date=` filters include all non-cancelled
+    # visits so the dashboard reflects "all activities of the day" (managed-visit
+    # style). The legacy narrow behaviour (status='in_progress') only applies when
+    # the caller sends no date filter at all.
     if request.query_params.get('start') and request.query_params.get('end'):
         qs = qs.exclude(status='cancelled')
+    elif request.query_params.get('date'):
+        qs = qs.filter(date=request.query_params.get('date')).exclude(status='cancelled')
     else:
         qs = qs.filter(status='in_progress')
     if request.query_params.get('nursing_pool') == '1':
@@ -510,14 +514,47 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def nursing_pool_metrics(self, request):
         """
         Aggregate counts for nursing pool dashboard cards (same filters as list: date, search, clinic, type, nursing_pool).
+
+        Cards:
+          - total:                  all non-cancelled today
+          - pending_vitals:         today's visits awaiting first vital signs
+          - ready_for_consultation: today's visits with complete vitals, not yet routed
+          - in_consultation:        today's visits currently in an active consultation
+                                    (room/physio/eye queue OR in-progress/completed session)
+          - completed:              today's visits whose consultation is finished
+                                    (status='completed' OR session.status='completed')
         """
+        from consultation.models import ConsultationQueue, ConsultationSession
+
         base = _nursing_pool_base_queryset_for_metrics(self, request)
+        visit_ids = list(base.values_list('id', flat=True))
+        in_queue_ids = set(
+            ConsultationQueue.objects.filter(is_active=True, visit_id__in=visit_ids)
+            .values_list('visit_id', flat=True)
+        )
+        session_visit_ids = set(
+            ConsultationSession.objects.filter(visit_id__in=visit_ids)
+            .exclude(status__in=['cancelled'])
+            .values_list('visit_id', flat=True)
+        )
+        in_consultation_ids = in_queue_ids | session_visit_ids
+        in_consultation = sum(1 for vid in visit_ids if vid in in_consultation_ids)
+        completed = base.filter(
+            Q(status='completed')
+            | Exists(
+                ConsultationSession.objects.filter(
+                    visit_id=OuterRef('pk'),
+                    status='completed',
+                )
+            )
+        ).count()
         return Response(
             {
                 'total': base.count(),
                 'pending_vitals': apply_nursing_status_filter(base, 'pending', request).count(),
                 'ready_for_consultation': apply_nursing_status_filter(base, 'ready', request).count(),
-                'sent_to_room': apply_nursing_status_filter(base, 'sent_to_room', request).count(),
+                'in_consultation': in_consultation,
+                'completed': completed,
             }
         )
 

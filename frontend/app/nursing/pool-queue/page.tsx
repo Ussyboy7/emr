@@ -62,6 +62,17 @@ const formatWaitTime = (minutes: number): string => {
   return `${days}d ${remainingHours}h`;
 };
 
+/** Lower number = higher in the queue (action-required first, done at bottom). */
+const NURSING_STAGE_PRIORITY: Record<string, number> = {
+  'Pending': 1,
+  'Vitals Recorded': 2,
+  'Ready for Consultation': 3,
+  'Sent to Room': 4,
+  'Sent to Physiotherapy': 5,
+  'Sent to Eye Clinic': 6,
+  'Completed': 7,
+};
+
 // Types
 interface Patient {
   id: string;
@@ -75,7 +86,7 @@ interface Patient {
   visitTime: string;
   visitType: string;
   visitNotes?: string; // Notes / Special Instructions from visit
-  nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy';
+  nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' | 'Completed';
   consultationRoom?: string;
   vitals?: VitalsData;
   age?: number;
@@ -162,7 +173,8 @@ export default function NursingPoolQueuePage() {
     total: 0,
     pending_vitals: 0,
     ready_for_consultation: 0,
-    sent_to_room: 0,
+    in_consultation: 0,
+    completed: 0,
   });
   /** Silent poll: reuse consultation queue maps (room labels) instead of refetching. */
   const queueRoomCacheRef = useRef<Map<number, string>>(new Map());
@@ -228,8 +240,6 @@ export default function NursingPoolQueuePage() {
         }
 
         const metricsParams = {
-          status: 'in_progress' as const,
-          nursing_pool: 1 as const,
           date: dateParam,
           start_date: startDate,
           end_date: endDate,
@@ -250,12 +260,14 @@ export default function NursingPoolQueuePage() {
                   : undefined;
 
         const usePhysioClientFilter = statusFilter === 'sent-to-physiotherapy';
+        const useCompletedClientFilter = statusFilter === 'completed';
 
         const visitFetch = visitService.getVisits({
           ...metricsParams,
-          nursing_status: usePhysioClientFilter ? undefined : nursingStatusApi,
-          page: usePhysioClientFilter ? 1 : currentPage,
-          page_size: usePhysioClientFilter ? 250 : itemsPerPage,
+          nursing_status:
+            usePhysioClientFilter || useCompletedClientFilter ? undefined : nursingStatusApi,
+          page: usePhysioClientFilter || useCompletedClientFilter ? 1 : currentPage,
+          page_size: usePhysioClientFilter || useCompletedClientFilter ? 250 : itemsPerPage,
         });
 
         const result = await visitFetch;
@@ -411,7 +423,7 @@ export default function NursingPoolQueuePage() {
           const vitalsData = Number.isFinite(visitKey) ? vitalsMap.get(visitKey) : undefined;
 
           // Determine nursing status based on visit data, vitals, and queue status
-          let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' = 'Pending';
+          let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' | 'Completed' = 'Pending';
           const roomName = Number.isFinite(visitKey) ? queueVisitToRoom.get(visitKey) : undefined;
           const sentToPhysio = Number.isFinite(visitKey) && Boolean(physioCheckedInByVisitId[visitKey]);
           const sentToEyeClinic = Number.isFinite(visitKey) && Boolean(eyeCheckedInByVisitId[visitKey]);
@@ -422,8 +434,11 @@ export default function NursingPoolQueuePage() {
           const hasEyeClinic = visitClinics.some((c: string) =>
             clinicMatches(c, 'Eye Clinic', opdClinicNames)
           );
-          
-          if (roomName) {
+
+          if (visit.status === 'completed') {
+            // Visit is fully closed out — sort to bottom of the queue.
+            nursingStatus = 'Completed';
+          } else if (roomName) {
             // Patient has been sent to a room
             nursingStatus = 'Sent to Room';
           } else if (sentToEyeClinic && hasEyeClinic) {
@@ -486,20 +501,40 @@ export default function NursingPoolQueuePage() {
           };
         });
 
+        // Sort: action-required stages first, waiting stages next, Completed at the bottom.
+        // Within the same stage, earliest visit time wins (longest-waiting surfaces first).
+        const sortedByStage = [...transformedPatients].sort((a, b) => {
+          const pa = NURSING_STAGE_PRIORITY[a.nursingStatus] ?? 99;
+          const pb = NURSING_STAGE_PRIORITY[b.nursingStatus] ?? 99;
+          if (pa !== pb) return pa - pb;
+          const ta = new Date(`${a.visitDate}T${a.visitTime}`).getTime();
+          const tb = new Date(`${b.visitDate}T${b.visitTime}`).getTime();
+          const va = Number.isFinite(ta) ? ta : 0;
+          const vb = Number.isFinite(tb) ? tb : 0;
+          return va - vb;
+        });
+
         if (usePhysioClientFilter) {
-          const physioRows = transformedPatients.filter((p) => p.nursingStatus === 'Sent to Physiotherapy');
+          const physioRows = sortedByStage.filter((p) => p.nursingStatus === 'Sent to Physiotherapy');
           setPhysioClientBuffer(physioRows);
           setTotalVisitCount(physioRows.length);
           setPatients([]);
+        } else if (useCompletedClientFilter) {
+          const completedRows = sortedByStage.filter((p) => p.nursingStatus === 'Completed');
+          setPhysioClientBuffer(completedRows);
+          setTotalVisitCount(completedRows.length);
+          setPatients([]);
         } else {
           setPhysioClientBuffer(null);
-          setPatients(transformedPatients);
+          setPatients(sortedByStage);
           setTotalVisitCount(result.count ?? transformedPatients.length);
         }
 
         return usePhysioClientFilter
-          ? transformedPatients.filter((p) => p.nursingStatus === 'Sent to Physiotherapy')
-          : transformedPatients;
+          ? sortedByStage.filter((p) => p.nursingStatus === 'Sent to Physiotherapy')
+          : useCompletedClientFilter
+            ? sortedByStage.filter((p) => p.nursingStatus === 'Completed')
+            : sortedByStage;
       } catch (err) {
         console.error('Error loading nursing pool data:', err);
         if (isAuthenticationError(err)) {
@@ -592,7 +627,7 @@ export default function NursingPoolQueuePage() {
     visitDate: string;
     visitTime: string;
     visitType: string;
-    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic';
+    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' | 'Completed';
     consultationRoom?: string;
     vitals?: any;
     waitTime: number;
@@ -668,7 +703,7 @@ export default function NursingPoolQueuePage() {
       totalInPool: poolMetrics.total,
       pendingVitals: poolMetrics.pending_vitals,
       readyForConsultation: poolMetrics.ready_for_consultation,
-      sentToRooms: poolMetrics.sent_to_room,
+      inConsultation: poolMetrics.in_consultation,
     }),
     [poolMetrics]
   );
@@ -1040,6 +1075,7 @@ export default function NursingPoolQueuePage() {
       case 'Sent to Room': return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
       case 'Sent to Physiotherapy': return 'border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10';
       case 'Sent to Eye Clinic': return 'border-sky-500/50 text-sky-600 dark:text-sky-400 bg-sky-500/10';
+      case 'Completed': return 'border-slate-500/50 text-slate-600 dark:text-slate-400 bg-slate-500/10';
       default: return 'border-gray-500/50 text-gray-600 dark:text-gray-400 bg-gray-500/10';
     }
   };
@@ -1108,7 +1144,7 @@ export default function NursingPoolQueuePage() {
             { label: "Today's Visits", value: stats.totalInPool, icon: Users, color: 'text-rose-500', bg: 'bg-rose-500/10' },
             { label: 'Pending Vitals', value: stats.pendingVitals, icon: Stethoscope, color: 'text-amber-500', bg: 'bg-amber-500/10' },
             { label: 'Ready for Consultation', value: stats.readyForConsultation, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-            { label: 'Sent to Rooms', value: stats.sentToRooms, icon: ArrowRight, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+            { label: 'In Consultation', value: stats.inConsultation, icon: Activity, color: 'text-violet-500', bg: 'bg-violet-500/10' },
           ].map((stat, i) => (
             <Card key={i} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4">
@@ -1158,6 +1194,7 @@ export default function NursingPoolQueuePage() {
                     <SelectItem value="ready-for-consultation">Ready for Consultation</SelectItem>
                     <SelectItem value="sent-to-room">Sent to Room</SelectItem>
                     <SelectItem value="sent-to-physiotherapy">Checked in to Physiotherapy</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>

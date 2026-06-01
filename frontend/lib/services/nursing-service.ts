@@ -8,7 +8,7 @@ export interface NursingPoolDashboardMetrics {
   totalInPool: number;
   pendingVitals: number;
   readyForConsultation: number;
-  sentToRoom: number;
+  inConsultation: number;
 }
 
 export interface NursingPendingTask {
@@ -135,7 +135,7 @@ class NursingService {
       totalInPool: metrics.total ?? 0,
       pendingVitals: metrics.pending_vitals ?? 0,
       readyForConsultation: metrics.ready_for_consultation ?? 0,
-      sentToRoom: metrics.sent_to_room ?? 0,
+      inConsultation: metrics.in_consultation ?? 0,
     };
   }
 

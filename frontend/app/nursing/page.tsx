@@ -37,7 +37,7 @@ const defaultMetrics: NursingPoolDashboardMetrics = {
   totalInPool: 0,
   pendingVitals: 0,
   readyForConsultation: 0,
-  sentToRoom: 0,
+  inConsultation: 0,
 };
 
 const defaultDashboard: NursingDashboardData = {
@@ -185,8 +185,8 @@ export default function NursingDashboardPage() {
                   activeHint="Can send to room"
                 />
                 <OverviewCard
-                  label="Sent to Rooms"
-                  value={metrics.sentToRoom}
+                  label="In Consultation"
+                  value={metrics.inConsultation}
                   icon={DoorOpen}
                   activeTone="violet"
                   emptyHint="None sent to rooms"
