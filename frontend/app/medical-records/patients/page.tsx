@@ -996,8 +996,8 @@ function PatientsListPageContent() {
         occupation: editForm.occupation.trim(),
       };
 
-      // Employee/retiree: editable staff P.N. Dependent: IDs come from principal only — do not PATCH personal_number.
-      if (cat !== 'Dependent') {
+      // Send personal_number: always for admin users, otherwise only for Employee/Retiree.
+      if (isAdminUser || (cat !== 'Dependent' && cat !== 'NonNPA')) {
         updateData.personal_number = editForm.personalNumber.trim();
       }
 
@@ -1612,10 +1612,9 @@ function PatientsListPageContent() {
                             </SelectContent>
                           </Select>
                         </div>
-                        {selectedPatient.category !== "NonNPA" &&
-                          selectedPatient.category !== "Dependent" && (
+                        {((selectedPatient.category !== "NonNPA" && selectedPatient.category !== "Dependent") || isAdminUser) && (
                             <div className="space-y-2">
-                              <Label>Personal number *</Label>
+                              <Label>Personal number {selectedPatient.category !== "NonNPA" && selectedPatient.category !== "Dependent" ? '*' : ''}</Label>
                               <Input
                                 value={editForm.personalNumber}
                                 onChange={(e) => setEditForm((prev) => ({ ...prev, personalNumber: e.target.value }))}
