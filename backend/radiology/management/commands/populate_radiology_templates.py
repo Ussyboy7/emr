@@ -43,8 +43,6 @@ class Command(BaseCommand):
             {'code': 'XR-SHOULDER', 'name': 'SHOULDER', 'category': 'xray', 'modality': 'X-Ray', 'body_part': 'Shoulder', 'radiation_exposure': 'moderate'},
             {'code': 'XR-SKULL-APLAT', 'name': 'SKULL AP/LAT', 'category': 'xray', 'modality': 'X-Ray', 'body_part': 'Skull', 'radiation_exposure': 'moderate'},
             {'code': 'XR-THORACIC-INLET-APLAT', 'name': 'THORACIC INLET (AP/LAT)', 'category': 'xray', 'modality': 'X-Ray', 'body_part': 'Thoracic Inlet', 'radiation_exposure': 'moderate'},
-            {'code': 'XR-THORACIC-SPINE-APLAT', 'name': 'THORACIC SPINE AP/LAT', 'category': 'xray', 'modality': 'X-Ray', 'body_part': 'Thoracic Spine', 'radiation_exposure': 'moderate'},
-            {'code': 'XR-THORACOLUMBAR-APLAT', 'name': 'THORACOLUMBAR SPINE AP/LAT', 'category': 'xray', 'modality': 'X-Ray', 'body_part': 'Thoracolumbar Spine', 'radiation_exposure': 'moderate'},
             {'code': 'XR-TMJ', 'name': 'TMJ', 'category': 'xray', 'modality': 'X-Ray', 'body_part': 'TMJ', 'radiation_exposure': 'low'},
             {'code': 'XR-WRIST', 'name': 'WRIST', 'category': 'xray', 'modality': 'X-Ray', 'body_part': 'Wrist', 'radiation_exposure': 'low'},
         ]
