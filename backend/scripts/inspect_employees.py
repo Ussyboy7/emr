@@ -22,8 +22,7 @@ def fmt(p):
         f"PN={p.personal_number!r}  emp_type={p.employee_type!r}  "
         f"division={p.division!r}  location={p.location!r}  "
         f"phone={p.phone!r}  email={p.email!r}  "
-        f"principal_staff_id={p.principal_staff_id}  "
-        f"merged_into_id={p.merged_into_id}"
+        f"principal_staff_id={p.principal_staff_id}"
     )
 
 
