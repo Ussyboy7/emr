@@ -22,6 +22,9 @@ class ActivityLog(models.Model):
         ('verify', 'Verify'),
         ('approve', 'Approve'),
         ('reject', 'Reject'),
+        ('merge', 'Merge'),
+        ('promote', 'Promote'),
+        ('convert_to_csr', 'Convert to CSR'),
     ]
     
     SEVERITY_CHOICES = [

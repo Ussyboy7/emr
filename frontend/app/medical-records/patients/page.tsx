@@ -35,7 +35,8 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { 
   Search, Filter, Users, Phone, Eye, 
   UserPlus, Calendar, FileText, Edit, X, Loader2,
-  Activity, UserCheck, AlertTriangle, Camera, Upload, Trash2, Plus
+  Activity, UserCheck, AlertTriangle, Camera, Upload, Trash2, Plus,
+  GitMerge
 } from 'lucide-react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { PatientOverviewModal } from '@/components/shared/PatientOverviewModal';
@@ -44,6 +45,7 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { useWorkLocationOptions } from '@/hooks/use-work-location-options';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedFiltersButton } from '@/components/shared/AdvancedFiltersButton';
+import { MergePatientDialog } from './merge-patient-dialog';
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -291,6 +293,9 @@ function PatientsListPageContent() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
   const [deletingPatient, setDeletingPatient] = useState(false);
+  // Merge state — admin-only "fold this record into another"
+  const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false);
+  const [patientToMerge, setPatientToMerge] = useState<Patient | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
@@ -643,6 +648,19 @@ function PatientsListPageContent() {
   const openCsrConversion = (patient: Patient) => {
     setPatientToConvertCsr(patient);
     setIsCsrConversionOpen(true);
+  };
+
+  // Merge handler — opens the side-by-side merge dialog.
+  const openMergeDialog = (patient: Patient) => {
+    // The local Patient and the dialog's LocalPatient are structurally
+    // compatible; cast at the boundary.
+    setPatientToMerge(patient as never);
+    setIsMergeDialogOpen(true);
+  };
+
+  const onMergeSuccess = async () => {
+    // The loser was just tombstoned; refresh the list so it disappears.
+    await loadPatients();
   };
 
   const handleCsrConversion = async () => {
@@ -1304,6 +1322,17 @@ function PatientsListPageContent() {
                                   title="Delete Patient"
                                 >
                                   <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
+                                </Button>
+                              )}
+                              {isAdminUser && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => openMergeDialog(patient)}
+                                  title="Merge with another patient (admin)"
+                                >
+                                  <GitMerge className="h-4 w-4 text-muted-foreground hover:text-amber-500" />
                                 </Button>
                               )}
                               {patient.category === 'Employee' && (
@@ -2576,6 +2605,14 @@ function PatientsListPageContent() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Merge patient dialog — admin only */}
+        <MergePatientDialog
+          open={isMergeDialogOpen}
+          onOpenChange={setIsMergeDialogOpen}
+          loser={patientToMerge}
+          onSuccess={onMergeSuccess}
+        />
       </div>
     </DashboardLayout>
   );

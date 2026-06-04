@@ -240,11 +240,25 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
-        """Return queryset filtered by active patients by default."""
+        """Return queryset filtered by active patients by default.
+
+        Tombstones (records folded into another patient via merge) are
+        excluded by default. Admins can opt in with `?include_merged=1`
+        (e.g. for cleanup / audit) and see only tombstones with
+        `?only_merged=1`. The `?include_inactive=true` flag continues to
+        surface any other inactive (non-merged) records.
+        """
         queryset = Patient.objects.all()
         # Filter by active status if not explicitly requested
         if self.request.query_params.get('include_inactive') != 'true':
             queryset = queryset.filter(is_active=True)
+        # Filter out merge tombstones unless explicitly requested
+        include_merged = self.request.query_params.get('include_merged') == '1'
+        only_merged = self.request.query_params.get('only_merged') == '1'
+        if only_merged:
+            queryset = queryset.filter(merged_into__isnull=False)
+        elif not include_merged:
+            queryset = queryset.filter(merged_into__isnull=True)
         return self.scope_queryset(queryset).select_related('principal_staff', 'created_by', 'updated_by')
     
     def get_serializer_class(self):
@@ -510,6 +524,105 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'patient': serializer.data,
             'dependents_converted': dependent_count,
         })
+
+    @action(detail=True, methods=['post'], url_path='merge')
+    def merge(self, request, pk=None):
+        """Merge this patient INTO another patient (the loser is tombstoned).
+
+        Body:
+            {
+              "winner_id":  <int>,     # The patient to keep (canonical record).
+              "reason":     "<str>"    # Required. Audit-trail reason.
+            }
+
+        Effect:
+            - All clinical FKs (visits, vitals, lab orders, prescriptions,
+              consults, queue items, diagnoses, radiology, etc.) are
+              re-pointed from this patient (the loser) to the winner.
+            - Dependents of this patient are re-parented to the winner.
+            - The OneToOne MedicalHistory is either re-pointed or merged.
+            - Empty fields on the winner are filled from the loser.
+            - The loser is tombstoned (patient_id='MERGED-{id}-{date}',
+              is_active=False, merged_into=winner). A PatientMerge audit
+              row is written with full snapshots.
+
+        Permission: super admin or system administrator / admin staff.
+        """
+        if not self._is_admin_user(request.user):
+            raise PermissionDenied('Only super admin or admin users can merge patients.')
+
+        winner_id = request.data.get('winner_id')
+        reason = (request.data.get('reason') or '').strip()
+        if not winner_id:
+            return Response({'error': 'winner_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not reason:
+            return Response({'error': 'reason is required for audit.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        loser = self.get_object()
+        if int(winner_id) == loser.id:
+            return Response({'error': 'Cannot merge a record with itself.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .merge import merge_patients
+        try:
+            result = merge_patients(
+                winner_id=int(winner_id),
+                loser_id=loser.id,
+                user=request.user,
+                reason=reason,
+            )
+        except Patient.DoesNotExist:
+            return Response({'error': f'Winner patient {winner_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Audit log entry for the patient module.
+        AuditService.log_patient_action(
+            user=request.user,
+            action='merge',
+            patient=loser,
+            module='medical_records',
+            description=(
+                f'Merged patient {loser.patient_id} '
+                f'(id={loser.id}, name={loser.get_full_name()}) into '
+                f'patient_id={result["winner_patient_id"]} (id={result["winner_id"]}). '
+                f'Reason: {reason}'
+            ),
+            old_values={'patient_id': result['loser_old_patient_id'], 'is_active': True},
+            new_values={'patient_id': result['loser_new_patient_id'], 'is_active': False, 'merged_into': result['winner_id']},
+            request=request,
+        )
+
+        winner = Patient.objects.get(pk=result['winner_id'])
+        return Response({
+            'winner_id': result['winner_id'],
+            'winner_patient_id': result['winner_patient_id'],
+            'loser_id': result['loser_id'],
+            'loser_old_patient_id': result['loser_old_patient_id'],
+            'loser_new_patient_id': result['loser_new_patient_id'],
+            'counters': result['counters'],
+            'merge_audit_id': result['merge_audit_id'],
+            'winner': self.get_serializer(winner).data,
+        })
+
+    @action(detail=True, methods=['get'], url_path='merge-audit')
+    def merge_audit(self, request, pk=None):
+        """Return the merge-audit rows where this patient is either winner or loser."""
+        from .models import PatientMerge
+        rows = PatientMerge.objects.filter(
+            Q(winner_id=pk) | Q(loser_id=pk)
+        ).order_by('-merged_at')
+        data = [{
+            'id': r.id,
+            'winner_id': r.winner_id,
+            'winner_patient_id': r.winner.patient_id,
+            'loser_id': r.loser_id,
+            'loser_patient_id': r.loser.patient_id,
+            'merged_at': r.merged_at,
+            'merged_by': r.merged_by.username if r.merged_by else None,
+            'reason': r.reason,
+            'counters': {k: v for k, v in r.__dict__.items() if k.endswith('_repointed') or k.endswith('_merged')},
+        } for r in rows]
+        return Response(data)
 
 
 class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):

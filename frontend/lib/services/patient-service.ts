@@ -291,6 +291,47 @@ class PatientService {
       method: 'PATCH',
     });
   }
+
+  /**
+   * Merge this patient (loser) into another patient (winner). All clinical
+   * FKs (visits, vitals, lab orders, prescriptions, consults, etc.) are
+   * re-pointed to the winner; the loser is tombstoned. Admin-only.
+   */
+  async mergePatient(
+    loserId: number,
+    winnerId: number,
+    reason: string,
+  ): Promise<{
+    winner_id: number;
+    winner_patient_id: string;
+    loser_id: number;
+    loser_old_patient_id: string;
+    loser_new_patient_id: string;
+    counters: Record<string, number>;
+    merge_audit_id: number;
+    winner: Patient;
+  }> {
+    return apiFetch(`/patients/${loserId}/merge/`, {
+      method: 'POST',
+      body: JSON.stringify({ winner_id: winnerId, reason }),
+    });
+  }
+
+  async getMergeAudit(patientId: number): Promise<
+    Array<{
+      id: number;
+      winner_id: number;
+      winner_patient_id: string;
+      loser_id: number;
+      loser_patient_id: string;
+      merged_at: string;
+      merged_by: string | null;
+      reason: string;
+      counters: Record<string, number>;
+    }>
+  > {
+    return apiFetch(`/patients/${patientId}/merge-audit/`);
+  }
 }
 
 export const patientService = new PatientService();
