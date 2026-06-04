@@ -175,6 +175,20 @@ class Patient(models.Model):
     )
     is_active = models.BooleanField(default=True)
 
+    # Merge support. If merged_into is set, this record has been folded into
+    # another patient. Clinical FKs were re-pointed at merge time; this row
+    # is kept for audit only and filtered from default list endpoints.
+    merged_into = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="merged_records",
+        help_text="If set, this record was merged into the referenced patient.",
+    )
+    merged_at = models.DateTimeField(null=True, blank=True)
+    merge_reason = models.TextField(blank=True)
+
     class Meta:
         db_table = "patients"
         ordering = ["-created_at"]
@@ -908,3 +922,70 @@ class MedicalCertificate(models.Model):
                 self.doctor_name_snapshot = str(self.issued_by)
 
         super().save(*args, **kwargs)
+
+
+class PatientMerge(models.Model):
+    """
+    Audit row for a patient merge event.
+
+    Soft merge: the loser's clinical FKs (visits, lab orders, prescriptions,
+    consultations, etc.) are re-pointed to the winner at the time of merge.
+    The loser's row is kept (tombstoned) with `is_active=False` and a
+    `merged_into` pointer so the original patient_id is preserved in
+    `loser_snapshot` and a tombstone `patient_id` like
+    `MERGED-{loser.id}-{date}` is assigned to free the unique constraint.
+
+    Reversible: the audit row + snapshots + tombstoned loser row are
+    sufficient to reverse the merge (re-activate loser, re-point FKs back).
+    """
+
+    winner = models.ForeignKey(
+        Patient, on_delete=models.PROTECT, related_name="merge_winner_rows"
+    )
+    loser = models.ForeignKey(
+        Patient, on_delete=models.PROTECT, related_name="merge_loser_rows"
+    )
+    merged_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="patient_merges"
+    )
+    merged_at = models.DateTimeField(auto_now_add=True)
+    reason = models.TextField(help_text="Why these records were merged.")
+
+    # Full snapshots of both records at the time of merge (preserved forever).
+    winner_snapshot = models.JSONField()
+    loser_snapshot = models.JSONField()
+
+    # Counters — one per related model that had rows re-pointed.
+    visits_repointed = models.PositiveIntegerField(default=0)
+    vital_readings_repointed = models.PositiveIntegerField(default=0)
+    lab_orders_repointed = models.PositiveIntegerField(default=0)
+    lab_results_repointed = models.PositiveIntegerField(default=0)
+    prescriptions_repointed = models.PositiveIntegerField(default=0)
+    consult_sessions_repointed = models.PositiveIntegerField(default=0)
+    queue_items_repointed = models.PositiveIntegerField(default=0)
+    referrals_repointed = models.PositiveIntegerField(default=0)
+    diagnoses_repointed = models.PositiveIntegerField(default=0)
+    admissions_repointed = models.PositiveIntegerField(default=0)
+    physio_orders_repointed = models.PositiveIntegerField(default=0)
+    eye_orders_repointed = models.PositiveIntegerField(default=0)
+    nursing_orders_repointed = models.PositiveIntegerField(default=0)
+    procedures_repointed = models.PositiveIntegerField(default=0)
+    radiology_orders_repointed = models.PositiveIntegerField(default=0)
+    radiology_reports_repointed = models.PositiveIntegerField(default=0)
+    appointments_repointed = models.PositiveIntegerField(default=0)
+    medical_certs_repointed = models.PositiveIntegerField(default=0)
+    medical_history_repointed = models.PositiveIntegerField(default=0)
+    medical_history_merged = models.PositiveIntegerField(default=0)
+    dependents_repointed = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "patient_merges"
+        ordering = ["-merged_at"]
+        indexes = [
+            models.Index(fields=["winner"]),
+            models.Index(fields=["loser"]),
+            models.Index(fields=["merged_at"]),
+        ]
+
+    def __str__(self):
+        return f"Merge #{self.id}: {self.loser.patient_id} → {self.winner.patient_id}"
