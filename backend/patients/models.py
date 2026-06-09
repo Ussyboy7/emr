@@ -978,6 +978,11 @@ class PatientMerge(models.Model):
     medical_history_merged = models.PositiveIntegerField(default=0)
     dependents_repointed = models.PositiveIntegerField(default=0)
 
+    # Row-IDs re-pointed at merge time, keyed by model name, e.g.
+    # {"Visit": [1, 2], "VitalReading": [3], "MedicalHistory": {"pk": 6, "action": "repoint"}}.
+    # Populated so un-merge can accurately revert without timestamp heuristics.
+    repointed_rows = models.JSONField(default=dict, blank=True)
+
     class Meta:
         db_table = "patient_merges"
         ordering = ["-merged_at"]

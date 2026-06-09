@@ -17,6 +17,7 @@ import { eyeCareService } from '@/lib/services/eye-care-service';
 import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
+import { MergeHistoryTab } from '@/components/patient-overview/MergeHistoryTab';
 import {
   getVisitServiceClinicsDisplay,
 } from '@/lib/utils/clinic-utils';
@@ -24,7 +25,7 @@ import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 import {
   User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
   AlertTriangle, Loader2, Mail, MapPin, Droplets,
-  ClipboardList, Clock, Users, UserPlus
+  ClipboardList, Clock, Users, UserPlus, GitMerge
 } from 'lucide-react';
 
 interface Patient {
@@ -859,6 +860,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 <TabsTrigger value="dependents" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
                   <Users className="h-4 w-4 mr-2" />Dependents
                 </TabsTrigger>
+                <TabsTrigger value="merge-history" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                  <GitMerge className="h-4 w-4 mr-2" />Merge History
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -1284,6 +1288,21 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                     </Card>
                   ))}
                 </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="merge-history" className="flex-1 overflow-y-auto px-6 py-4 mt-0">
+              {patientDetail?.numericId ? (
+                <MergeHistoryTab
+                  patientNumericId={patientDetail.numericId}
+                  onUnmerged={() => {
+                    // Re-load patient data so the latest state is reflected
+                    // (in case the loser is now re-activated and visible).
+                    void loadPatientData();
+                  }}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">Patient not loaded.</p>
               )}
             </TabsContent>
 

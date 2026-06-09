@@ -327,10 +327,33 @@ class PatientService {
       merged_at: string;
       merged_by: string | null;
       reason: string;
+      has_repointed_rows: boolean;
       counters: Record<string, number>;
     }>
   > {
     return apiFetch(`/patients/${patientId}/merge-audit/`);
+  }
+
+  /**
+   * Reverse a previous merge. Admin-only emergency undo. Uses the merge
+   * audit row's stored repointed_rows to accurately revert FK re-points
+   * and restore the loser's tombstone record.
+   */
+  async unmergePatient(
+    winnerId: number,
+    mergeAuditId: number,
+  ): Promise<{
+    audit_id: number;
+    original_audit_id: number;
+    winner_id: number;
+    winner_patient_id: string;
+    loser_id: number;
+    loser_patient_id: string;
+  }> {
+    return apiFetch(`/patients/${winnerId}/unmerge/`, {
+      method: 'POST',
+      body: JSON.stringify({ merge_audit_id: mergeAuditId }),
+    });
   }
 }
 

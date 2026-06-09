@@ -620,9 +620,76 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'merged_at': r.merged_at,
             'merged_by': r.merged_by.username if r.merged_by else None,
             'reason': r.reason,
+            'has_repointed_rows': bool(r.repointed_rows),
             'counters': {k: v for k, v in r.__dict__.items() if k.endswith('_repointed') or k.endswith('_merged')},
         } for r in rows]
         return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='unmerge')
+    def unmerge(self, request, pk=None):
+        """Reverse a previous merge. Admin-only emergency undo.
+
+        Body:
+            {
+              "merge_audit_id": <int>   # Required. The PatientMerge audit row to reverse.
+            }
+
+        Effect:
+            - Clinical FKs are re-pointed back from the winner to the loser.
+            - The loser's tombstone record is restored (patient_id, is_active,
+              merged_into, etc.).
+            - An un-merge audit row is written.
+        """
+        if not self._is_admin_user(request.user):
+            raise PermissionDenied('Only super admin or admin users can un-merge patients.')
+
+        from .models import PatientMerge
+
+        audit_id = request.data.get('merge_audit_id')
+        if not audit_id:
+            return Response(
+                {'error': 'merge_audit_id is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verify the audit row involves this patient as the winner.
+        try:
+            audit = PatientMerge.objects.get(pk=audit_id)
+        except PatientMerge.DoesNotExist:
+            return Response(
+                {'error': f'Merge audit row {audit_id} not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if audit.winner_id != int(pk):
+            return Response(
+                {'error': 'This patient is not the winner in the specified merge row.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .merge import unmerge_patients
+        try:
+            result = unmerge_patients(audit_id=audit_id, user=request.user)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Audit log.
+        AuditService.log_patient_action(
+            user=request.user,
+            action='merge',
+            patient=audit.loser,
+            module='medical_records',
+            description=(
+                f'UNMERGED: Reversed merge #{audit.id} '
+                f'({audit.loser.patient_id} → {audit.winner.patient_id}). '
+                f'Loser restored as {result["loser_patient_id"]}.'
+            ),
+            old_values={'merged_into': audit.winner.patient_id, 'is_active': False},
+            new_values={'merged_into': None, 'is_active': True, 'patient_id': result['loser_patient_id']},
+            request=request,
+        )
+
+        return Response(result)
 
 
 class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):

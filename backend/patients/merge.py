@@ -22,9 +22,9 @@ Performs a soft merge:
   - A `PatientMerge` audit row is written with full snapshots of both
     records and per-model repointed counts.
 
-Reversible: the loser's snapshot is preserved in the audit row and the
-tombstoned row retains the old `patient_id` history. Re-pointing back is
-a manual operation (not exposed yet) but data is not destroyed.
+Reversible: `unmerge_patients()` uses the `repointed_rows` JSON stored on
+the `PatientMerge` audit row to accurately revert all FK re-points and
+restore the loser's tombstone record.
 """
 from __future__ import annotations
 
@@ -174,6 +174,7 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
         loser_snap = PatientSerializer(loser).data
 
         counters = {}
+        repointed_rows = {}  # model_name → [list of PKs] (for un-merge)
 
         # 2) Re-point FK-to-Patient for every related model.
         for qualified in RELATED_TO_PATIENT:
@@ -182,17 +183,22 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
             audit_field = RELATED_AUDIT_FIELD.get(model_name)
             if not audit_field:
                 continue
-            n = (
+            rows = list(
                 model.objects.filter(patient_id=loser)
                 .exclude(patient_id=winner)  # safety
-                .update(patient_id=winner)
+                .values_list("pk", flat=True)
             )
-            counters[audit_field] = counters.get(audit_field, 0) + n
+            if rows:
+                model.objects.filter(pk__in=rows).update(patient_id=winner)
+                repointed_rows[model_name] = rows
+            counters[audit_field] = counters.get(audit_field, 0) + len(rows)
 
         # 3) Handle OneToOne (MedicalHistory).
         mh_audit_repointed = 0
         mh_audit_merged = 0
+        oto_entries = {}
         for qualified, model in ONETOONE_TO_PATIENT:
+            model_name = model.__name__
             try:
                 loser_oh = model.objects.get(patient=loser)
             except model.DoesNotExist:
@@ -203,6 +209,7 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
                 # No conflict — re-point loser's row to winner.
                 loser_oh.patient = winner
                 loser_oh.save()
+                oto_entries[model_name] = {"pk": loser_oh.pk, "action": "repoint"}
                 mh_audit_repointed += 1
                 continue
             # Both have a row — merge fields then delete loser.
@@ -216,20 +223,29 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
                 if not winner_val and loser_val:
                     setattr(winner_oh, f.name, loser_val)
             winner_oh.save()
+            oto_entries[model_name] = {"action": "merged", "pk": loser_oh.pk}
             loser_oh.delete()
             mh_audit_merged += 1
+        if oto_entries:
+            repointed_rows["__onetoone__"] = oto_entries
         counters["medical_history_repointed"] = mh_audit_repointed
         counters["medical_history_merged"] = mh_audit_merged
 
         # 4) Re-point self-FKs (dependents of the loser → winner).
         deps_repointed = 0
+        dep_rows = {}
         for fk_field in PATIENT_SELF_FKS:
-            n = (
+            pks = list(
                 Patient.objects.filter(**{fk_field: loser})
                 .exclude(pk=winner.pk)  # safety
-                .update(**{fk_field: winner})
+                .values_list("pk", flat=True)
             )
-            deps_repointed += n
+            if pks:
+                Patient.objects.filter(pk__in=pks).update(**{fk_field: winner})
+                dep_rows[fk_field] = pks
+            deps_repointed += len(pks)
+        if dep_rows:
+            repointed_rows["__self_fks__"] = dep_rows
         counters["dependents_repointed"] = deps_repointed
 
         # 5) Copy empty fields from loser to winner.
@@ -270,6 +286,7 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
             reason=reason,
             winner_snapshot=winner_snap,
             loser_snapshot=loser_snap,
+            repointed_rows=repointed_rows,
             **counters,
         )
 
@@ -281,4 +298,119 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
         "loser_new_patient_id": loser.patient_id,
         "counters": counters,
         "merge_audit_id": audit.id,
+        "repointed_rows": repointed_rows,
+    }
+
+
+def unmerge_patients(audit_id: int, user) -> dict:
+    """
+    Reverse a patient merge identified by *audit_id*.
+
+    Uses the ``repointed_rows`` JSON from the ``PatientMerge`` audit row to
+    accurately re-point FKs back from the winner to the loser, then restores
+    the loser's tombstone record (``patient_id``, ``is_active``, ``merged_into``,
+    ``merged_at``, ``merge_reason``).
+
+    Raises:
+        PatientMerge.DoesNotExist if audit_id is invalid.
+        PermissionDenied if user is not an admin.
+        ValidationError if the audit row has no repointed_rows data
+            (legacy merge that cannot be automatically reversed).
+    """
+    if not _is_admin(user):
+        raise PermissionDenied(
+            "Only super admin or admin users can un-merge patients."
+        )
+
+    with transaction.atomic():
+        audit = PatientMerge.objects.select_related(
+            "winner", "loser"
+        ).select_for_update().get(pk=audit_id)
+
+        winner = audit.winner
+        loser = audit.loser
+        orig_loser_patient_id = audit.loser_snapshot.get("patient_id", loser.patient_id)
+
+        if not audit.repointed_rows:
+            raise ValidationError(
+                "This merge was performed before repointed_rows was stored; "
+                "automatic un-merge is not possible. Contact a developer to "
+                "reverse manually from the audit snapshots."
+            )
+
+        repointed = audit.repointed_rows
+
+        # 1) Re-point FK-to-Patient rows back: winner → loser.
+        for qualified in RELATED_TO_PATIENT:
+            model = _import_model(qualified)
+            model_name = model.__name__
+            pks = repointed.get(model_name, [])
+            if pks:
+                n = model.objects.filter(pk__in=pks, patient_id=winner).update(
+                    patient_id=loser
+                )
+                if n != len(pks):
+                    pass  # Some rows may have been deleted since merge; that's OK.
+
+        # 2) Handle OneToOne reversal.
+        oto = repointed.get("__onetoone__", {})
+        for qualified, model_cls in ONETOONE_TO_PATIENT:
+            model_name = model_cls.__name__
+            entry = oto.get(model_name)
+            if not entry:
+                continue
+            if entry.get("action") == "repoint":
+                # Re-point the row back to the loser.
+                try:
+                    oh = model_cls.objects.get(pk=entry["pk"])
+                except model_cls.DoesNotExist:
+                    continue
+                oh.patient = loser
+                oh.save()
+            elif entry.get("action") == "merged":
+                # Row was merged & deleted — skip (can't split merged data).
+                pass
+
+        # 3) Re-point self-FKs back: winner → loser.
+        sfk = repointed.get("__self_fks__", {})
+        for fk_field, pks in sfk.items():
+            actual = Patient.objects.filter(pk__in=pks, **{fk_field: winner})
+            if actual.exists():
+                actual.update(**{fk_field: loser})
+
+        # 4) Restore the loser's tombstone record.
+        loser.patient_id = orig_loser_patient_id
+        loser.is_active = True
+        loser.merged_into = None
+        loser.merged_at = None
+        loser.merge_reason = ""
+        loser.save(
+            update_fields=[
+                "patient_id",
+                "is_active",
+                "merged_into",
+                "merged_at",
+                "merge_reason",
+                "updated_at",
+            ]
+        )
+
+        # 5) Write an un-merge audit row (winner/loser swapped roles).
+        unmerge_audit = PatientMerge.objects.create(
+            winner=winner,
+            loser=loser,
+            merged_by=user,
+            reason=f"UNMERGED: {audit.reason}",
+            winner_snapshot=audit.winner_snapshot,
+            loser_snapshot=audit.loser_snapshot,
+            repointed_rows={},
+        )
+
+    return {
+        "audit_id": unmerge_audit.id,
+        "original_audit_id": audit.id,
+        "winner_id": winner.id,
+        "winner_patient_id": winner.patient_id,
+        "loser_id": loser.id,
+        "loser_patient_id": loser.patient_id,
     }
