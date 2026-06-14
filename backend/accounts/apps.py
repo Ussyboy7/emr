@@ -8,4 +8,5 @@ class AccountsConfig(AppConfig):
     def ready(self):
         """Import signals when app is ready."""
         import accounts.signals  # noqa
+        import accounts.spectacular  # noqa: F401 — register OpenAPI auth extensions
 

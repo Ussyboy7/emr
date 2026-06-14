@@ -2,19 +2,24 @@
 
 import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  Activity, Syringe, FileText, Printer, Calendar, TrendingUp, Users
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
+import {
+  ArrowLeft,
+  Activity,
+  Syringe,
+  FileText,
+  Calendar,
+  TrendingUp,
+  Users,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
 
 interface ServiceData {
   sn: number;
@@ -31,118 +36,76 @@ interface ServicesSummary {
   total_female: number;
 }
 
-interface MedicalCertificateSickLeave {
-  certificates_issued: number;
-  total_sick_leave_days: number;
-  male: number;
-  female: number;
-}
+const emptySummary: ServicesSummary = { total: 0, total_male: 0, total_female: 0 };
 
 export default function ServicesActivitiesReport() {
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<string>("monthly");
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    periodLabel,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    years,
+  } = useMrReportPeriod("all");
+
   const [data, setData] = useState<ServiceData[]>([]);
-  const [summary, setSummary] = useState<ServicesSummary>({
-    total: 0,
-    total_male: 0,
-    total_female: 0,
-  });
-  const [certificateSickLeave, setCertificateSickLeave] = useState<MedicalCertificateSickLeave | null>(null);
+  const [summary, setSummary] = useState<ServicesSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchReport = async () => {
+    const params = buildQuery();
+    if (!params) {
+      toast.error("Please select a valid date range");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-      if (!range) {
-        toast.error("Please select a valid date range");
-        setIsLoading(false);
-        return;
-      }
-      const url = `/reports/services-activities/?start_date=${range.start}&end_date=${range.end}`;
-      const response = await apiFetch<{
-        data: ServiceData[];
-        summary: ServicesSummary;
-        medical_certificate_sick_leave?: MedicalCertificateSickLeave;
-      }>(url);
-      setData(response.data || []);
-      setSummary(response.summary || { total: 0, total_male: 0, total_female: 0 });
-      setCertificateSickLeave(response.medical_certificate_sick_leave ?? null);
-    } catch (error: any) {
+      const response = await apiFetch<{ data: ServiceData[]; summary: ServicesSummary }>(
+        `/reports/services-activities/?${params.toString()}`
+      );
+      setData(response.data);
+      setSummary(response.summary);
+    } catch (error: unknown) {
       console.error("Error fetching services report:", error);
-      toast.error(error.message || "Failed to load services report");
+      toast.error(error instanceof Error ? error.message : "Failed to load services report");
       setData([]);
-      setSummary({ total: 0, total_male: 0, total_female: 0 });
-      setCertificateSickLeave(null);
+      setSummary(emptySummary);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    if (range) fetchReport();
+    if (canFetch) fetchReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);
 
-  const exportToCSV = () => {
-    if (data.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-
-    const headers = ["S/N", "Category", "Total", "Male", "Female", "%"];
-    const rows = data.map(row => [row.sn, row.category, row.count, row.male, row.female, `${row.percentage}%`]);
-    
-    const certLines: string[] = [];
-    if (certificateSickLeave) {
-      certLines.push("");
-      certLines.push("Medical certificates (illness / sick leave)");
-      certLines.push(
-        ["Certificates issued", certificateSickLeave.certificates_issued].join(","),
-      );
-      certLines.push(
-        ["Total calendar sick leave days", certificateSickLeave.total_sick_leave_days].join(","),
-      );
-      certLines.push(
-        ["Male patients", certificateSickLeave.male, "Female patients", certificateSickLeave.female].join(","),
-      );
-    }
-
-    const csv = [
-      headers.join(','),
-      ...rows.map(row => row.join(',')),
-      `TOTAL,,${summary.total},${summary.total_male},${summary.total_female},100.0%`,
-      ...certLines,
-    ].join('\n');
-    
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    const period = range ? `${range.start}_to_${range.end}` : year;
-    a.download = `services_activities_${period}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    
-    toast.success("Report exported successfully");
-  };
-
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
+  const totalMaleEvents = data.reduce((sum, row) => sum + row.male, 0);
+  const totalFemaleEvents = data.reduce((sum, row) => sum + row.female, 0);
+  const distinctPatients = summary.total_male + summary.total_female;
+  const malePatientPct =
+    distinctPatients > 0 ? ((summary.total_male / distinctPatients) * 100).toFixed(1) : "0";
+  const femalePatientPct =
+    distinctPatients > 0 ? ((summary.total_female / distinctPatients) * 100).toFixed(1) : "0";
 
   const getIconForService = (category: string) => {
-    if (category.includes('Injection')) return Syringe;
-    if (category.includes('Dressing')) return Activity;
-    if (category.includes('Sick Leave')) return FileText;
+    if (category.includes("Injection")) return Syringe;
+    if (category.includes("Dressing")) return Activity;
+    if (category.includes("Sick Leave")) return FileText;
     return Activity;
   };
 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header */}
         <div className="mb-2 print:hidden">
           <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
             <Link href="/medical-records/reports">
@@ -158,21 +121,15 @@ export default function ServicesActivitiesReport() {
               <Activity className="h-8 w-8 text-orange-500" />
               Services & Activities Report
             </h1>
-            <p className="text-muted-foreground mt-1">Injections, Dressing, Sick Leave, Referrals, Observations</p>
+            <p className="text-muted-foreground mt-1">Nursing procedures and activities — {periodLabel}</p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={data.length === 0}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={data.length === 0}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/services-activities/"
+              buildQuery={buildQuery}
+              filenameBase={`services_activities_${filenameSuffix}`}
+              disabled={data.length === 0}
+            />
           </div>
         </div>
 
@@ -186,60 +143,17 @@ export default function ServicesActivitiesReport() {
           </CardHeader>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={setViewMode}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {viewMode === 'year' ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {years.map(y => (
-                        <SelectItem key={y} value={y}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : viewMode === 'range' ? (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                  </div>
-                </>
-              ) : (
-                <div>
-                  <Label>Period</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {viewMode === 'daily' && 'Today'}
-                    {viewMode === 'weekly' && 'This week'}
-                    {viewMode === 'monthly' && 'This month'}
-                    {viewMode === 'bimonthly' && 'Last 2 months'}
-                    {viewMode === 'quarterly' && 'This quarter'}
-                    {viewMode === 'half-yearly' && 'This half-year'}
-                    {viewMode === 'annually' && 'This year'}
-                  </p>
-                </div>
-              )}
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                   <TrendingUp className="h-4 w-4 mr-2" />
@@ -250,15 +164,15 @@ export default function ServicesActivitiesReport() {
           </CardContent>
         </Card>
 
-        {/* Summary Cards */}
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="border-l-4 border-l-orange-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Services</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">{summary.total.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Includes all recorded service activities</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">
+                    {summary.total.toLocaleString()}
+                  </p>
                 </div>
                 <Activity className="h-10 w-10 text-orange-500 opacity-50" />
               </div>
@@ -270,9 +184,7 @@ export default function ServicesActivitiesReport() {
                 <div>
                   <p className="text-sm text-muted-foreground">Male Patients</p>
                   <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.total > 0 ? `${((summary.total_male / summary.total) * 100).toFixed(1)}%` : "0%"} of total
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">{malePatientPct}% of patients</p>
                 </div>
                 <Users className="h-10 w-10 text-cyan-500 opacity-50" />
               </div>
@@ -284,9 +196,7 @@ export default function ServicesActivitiesReport() {
                 <div>
                   <p className="text-sm text-muted-foreground">Female Patients</p>
                   <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.total > 0 ? `${((summary.total_female / summary.total) * 100).toFixed(1)}%` : "0%"} of total
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">{femalePatientPct}% of patients</p>
                 </div>
                 <Users className="h-10 w-10 text-pink-500 opacity-50" />
               </div>
@@ -294,47 +204,14 @@ export default function ServicesActivitiesReport() {
           </Card>
         </div>
 
-        {certificateSickLeave && (
-          <Card className="border-l-4 border-l-teal-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-5 w-5 text-teal-600" />
-                Medical certificates (illness / sick leave)
-              </CardTitle>
-              <CardDescription>
-                Persisted certificates in the period — total calendar days summed from the sick leave days field.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-              <div>
-                <p className="text-muted-foreground">Certificates issued</p>
-                <p className="text-xl font-semibold">{certificateSickLeave.certificates_issued.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Total sick leave days</p>
-                <p className="text-xl font-semibold">{certificateSickLeave.total_sick_leave_days.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Male patients</p>
-                <p className="text-xl font-semibold">{certificateSickLeave.male.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Female patients</p>
-                <p className="text-xl font-semibold">{certificateSickLeave.female.toLocaleString()}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Data Table */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Activity className="h-5 w-5" />
-              Services & Activities - {viewMode === "year" ? year : `${startDate} to ${endDate}`}
+              Services & Activities — {periodLabel}
             </CardTitle>
             <CardDescription>
-              Breakdown of services and activities performed. "Sick leave" rows are nursing orders; certificate totals are shown above.
+              Same procedure rules as Nursing → Procedures History. Medications are excluded.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -376,8 +253,8 @@ export default function ServicesActivitiesReport() {
                     <tr className="border-t-2 border-border bg-muted/50 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">TOTAL</td>
                       <td className="p-3 text-right text-foreground">{summary.total.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{totalMaleEvents.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{totalFemaleEvents.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
@@ -387,7 +264,7 @@ export default function ServicesActivitiesReport() {
               <div className="text-center py-12">
                 <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-1">No data available</p>
-                <p className="text-sm text-muted-foreground">No services or activities found for this year</p>
+                <p className="text-sm text-muted-foreground">No services or activities found for {periodLabel}</p>
               </div>
             )}
           </CardContent>

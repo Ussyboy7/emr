@@ -13,9 +13,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from laboratory.pagination import FlexiblePageNumberPagination
+from laboratory.pagination import LabCatalogPagination
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ from .models import (
     ConsultationRoom,
     ConsultationSession,
     ConsultationQueue,
+    consultation_queue_priority_for_visit,
     Referral,
     ReferralFacility,
     ResponsibilityFormIssuance,
@@ -47,14 +49,14 @@ from .serializers import (
 from audit.services import AuditService
 from patients.workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
 from common.mixins import ClinicScopedMixin
+from common.openapi import REFERRAL_FORM_PK_PARAMS, document_viewset
 from accounts.utils import resolve_clinic_id
 from organization.models import SystemConfig
 
 
+@document_viewset(tag="Consultation", resource="referral facilities")
 class ReferralFacilityViewSet(viewsets.ModelViewSet):
     """CRUD for the referral-facility catalog (typeahead + Django admin)."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = ReferralFacilitySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["is_active", "facility_type"]
@@ -65,14 +67,17 @@ class ReferralFacilityViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ReferralFacility.objects.none()
+        
         return ReferralFacility.objects.all()
 
 
+@document_viewset(tag="Consultation", resource="consultation rooms")
 class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation rooms."""
     
     clinic_filter_field = 'clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = ConsultationRoomSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'specialty', 'is_active', 'clinic', 'room_type']
@@ -83,10 +88,14 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         # Admin listing must include inactive / maintenance rows so filters work.
         # Use ``is_active`` / ``status`` query params to narrow results.
+        if getattr(self, 'swagger_fake_view', False):
+            return ConsultationRoom.objects.none()
+        
         return self.scope_queryset(
             ConsultationRoom.objects.all().select_related('clinic')
         )
     
+    @extend_schema(tags=["Consultation"], summary="Queue", description="Get queue for a room.")
     @action(detail=True, methods=['get'])
     def queue(self, request, pk=None):
         """Get queue for a room."""
@@ -100,11 +109,35 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = ConsultationQueueSerializer(queue_items, many=True)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Consultation"], summary="List stats", description="Tab counts for admin rooms list (replaces 4 parallel COUNT requests).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Tab counts for admin rooms list (replaces 4 parallel COUNT requests)."""
+        from common.list_stats import aggregate_status_counts, viewset_queryset_excluding_params
 
+        qs = viewset_queryset_excluding_params(self, frozenset({'status', 'page', 'page_size', 'ordering'}))
+        data = aggregate_status_counts(
+            qs,
+            'status',
+            {
+                'active': 'active',
+                'inactive': 'inactive',
+                'maintenance': 'maintenance',
+            },
+        )
+        return Response(data)
+
+
+@extend_schema_view(
+    list=extend_schema(summary="List consultation sessions", tags=["Consultation"]),
+    retrieve=extend_schema(summary="Retrieve consultation session", tags=["Consultation"]),
+    create=extend_schema(summary="Start consultation session", tags=["Consultation"]),
+    update=extend_schema(summary="Update consultation session", tags=["Consultation"]),
+    partial_update=extend_schema(summary="Partially update consultation session", tags=["Consultation"]),
+    destroy=extend_schema(summary="End or remove consultation session", tags=["Consultation"]),
+)
 class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation sessions."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = ConsultationSessionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['room', 'patient', 'doctor', 'status', 'visit']
@@ -122,7 +155,19 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-started_at']
     
     def get_queryset(self):
-        qs = ConsultationSession.objects.all().select_related('room', 'patient', 'doctor', 'visit', 'created_by')
+        if getattr(self, 'swagger_fake_view', False):
+            return ConsultationSession.objects.none()
+        
+        qs = ConsultationSession.objects.all().select_related(
+            'room',
+            'room__clinic',
+            'patient',
+            'doctor',
+            'visit',
+            'visit__location_clinic',
+            'location_clinic',
+            'created_by',
+        )
 
         # Match VisitViewSet-style date filtering for history views.
         # We filter by started_at because it represents the actual consultation time.
@@ -403,6 +448,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         # No fallback to other doctors - the actual performer is recorded
         return None
 
+    @extend_schema(tags=["Consultation"], summary="End", description="End a consultation session and log audit.")
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
         """End a consultation session and log audit."""
@@ -472,6 +518,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
         return Response(ConsultationSessionSerializer(session).data)
 
+    @extend_schema(tags=["Consultation"], summary="End not seen")
     @action(detail=True, methods=['post'], url_path='end-not-seen')
     def end_not_seen(self, request, pk=None):
         session = self.get_object()
@@ -490,6 +537,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
         return Response({'detail': 'Session ended as not seen.', **result})
 
+    @extend_schema(tags=["Consultation"], summary="Pause", description="Pause an active session; accumulate active time into active_seconds.")
     @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
         """Pause an active session; accumulate active time into active_seconds."""
@@ -528,6 +576,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
         return Response(ConsultationSessionSerializer(session).data)
 
+    @extend_schema(tags=["Consultation"], summary="Resume", description="Resume a paused session.")
     @action(detail=True, methods=['post'])
     def resume(self, request, pk=None):
         """Resume a paused session."""
@@ -577,6 +626,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
         return Response(ConsultationSessionSerializer(session).data)
 
+    @extend_schema(tags=["Consultation"], summary="Comprehensive analytics", description="Comprehensive consultation analytics combining all metrics.")
     @action(detail=False, methods=['get'], url_path='comprehensive-analytics')
     def comprehensive_analytics(self, request):
         """
@@ -593,7 +643,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if isinstance(dates, Response):
             return dates
 
-        start_date, end_date = dates
+        start_date, end_date, _all_time = dates
 
         # Get consultation sessions for the period
         base = (
@@ -652,8 +702,14 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             }
         }
 
+        from common.analytics_export import maybe_export_analytics
+
+        exported = maybe_export_analytics(request, analytics, module_key="consultation")
+        if exported is not None:
+            return exported
         return Response(analytics)
 
+    @extend_schema(tags=["Consultation"], summary="Stats", description="Get consultation statistics for dashboard.")
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get consultation statistics for dashboard."""
@@ -661,10 +717,22 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         from datetime import timedelta
         from django.utils import timezone as tz
         
+        from common.report_period import local_month_bounds_to_today, local_week_bounds
+
         now = tz.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        week_start = today_start - timedelta(days=7)
-        month_start = today_start.replace(day=1)
+        week_start_date, _week_end_date = local_week_bounds()
+        week_start = today_start.replace(
+            year=week_start_date.year,
+            month=week_start_date.month,
+            day=week_start_date.day,
+        )
+        month_start_date, _ = local_month_bounds_to_today()
+        month_start = today_start.replace(
+            year=month_start_date.year,
+            month=month_start_date.month,
+            day=month_start_date.day,
+        )
         
         # Get current user's sessions if filtering by doctor
         doctor_id = request.query_params.get('doctor', None)
@@ -811,6 +879,92 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'completed_today': today_stats['completed'],
         })
 
+    @extend_schema(tags=["Consultation"], summary="Workspace bundle", description="Diagnoses, orders, prescriptions, and vitals for the consultation room in one request.")
+    @action(detail=True, methods=['get'], url_path='workspace-bundle')
+    def workspace_bundle(self, request, pk=None):
+        """Diagnoses, orders, prescriptions, and vitals for the consultation room in one request."""
+        session = self.get_object()
+        from .session_bundle import build_session_workspace_bundle
+
+        return Response(build_session_workspace_bundle(session))
+
+    @extend_schema(tags=["Consultation"], summary="Resolve for visit", description="Return the best-matching session for a visit (e.g. latest completed report).")
+    @action(detail=False, methods=['get'], url_path='resolve-for-visit')
+    def resolve_for_visit(self, request):
+        """Return the best-matching session for a visit (e.g. latest completed report)."""
+        visit_id = request.query_params.get('visit')
+        if not visit_id:
+            return Response({'detail': 'visit is required'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.filter_queryset(self.get_queryset()).filter(visit_id=visit_id)
+        status_param = request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        patient_id = request.query_params.get('patient')
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        ordering = (request.query_params.get('ordering') or '-ended_at').strip()
+        if ordering.startswith('-'):
+            qs = qs.order_by(ordering)
+        else:
+            qs = qs.order_by(ordering)
+        session = qs.first()
+        if not session:
+            return Response({'detail': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(session).data)
+
+    @extend_schema(tags=["Consultation"], summary="Room day counts", description="Session counts per room for a calendar day (one aggregate query).")
+    @action(detail=False, methods=['get'], url_path='room-day-counts')
+    def room_day_counts(self, request):
+        """Session counts per room for a calendar day (one aggregate query)."""
+        day = parse_date(request.query_params.get('date') or '') or timezone.localdate()
+        qs = self.filter_queryset(self.get_queryset()).filter(started_at__date=day)
+        rows = qs.values('room').annotate(count=Count('id'))
+        counts = {
+            str(row['room']): row['count']
+            for row in rows
+            if row['room'] is not None
+        }
+        return Response({'counts': counts})
+
+    @extend_schema(tags=["Consultation"], summary="History stats", description="Dashboard cards for consultation history (replaces 4 parallel COUNT list calls).")
+    @action(detail=False, methods=['get'], url_path='history-stats')
+    def history_stats(self, request):
+        """
+        Dashboard cards for consultation history (replaces 4 parallel COUNT list calls).
+
+        Accepts the same list filters as ``GET /consultation/sessions/`` plus:
+        - ``calendar_today``: ISO date for the "Today" card (client local today)
+        - ``week_start`` / ``week_end``: inclusive bounds for the "This week" card
+        """
+        from django.utils import timezone
+        from django.utils.dateparse import parse_date
+
+        calendar_today = parse_date(request.query_params.get('calendar_today') or '') or timezone.localdate()
+        week_start = parse_date(request.query_params.get('week_start') or '') or calendar_today
+        week_end = parse_date(request.query_params.get('week_end') or '') or calendar_today
+
+        from common.list_stats import viewset_queryset_excluding_params
+
+        base = viewset_queryset_excluding_params(self, frozenset({'status', 'page', 'page_size', 'ordering'}))
+
+        clinic = request.query_params.get('clinic')
+        today_qs = self.scope_queryset(ConsultationSession.objects.all())
+        week_qs = self.scope_queryset(ConsultationSession.objects.all())
+        if clinic:
+            today_qs = today_qs.filter(visit__clinic=clinic)
+            week_qs = week_qs.filter(visit__clinic=clinic)
+
+        return Response({
+            'today': today_qs.filter(started_at__date=calendar_today).count(),
+            'thisWeek': week_qs.filter(
+                started_at__date__gte=week_start,
+                started_at__date__lte=week_end,
+            ).count(),
+            'inProgress': base.filter(status='active').count(),
+            'completed': base.filter(status='completed').count(),
+        })
+
+    @extend_schema(tags=["Consultation"], summary="Report", description="Download consultation report as PDF.")
     @action(detail=True, methods=['get'], url_path='report')
     def download_report(self, request, pk=None):
         """Download consultation report as PDF."""
@@ -819,11 +973,11 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return build_consultation_report_pdf(session)
 
 
+@document_viewset(tag="Consultation", resource="consultation queues")
 class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation queue."""
     
     clinic_filter_field = 'room__clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = ConsultationQueueSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['room', 'patient', 'is_active', 'visit']
@@ -831,6 +985,9 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['priority', 'queued_at']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ConsultationQueue.objects.none()
+        
         qs = (
             ConsultationQueue.objects.all()
             .select_related('room', 'patient', 'visit')
@@ -854,6 +1011,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return self.scope_queryset(qs)
 
+    @extend_schema(tags=["Consultation"], summary="By visits", description="Active queue rows for a set of visit IDs.")
     @action(detail=False, methods=['get'], url_path='by-visits')
     def by_visits(self, request):
         """
@@ -971,8 +1129,9 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     ).exists()
                     
                     if not eye_order_exists:
-                        # Create eye order automatically
-                        EyeOrder.objects.create(
+                        from common.order_location import resolve_order_location_clinic
+
+                        eye_kwargs = dict(
                             patient=patient,
                             ordered_by=self.request.user,
                             visit=visit,
@@ -992,6 +1151,13 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                             status='scheduled',
                             scheduled_at=timezone.now(),
                         )
+                        clinic = resolve_order_location_clinic(
+                            visit=visit,
+                            user=self.request.user,
+                        )
+                        if clinic is not None:
+                            eye_kwargs['location_clinic'] = clinic
+                        EyeOrder.objects.create(**eye_kwargs)
                         logger.info(f'Created automatic eye order for patient {patient} from multi-clinic visit')
                 except Exception as e:
                     logger.error(f'Failed to create eye order: {e}')
@@ -1021,7 +1187,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                                 room=matching_room,
                                 patient=patient,
                                 visit=visit,
-                                priority=queue_item.priority,
+                                priority=consultation_queue_priority_for_visit(visit),
                                 notes=queue_item.notes,
                                 is_active=True
                             )
@@ -1160,6 +1326,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         except Exception:
             pass
     
+    @extend_schema(tags=["Consultation"], summary="Call", description="Call a patient from the queue.")
     @action(detail=True, methods=['post'])
     def call(self, request, pk=None):
         """Call a patient from the queue."""
@@ -1169,6 +1336,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         queue_item.save()
         return Response(ConsultationQueueSerializer(queue_item).data)
 
+    @extend_schema(tags=["Consultation"], summary="Mark left")
     @action(detail=True, methods=['post'], url_path='mark-left')
     def mark_left(self, request, pk=None):
         queue_item = self.get_object()
@@ -1189,10 +1357,9 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response({'detail': 'Patient marked left from queue.', **result})
 
 
+@document_viewset(tag="Consultation", resource="referrals")
 class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing referrals."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = ReferralSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = [
@@ -1210,14 +1377,21 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ["-referred_at"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Referral.objects.none()
+        
         qs = (
             Referral.objects.all()
             .select_related(
                 "patient",
+                "patient__principal_staff",
                 "visit",
+                "visit__location_clinic",
                 "session",
+                "session__location_clinic",
                 "referred_by",
                 "created_by",
+                "facility_partner",
                 "referral_letter_acknowledged_by",
             )
             .prefetch_related(
@@ -1259,6 +1433,27 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     Q(visit__location_clinic=clinic_id) | Q(session__location_clinic=clinic_id)
                 )
         return qs
+
+    @extend_schema(tags=["Consultation"], summary="List stats", description="Tab counts for referrals queue (replaces parallel COUNT list calls).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Tab counts for referrals queue (replaces parallel COUNT list calls)."""
+        from common.list_stats import viewset_queryset_excluding_params
+        from django.db.models import Count, Q
+
+        qs = viewset_queryset_excluding_params(self, frozenset({'status', 'page', 'page_size', 'ordering'}))
+        row = qs.aggregate(
+            total=Count('pk'),
+            submitted=Count('pk', filter=Q(status='submitted_to_records')),
+            inReview=Count('pk', filter=Q(status='records_review')),
+            approved=Count('pk', filter=Q(status='approved_for_forms')),
+        )
+        return Response({
+            'total': row['total'] or 0,
+            'submitted': row['submitted'] or 0,
+            'inReview': row['inReview'] or 0,
+            'approved': row['approved'] or 0,
+        })
 
     def perform_create(self, serializer):
         """Create referral and log audit."""
@@ -1303,6 +1498,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 return True
         return False
 
+    @extend_schema(tags=["Consultation"], summary="Forms", description="List or create responsibility form issuances for this referral.")
     @action(detail=True, methods=["get", "post"])
     def forms(self, request, pk=None):
         """List or create responsibility form issuances for this referral."""
@@ -1371,6 +1567,12 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     issued_by=request.user,
                     document_file=doc if doc else None,
                 )
+                # Reopen Medical Records queue when a new unstamped form is added
+                # after the referral was already acknowledged.
+                referral.refresh_from_db()
+                if referral.status in ("approved_for_forms", "scheduled"):
+                    referral.status = "submitted_to_records"
+                    referral.save(update_fields=["status"])
         except IntegrityError:
             return Response(
                 {"detail": "Could not allocate sequence number — retry."},
@@ -1424,6 +1626,16 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @extend_schema(tags=["Consultation"], summary="Letter/pdf", description="Stream the NPA-letterhead referral letter PDF for this referral.")
+    @action(detail=True, methods=["get"], url_path="letter/pdf")
+    def referral_letter_pdf(self, request, pk=None):
+        """Stream the NPA-letterhead referral letter PDF for this referral."""
+        referral = self.get_object()
+        from .pdfs import build_referral_letter_pdf_response
+
+        return build_referral_letter_pdf_response(referral)
+
+    @extend_schema(tags=["Consultation"], summary="Forms/(?P<form pk>[^/.]+)/pdf", description="Stream the responsibility-form PDF for a specific issuance.", parameters=REFERRAL_FORM_PK_PARAMS)
     @action(
         detail=True,
         methods=["get"],
@@ -1485,6 +1697,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         response["Content-Disposition"] = f'inline; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Consultation"], summary="Submit to records", description="Move a draft referral into the Medical Records queue.")
     @action(detail=True, methods=["post"])
     def submit_to_records(self, request, pk=None):
         """Move a draft referral into the Medical Records queue."""
@@ -1492,6 +1705,16 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if referral.status != "draft":
             return Response(
                 {"detail": "Only draft referrals can be submitted to Medical Records."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not referral.responsibility_forms.exists():
+            return Response(
+                {
+                    "detail": (
+                        "Issue at least one responsibility form before submitting "
+                        "to Medical Records."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1513,6 +1736,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(ReferralSerializer(referral).data)
 
+    @extend_schema(tags=["Consultation"], summary="Close referral", description="Close a referral file after Records acknowledgement.")
     @action(detail=True, methods=["post"])
     def close_referral(self, request, pk=None):
         """Close a referral file after Records acknowledgement."""
@@ -1545,6 +1769,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(ReferralSerializer(referral).data)
 
+    @extend_schema(tags=["Consultation"], summary="Approve for forms", description="Medical Records: approve referral letter so Consultation may issue forms.")
     @action(detail=True, methods=["post"])
     def approve_for_forms(self, request, pk=None):
         """Medical Records: approve referral letter so Consultation may issue forms."""
@@ -1583,6 +1808,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(ReferralSerializer(referral).data)
 
+    @extend_schema(tags=["Consultation"], summary="Return for correction", description="Medical Records: return referral to author for edits.")
     @action(detail=True, methods=["post"])
     def return_for_correction(self, request, pk=None):
         """Medical Records: return referral to author for edits."""
@@ -1621,6 +1847,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(ReferralSerializer(referral).data)
 
+    @extend_schema(tags=["Consultation"], summary="Update form status", description="Update responsibility-form issuance status (active / expired / revoked / used).")
     @action(detail=True, methods=["post"])
     def update_form_status(self, request, pk=None):
         """Update responsibility-form issuance status (active / expired / revoked / used)."""
@@ -1673,6 +1900,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(ResponsibilityFormIssuanceSerializer(form).data)
 
+    @extend_schema(tags=["Consultation"], summary="Acknowledge responsibility form", description="Medical Records: stamp a printed responsibility-form slip.")
     @action(detail=True, methods=["post"])
     def acknowledge_responsibility_form(self, request, pk=None):
         """
@@ -1761,28 +1989,41 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response(ResponsibilityFormIssuanceSerializer(form).data)
 
 
+@document_viewset(tag="Consultation", resource="ICD-10 codes", read_only=True)
 class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for ICD-10 codes (read-only reference data)."""
-
-    permission_classes = [IsAuthenticated]  # Keep authentication for consistency
     serializer_class = ICD10CodeSerializer
-    pagination_class = FlexiblePageNumberPagination  # Allow large page sizes for ICD-10 codes
+    pagination_class = LabCatalogPagination  # ICD-10 catalog (search + max 500)
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['category', 'is_active']
     search_fields = ['code', 'description', 'category']
     ordering_fields = ['code', 'description']
     ordering = ['code']
-    page_size = 5000  # Override default page size for this viewset
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ICD10Code.objects.none()
+        
         return ICD10Code.objects.filter(is_active=True)
 
+    @extend_schema(tags=["Consultation"], summary="Resolve", description="Exact ICD-10 code lookup (no paginated search).")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_code(self, request):
+        """Exact ICD-10 code lookup (no paginated search)."""
+        code = (request.query_params.get('code') or '').strip()
+        if not code:
+            return Response({'detail': 'code is required'}, status=status.HTTP_400_BAD_REQUEST)
+        row = self.get_queryset().filter(code__iexact=code).first()
+        if not row:
+            return Response({'detail': 'ICD-10 code not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ICD10CodeSerializer(row).data)
 
+
+@document_viewset(tag="Consultation", resource="diagnoses")
 class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing patient diagnoses."""
 
     clinic_filter_field = 'visit__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = DiagnosisSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'visit', 'session', 'icd10_code', 'status', 'certainty']
@@ -1791,9 +2032,22 @@ class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-diagnosed_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Diagnosis.objects.none()
+        
         return self.scope_queryset(
             Diagnosis.objects.all().select_related('patient', 'visit', 'session', 'icd10_code', 'diagnosed_by')
         )
+
+    @extend_schema(tags=["Consultation"], summary="Exists", description="Whether a consultation session has at least one diagnosis.")
+    @action(detail=False, methods=['get'], url_path='exists')
+    def exists_for_session(self, request):
+        """Whether a consultation session has at least one diagnosis."""
+        session_id = request.query_params.get('session')
+        if not session_id:
+            return Response({'detail': 'session is required'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.filter_queryset(self.get_queryset()).filter(session_id=session_id)
+        return Response({'exists': qs.exists()})
 
     def perform_create(self, serializer):
         """Create diagnosis and log audit."""
@@ -1811,10 +2065,9 @@ class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
 
 
+@document_viewset(tag="Consultation", resource="presenting complaint categories", read_only=True)
 class PresentingComplaintCategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """Reference library: complaint categories (optional nested complaints via query params)."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = PresentingComplaintCategorySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
@@ -1823,6 +2076,9 @@ class PresentingComplaintCategoryViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['sort_order', 'name']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return PresentingComplaintCategory.objects.none()
+        
         return (
             PresentingComplaintCategory.objects.annotate(
                 complaint_count=Count('complaints', distinct=True),
@@ -1843,10 +2099,9 @@ class PresentingComplaintCategoryViewSet(viewsets.ReadOnlyModelViewSet):
         return ctx
 
 
+@document_viewset(tag="Consultation", resource="presenting complaints", read_only=True)
 class PresentingComplaintViewSet(viewsets.ReadOnlyModelViewSet):
     """Reference library: presenting complaint options."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = PresentingComplaintSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['category', 'is_active']
@@ -1855,4 +2110,7 @@ class PresentingComplaintViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['category__sort_order', 'category__name', 'sort_order', 'label']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return PresentingComplaint.objects.none()
+        
         return PresentingComplaint.objects.select_related('category')

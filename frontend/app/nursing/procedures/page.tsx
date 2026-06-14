@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { formatDisplayDate, formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -13,18 +15,32 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import Link from 'next/link';
 import { apiFetch } from '@/lib/api-client';
-import { wardService } from '@/lib/services';
+import { wardService, nursingService, visitService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   Syringe, Bandage, Pill, Search, Users, Clock, CheckCircle2, AlertTriangle,
-  Eye, Calendar, Loader2, Save, Activity, History, ArrowRight, User, Stethoscope, Building2, DoorOpen
+  Eye, Calendar, Loader2, Save, Activity, ArrowRight, User, Stethoscope, DoorOpen, Plus, Building2
 } from 'lucide-react';
+import { NURSING_DRESSING_PROCEDURE_TYPES } from '@/lib/constants/medical-data';
+import {
+  AddNursingProcedureDialog,
+  type AddNursingProcedureResult,
+} from '@/components/nursing/AddNursingProcedureDialog';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { completeNursingProcedureVisit } from '@/lib/nursing/nursing-repeat-procedure';
+
+const DRESSING_INTERVENTION_MAP: Record<string, string> = {
+  Dressing: 'dressing',
+  Suturing: 'sutures',
+  'Suture removal': 'suture_removal',
+  'Incision and drainage': 'i_and_d',
+};
 
 const isInvalidAdmissionTypeError = (error: any) => {
   const msg = String(error?.message || error?.apiMessage || '').toLowerCase();
@@ -36,6 +52,8 @@ interface Procedure {
   id: string;
   visitId?: number;
   consultationSessionId?: number;
+  /** True when a new nursing_procedure visit was created for this queue item. */
+  createdNursingVisit?: boolean;
   type: 'injection' | 'dressing' | 'medication' | 'ward_admission';
   status: 'pending' | 'completed';
   patientName: string;
@@ -72,14 +90,27 @@ interface Procedure {
 // Procedures data will be loaded from API
 
 // ==================== HELPERS ====================
-const getPriorityColor = (priority: string) => {
-  const colors: Record<string, string> = {
-    'Emergency': 'bg-rose-500 text-white',
-    'High': 'bg-amber-500 text-white',
-    'Medium': 'bg-blue-500 text-white',
-    'Low': 'bg-emerald-500 text-white',
+const getPriorityBadge = (priority: string) => {
+  const styles: Record<string, string> = {
+    Emergency: 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-500/10',
+    High: 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10',
+    Medium: 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10',
+    Low: 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10',
   };
-  return colors[priority] || 'bg-gray-500 text-white';
+  return styles[priority] || 'border-gray-500/50 text-gray-600 bg-gray-500/10';
+};
+
+const getTypeBorderColor = (type: Procedure['type']) => {
+  switch (type) {
+    case 'injection':
+      return 'border-l-emerald-500';
+    case 'dressing':
+      return 'border-l-violet-500';
+    case 'ward_admission':
+      return 'border-l-amber-500';
+    default:
+      return 'border-l-blue-500';
+  }
 };
 
 const getTypeConfig = (type: string) => {
@@ -90,6 +121,21 @@ const getTypeConfig = (type: string) => {
     'ward_admission': { icon: DoorOpen, color: 'text-amber-500', bgColor: 'bg-amber-500/10 border-amber-500/30', label: 'Observation Admission' },
   };
   return configs[type] || configs['medication'];
+};
+
+const WOUND_INTERVENTION_LABELS: Record<string, string> = {
+  dressing: 'Dressing',
+  sutures: 'Suturing',
+  suture_removal: 'Suture removal',
+  i_and_d: 'Incision and drainage',
+};
+
+const formatOrderDateTime = (dateString?: string) => {
+  if (!dateString) return { date: '—', time: '' };
+  return {
+    date: formatDisplayDateMedium(dateString),
+    time: formatDisplayTime(dateString),
+  };
 };
 
 const getTimeSince = (dateString: string) => {
@@ -159,13 +205,7 @@ const emptyInjectionForm = () => ({
 function formatAdministrationNote(timeHm: string): string {
   const t = (timeHm || '').trim();
   if (!t) return '';
-  const d = new Date();
-  const dateStr = d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-  });
-  return `Time of administration: ${t} on ${dateStr}`;
+  return `Time of administration: ${t} on ${formatDisplayDate(new Date())}`;
 }
 
 /** Parse nursing order descriptions produced by the consultation room (and legacy text). */
@@ -363,11 +403,10 @@ export default function ProceduresQueuePage() {
   const [procedures, setProcedures] = useState<Procedure[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [queueStats, setQueueStats] = useState({
+    total: 0,
     pending: 0,
+    completed: 0,
     injections: 0,
-    dressings: 0,
-    medications: 0,
-    wardAdmissions: 0,
   });
   const [wards, setWards] = useState<any[]>([]);
   const [wardSearch, setWardSearch] = useState('');
@@ -379,6 +418,7 @@ export default function ProceduresQueuePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [typeFilter, setTypeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
@@ -392,15 +432,34 @@ export default function ProceduresQueuePage() {
   const hasActiveFilters =
     debouncedSearch.trim() !== '' ||
     typeFilter !== 'all' ||
+    statusFilter !== 'all' ||
     priorityFilter !== 'all' ||
     genderFilter !== 'all' ||
     Boolean(dateRange.from) ||
     Boolean(dateRange.to) ||
     dateFilter !== 'all';
 
+  const totalOrdersLabel = useMemo(() => {
+    if (dateFilter === 'today') return "Today's Orders";
+    if (dateFilter === 'week') return 'This Week';
+    if (dateFilter === 'month') return 'This Month';
+    return 'All Orders';
+  }, [dateFilter]);
+
   // Dialog states
   const [isPerformDialogOpen, setIsPerformDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isAddProcedureOpen, setIsAddProcedureOpen] = useState(false);
   const [selectedProcedure, setSelectedProcedure] = useState<Procedure | null>(null);
+  const [viewProcedure, setViewProcedure] = useState<Procedure | null>(null);
+  const [viewRecord, setViewRecord] = useState<{
+    site?: string;
+    notes?: string;
+    wound_intervention?: string;
+    performed_by_name?: string;
+    performed_at?: string;
+  } | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
@@ -434,8 +493,8 @@ export default function ProceduresQueuePage() {
 
   const dressingCanComplete = useMemo(() => {
     if (!selectedProcedure || selectedProcedure.type !== 'dressing') return true;
-    return true;
-  }, [selectedProcedure]);
+    return Boolean(dressingForm.dressingType && dressingForm.woundCondition);
+  }, [selectedProcedure, dressingForm.dressingType, dressingForm.woundCondition]);
 
   const medicationCanComplete = useMemo(() => {
     if (!selectedProcedure || selectedProcedure.type !== 'medication') return true;
@@ -456,31 +515,38 @@ export default function ProceduresQueuePage() {
       });
   }, []);
 
+  const appendQueueDateFilters = useCallback(
+    (qs: URLSearchParams) => {
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) qs.set('ordered_at_after', dateRange.from);
+        if (dateRange.to) qs.set('ordered_at_before', dateRange.to);
+      } else if (dateFilter !== 'all') {
+        qs.set('date_filter', dateFilter);
+      }
+    },
+    [dateFilter, dateRange.from, dateRange.to]
+  );
+
   const loadQueueStats = useCallback(async () => {
     try {
-      const base: Record<string, string> = {
-        procedures_queue: '1',
-        status: 'pending',
-        page: '1',
-        page_size: '1',
-      };
-      const fetchCount = async (extra: Record<string, string>) => {
-        const qs = new URLSearchParams({ ...base, ...extra });
-        const res = await apiFetch<{ count?: number }>(`/nursing/orders/?${qs.toString()}`);
-        return typeof res.count === 'number' ? res.count : 0;
-      };
-      const [pending, injections, dressings, medications, wardAdmissions] = await Promise.all([
-        fetchCount({}),
-        fetchCount({ queue_type: 'injection' }),
-        fetchCount({ queue_type: 'dressing' }),
-        fetchCount({ queue_type: 'medication' }),
-        fetchCount({ queue_type: 'ward_admission' }),
-      ]);
-      setQueueStats({ pending, injections, dressings, medications, wardAdmissions });
+      const params: Record<string, string | undefined> = {};
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) params.ordered_at_after = dateRange.from;
+        if (dateRange.to) params.ordered_at_before = dateRange.to;
+      } else if (dateFilter !== 'all') {
+        params.date_filter = dateFilter;
+      }
+      const stats = await nursingService.getProceduresQueueStats(params);
+      setQueueStats({
+        total: stats.total ?? 0,
+        pending: stats.pending ?? 0,
+        completed: stats.completed ?? 0,
+        injections: stats.injections ?? 0,
+      });
     } catch (e) {
       console.error('Failed to load procedure queue stats:', e);
     }
-  }, []);
+  }, [dateFilter, dateRange.from, dateRange.to]);
 
   useEffect(() => {
     void loadQueueStats();
@@ -507,8 +573,10 @@ export default function ProceduresQueuePage() {
       setError(null);
       const qs = new URLSearchParams();
       qs.set('procedures_queue', '1');
-      qs.set('status', 'pending');
       qs.set('page', String(currentPage));
+      if (statusFilter !== 'all') {
+        qs.set('status', statusFilter);
+      }
       qs.set('page_size', String(itemsPerPage));
       const q = debouncedSearch.trim();
       if (q) qs.set('search', q);
@@ -526,12 +594,7 @@ export default function ProceduresQueuePage() {
       if (genderFilter !== 'all') {
         qs.set('patient_gender', genderFilter.toLowerCase());
       }
-      if (dateRange.from || dateRange.to) {
-        if (dateRange.from) qs.set('ordered_at_after', dateRange.from);
-        if (dateRange.to) qs.set('ordered_at_before', dateRange.to);
-      } else if (dateFilter !== 'all') {
-        qs.set('date_filter', dateFilter);
-      }
+      appendQueueDateFilters(qs);
       const ordersResult = await apiFetch<{ results: any[]; count?: number }>(
         `/nursing/orders/?${qs.toString()}`
       );
@@ -553,11 +616,10 @@ export default function ProceduresQueuePage() {
     itemsPerPage,
     debouncedSearch,
     typeFilter,
+    statusFilter,
     priorityFilter,
     genderFilter,
-    dateFilter,
-    dateRange.from,
-    dateRange.to,
+    appendQueueDateFilters,
   ]);
 
   useEffect(() => {
@@ -569,6 +631,7 @@ export default function ProceduresQueuePage() {
   }, [
     debouncedSearch,
     typeFilter,
+    statusFilter,
     priorityFilter,
     dateFilter,
     genderFilter,
@@ -583,6 +646,30 @@ export default function ProceduresQueuePage() {
   };
 
   // ==================== HANDLERS ====================
+  const openViewDialog = async (procedure: Procedure) => {
+    setViewProcedure(procedure);
+    setViewRecord(null);
+    setIsViewDialogOpen(true);
+    if (procedure.status !== 'completed') return;
+    try {
+      setViewLoading(true);
+      const row = await nursingService.resolveProcedureForOrder(procedure.id);
+      if (row) {
+        setViewRecord({
+          site: row.site,
+          notes: row.notes,
+          wound_intervention: row.wound_intervention,
+          performed_by_name: row.performed_by_name,
+          performed_at: row.performed_at,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load procedure record:', err);
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
   const openPerformDialog = (procedure: Procedure) => {
     resetForms();
     setSelectedProcedure(procedure);
@@ -736,17 +823,21 @@ export default function ProceduresQueuePage() {
           }
         }
         if (!visitId) {
-          const visitsResponse = await apiFetch<{ results: any[] }>(`/visits/?patient=${patientDbId}&status=in_progress&page_size=1`);
-          const activeVisits = visitsResponse.results || [];
-          if (activeVisits.length > 0 && typeof activeVisits[0].id === 'number') {
-            visitId = activeVisits[0].id;
+          const activeVisit = await visitService.resolveVisit({
+            patient: patientDbId,
+            status: 'in_progress',
+          });
+          if (activeVisit?.id) {
+            visitId = activeVisit.id;
           }
         }
         if (!visitId) {
-          const latestVisitsResponse = await apiFetch<{ results: any[] }>(`/visits/?patient=${patientDbId}&ordering=-date,-time&page_size=1`);
-          const latestVisits = latestVisitsResponse.results || [];
-          if (latestVisits.length > 0 && typeof latestVisits[0].id === 'number') {
-            visitId = latestVisits[0].id;
+          const latestVisit = await visitService.resolveVisit({
+            patient: patientDbId,
+            ordering: '-date,-time',
+          });
+          if (latestVisit?.id) {
+            visitId = latestVisit.id;
           }
         }
         if (!visitId) {
@@ -846,11 +937,14 @@ export default function ProceduresQueuePage() {
             ? injectionSiteNeedsLaterality(injectionForm.site) && injectionForm.laterality
               ? `${injectionForm.laterality} — ${injectionForm.site}`
               : injectionForm.site
-            : medicationForm.site || '';
+            : selectedProcedure.type === 'dressing'
+              ? (selectedProcedure.details.woundLocation || '')
+              : medicationForm.site || '';
 
       const procedureData: any = {
         patient: patientDbId,  // Use correct patient database ID
         nursing_order: orderId,  // Link to the original nursing order
+        visit: selectedProcedure.visitId ?? null,
         procedure_type: typeMap[selectedProcedure.type] || 'other',
         description,
         site: performedSite,
@@ -865,6 +959,10 @@ export default function ProceduresQueuePage() {
         dosage:
           selectedProcedure.type === 'injection' ? (selectedProcedure.details.dosage || '').slice(0, 200) : '',
         route: selectedProcedure.type === 'injection' ? (selectedProcedure.details.route || '').slice(0, 100) : '',
+        wound_intervention:
+          selectedProcedure.type === 'dressing'
+            ? DRESSING_INTERVENTION_MAP[dressingForm.dressingType] || ''
+            : '',
       };
       
       // Create procedure
@@ -890,6 +988,14 @@ export default function ProceduresQueuePage() {
         body: JSON.stringify({ status: 'completed' }),
       });
       console.log('Order updated:', orderResponse);
+
+      if (selectedProcedure.createdNursingVisit && selectedProcedure.visitId) {
+        try {
+          await completeNursingProcedureVisit(selectedProcedure.visitId);
+        } catch (visitErr) {
+          console.warn('Failed to mark nursing procedure visit completed:', visitErr);
+        }
+      }
 
       void loadOrders();
       void loadQueueStats();
@@ -937,72 +1043,40 @@ export default function ProceduresQueuePage() {
               </div>
               Procedures Queue
             </h1>
-            <p className="text-muted-foreground mt-1">View and manage pending nursing procedures</p>
+            <p className="text-muted-foreground mt-1">View and manage nursing procedure orders</p>
           </div>
-          <div>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/nursing/procedures/history">Procedures History</Link>
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            className="bg-violet-600 hover:bg-violet-700 text-white"
+            onClick={() => setIsAddProcedureOpen(true)}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add procedure
+          </Button>
         </div>
 
         {/* Stats Row */}
-        <div className="grid gap-4 md:grid-cols-5">
-          <Card className="border-l-4 border-l-slate-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-3xl font-bold">{queueStats.pending}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: totalOrdersLabel, value: queueStats.total, icon: Calendar, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+            { label: 'Pending', value: queueStats.pending, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+            { label: 'Completed', value: queueStats.completed, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+            { label: 'Injections (pending)', value: queueStats.injections, icon: Syringe, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+          ].map((stat, i) => (
+            <Card key={i} className="hover:shadow-md transition-shadow">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                  </div>
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
                 </div>
-                <Clock className="h-10 w-10 text-slate-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Injections</p>
-                  <p className="text-3xl font-bold">{queueStats.injections}</p>
-                </div>
-                <Syringe className="h-10 w-10 text-emerald-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-violet-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Dressings</p>
-                  <p className="text-3xl font-bold">{queueStats.dressings}</p>
-                </div>
-                <Bandage className="h-10 w-10 text-violet-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-blue-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Medications</p>
-                  <p className="text-3xl font-bold">{queueStats.medications}</p>
-                </div>
-                <Pill className="h-10 w-10 text-blue-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Observation Admits</p>
-                  <p className="text-3xl font-bold">{queueStats.wardAdmissions}</p>
-                </div>
-                <Building2 className="h-10 w-10 text-amber-500" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         {/* Filters */}
@@ -1011,7 +1085,12 @@ export default function ProceduresQueuePage() {
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
               <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                <Input
+                  placeholder="Search by patient name, patient ID, or personal number..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -1021,6 +1100,14 @@ export default function ProceduresQueuePage() {
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="week">This Week</SelectItem>
                     <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -1057,19 +1144,33 @@ export default function ProceduresQueuePage() {
           </CardContent>
         </Card>
 
+        <div className="flex items-center justify-between px-1">
+          <p className="text-sm text-muted-foreground">
+            Showing <span className="font-medium text-foreground">{procedures.length}</span> of{' '}
+            <span className="font-medium text-foreground">{totalCount}</span> procedures
+          </p>
+        </div>
+
         {/* Queue List */}
         {!loading && totalCount === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <CheckCircle2 className="h-16 w-16 text-emerald-500 mb-4" />
               <h3 className="text-xl font-semibold text-foreground mb-2">
-                All caught up!
+                {hasActiveFilters ? 'No matching procedures' : statusFilter === 'pending' ? 'All caught up!' : 'No procedures found'}
               </h3>
-              <p className="text-muted-foreground text-center">
+              <p className="text-muted-foreground text-center max-w-md">
                 {hasActiveFilters
-                  ? 'No pending procedures match your current filters'
-                  : 'No pending procedures found'}
+                  ? 'No procedures match your current filters. Try a wider date range or clear filters.'
+                  : statusFilter === 'pending'
+                    ? 'No pending nursing orders in this date range.'
+                    : 'No nursing procedure orders in this date range.'}
               </p>
+              {statusFilter === 'pending' && !hasActiveFilters ? (
+                <Button asChild variant="outline" size="sm" className="mt-4">
+                  <Link href="/nursing/procedures/history">View Procedures History</Link>
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         ) : (
@@ -1085,40 +1186,37 @@ export default function ProceduresQueuePage() {
             {procedures.map((procedure) => {
               const typeConfig = getTypeConfig(procedure.type);
               const TypeIcon = typeConfig.icon;
-              
+              const summary = procedureSummaryLine(procedure);
+
               return (
-                <Card key={procedure.id} className={`border-l-4 hover:shadow-md transition-shadow ${
-                  procedure.priority === 'Emergency' ? 'border-l-rose-500' :
-                  procedure.priority === 'High' ? 'border-l-amber-500' :
-                  procedure.priority === 'Medium' ? 'border-l-blue-500' : 'border-l-emerald-500'
-                }`}>
+                <Card
+                  key={procedure.id}
+                  className={`border-l-4 ${getTypeBorderColor(procedure.type)} hover:shadow-md transition-shadow`}
+                >
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
-                      {/* Avatar */}
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${typeConfig.bgColor}`}>
-                        <TypeIcon className={`h-4 w-4 ${typeConfig.color}`} />
-                      </div>
-                      
-                      {/* Info */}
+                      <PatientAvatar name={procedure.patientName} photoUrl={undefined} size="sm" />
+
                       <div className="flex-1 min-w-0">
-                        {/* Row 1: Name + Badges + Actions */}
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
                             <span className="font-semibold text-foreground truncate">{procedure.patientName}</span>
-                            <Badge className={`text-[10px] px-1.5 py-0 ${getPriorityColor(procedure.priority)}`}>{procedure.priority}</Badge>
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${typeConfig.bgColor} ${typeConfig.color}`}>{typeConfig.label}</Badge>
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${typeConfig.bgColor} ${typeConfig.color}`}>
+                              {typeConfig.label}
+                            </Badge>
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getPriorityBadge(procedure.priority)}`}>
+                              {procedure.priority}
+                            </Badge>
                             {procedure.status === 'completed' && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
                                 Completed
                               </Badge>
                             )}
                             {procedure.allergies.length > 0 && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-rose-500 text-rose-500">⚠️</Badge>
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-500/10">
+                                Allergy
+                              </Badge>
                             )}
-                            {/* Procedure summary */}
-                            <span className="text-[10px] text-muted-foreground hidden md:inline truncate max-w-[min(100%,280px)]" title={procedure.description}>
-                              {procedureSummaryLine(procedure)}
-                            </span>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             {procedure.status === 'completed' ? (
@@ -1128,7 +1226,7 @@ export default function ProceduresQueuePage() {
                             ) : (
                               <Button
                                 size="sm"
-                                onClick={() => openPerformDialog(procedure)} 
+                                onClick={() => openPerformDialog(procedure)}
                                 className={`h-7 px-2 text-xs ${
                                   procedure.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
                                   procedure.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :
@@ -1139,13 +1237,21 @@ export default function ProceduresQueuePage() {
                                 <TypeIcon className="h-3 w-3 mr-1" />
                                 {procedure.type === 'injection' ? 'Administer' :
                                  procedure.type === 'dressing' ? 'Perform' :
-                                 procedure.type === 'ward_admission' ? 'Admit to Observation' : 'Perform'}
+                                 procedure.type === 'ward_admission' ? 'Admit' : 'Perform'}
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => void openViewDialog(procedure)}
+                              title="View order"
+                            >
+                              <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                            </Button>
                           </div>
                         </div>
-                        
-                        {/* Row 2: Details */}
+
                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                           <span>{procedure.patientId}</span>
                           <span>•</span>
@@ -1157,10 +1263,22 @@ export default function ProceduresQueuePage() {
                             </>
                           ) : null}
                           <span>•</span>
-                          <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{procedure.orderedBy}</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Stethoscope className="h-3 w-3 shrink-0" />
+                            {procedure.orderedBy}
+                          </span>
                           <span>•</span>
-                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{getTimeSince(procedure.orderedAt)}</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3 shrink-0" />
+                            {getTimeSince(procedure.orderedAt)}
+                          </span>
                         </div>
+
+                        {summary ? (
+                          <p className="text-xs text-muted-foreground mt-1 truncate" title={procedure.description}>
+                            {summary}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </CardContent>
@@ -1193,6 +1311,191 @@ export default function ProceduresQueuePage() {
             onChange={setDateRange}
             onClear={clearDateRangeFilters}
           />
+
+        {/* View order dialog */}
+        <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+          <DialogContent className={MODAL_SIZES.md}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                {viewProcedure && (() => {
+                  const config = getTypeConfig(viewProcedure.type);
+                  const Icon = config.icon;
+                  return (
+                    <>
+                      <Icon className={`h-5 w-5 ${config.color}`} />
+                      {config.label}
+                      {viewProcedure.status === 'completed' ? (
+                        <Badge variant="outline" className="text-[10px] ml-1 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                          Completed
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className={`text-[10px] ml-1 ${getPriorityBadge(viewProcedure.priority)}`}>
+                          {viewProcedure.priority}
+                        </Badge>
+                      )}
+                    </>
+                  );
+                })()}
+              </DialogTitle>
+              <DialogDescription>
+                {viewProcedure?.patientName} · {viewProcedure?.patientId}
+              </DialogDescription>
+            </DialogHeader>
+            {viewProcedure && (
+              <div className="py-2 space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  {viewProcedure.age > 0 ? `${viewProcedure.age}y` : 'Age unknown'} · {viewProcedure.gender}
+                </p>
+                {viewProcedure.allergies.length > 0 && (
+                  <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30">
+                    <p className="text-sm font-medium text-rose-600 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      Allergy: {viewProcedure.allergies.join(', ')}
+                    </p>
+                  </div>
+                )}
+                <div className="p-4 rounded-lg bg-muted/50 space-y-3">
+                  <p className="text-xs text-muted-foreground">Ordered by {viewProcedure.orderedBy}</p>
+                  {viewProcedure.type === 'injection' && (
+                    <>
+                      <p className="font-medium text-foreground">
+                        {viewProcedure.details.medication} — {viewProcedure.details.dosage}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {[viewProcedure.details.route, viewProcedure.details.frequency].filter(Boolean).join(' · ')}
+                      </p>
+                    </>
+                  )}
+                  {viewProcedure.type === 'dressing' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Wound type</p>
+                        <p className="font-medium">{viewProcedure.details.woundType || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Location</p>
+                        <p className="font-medium">{viewProcedure.details.woundLocation || '—'}</p>
+                      </div>
+                      {viewProcedure.details.instructions ? (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Instructions</p>
+                          <p className="text-sm">{viewProcedure.details.instructions}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                  {viewProcedure.type === 'medication' && (
+                    <>
+                      <p className="font-medium text-foreground">{viewProcedure.details.medication}</p>
+                      <p className="text-sm text-muted-foreground">{viewProcedure.details.route}</p>
+                    </>
+                  )}
+                  {viewProcedure.type === 'ward_admission' && (
+                    <>
+                      <p className="font-medium text-foreground">Observation admission</p>
+                      <p className="text-sm text-muted-foreground">{viewProcedure.ward || 'Ward not specified'}</p>
+                      {viewProcedure.details.admissionDiagnosis ? (
+                        <p className="text-sm text-muted-foreground">{viewProcedure.details.admissionDiagnosis}</p>
+                      ) : null}
+                    </>
+                  )}
+                  {viewProcedure.description && !viewProcedure.details.medication && !viewProcedure.details.woundType ? (
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewProcedure.description}</p>
+                  ) : null}
+                </div>
+                {viewProcedure.status === 'completed' && (
+                  <div className="space-y-3 border-t pt-3">
+                    <p className="text-sm font-medium text-foreground">Completion record</p>
+                    {viewLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading record…
+                      </div>
+                    ) : viewRecord ? (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        {viewRecord.site ? (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Site</p>
+                            <p className="font-medium">{viewRecord.site}</p>
+                          </div>
+                        ) : null}
+                        {viewRecord.wound_intervention ? (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Procedure performed</p>
+                            <p className="font-medium">
+                              {WOUND_INTERVENTION_LABELS[viewRecord.wound_intervention] || viewRecord.wound_intervention}
+                            </p>
+                          </div>
+                        ) : null}
+                        {viewRecord.notes ? (
+                          <div className="col-span-2">
+                            <p className="text-xs text-muted-foreground">Notes</p>
+                            <p className="text-muted-foreground whitespace-pre-wrap">{viewRecord.notes}</p>
+                          </div>
+                        ) : null}
+                        {viewRecord.performed_by_name ? (
+                          <div className="col-span-2 flex items-center justify-between text-xs text-muted-foreground pt-1">
+                            <span className="inline-flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              {viewRecord.performed_by_name}
+                            </span>
+                            {viewRecord.performed_at ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatOrderDateTime(viewRecord.performed_at).date}{' '}
+                                {formatOrderDateTime(viewRecord.performed_at).time}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No completion record found for this order.</p>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-xs text-muted-foreground border-t pt-3">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  Ordered {formatOrderDateTime(viewProcedure.orderedAt).date}{' '}
+                  {formatOrderDateTime(viewProcedure.orderedAt).time}
+                </div>
+              </div>
+            )}
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
+                Close
+              </Button>
+              {viewProcedure?.status === 'pending' ? (
+                <Button
+                  onClick={() => {
+                    setIsViewDialogOpen(false);
+                    openPerformDialog(viewProcedure);
+                  }}
+                >
+                  {viewProcedure.type === 'injection' ? 'Administer' :
+                   viewProcedure.type === 'dressing' ? 'Perform' :
+                   viewProcedure.type === 'ward_admission' ? 'Admit' : 'Perform'}
+                </Button>
+              ) : null}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AddNursingProcedureDialog
+          open={isAddProcedureOpen}
+          onOpenChange={setIsAddProcedureOpen}
+          currentUserId={currentUser?.id ? Number(currentUser.id) : undefined}
+          onCreated={async (result: AddNursingProcedureResult) => {
+            await loadOrders();
+            void loadQueueStats();
+            if (result.completeNow) {
+              const proc = nursingOrderToProcedure(result.order);
+              if (result.visitId) proc.visitId = result.visitId;
+              proc.createdNursingVisit = result.createdNursingVisit;
+              openPerformDialog(proc);
+            }
+          }}
+        />
 
         {/* Perform Dialog */}
         <Dialog
@@ -1238,10 +1541,22 @@ export default function ProceduresQueuePage() {
                     </>
                   )}
                   {selectedProcedure.type === 'dressing' && (
-                    <>
-                      <p className="font-medium text-foreground">{selectedProcedure.details.woundType} wound - {selectedProcedure.details.woundLocation}</p>
-                      <p className="text-sm text-muted-foreground">{selectedProcedure.details.instructions}</p>
-                    </>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Wound type</p>
+                        <p className="font-medium">{selectedProcedure.details.woundType || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Location</p>
+                        <p className="font-medium">{selectedProcedure.details.woundLocation || '—'}</p>
+                      </div>
+                      {selectedProcedure.details.instructions ? (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Instructions</p>
+                          <p className="text-sm">{selectedProcedure.details.instructions}</p>
+                        </div>
+                      ) : null}
+                    </div>
                   )}
                   {selectedProcedure.type === 'medication' && (
                     <>
@@ -1351,12 +1666,11 @@ export default function ProceduresQueuePage() {
                       <Select value={dressingForm.dressingType} onValueChange={(v) => setDressingForm(p => ({ ...p, dressingType: v }))}>
                         <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Gauze">Gauze</SelectItem>
-                          <SelectItem value="Hydrocolloid">Hydrocolloid</SelectItem>
-                          <SelectItem value="Foam">Foam</SelectItem>
-                          <SelectItem value="Alginate">Alginate</SelectItem>
-                          <SelectItem value="Transparent">Transparent</SelectItem>
-                          <SelectItem value="Non-adherent">Non-adherent</SelectItem>
+                          {NURSING_DRESSING_PROCEDURE_TYPES.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {type}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>

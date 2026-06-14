@@ -6,6 +6,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from common.openapi import document_viewset
+from drf_spectacular.utils import extend_schema
 from django.utils import timezone
 from datetime import timedelta
 
@@ -13,10 +15,10 @@ from .models import ActivityLog
 from .serializers import ActivityLogSerializer
 
 
+@document_viewset(tag="Audit", resource="activity logs", read_only=True)
 class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing audit logs."""
     
-    permission_classes = [permissions.IsAuthenticated]
     serializer_class = ActivityLogSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['user', 'action', 'object_type', 'module', 'severity', 'result']
@@ -25,6 +27,9 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ActivityLog.objects.none()
+        
         """Filter logs based on user permissions."""
         queryset = ActivityLog.objects.all().select_related('user')
         
@@ -63,9 +68,13 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
                     queryset = queryset.filter(created_at__lte=date_to_obj)
             except (ValueError, AttributeError, TypeError):
                 pass
+        elif self.action == "list" and not date_from:
+            # Cap unbounded list scans at 90 days by default.
+            queryset = queryset.filter(created_at__gte=timezone.now() - timedelta(days=90))
         
         return queryset
     
+    @extend_schema(tags=["Audit"], summary="Audit log statistics")
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get audit statistics."""
@@ -113,6 +122,7 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         
         return Response(stats)
 
+    @extend_schema(tags=["Audit"], summary="Distinct audit log modules")
     @action(detail=False, methods=["get"], url_path="modules")
     def modules(self, request):
         """

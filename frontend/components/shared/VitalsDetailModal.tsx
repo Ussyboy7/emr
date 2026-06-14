@@ -1,4 +1,5 @@
 "use client";
+import { formatDisplayDateTime } from '@/lib/dates';
 
 import {
   Dialog,
@@ -107,7 +108,7 @@ export function VitalsDetailModal({
 
   const recordedRaw = vitals.recordedAt ?? vitals.recorded_at;
   const recordedAtStr = recordedRaw
-    ? new Date(recordedRaw as string).toLocaleString()
+    ? formatDisplayDateTime(recordedRaw as string)
     : [vitals.date, vitals.time].filter(Boolean).join(", ") || "";
 
   const sysS = normalized.bloodPressureSystolic;

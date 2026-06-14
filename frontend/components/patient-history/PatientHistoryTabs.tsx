@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,15 +8,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Calendar, TestTube, ScanLine, Pill, Heart,
   Activity, Building2, ClipboardList, ChevronLeft, ChevronRight,
-  Loader2, AlertTriangle, FileText, Share2, User, Eye,
+  Loader2, AlertTriangle, FileText, Share2, User, Eye, ClipboardCheck,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { formatDisplayDate } from '@/lib/dates';
 import { usePatientHistory, type PatientHistoryData } from '@/hooks/usePatientHistory';
+import { printMedicalCertificatePdf } from '@/lib/medical-records/medicalCertificatePdf';
+import { PatientHistoryReferralViewDialog } from '@/components/patient-history/PatientHistoryReferralViewDialog';
+import { referralStatusLabel, getStatusBadgeClass } from '@/lib/referrals/referral-helpers';
+import type { AnnualCheckup } from '@/lib/services/annual-checkup-service';
 
 // --- Helpers ---
 
 const formatDate = (d: string | undefined): string => {
   if (!d) return '';
-  try { return new Date(d).toLocaleDateString(); } catch { return ''; }
+  const formatted = formatDisplayDate(d);
+  return formatted === '—' ? '' : formatted;
 };
 
 const formatPriority = (p: string | undefined): string => {
@@ -47,10 +54,10 @@ const statusBadgeClass = (status: string): string => {
 };
 
 const purposeLabel: Record<string, string> = {
-  fitness: 'FITNESS FOR DUTY',
-  illness: 'UNFIT FOR WORK',
-  travel: 'FIT TO TRAVEL',
-  employment: 'FIT FOR EMPLOYMENT',
+  fitness: 'Fitness certificate',
+  illness: 'Illness / sick leave',
+  travel: 'Travel medical',
+  employment: 'Employment medical',
 };
 
 // --- Pagination ---
@@ -90,6 +97,9 @@ export interface PatientHistoryTabsProps {
   showCertificates?: boolean;
   showReferrals?: boolean;
   showBackground?: boolean;
+  /** Show Annual Check-up tab (typically for employees) */
+  showAnnual?: boolean;
+  scheduleCheckupHref?: string;
   /** Pre-fetched data (component won't fetch its own) */
   initialData?: PatientHistoryData;
   compact?: boolean;
@@ -109,6 +119,14 @@ export interface PatientHistoryTabsProps {
   onViewPhysio?: (order: any) => void;
   onViewEyeOrder?: (order: any) => void;
   onViewWard?: (admission: any) => void;
+  onViewAnnualCheckup?: (checkup: AnnualCheckup) => void;
+  onViewReferral?: (referral: any) => void;
+  /** Opens medical certificate issue flow (patient record context). */
+  onIssueCertificate?: () => void;
+  /** Bump to refetch history after certificate create, etc. */
+  historyReloadToken?: number;
+  /** Called after referral issue/submit from the view dialog. */
+  onReferralUpdated?: () => void;
   /** Extra content rendered at top of Background tab */
   backgroundExtra?: React.ReactNode;
 }
@@ -121,6 +139,8 @@ export function PatientHistoryTabs({
   showCertificates = false,
   showReferrals = false,
   showBackground = false,
+  showAnnual = false,
+  scheduleCheckupHref,
   initialData,
   compact = false,
   tab: tabProp,
@@ -135,11 +155,29 @@ export function PatientHistoryTabs({
   onViewPhysio,
   onViewEyeOrder,
   onViewWard,
+  onViewAnnualCheckup,
+  onViewReferral,
+  onIssueCertificate,
+  historyReloadToken,
+  onReferralUpdated,
   backgroundExtra,
 }: PatientHistoryTabsProps) {
   const fetched = usePatientHistory(initialData ? null : patientId);
   const data = initialData ?? fetched.data;
   const loading = fetched.loading;
+
+  const reloadHistory = useCallback(() => {
+    onReferralUpdated?.();
+    if (!initialData) {
+      fetched.reload();
+    }
+  }, [onReferralUpdated, initialData, fetched.reload]);
+
+  useEffect(() => {
+    if (historyReloadToken == null || initialData) return;
+    fetched.reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyReloadToken, initialData]);
 
   // --- Pagination ---
   const [consultationsPage, setConsultationsPage] = useState(1);
@@ -149,11 +187,62 @@ export function PatientHistoryTabs({
     (consultationsPage - 1) * consultationsPerPage,
     consultationsPage * consultationsPerPage
   );
+  const [viewingCertId, setViewingCertId] = useState<number | null>(null);
+  const [localTab, setLocalTab] = useState(defaultTab);
+  const activeTab = tabProp ?? localTab;
+  const [referralViewId, setReferralViewId] = useState<number | null>(null);
+  const [referralViewRefreshKey, setReferralViewRefreshKey] = useState(0);
+  const [referralDialogOpen, setReferralDialogOpen] = useState(false);
+
+  const handleSubTabChange = (value: string) => {
+    if (!tabProp) setLocalTab(value);
+    onTabChange?.(value);
+    if (value === 'referrals' && showReferrals) {
+      reloadHistory();
+    }
+  };
+
+  useEffect(() => {
+    if (tabProp === 'referrals' && showReferrals) {
+      reloadHistory();
+    }
+  }, [tabProp, showReferrals, reloadHistory]);
+
+  const handleViewReferral = (referral: { id?: number }) => {
+    if (onViewReferral) {
+      triggerView(onViewReferral, referral);
+      return;
+    }
+    if (!referral.id) return;
+    setReferralViewId(referral.id);
+    setReferralViewRefreshKey((n) => n + 1);
+    setReferralDialogOpen(true);
+  };
+
+  const handleViewCertificate = async (cert: { id?: number }) => {
+    if (!cert.id) return;
+    setViewingCertId(cert.id);
+    try {
+      await printMedicalCertificatePdf(cert.id);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to open certificate PDF.');
+    } finally {
+      setViewingCertId(null);
+    }
+  };
 
   // --- Tabs definition ---
   const tabs = useMemo(() => {
     const all: { value: string; label: string; icon: typeof Calendar; count?: number }[] = [];
     if (showVisits) all.push({ value: 'visits', label: 'Visits', icon: Calendar, count: data.visits.length });
+    if (showAnnual || data.annualCheckups.length > 0) {
+      all.push({
+        value: 'annual',
+        label: 'Annual',
+        icon: ClipboardCheck,
+        count: data.annualCheckups.length,
+      });
+    }
     all.push({ value: 'consultations', label: 'Consultations', icon: ClipboardList, count: data.consultations.length });
     all.push({ value: 'labs', label: 'Lab Results', icon: TestTube, count: data.labResults.length });
     all.push({ value: 'imaging', label: 'Imaging', icon: ScanLine, count: data.imagingOrders.length });
@@ -166,7 +255,7 @@ export function PatientHistoryTabs({
     if (showReferrals) all.push({ value: 'referrals', label: 'Referrals', icon: Share2, count: data.referrals.length });
     if (showBackground) all.push({ value: 'background', label: 'Background', icon: User });
     return all;
-  }, [showVisits, showCertificates, showReferrals, showBackground, data, compact]);
+  }, [showVisits, showAnnual, showCertificates, showReferrals, showBackground, data, compact]);
 
   if (loading && !initialData) {
     return (
@@ -177,20 +266,15 @@ export function PatientHistoryTabs({
     );
   }
 
-  // --- Default view handler if no override provided ---
-  const defaultViewHandler = (label: string) => () => {
-    // No-op: the consumer either provides a handler or uses the built-in modals
-    // We trust the consumer wired it up
-  };
-
   const triggerView = (handler: ((item: any) => void) | undefined, item: any) => {
     if (handler) handler(item);
   };
 
   return (
+    <>
     <Card>
       <CardHeader className={compact ? 'pb-0' : ''}>
-        <Tabs value={tabProp} defaultValue={tabProp ? undefined : defaultTab} onValueChange={onTabChange} className="w-full">
+        <Tabs value={activeTab} onValueChange={handleSubTabChange} className="w-full">
           <TabsList className="mb-1 flex h-auto w-full flex-wrap items-center justify-start gap-1 overflow-visible rounded-md bg-muted p-1 text-muted-foreground">
             {tabs.map(tab => (
               <TabsTrigger key={tab.value} value={tab.value} className="shrink-0 gap-1 px-2 py-1 text-xs whitespace-nowrap">
@@ -211,8 +295,6 @@ export function PatientHistoryTabs({
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">Date</th>
-                        <th className="px-4 py-2 text-left font-medium">Time</th>
-                        <th className="px-4 py-2 text-left font-medium">Visit ID</th>
                         <th className="px-4 py-2 text-left font-medium">Type</th>
                         <th className="px-4 py-2 text-left font-medium">Clinics</th>
                         <th className="px-4 py-2 text-left font-medium">Status</th>
@@ -223,10 +305,12 @@ export function PatientHistoryTabs({
                       {data.visits.map((v: any) => (
                         <tr key={v.id} className="hover:bg-muted/30">
                           <td className="px-4 py-3 text-muted-foreground">{v.date || '—'}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{v.time || '—'}</td>
-                          <td className="px-4 py-3 font-mono text-xs">{v.visit_id || v.id}</td>
                           <td className="px-4 py-3">{v.visit_type || 'OPD'}</td>
-                          <td className="px-4 py-3">{v.clinic || (v.clinics ? (v.clinics as string[]).join(', ') : '—') || '—'}</td>
+                          <td className="px-4 py-3">
+                            {Array.isArray(v.clinics) && v.clinics.length
+                              ? (v.clinics as string[]).join(', ')
+                              : (v.location_clinic_name || '—')}
+                          </td>
                           <td className="px-4 py-3"><Badge variant="outline" className={`text-xs ${statusBadgeClass(v.status)}`}>{humanizeStatus(v.status)}</Badge></td>
                           <td className="px-4 py-3 text-center">
                             <Button variant="ghost" size="sm" onClick={() => triggerView(onViewVisit, v)}>
@@ -235,6 +319,76 @@ export function PatientHistoryTabs({
                           </td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {/* Annual check-ups */}
+          {(showAnnual || data.annualCheckups.length > 0) && (
+            <TabsContent value="annual" className="mt-4">
+              {data.annualCheckups.length === 0 ? (
+                <div className="py-10 text-center space-y-3">
+                  <p className="text-sm text-muted-foreground">No annual check-up records found</p>
+                  {scheduleCheckupHref ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={scheduleCheckupHref}>Schedule annual check-up</a>
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">Date</th>
+                        <th className="px-4 py-2 text-left font-medium">Programme</th>
+                        <th className="px-4 py-2 text-left font-medium">Doctor</th>
+                        <th className="px-4 py-2 text-left font-medium">Outcome</th>
+                        <th className="px-4 py-2 text-left font-medium">Status</th>
+                        <th className="px-4 py-2 text-center font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {[...data.annualCheckups]
+                        .sort((a, b) => (b.programme_year || 0) - (a.programme_year || 0))
+                        .map((checkup) => (
+                          <tr key={checkup.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(checkup.visit_date)}
+                            </td>
+                            <td className="px-4 py-3">{checkup.programme_year}</td>
+                            <td className="px-4 py-3">{checkup.signed_off_by_name || '—'}</td>
+                            <td className="px-4 py-3">
+                              {checkup.status === 'completed'
+                                ? checkup.fitness_outcome_display || 'Completed'
+                                : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${statusBadgeClass(checkup.status)}`}
+                              >
+                                {checkup.status === 'completed'
+                                  ? 'Completed'
+                                  : checkup.status === 'cancelled'
+                                    ? 'Cancelled'
+                                    : 'In progress'}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => triggerView(onViewAnnualCheckup, checkup)}
+                              >
+                                <Eye className="h-4 w-4 mr-1" /> View
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
@@ -289,8 +443,14 @@ export function PatientHistoryTabs({
           {/* Lab Results */}
           <TabsContent value="labs" className="mt-4">
             {data.labResults.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No lab results found</p>
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No lab results with entered or verified results found
+              </p>
             ) : (
+              <>
+              <p className="text-xs text-muted-foreground mb-3">
+                Tests with results entered or verified only — pending orders are not listed here.
+              </p>
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
@@ -328,6 +488,7 @@ export function PatientHistoryTabs({
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </TabsContent>
 
@@ -352,7 +513,7 @@ export function PatientHistoryTabs({
                       <tr key={img.id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 text-muted-foreground">{formatDate(img.created_at)}</td>
                         <td className="px-4 py-3 font-medium">{img.study_details?.procedure || 'Imaging'}</td>
-                        <td className="px-4 py-3">{img.study_details?.location_clinic_name || '—'}</td>
+                        <td className="px-4 py-3">{img.location_clinic_name || '—'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={`text-xs ${statusBadgeClass((img.study_details?.overall_status || img.study_details?.status || '').toLowerCase())}`}>
                             {humanizeStatus(img.study_details?.overall_status || img.study_details?.status)}
@@ -502,8 +663,6 @@ export function PatientHistoryTabs({
                       <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
                       <th className="px-4 py-2 text-left font-medium">Location</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
-                      <th className="px-4 py-2 text-left font-medium">Priority</th>
-                      <th className="px-4 py-2 text-left font-medium">Sessions</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
                   </thead>
@@ -511,21 +670,13 @@ export function PatientHistoryTabs({
                     {data.eyeOrders.map((o: any) => (
                       <tr key={o.id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 text-muted-foreground">{formatDate(o.ordered_at)}</td>
-                        <td className="px-4 py-3">
-                          <span className="font-medium">{o.diagnosis || o.chief_complaint || 'N/A'}</span>
-                        </td>
+                        <td className="px-4 py-3 font-medium">{o.diagnosis || '—'}</td>
                         <td className="px-4 py-3">{o.location_clinic_name || '—'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={`text-xs ${statusBadgeClass(o.status)}`}>
                             {humanizeStatus(o.status)}
                           </Badge>
                         </td>
-                        <td className="px-4 py-3">
-                          <Badge variant={o.priority === 'stat' ? 'destructive' : o.priority === 'urgent' ? 'default' : 'secondary'} className="text-xs">
-                            {formatPriority(o.priority)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{o.completed_sessions_count ?? 0}</td>
                         <td className="px-4 py-3 text-center">
                           <Button variant="ghost" size="sm" onClick={() => triggerView(onViewEyeOrder, o)}>
                             <Eye className="h-4 w-4 mr-1" /> View
@@ -591,6 +742,14 @@ export function PatientHistoryTabs({
           {/* Certificates */}
           {showCertificates && (
             <TabsContent value="certificates" className="mt-4">
+              {onIssueCertificate && (
+                <div className="flex justify-end mb-3">
+                  <Button type="button" size="sm" variant="outline" onClick={onIssueCertificate}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Issue certificate
+                  </Button>
+                </div>
+              )}
               {data.certificates.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">No medical certificates found</p>
               ) : (
@@ -599,20 +758,37 @@ export function PatientHistoryTabs({
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">Issued</th>
-                        <th className="px-4 py-2 text-left font-medium">Certificate No.</th>
                         <th className="px-4 py-2 text-left font-medium">Purpose</th>
                         <th className="px-4 py-2 text-left font-medium">Validity</th>
-                        <th className="px-4 py-2 text-left font-medium">Sick Leave</th>
+                        <th className="px-4 py-2 text-center font-medium">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
                       {data.certificates.map((c: any) => (
                         <tr key={c.id} className="hover:bg-muted/30">
                           <td className="px-4 py-3 text-muted-foreground">{formatDate(c.issued_at || c.created_at)}</td>
-                          <td className="px-4 py-3 font-mono text-xs">{c.certificate_number || c.id}</td>
                           <td className="px-4 py-3">{purposeLabel[c.purpose] || c.purpose || '—'}</td>
-                          <td className="px-4 py-3">{c.valid_until ? `${formatDate(c.valid_from)} – ${formatDate(c.valid_until)}` : '—'}</td>
-                          <td className="px-4 py-3">{c.sick_leave_days ?? '—'}</td>
+                          <td className="px-4 py-3">
+                            {c.valid_from && (c.valid_to || c.valid_until)
+                              ? `${formatDate(c.valid_from)} – ${formatDate(c.valid_to || c.valid_until)}`
+                              : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={viewingCertId === c.id}
+                              onClick={() => { void handleViewCertificate(c); }}
+                            >
+                              {viewingCertId === c.id ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <Eye className="h-4 w-4 mr-1" />
+                              )}
+                              View
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -635,9 +811,8 @@ export function PatientHistoryTabs({
                         <th className="px-4 py-2 text-left font-medium">Date</th>
                         <th className="px-4 py-2 text-left font-medium">Facility</th>
                         <th className="px-4 py-2 text-left font-medium">Specialty</th>
-                        <th className="px-4 py-2 text-left font-medium">Urgency</th>
                         <th className="px-4 py-2 text-left font-medium">Status</th>
-                        <th className="px-4 py-2 text-left font-medium">Referred By</th>
+                        <th className="px-4 py-2 text-center font-medium">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -647,16 +822,15 @@ export function PatientHistoryTabs({
                           <td className="px-4 py-3">{r.facility || '—'}</td>
                           <td className="px-4 py-3">{r.specialty || '—'}</td>
                           <td className="px-4 py-3">
-                            <Badge variant={r.urgency === 'urgent' ? 'destructive' : 'secondary'} className="text-xs">
-                              {r.urgency || '—'}
+                            <Badge variant="outline" className={`text-xs ${getStatusBadgeClass(r.status || '')}`}>
+                              {referralStatusLabel(r.status)}
                             </Badge>
                           </td>
-                          <td className="px-4 py-3">
-                            <Badge variant="outline" className={`text-xs ${statusBadgeClass((r.status || '').toLowerCase())}`}>
-                              {humanizeStatus(r.status)}
-                            </Badge>
+                          <td className="px-4 py-3 text-center">
+                            <Button variant="ghost" size="sm" onClick={() => handleViewReferral(r)}>
+                              <Eye className="h-4 w-4 mr-1" /> View
+                            </Button>
                           </td>
-                          <td className="px-4 py-3">{r.referred_by_name || r.created_by_name || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -740,5 +914,15 @@ export function PatientHistoryTabs({
         </Tabs>
       </CardHeader>
     </Card>
+    {!onViewReferral ? (
+      <PatientHistoryReferralViewDialog
+        open={referralDialogOpen}
+        onOpenChange={setReferralDialogOpen}
+        referralId={referralViewId}
+        refreshKey={referralViewRefreshKey}
+        onReferralUpdated={reloadHistory}
+      />
+    ) : null}
+    </>
   );
 }

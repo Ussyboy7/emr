@@ -1,10 +1,12 @@
 "use client";
+import { formatDisplayDateTime } from '@/lib/dates';
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
+import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -125,7 +127,7 @@ export default function WarehouseStorePage() {
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ processed: 0, total: 0 });
   const [inventoryCurrentPage, setInventoryCurrentPage] = useState(1);
-  const [inventoryItemsPerPage, setInventoryItemsPerPage] = useState(10);
+  const [inventoryItemsPerPage, setInventoryItemsPerPage] = useState(DEFAULT_LIST_PAGE_SIZE);
   const [inventoryTotalCount, setInventoryTotalCount] = useState(0);
   const debouncedInventorySearch = useDebouncedValue(inventorySearchQuery, 300);
   const [storeStats, setStoreStats] = useState({
@@ -206,7 +208,7 @@ export default function WarehouseStorePage() {
     const res = await pharmacyService.getInventory({
       medication: String(med.id),
       location: PHARMACY_LOCATIONS.STORE,
-      page_size: 500,
+      page_size: MAX_LIST_PAGE_SIZE,
     });
     return res.results || [];
   }, []);
@@ -1007,7 +1009,7 @@ export default function WarehouseStorePage() {
                         const deltaUnits = Number(h.quantity_after || 0) - Number(h.quantity_before || 0);
                         const direction = deltaUnits >= 0 ? "Increase" : "Decrease";
                         const absUnits = Math.abs(deltaUnits);
-                        const dateLabel = h.created_at ? new Date(h.created_at).toLocaleString() : "";
+                        const dateLabel = h.created_at ? formatDisplayDateTime(h.created_at) : "";
 
                         return (
                           <div key={h.id} className="pt-1 border-t border-border first:border-t-0">

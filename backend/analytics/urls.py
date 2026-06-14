@@ -2,8 +2,8 @@
 URL configuration for the Analytics app.
 """
 from django.urls import path
-from . import views
+from .views import ClinicalDashboardAnalyticsView
 
 urlpatterns = [
-    path('analytics/dashboard/', views.clinical_dashboard_analytics, name='clinical-dashboard-analytics'),
+    path('analytics/dashboard/', ClinicalDashboardAnalyticsView.as_view(), name='clinical-dashboard-analytics'),
 ]

@@ -4,7 +4,9 @@
  * Pharmacy API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { peekServerTodayApi, toApiDateFromInstant } from '../dates';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
+import { MAX_LIST_PAGE_SIZE, DEFAULT_CATALOG_PAGE_SIZE } from '../pagination-constants';
 import { logError, logWarn } from '../client-logger';
 import type { PartialUpdate, ApiResponse } from '../types/common';
 
@@ -416,6 +418,17 @@ class PharmacyService {
     };
   }
 
+  /** Top medication match for a name search (interactions, substitutes). */
+  async resolveMedication(search: string): Promise<Medication | null> {
+    try {
+      const query = buildQueryString({ search: search.trim() });
+      const res = await apiFetch<Medication>(`/v1/pharmacy/medications/resolve/${query}`);
+      return normalizeMedication(res);
+    } catch {
+      return null;
+    }
+  }
+
   async getMedication(id: number): Promise<Medication> {
     const res = await apiFetch<Medication>(`/v1/pharmacy/medications/${id}/?__ts=${Date.now()}`);
     return normalizeMedication(res);
@@ -497,7 +510,7 @@ class PharmacyService {
     // Get inventory from Store location (the master list)
     const inventory = await this.getInventory({
       location: PHARMACY_LOCATIONS.STORE,
-      page_size: params?.page_size || 500,
+      page_size: params?.page_size || DEFAULT_CATALOG_PAGE_SIZE,
       ...params,
     });
     
@@ -602,9 +615,7 @@ class PharmacyService {
   }
 
   /**
-   * Lightweight inventory stats (counts + total units).
-   *
-   * Implemented via small paginated requests to avoid huge page_size.
+   * Inventory tab counts + total units via a single aggregate endpoint.
    */
   async getInventoryStats(params: {
     location: string;
@@ -620,53 +631,16 @@ class PharmacyService {
     expired: number;
     total_units: string | number;
   }> {
-    const base = {
-      page: 1,
-      page_size: 1,
+    const query = buildQueryString({
       location: params.location,
       search: params.search || undefined,
       medication__category: params.medication__category || undefined,
-    } as const;
-
-    const [totalRes, outRes, lowRes, expSoonRes, expiredRes] = await Promise.all([
-      this.getInventory({ ...base }),
-      this.getInventory({ ...base, stock_status: 'out' }),
-      this.getInventory({ ...base, stock_status: 'low' }),
-      this.getInventory({ ...base, stock_status: 'near_expiry' }),
-      this.getInventory({ ...base, stock_status: 'expired' }),
-    ]);
-
-    // Sum units across pages to avoid huge single-page fetches.
-    const unitsPageSize = 200;
-    const firstUnitsPage = await this.getInventory({ ...base, page_size: unitsPageSize });
-    let total_units = (firstUnitsPage.results || []).reduce(
-      (acc, row) => acc + Number((row as any).quantity || 0),
-      0,
-    );
-    const totalRows = firstUnitsPage.count ?? (firstUnitsPage.results || []).length;
-    const totalPages = Math.ceil(totalRows / unitsPageSize);
-    if (totalPages > 1) {
-      const extraPages = await Promise.all(
-        Array.from({ length: totalPages - 1 }, (_, i) =>
-          this.getInventory({ ...base, page_size: unitsPageSize, page: i + 2 }),
-        ),
-      );
-      for (const p of extraPages) {
-        total_units += (p.results || []).reduce(
-          (acc, row) => acc + Number((row as any).quantity || 0),
-          0,
-        );
-      }
-    }
-
-    return {
-      total: totalRes.count ?? 0,
-      out_of_stock: outRes.count ?? 0,
-      low_stock: lowRes.count ?? 0,
-      expiring_soon: expSoonRes.count ?? 0,
-      expired: expiredRes.count ?? 0,
-      total_units,
-    };
+      stock_status: params.stock_status || undefined,
+    });
+    const path = query
+      ? `/v1/pharmacy/inventory/list-stats/${query}`
+      : '/v1/pharmacy/inventory/list-stats/';
+    return apiFetch(path);
   }
 
   /**
@@ -878,31 +852,7 @@ class PharmacyService {
     lowStock: number;
     totalInventory: number;
   }> {
-    const [pendingResponse, dispensedResponse, alertsResponse, inventoryResponse] = await Promise.all([
-      this.getPrescriptions({ status: 'pending', page: 1 }),
-      this.getPrescriptions({ status: 'dispensed', page: 1 }),
-      this.getInventoryAlertSummary(),
-      this.getInventory({ page: 1 }),
-    ]);
-
-    const pendingRx = pendingResponse.count || pendingResponse.results.length;
-    const today = new Date().toLocaleDateString('en-CA');
-    const dispensedToday = dispensedResponse.results.filter((rx: Prescription) => {
-      if (rx.dispensed_at) {
-        const dispensedDate = new Date(rx.dispensed_at).toLocaleDateString('en-CA');
-        return dispensedDate === today;
-      }
-      return false;
-    }).length;
-    const lowStock = alertsResponse.low_stock_count || 0;
-    const totalInventory = inventoryResponse.count || inventoryResponse.results.length;
-    
-    return {
-      pendingRx,
-      dispensedToday,
-      lowStock,
-      totalInventory,
-    };
+    return apiFetch('/v1/pharmacy/prescriptions/home-stats/');
   }
 
   /**
@@ -921,6 +871,28 @@ class PharmacyService {
   }): Promise<{ results: StockRequest[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: StockRequest[]; count: number }>(`/v1/pharmacy/stock-requests/${query}`);
+  }
+
+  async getStockRequestListStats(params?: {
+    search?: string;
+    to_location?: string;
+    from_location?: string;
+    date_after?: string;
+    date_before?: string;
+    show_all?: string;
+    [key: string]: string | undefined;
+  }): Promise<{
+    total: number;
+    pending: number;
+    approved: number;
+    confirmed: number;
+    awaitingConfirmation: number;
+  }> {
+    const query = buildQueryString(params || {});
+    const path = query
+      ? `/v1/pharmacy/stock-requests/list-stats/?${query.slice(1)}`
+      : '/v1/pharmacy/stock-requests/list-stats/';
+    return apiFetch(path);
   }
 
   async createStockRequest(data: {
@@ -1110,7 +1082,7 @@ class PharmacyService {
           batchNumber: item.batch_number,
           quantity: Number(item.quantity),
           expiryDate: item.expiry_date,
-          receivedDate: (item as any).created_at?.split('T')[0] || '',
+          receivedDate: toApiDateFromInstant((item as any).created_at),
           supplier: item.supplier || '',
           unitCost: Number((item as any).purchase_price) || 0,
         }))
@@ -1171,7 +1143,7 @@ class PharmacyService {
           const inventory = await this.getInventory({
             medication: med.id.toString(),
             location: PHARMACY_LOCATIONS.DISPENSARY,
-            page_size: 100
+            page_size: MAX_LIST_PAGE_SIZE
           });
           
           // Check if there's any non-expired stock
@@ -1262,8 +1234,11 @@ class PharmacyService {
     }
   }
 
-  async getAnalyticsSummary(start: string, end: string): Promise<PharmacyAnalyticsSummary> {
-    const query = buildQueryString({ start, end });
+  async getAnalyticsSummary(period: URLSearchParams | { start: string; end: string }): Promise<PharmacyAnalyticsSummary> {
+    const query =
+      period instanceof URLSearchParams
+        ? `?${period.toString()}`
+        : buildQueryString({ start: period.start, end: period.end });
     return apiFetch<PharmacyAnalyticsSummary>(`/pharmacy/analytics/summary/${query}`);
   }
 }

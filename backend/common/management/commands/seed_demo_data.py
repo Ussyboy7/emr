@@ -203,6 +203,9 @@ class Command(BaseCommand):
             'analytics_view': ('Analytics', 'view'),
             'analytics_executive': ('Analytics', 'executive'),
 
+            # Human Resources
+            'hr_view': ('Human Resources', 'view'),
+
             # Administration
             'admin_users': ('Administration', 'users'),
             'admin_roles': ('Administration', 'roles'),
@@ -231,12 +234,13 @@ class Command(BaseCommand):
                 'type': 'admin',
                 'description': 'Full system access with all permissions',
                 'permissions': [
-                    "/admin", "/admin/audit", "/admin/clinics", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
+                    "/admin", "/admin/annual-checkup-programme", "/admin/audit", "/admin/clinics", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
                     "/analytics", "/analytics/executive",
+                    "/hr", "/hr/annual-checkups", "/hr/exemptions",
                     "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/start", "/consultation/wards",
                     "/laboratory", "/laboratory/completed", "/laboratory/orders", "/laboratory/templates", "/laboratory/verification",
                     "/medical-records", "/medical-records/appointments", "/medical-records/dependents", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/referrals", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
-                    "/nursing", "/nursing/analytics", "/nursing/patient-vitals", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
+                    "/nursing", "/nursing/analytics", "/nursing/vitals-history", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
                     "/pharmacy", "/pharmacy/history", "/pharmacy/inventory", "/pharmacy/prescriptions",
                     "/physiotherapy", "/physiotherapy/completed", "/physiotherapy/pool-queue",
                     "/radiology", "/radiology/completed", "/radiology/orders", "/radiology/templates", "/radiology/verification",
@@ -261,7 +265,7 @@ class Command(BaseCommand):
                     '/consultation', '/consultation/start', '/consultation/history',
                     '/consultation/wards', '/consultation/referrals',
                     # Nursing - Limited access
-                    '/nursing', '/nursing/analytics', '/nursing/patient-vitals', '/nursing/pool-queue', '/nursing/room-queue',
+                    '/nursing', '/nursing/analytics', '/nursing/vitals-history', '/nursing/pool-queue', '/nursing/room-queue',
                     # Laboratory - View access
                     '/laboratory', '/laboratory/orders', '/laboratory/verification', '/laboratory/completed',
                     # Pharmacy - View access
@@ -295,7 +299,7 @@ class Command(BaseCommand):
                     '/consultation',  # My Dashboard - consultation_view
 
                     # Nursing - All permissions (add explicit permissions for UI display)
-                    '/nursing/patient-vitals',  # nursing_vitals
+                    '/nursing/vitals-history',  # nursing_vitals
                     '/nursing/pool-queue',  # nursing_queue
                     '/nursing/analytics',  # nursing_queue — pool metrics
                     '/nursing/room-queue',  # nursing_queue
@@ -424,6 +428,19 @@ class Command(BaseCommand):
             }
         )
         roles['Medical Records Officer'] = records_role
+
+        hr_role, _ = Role.objects.get_or_create(
+            name='Human Resources Officer',
+            defaults={
+                'type': 'administrative',
+                'description': 'HR annual check-up compliance and exemptions',
+                'permissions': [
+                    '/hr', '/hr/annual-checkups', '/hr/exemptions',
+                ],
+                'is_active': True,
+            }
+        )
+        roles['Human Resources Officer'] = hr_role
         
         self.stdout.write(f"  ✓ Created {len(roles)} roles")
         return roles

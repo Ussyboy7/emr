@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.openapi import document_api_view
 from radiology.models import RadiologyOrder, RadiologyReport, RadiologyStudy
 
 
@@ -59,6 +60,7 @@ def _filter_reports_by_search(qs, search: str):
     ).distinct()
 
 
+@document_api_view(tag="Radiology", summary="Cross-workflow radiology patient tracker")
 class RadiologyPatientTrackerView(APIView):
     """
     GET /radiology/patient-tracker/?search=...
@@ -66,8 +68,6 @@ class RadiologyPatientTrackerView(APIView):
     Returns active and completed radiology studies for a patient search term
     with screen/tab hints for the frontend.
     """
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         search = (request.query_params.get('search') or '').strip()

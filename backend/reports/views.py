@@ -20,24 +20,15 @@ from nursing.models import NursingOrder, Procedure
 from consultation.models import Referral, ConsultationSession, Diagnosis
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth, TruncDay, TruncWeek
 
+from reports.export_helpers import respond_with_export
+from common.openapi import document_api_view
 
-def _resolve_period_bounds(year=None, start_date=None, end_date=None, default_to_current_year=False):
-    """Resolve report period bounds as dates."""
-    if start_date and end_date:
-        return start_date, end_date
 
-    if year:
-        try:
-            year_int = int(year)
-            return datetime(year_int, 1, 1).date(), datetime(year_int, 12, 31).date()
-        except (ValueError, TypeError):
-            pass
+def _period_bounds_from_request(request, *, default_to_current_year=False):
+    """Parse request query params into inclusive (start, end) date bounds."""
+    from common.report_period import bounds_from_request
 
-    if default_to_current_year:
-        current_year = timezone.now().year
-        return datetime(current_year, 1, 1).date(), datetime(current_year, 12, 31).date()
-
-    return None, None
+    return bounds_from_request(request, default_to_current_year=default_to_current_year)
 
 
 def _build_visit_lifecycle_summary(period_visits_queryset, history_visits_queryset, start_date, end_date):
@@ -88,198 +79,70 @@ def _build_visit_lifecycle_summary(period_visits_queryset, history_visits_querys
     }
 
 
+@document_api_view(tag="Reports", summary="Patient demographics report")
 class PatientDemographicsReportView(views.APIView):
-    """Generate patient demographics report."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """Active patient register demographics snapshot."""
+
     def get(self, request):
-        format_type = request.query_params.get('format', 'json')
-        
-        try:
-            total_patients = Patient.objects.filter(is_active=True).count()
-        except Exception as e:
-            return Response({
-                'error': 'Failed to load patient demographics',
-                'total_patients': 0,
-                'by_category': {},
-                'by_gender': {},
-                'by_age_group': {},
-                'by_blood_group': {},
-            }, status=500)
-        
-        stats = {
-            'total_patients': total_patients,
-            'by_category': {},
-            'by_gender': {},
-            'by_age_group': {},
-            'by_blood_group': {},
-        }
-        
-        # By category
-        try:
-            for category, _ in Patient.CATEGORY_CHOICES:
-                stats['by_category'][category] = Patient.objects.filter(
-                    category=category,
-                    is_active=True
-                ).count()
-        except Exception:
-            # If category field doesn't exist or has issues, provide fallback
-            stats['by_category'] = {
-                'employee': 0,
-                'dependent': 0,
-                'retiree': 0,
-                'nonnpa': 0,
-            }
-        
-        # By gender
-        for gender, _ in Patient.GENDER_CHOICES:
-            stats['by_gender'][gender] = Patient.objects.filter(
-                gender=gender,
-                is_active=True
-            ).count()
-        
-        # By age group
-        today = timezone.now().date()
-        age_groups = {
-            '0-18': Patient.objects.filter(is_active=True).extra(
-                where=["EXTRACT(YEAR FROM AGE(date_of_birth)) BETWEEN 0 AND 18"]
-            ).count(),
-            '19-35': Patient.objects.filter(is_active=True).extra(
-                where=["EXTRACT(YEAR FROM AGE(date_of_birth)) BETWEEN 19 AND 35"]
-            ).count(),
-            '36-50': Patient.objects.filter(is_active=True).extra(
-                where=["EXTRACT(YEAR FROM AGE(date_of_birth)) BETWEEN 36 AND 50"]
-            ).count(),
-            '51-65': Patient.objects.filter(is_active=True).extra(
-                where=["EXTRACT(YEAR FROM AGE(date_of_birth)) BETWEEN 51 AND 65"]
-            ).count(),
-            '65+': Patient.objects.filter(is_active=True).extra(
-                where=["EXTRACT(YEAR FROM AGE(date_of_birth)) > 65"]
-            ).count(),
-        }
-        stats['by_age_group'] = age_groups
-        
-        # By blood group
-        for bg, _ in Patient.BLOOD_GROUP_CHOICES:
-            stats['by_blood_group'][bg] = Patient.objects.filter(
-                blood_group=bg,
-                is_active=True
-            ).count()
-        
-        if format_type == 'csv':
-            response = HttpResponse(content_type='text/csv')
-            response['Content-Disposition'] = 'attachment; filename="patient_demographics.csv"'
-            writer = csv.writer(response)
-            writer.writerow(['Metric', 'Value'])
-            for key, value in stats.items():
-                if isinstance(value, dict):
-                    for k, v in value.items():
-                        writer.writerow([f"{key}_{k}", v])
-                else:
-                    writer.writerow([key, value])
-            return response
-        
-        return Response(stats)
+        from common.report_period import parse_report_period
+        from reports.patient_demographics_report import build_patient_demographics_report
+
+        period = parse_report_period(request)
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_patient_demographics_report(
+            period_start,
+            period_end,
+            all_time=period.all_time,
+        )
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="patient_demographics",
+            title="Patient Demographics",
+        )
 
 
+@document_api_view(tag="Reports", summary="Laboratory statistics report")
 class LabStatisticsReportView(views.APIView):
-    """Generate laboratory statistics report."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """Lab order and test volume for the selected period."""
+
     def get(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        
-        queryset = LabOrder.objects.all()
-        if start_date:
-            queryset = queryset.filter(ordered_at__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(ordered_at__lte=end_date)
-        
-        stats = {
-            'total_orders': queryset.count(),
-            'by_priority': {},
-            'by_status': {},
-            'tests_completed': LabTest.objects.filter(
-                order__in=queryset,
-                status='verified'
-            ).count(),
-            'tests_pending': LabTest.objects.filter(
-                order__in=queryset,
-                status__in=['pending', 'sample_collected', 'processing', 'results_ready']
-            ).count(),
-        }
-        
-        for priority, _ in LabOrder.PRIORITY_CHOICES:
-            stats['by_priority'][priority] = queryset.filter(priority=priority).count()
-        
-        for status, _ in LabTest.STATUS_CHOICES:
-            stats['by_status'][status] = LabTest.objects.filter(
-                order__in=queryset,
-                status=status
-            ).count()
-        
-        return Response(stats)
+        from reports.lab_statistics_report import build_lab_statistics_report
+
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_lab_statistics_report(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="lab_statistics",
+            title="Lab Statistics",
+        )
 
 
+@document_api_view(tag="Reports", summary="Top diagnoses report")
 class TopDiagnosesReportView(views.APIView):
-    """Get top diagnoses from consultation sessions."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """Top ICD-10 diagnoses from completed consultations."""
+
     def get(self, request):
-        limit = int(request.query_params.get('limit', 10))
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
+        from reports.top_diagnoses_report import build_top_diagnoses_report
 
-        # Use structured diagnoses (ICD-10) instead of parsing free-text assessment.
-        from consultation.models import Diagnosis
-
-        qs = Diagnosis.objects.filter(
-            session__status='completed',
-            icd10_code__isnull=False,
+        try:
+            limit = int(request.query_params.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_top_diagnoses_report(period_start, period_end, limit=limit)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="top_diagnoses",
+            title="Top Diagnoses",
         )
 
-        # Filter by consultation session period (ended_at), if supplied.
-        if start_date:
-            qs = qs.filter(session__ended_at__gte=start_date)
-        if end_date:
-            qs = qs.filter(session__ended_at__lte=end_date)
 
-        total = qs.count()
-        aggregated = (
-            qs.values(
-                code=F('icd10_code__code'),
-                description=F('icd10_code__description'),
-            )
-            .annotate(count=Count('id'))
-            .order_by('-count')[:limit]
-        )
-
-        results = []
-        for row in aggregated:
-            code = row.get('code') or 'UNSPECIFIED'
-            description = row.get('description') or ''
-            count = row.get('count') or 0
-            percentage = (count / total * 100) if total > 0 else 0
-            results.append({
-                # Keep `diagnosis` for backward compatibility with existing frontend code.
-                'diagnosis': f"{code} - {description}" if description else code,
-                'code': code,
-                'description': description,
-                'count': count,
-                'percentage': round(percentage, 1),
-            })
-
-        return Response(results)
-
-
+@document_api_view(tag="Reports", summary="Laboratory performance report")
 class LabPerformanceReportView(views.APIView):
     """Get laboratory performance metrics."""
-    
-    permission_classes = [IsAuthenticated]
     
     def get(self, request):
         today = timezone.now().date()
@@ -331,13 +194,14 @@ class LabPerformanceReportView(views.APIView):
             'critical_values': critical_values,
         }
         
-        return Response(stats)
+        return respond_with_export(
+            request, stats, filename_prefix="lab_performance", title="Lab Performance"
+        )
 
 
+@document_api_view(tag="Reports", summary="Pharmacy performance report")
 class PharmacyPerformanceReportView(views.APIView):
     """Get pharmacy performance metrics."""
-    
-    permission_classes = [IsAuthenticated]
     
     def get(self, request):
         today = timezone.now().date()
@@ -382,69 +246,45 @@ class PharmacyPerformanceReportView(views.APIView):
             'low_stock_items': low_stock_count,
         }
         
-        return Response(stats)
+        return respond_with_export(
+            request,
+            stats,
+            filename_prefix="pharmacy_performance",
+            title="Pharmacy Performance",
+        )
 
 
+@document_api_view(tag="Reports", summary="Export report data")
 class ExportDataView(views.APIView):
     """Export data to CSV/JSON."""
     
-    permission_classes = [IsAuthenticated]
-    
     def get(self, request):
         model_type = request.query_params.get('model', 'patient')
-        format_type = request.query_params.get('format', 'json')
-        
-        # This is a simplified export - in production, use proper serialization
-        if format_type == 'json':
-            data = {'message': 'Export functionality - implement based on model_type'}
-            return Response(data)
-        
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="{model_type}_export.csv"'
-        writer = csv.writer(response)
-        writer.writerow(['Export', 'Not', 'Implemented', 'Yet'])
-        return response
+        data = {'message': 'Export functionality - implement based on model_type', 'model': model_type}
+        return respond_with_export(
+            request,
+            data,
+            filename_prefix=f"{model_type}_export",
+            title=f"{model_type.title()} Export",
+        )
 
 
+@document_api_view(tag="Reports", summary="Attendance summary report")
 class AttendanceSummaryReportView(views.APIView):
     """Generate attendance summary report by patient category."""
     
-    permission_classes = [IsAuthenticated]
-    
     def get(self, request):
         """Generate attendance summary with optional date filtering."""
-        from django.utils.dateparse import parse_date
-        
-        # Parse query parameters
-        year = request.query_params.get('year')
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date) if start_date else None
-        parsed_end_date = parse_date(end_date) if end_date else None
-        
-        # Build date filter
-        history_queryset = Visit.objects.filter(status__in=['completed', 'in_progress']).select_related('patient')
-        visits_queryset = history_queryset
-        
-        if start_date and end_date:
-            if parsed_start_date and parsed_end_date:
-                visits_queryset = visits_queryset.filter(date__gte=parsed_start_date, date__lte=parsed_end_date)
-        elif year:
-            try:
-                year_int = int(year)
-                visits_queryset = visits_queryset.filter(date__year=year_int)
-            except (ValueError, TypeError):
-                pass
-        else:
-            # Default to current year
-            current_year = timezone.now().year
-            visits_queryset = visits_queryset.filter(date__year=current_year)
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
 
-        period_start, period_end = _resolve_period_bounds(
-            year=year,
-            start_date=parsed_start_date,
-            end_date=parsed_end_date,
-            default_to_current_year=True,
+        history_queryset = Visit.objects.filter(
+            status__in=['completed', 'in_progress']
+        ).select_related('patient')
+        visits_queryset = history_queryset.filter(
+            date__gte=period_start,
+            date__lte=period_end,
         )
         lifecycle_summary = _build_visit_lifecycle_summary(
             period_visits_queryset=visits_queryset,
@@ -597,8 +437,7 @@ class AttendanceSummaryReportView(views.APIView):
         
         # Filter out categories with 0 counts for cleaner display (optional)
         # Keep all categories for now to match NPA-EMR format
-        
-        return Response({
+        report = {
             'data': categories,
             'summary': {
                 'total_employee': total_employee,
@@ -608,191 +447,121 @@ class AttendanceSummaryReportView(views.APIView):
                 'grand_total': grand_total,
                 **lifecycle_summary,
             }
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="attendance_summary",
+            title="Attendance Summary",
+        )
 
 
+@document_api_view(tag="Reports", summary="Visit statistics report")
 class VisitStatisticsReportView(views.APIView):
-    """Visit statistics grouped by day/week/month with status breakdown."""
+    """
+    Visit statistics grouped by day/week/month with status breakdown.
 
-    permission_classes = [IsAuthenticated]
+    Query params: start_date, end_date, year, group_by (day|week|month),
+    export (json|pdf|csv). Use ``export`` not ``format`` — DRF reserves ``format``.
+    """
 
     def get(self, request):
         from django.utils.dateparse import parse_date
 
-        year = request.query_params.get('year')
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        group_by = request.query_params.get('group_by', 'month')
-        parsed_start = parse_date(start_date) if start_date else None
-        parsed_end = parse_date(end_date) if end_date else None
+        from reports.visit_statistics import (
+            build_visit_statistics_csv,
+            build_visit_statistics_report,
+        )
+        from reports.visit_statistics_pdf import build_visit_statistics_pdf
 
-        period_start, period_end = _resolve_period_bounds(
+        from common.report_period import parse_report_period
+
+        year = request.query_params.get("year")
+        period = parse_report_period(request)
+        group_by = request.query_params.get("group_by", "month")
+        export_type = request.query_params.get("export", "json")
+
+        from common.report_period import resolve_report_bounds
+
+        period_start, period_end = resolve_report_bounds(
+            period,
             year=year,
-            start_date=parsed_start,
-            end_date=parsed_end,
-            default_to_current_year=True,
+            default_to_current_year=not period.all_time,
         )
 
-        visits = Visit.objects.filter(
-            date__gte=period_start, date__lte=period_end
+        if group_by not in ("day", "week", "month"):
+            group_by = "month"
+
+        report = build_visit_statistics_report(
+            start_date=period_start,
+            end_date=period_end,
+            group_by=group_by,
         )
 
-        trunc_fn = {'day': TruncDay, 'week': TruncWeek, 'month': TruncMonth}.get(group_by, TruncMonth)
+        user = request.user
+        generated_by = ""
+        if user and user.is_authenticated:
+            generated_by = user.get_full_name() or getattr(user, "username", "") or ""
 
-        period_annotation = trunc_fn('date')
+        if export_type == "pdf":
+            pdf_bytes = build_visit_statistics_pdf(report, generated_by=generated_by)
+            filename = f"visit_statistics_{period_start}_{period_end}.pdf"
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
 
-        grouped = visits.annotate(
-            period=period_annotation
-        ).values('period').annotate(
-            completed=Count('id', filter=Q(status='completed')),
-            cancelled=Count('id', filter=Q(status='cancelled')),
-            in_progress=Count('id', filter=Q(status='in_progress')),
-            scheduled=Count('id', filter=Q(status__in=['scheduled', 'pending'])),
-            total=Count('id'),
-            male=Count('id', filter=Q(patient__gender='male')),
-            female=Count('id', filter=Q(patient__gender='female')),
-            employee=Count('id', filter=Q(patient__category='employee')),
-            non_employee=Count('id', filter=~Q(patient__category='employee')),
-            officer=Count('id', filter=Q(patient__category='employee', patient__employee_type__icontains='officer')),
-            staff=Count('id', filter=Q(patient__category='employee') & ~Q(patient__employee_type__icontains='officer')),
-            emp_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='employee')),
-            ret_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='retiree')),
-            nonnpa=Count('id', filter=Q(patient__category='nonnpa')),
-            retiree=Count('id', filter=Q(patient__category='retiree')),
-        ).order_by('period')
+        if export_type == "csv":
+            csv_text = build_visit_statistics_csv(report)
+            filename = f"visit_statistics_{period_start}_{period_end}.csv"
+            response = HttpResponse(csv_text, content_type="text/csv")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
 
-        def format_label(dt, group):
-            if group == 'day':
-                return dt.strftime('%b %d, %Y')
-            elif group == 'week':
-                start_of_week = dt
-                end_of_week = dt + timedelta(days=6)
-                return f"{start_of_week.strftime('%b %d')} - {end_of_week.strftime('%b %d, %Y')}"
-            return dt.strftime('%b %Y')
-
-        data = []
-        for entry in grouped:
-            period_val = entry['period']
-            if period_val is None:
-                continue
-            data.append({
-                'period': period_val.isoformat(),
-                'period_label': format_label(period_val, group_by),
-                'completed': entry['completed'],
-                'cancelled': entry['cancelled'],
-                'in_progress': entry['in_progress'],
-                'scheduled': entry['scheduled'],
-                'total': entry['total'],
-                'male': entry['male'],
-                'female': entry['female'],
-                'employee': entry['employee'],
-                'non_employee': entry['non_employee'],
-                'officer': entry['officer'],
-                'staff': entry['staff'],
-                'emp_dependent': entry['emp_dependent'],
-                'ret_dependent': entry['ret_dependent'],
-                'nonnpa': entry['nonnpa'],
-                'retiree': entry['retiree'],
-            })
-
-        totals = visits.aggregate(
-            completed=Count('id', filter=Q(status='completed')),
-            cancelled=Count('id', filter=Q(status='cancelled')),
-            in_progress=Count('id', filter=Q(status='in_progress')),
-            scheduled=Count('id', filter=Q(status__in=['scheduled', 'pending'])),
-            total=Count('id'),
-            male=Count('id', filter=Q(patient__gender='male')),
-            female=Count('id', filter=Q(patient__gender='female')),
-            employee=Count('id', filter=Q(patient__category='employee')),
-            non_employee=Count('id', filter=~Q(patient__category='employee')),
-            officer=Count('id', filter=Q(patient__category='employee', patient__employee_type__icontains='officer')),
-            staff=Count('id', filter=Q(patient__category='employee') & ~Q(patient__employee_type__icontains='officer')),
-            emp_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='employee')),
-            ret_dependent=Count('id', filter=Q(patient__category='dependent', patient__dependent_type__icontains='retiree')),
-            nonnpa=Count('id', filter=Q(patient__category='nonnpa')),
-            retiree=Count('id', filter=Q(patient__category='retiree')),
-        )
-
-        return Response({
-            'data': data,
-            'summary': totals,
-        })
+        return Response(report)
 
 
+@document_api_view(tag="Reports", summary="Dispensed prescriptions report")
 class DispensedPrescriptionsReportView(views.APIView):
-    """Generate dispensed prescriptions report by month."""
-    
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        from django.utils.dateparse import parse_date
+    """
+    Prescription orders fully dispensed in the selected period.
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Get all dispensed prescriptions for the selected period
+    Counts one per :model:`pharmacy.Prescription` row (``status='dispensed'``),
+    not per medication line. Query param ``group_by``: day | week | month.
+    """
+
+    def get(self, request):
+        from reports.dispensed_prescriptions import (
+            GROUP_BY_LABELS,
+            build_prescription_period_breakdown,
+        )
+
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
+        group_by = (request.query_params.get("group_by") or "month").strip().lower()
+        if group_by not in ("day", "week", "month"):
+            group_by = "month"
+
         prescriptions = Prescription.objects.filter(
             status='dispensed',
             dispensed_at__isnull=False,
-        ).select_related('patient').annotate(
-            month=ExtractMonth('dispensed_at'),
-        )
-        if parsed_start_date and parsed_end_date:
-            prescriptions = prescriptions.filter(
-                dispensed_at__date__gte=parsed_start_date,
-                dispensed_at__date__lte=parsed_end_date,
-            )
-        else:
-            prescriptions = prescriptions.filter(dispensed_at__year=year_int)
-        
-        # Monthly breakdown
-        # If user selected a date range within the same year, return every month in that span (even if 0)
-        # so the UI doesn't look like data is "missing".
-        months = ['January', 'February', 'March', 'April', 'May', 'June',
-                 'July', 'August', 'September', 'October', 'November', 'December']
-        
-        monthly_data = []
-        total = 0
+            dispensed_at__date__gte=period_start,
+            dispensed_at__date__lte=period_end,
+        ).select_related('patient')
 
-        if parsed_start_date and parsed_end_date and parsed_start_date.year == parsed_end_date.year:
-            month_indices_to_show = list(range(parsed_start_date.month, parsed_end_date.month + 1))
-            for month_index in month_indices_to_show:
-                month_name = months[month_index - 1]
-                count = prescriptions.filter(month=month_index).count()
-                monthly_data.append({
-                    'sn': len(monthly_data) + 1,
-                    'month': month_name,
-                    'total': count,
-                })
-                total += count
-        else:
-            # Default: only include months with data (matches the older "year" report behavior).
-            for i, month_name in enumerate(months, 1):
-                count = prescriptions.filter(month=i).count()
-                if count > 0:
-                    monthly_data.append({
-                        'sn': len(monthly_data) + 1,
-                        'month': month_name,
-                        'total': count,
-                    })
-                    total += count
-        
+        period_data = build_prescription_period_breakdown(
+            prescriptions,
+            group_by=group_by,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        total = sum(row["total"] for row in period_data)
+
+        total_patients = prescriptions.values('patient_id').distinct().count()
         male_patients = prescriptions.filter(patient__gender='male').values('patient_id').distinct().count()
         female_patients = prescriptions.filter(patient__gender='female').values('patient_id').distinct().count()
-        grand_total_patients = male_patients + female_patients
 
-        # Add percentage per month based on total dispensed prescriptions.
-        for row in monthly_data:
-            row['percentage'] = round((row['total'] / total * 100) if total > 0 else 0, 1)
-
-        # Dispensed items breakdown (e.g., Paracetamol quantities dispensed)
+        # Medication lines dispensed (quantities by drug name)
         from django.db.models.functions import Coalesce
         from django.db.models import Value as DjangoValue
 
@@ -811,17 +580,11 @@ class DispensedPrescriptionsReportView(views.APIView):
         )
 
         # Filter by dispense date
-        if parsed_start_date and parsed_end_date:
-            dispense_ids = Dispense.objects.filter(
-                dispensed_at__date__gte=parsed_start_date,
-                dispensed_at__date__lte=parsed_end_date,
-            ).values_list('prescription_item_id', flat=True).distinct()
-            dispensed_items_qs = dispensed_items_qs.filter(id__in=dispense_ids)
-        else:
-            dispense_ids = Dispense.objects.filter(
-                dispensed_at__year=year_int
-            ).values_list('prescription_item_id', flat=True).distinct()
-            dispensed_items_qs = dispensed_items_qs.filter(id__in=dispense_ids)
+        dispense_ids = Dispense.objects.filter(
+            dispensed_at__date__gte=period_start,
+            dispensed_at__date__lte=period_end,
+        ).values_list('prescription_item_id', flat=True).distinct()
+        dispensed_items_qs = dispensed_items_qs.filter(id__in=dispense_ids)
 
         dispensed_items_rows = (
             dispensed_items_qs
@@ -841,121 +604,101 @@ class DispensedPrescriptionsReportView(views.APIView):
                 'unit': row.get('unit') or '',
                 'quantity_dispensed': float(row.get('total_dispensed_quantity') or 0),
             })
-        
-        return Response({
-            'data': monthly_data,
+        report = {
+            'data': period_data,
+            'group_by': group_by,
+            'group_by_label': GROUP_BY_LABELS[group_by],
             'summary': {
                 'total': total,
+                'total_patients': total_patients,
                 'total_male': male_patients,
                 'total_female': female_patients,
-                'grand_total': grand_total_patients,
-            }
-            ,
+                'grand_total': total_patients,
+            },
             'dispensed_items': dispensed_items,
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="prescriptions",
+            title="Prescriptions Report",
+        )
 
 
+@document_api_view(tag="Reports", summary="Laboratory attendance report")
 class LaboratoryAttendanceReportView(views.APIView):
-    """Generate laboratory attendance report by month and category."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """Distinct patients with lab orders in the period, broken down by category."""
+
     def get(self, request):
-        from django.utils.dateparse import parse_date
-
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Build lab period/history querysets
-        history_orders = LabOrder.objects.select_related('patient')
-        lab_orders = history_orders
-        if parsed_start_date and parsed_end_date:
-            lab_orders = lab_orders.filter(ordered_at__date__gte=parsed_start_date, ordered_at__date__lte=parsed_end_date)
-        else:
-            lab_orders = lab_orders.filter(ordered_at__year=year_int)
-
-        employee_orders = lab_orders.filter(patient__category='employee')
-        officers_orders = employee_orders.exclude(
-            patient__employee_type__isnull=True
-        ).exclude(
-            patient__employee_type=''
-        ).filter(
-            patient__employee_type__icontains='officer'
+        from reports.attendance_statistics import (
+            distinct_patient_gender_counts_for_filter,
+            mr_categorized_patients_q,
+            mr_category_row_filters,
         )
-        staff_orders = employee_orders.exclude(
-            patient__employee_type__icontains='officer'
+
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
         )
-        dependents_orders = lab_orders.filter(patient__category='dependent')
-        emp_dep_orders = dependents_orders.exclude(
-            patient__dependent_type__isnull=True
-        ).filter(
-            patient__dependent_type__icontains='employee'
+
+        history_orders = LabOrder.objects.filter(patient__isnull=False).select_related("patient")
+        lab_orders = history_orders.filter(
+            ordered_at__date__gte=period_start,
+            ordered_at__date__lte=period_end,
         )
-        ret_dep_orders = dependents_orders.exclude(
-            patient__dependent_type__isnull=True
-        ).filter(
-            patient__dependent_type__icontains='retiree'
+
+        grand_total = lab_orders.values("patient").distinct().count()
+        data = []
+        total_male = total_female = 0
+        officers_total = staff_total = 0
+        total_non_employee = 0
+
+        for sn, label, filt in mr_category_row_filters():
+            male, female, total = distinct_patient_gender_counts_for_filter(lab_orders, filt)
+            total_male += male
+            total_female += female
+            if sn <= 2:
+                officers_total += total if sn == 1 else 0
+                staff_total += total if sn == 2 else 0
+            else:
+                total_non_employee += total
+            data.append(
+                {
+                    "sn": sn,
+                    "category": label,
+                    "male": male,
+                    "female": female,
+                    "total": total,
+                    "percentage": round((total / grand_total * 100) if grand_total > 0 else 0, 1),
+                }
+            )
+
+        other_male, other_female, other_total = distinct_patient_gender_counts_for_filter(
+            lab_orders, ~mr_categorized_patients_q()
         )
-        non_npa_orders = lab_orders.filter(patient__category='nonnpa')
-        retiree_orders = lab_orders.filter(patient__category='retiree')
-
-        officers_total = officers_orders.values('patient').distinct().count()
-        officers_male = officers_orders.filter(patient__gender='male').values('patient').distinct().count()
-        officers_female = officers_orders.filter(patient__gender='female').values('patient').distinct().count()
-
-        staff_total = staff_orders.values('patient').distinct().count()
-        staff_male = staff_orders.filter(patient__gender='male').values('patient').distinct().count()
-        staff_female = staff_orders.filter(patient__gender='female').values('patient').distinct().count()
-
-        emp_dep_total = emp_dep_orders.values('patient').distinct().count()
-        emp_dep_male = emp_dep_orders.filter(patient__gender='male').values('patient').distinct().count()
-        emp_dep_female = emp_dep_orders.filter(patient__gender='female').values('patient').distinct().count()
-
-        ret_dep_total = ret_dep_orders.values('patient').distinct().count()
-        ret_dep_male = ret_dep_orders.filter(patient__gender='male').values('patient').distinct().count()
-        ret_dep_female = ret_dep_orders.filter(patient__gender='female').values('patient').distinct().count()
-
-        non_npa_total = non_npa_orders.values('patient').distinct().count()
-        non_npa_male = non_npa_orders.filter(patient__gender='male').values('patient').distinct().count()
-        non_npa_female = non_npa_orders.filter(patient__gender='female').values('patient').distinct().count()
-
-        retirees_total = retiree_orders.values('patient').distinct().count()
-        retirees_male = retiree_orders.filter(patient__gender='male').values('patient').distinct().count()
-        retirees_female = retiree_orders.filter(patient__gender='female').values('patient').distinct().count()
+        if other_total > 0:
+            total_male += other_male
+            total_female += other_female
+            total_non_employee += other_total
+            data.append(
+                {
+                    "sn": len(data) + 1,
+                    "category": "Other",
+                    "male": other_male,
+                    "female": other_female,
+                    "total": other_total,
+                    "percentage": round((other_total / grand_total * 100) if grand_total > 0 else 0, 1),
+                }
+            )
 
         total_employee = officers_total + staff_total
-        total_non_employee = emp_dep_total + ret_dep_total + non_npa_total + retirees_total
-        grand_total = total_employee + total_non_employee
-        total_male = officers_male + staff_male + emp_dep_male + ret_dep_male + non_npa_male + retirees_male
-        total_female = officers_female + staff_female + emp_dep_female + ret_dep_female + non_npa_female + retirees_female
+        unique_patient_ids = set(lab_orders.values_list("patient_id", flat=True).distinct())
 
-        period_start, period_end = _resolve_period_bounds(
-            year=year,
-            start_date=parsed_start_date,
-            end_date=parsed_end_date,
-            default_to_current_year=not bool(year),
-        )
-        cohort_patient_ids = (
-            list(officers_orders.values_list('patient_id', flat=True).distinct()) +
-            list(staff_orders.values_list('patient_id', flat=True).distinct()) +
-            list(emp_dep_orders.values_list('patient_id', flat=True).distinct()) +
-            list(ret_dep_orders.values_list('patient_id', flat=True).distinct()) +
-            list(non_npa_orders.values_list('patient_id', flat=True).distinct()) +
-            list(retiree_orders.values_list('patient_id', flat=True).distinct())
-        )
-        unique_patient_ids = set(cohort_patient_ids)
+        first_time_patients = 0
+        returning_patients = 0
         if period_start and period_end and unique_patient_ids:
             first_lab_date_subquery = history_orders.filter(
-                patient=OuterRef('pk')
-            ).order_by('ordered_at', 'id').values('ordered_at__date')[:1]
+                patient=OuterRef("pk")
+            ).order_by("ordered_at", "id").values("ordered_at__date")[:1]
             patients_qs = Patient.objects.filter(id__in=unique_patient_ids).annotate(
                 first_lab_order_date=Subquery(first_lab_date_subquery, output_field=DateField())
             )
@@ -963,446 +706,202 @@ class LaboratoryAttendanceReportView(views.APIView):
                 first_lab_order_date__gte=period_start,
                 first_lab_order_date__lte=period_end,
             ).count()
-            new_registrations = patients_qs.filter(
-                created_at__date__gte=period_start,
-                created_at__date__lte=period_end,
-            ).count()
             returning_patients = max(patients_qs.count() - first_time_patients, 0)
-        else:
-            first_time_patients = 0
-            new_registrations = 0
-            returning_patients = len(unique_patient_ids)
 
-        data = [
-            {
-                'sn': 1,
-                'category': 'Officers',
-                'male': officers_male,
-                'female': officers_female,
-                'total': officers_total,
-                'percentage': round((officers_total / grand_total * 100) if grand_total > 0 else 0, 1),
+        report = {
+            "data": data,
+            "summary": {
+                "total_employee": total_employee,
+                "total_non_employee": total_non_employee,
+                "total_male": total_male,
+                "total_female": total_female,
+                "grand_total": grand_total,
+                "first_time_patients": first_time_patients,
+                "returning_patients": returning_patients,
+                "total_unique_patients_seen": grand_total,
+                "total_lab_orders": lab_orders.count(),
             },
-            {
-                'sn': 2,
-                'category': 'Staff',
-                'male': staff_male,
-                'female': staff_female,
-                'total': staff_total,
-                'percentage': round((staff_total / grand_total * 100) if grand_total > 0 else 0, 1),
-            },
-            {
-                'sn': 3,
-                'category': 'Employee Dependents',
-                'male': emp_dep_male,
-                'female': emp_dep_female,
-                'total': emp_dep_total,
-                'percentage': round((emp_dep_total / grand_total * 100) if grand_total > 0 else 0, 1),
-            },
-            {
-                'sn': 4,
-                'category': 'Retiree Dependents',
-                'male': ret_dep_male,
-                'female': ret_dep_female,
-                'total': ret_dep_total,
-                'percentage': round((ret_dep_total / grand_total * 100) if grand_total > 0 else 0, 1),
-            },
-            {
-                'sn': 5,
-                'category': 'Non-NPA',
-                'male': non_npa_male,
-                'female': non_npa_female,
-                'total': non_npa_total,
-                'percentage': round((non_npa_total / grand_total * 100) if grand_total > 0 else 0, 1),
-            },
-            {
-                'sn': 6,
-                'category': 'Retirees',
-                'male': retirees_male,
-                'female': retirees_female,
-                'total': retirees_total,
-                'percentage': round((retirees_total / grand_total * 100) if grand_total > 0 else 0, 1),
-            },
-        ]
-        
-        return Response({
-            'data': data,
-            'summary': {
-                'total_employee': total_employee,
-                'total_non_employee': total_non_employee,
-                'total_male': total_male,
-                'total_female': total_female,
-                'grand_total': grand_total,
-                'new_registrations': new_registrations,
-                'first_time_patients': first_time_patients,
-                'returning_patients': returning_patients,
-                'total_unique_patients_seen': len(unique_patient_ids),
-                'total_visits': lab_orders.count(),
-            }
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="laboratory_attendance",
+            title="Laboratory Attendance",
+        )
 
 
+@document_api_view(tag="Reports", summary="Services and activities report")
 class ServicesActivitiesReportView(views.APIView):
     """Generate services and activities report."""
-    
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        from django.utils.dateparse import parse_date
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Get procedures for selected period with gender breakdown
-        procedures = Procedure.objects.select_related('patient')
-        if parsed_start_date and parsed_end_date:
-            procedures = procedures.filter(
-                performed_at__date__gte=parsed_start_date,
-                performed_at__date__lte=parsed_end_date,
-            )
-        else:
-            procedures = procedures.filter(performed_at__year=year_int)
-        
-        # Count by procedure type with gender breakdown
-        injections_male = procedures.filter(
-            procedure_type='injection',
-            patient__gender='male'
-        ).count()
-        injections_female = procedures.filter(
-            procedure_type='injection',
-            patient__gender='female'
-        ).count()
+    def get(self, request):
+        from nursing.procedure_queries import (
+            base_procedures_queryset,
+            distinct_patient_gender_counts,
+            filter_procedures_by_history_type,
+            filter_procedures_by_performed_period,
+            gender_event_counts,
+        )
+
+        from common.report_period import parse_report_period, resolve_report_bounds
+
+        period = parse_report_period(request)
+        year = request.query_params.get("year")
+        period_start, period_end = resolve_report_bounds(
+            period,
+            year=year,
+            default_to_current_year=not period.all_time and not (period.start and period.end),
+        )
+
+        procedures = filter_procedures_by_performed_period(
+            base_procedures_queryset(),
+            start_date=period_start,
+            end_date=period_end,
+        )
+
+        injections_qs = filter_procedures_by_history_type(procedures, "injection")
+        injections_male = gender_event_counts(injections_qs, "male")
+        injections_female = gender_event_counts(injections_qs, "female")
         injections = injections_male + injections_female
-        
-        dressing_male = procedures.filter(
-            procedure_type='dressing',
-            patient__gender='male'
-        ).count()
-        dressing_female = procedures.filter(
-            procedure_type='dressing',
-            patient__gender='female'
-        ).count()
+
+        dressing_qs = filter_procedures_by_history_type(procedures, "dressing")
+        dressing_male = gender_event_counts(dressing_qs, "male")
+        dressing_female = gender_event_counts(dressing_qs, "female")
         dressing = dressing_male + dressing_female
-        
-        # Get nursing orders for sick leave tracking with gender breakdown
-        nursing_orders = NursingOrder.objects.filter(
-            order_type__icontains='sick'
-        ).select_related('patient')
-        if parsed_start_date and parsed_end_date:
-            nursing_orders = nursing_orders.filter(
-                ordered_at__date__gte=parsed_start_date,
-                ordered_at__date__lte=parsed_end_date,
-            )
-        else:
-            nursing_orders = nursing_orders.filter(ordered_at__year=year_int)
-        
-        sick_leave_male = nursing_orders.filter(
-            patient__gender='male'
-        ).count()
-        sick_leave_female = nursing_orders.filter(
-            patient__gender='female'
-        ).count()
+
+        sick_leave_qs = MedicalCertificate.objects.filter(
+            purpose="illness",
+            issued_at__date__gte=period_start,
+            issued_at__date__lte=period_end,
+        ).select_related("patient")
+        sick_leave_male = gender_event_counts(sick_leave_qs, "male")
+        sick_leave_female = gender_event_counts(sick_leave_qs, "female")
         sick_leave = sick_leave_male + sick_leave_female
 
-        # Illness medical certificates (stored sick_leave_days + counts by patient gender)
-        cert_sick_qs = MedicalCertificate.objects.filter(purpose="illness").select_related("patient")
-        if parsed_start_date and parsed_end_date:
-            cert_sick_qs = cert_sick_qs.filter(
-                issued_at__date__gte=parsed_start_date,
-                issued_at__date__lte=parsed_end_date,
-            )
-        else:
-            cert_sick_qs = cert_sick_qs.filter(issued_at__year=year_int)
-        cert_sick_leave_days_sum = cert_sick_qs.aggregate(total=Sum("sick_leave_days"))["total"] or 0
-        cert_sick_male = cert_sick_qs.filter(patient__gender="male").count()
-        cert_sick_female = cert_sick_qs.filter(patient__gender="female").count()
-        cert_sick_issued = cert_sick_qs.count()
-        
-        # Get referrals from consultation with gender breakdown
-        referrals = Referral.objects.select_related('patient')
-        if parsed_start_date and parsed_end_date:
-            referrals = referrals.filter(
-                referred_at__date__gte=parsed_start_date,
-                referred_at__date__lte=parsed_end_date,
-            )
-        else:
-            referrals = referrals.filter(referred_at__year=year_int)
-        
-        referrals_male = referrals.filter(
-            patient__gender='male'
-        ).count()
-        referrals_female = referrals.filter(
-            patient__gender='female'
-        ).count()
+        referrals_qs = Referral.objects.filter(
+            referred_at__date__gte=period_start,
+            referred_at__date__lte=period_end,
+        ).select_related("patient")
+        referrals_male = gender_event_counts(referrals_qs, "male")
+        referrals_female = gender_event_counts(referrals_qs, "female")
         referrals_total = referrals_male + referrals_female
-        
-        # Get observations (can be from consultation sessions) with gender breakdown
-        observations_qs = ConsultationSession.objects.exclude(
-            assessment=''
-        ).exclude(
-            assessment__isnull=True
-        ).select_related('patient')
-        if parsed_start_date and parsed_end_date:
-            observations_qs = observations_qs.filter(
-                started_at__date__gte=parsed_start_date,
-                started_at__date__lte=parsed_end_date,
-            )
-        else:
-            observations_qs = observations_qs.filter(started_at__year=year_int)
-        
-        observations_male = observations_qs.filter(
-            patient__gender='male'
-        ).count()
-        observations_female = observations_qs.filter(
-            patient__gender='female'
-        ).count()
+
+        observations_qs = filter_procedures_by_history_type(procedures, "ward_admission")
+        observations_male = gender_event_counts(observations_qs, "male")
+        observations_female = gender_event_counts(observations_qs, "female")
         observations = observations_male + observations_female
-        
+
         categories = [
             {
-                'sn': 1, 
-                'category': 'Injections', 
-                'count': injections,
-                'male': injections_male,
-                'female': injections_female
+                "sn": 1,
+                "category": "Injections",
+                "count": injections,
+                "male": injections_male,
+                "female": injections_female,
             },
             {
-                'sn': 2, 
-                'category': 'Dressing', 
-                'count': dressing,
-                'male': dressing_male,
-                'female': dressing_female
+                "sn": 2,
+                "category": "Dressing",
+                "count": dressing,
+                "male": dressing_male,
+                "female": dressing_female,
             },
             {
-                'sn': 3, 
-                'category': 'Sick Leave', 
-                'count': sick_leave,
-                'male': sick_leave_male,
-                'female': sick_leave_female
+                "sn": 3,
+                "category": "Sick Leave",
+                "count": sick_leave,
+                "male": sick_leave_male,
+                "female": sick_leave_female,
             },
             {
-                'sn': 4, 
-                'category': 'Referrals', 
-                'count': referrals_total,
-                'male': referrals_male,
-                'female': referrals_female
+                "sn": 4,
+                "category": "Referrals",
+                "count": referrals_total,
+                "male": referrals_male,
+                "female": referrals_female,
             },
             {
-                'sn': 5, 
-                'category': 'Observations', 
-                'count': observations,
-                'male': observations_male,
-                'female': observations_female
+                "sn": 5,
+                "category": "Observations",
+                "count": observations,
+                "male": observations_male,
+                "female": observations_female,
             },
         ]
-        
-        total = sum(c['count'] for c in categories)
-        total_male = sum(c['male'] for c in categories)
-        total_female = sum(c['female'] for c in categories)
+
+        total = sum(c["count"] for c in categories)
+        total_male, total_female = distinct_patient_gender_counts(
+            injections_qs,
+            dressing_qs,
+            sick_leave_qs,
+            referrals_qs,
+            observations_qs,
+        )
         for row in categories:
-            row['percentage'] = round((row['count'] / total * 100) if total > 0 else 0, 1)
-        
-        return Response({
-            'data': categories,
-            'summary': {
-                'total': total,
-                'total_male': total_male,
-                'total_female': total_female,
+            row["percentage"] = round((row["count"] / total * 100) if total > 0 else 0, 1)
+
+        report = {
+            "data": categories,
+            "summary": {
+                "total": total,
+                "total_male": total_male,
+                "total_female": total_female,
             },
-            'medical_certificate_sick_leave': {
-                'certificates_issued': cert_sick_issued,
-                'total_sick_leave_days': cert_sick_leave_days_sum,
-                'male': cert_sick_male,
-                'female': cert_sick_female,
-            },
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="services_activities",
+            title="Services and Activities",
+        )
 
 
+@document_api_view(tag="Reports", summary="Comprehensive clinical report")
 class ComprehensiveReportView(views.APIView):
-    """Generate comprehensive report with all metrics."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """MR executive summary for the selected period."""
+
     def get(self, request):
-        from django.utils.dateparse import parse_date
+        from common.report_period import parse_report_period
+        from reports.attendance_statistics import attendable_visits_queryset
+        from reports.comprehensive_report import build_comprehensive_report
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Overview metrics
-        visits = Visit.objects.filter(status__in=['completed', 'in_progress'])
-        if parsed_start_date and parsed_end_date:
-            visits = visits.filter(date__gte=parsed_start_date, date__lte=parsed_end_date)
-        else:
-            visits = visits.filter(date__year=year_int)
-        total_visits = visits.count()
-        
-        prescriptions = Prescription.objects.all()
-        if parsed_start_date and parsed_end_date:
-            prescriptions = prescriptions.filter(prescribed_at__date__gte=parsed_start_date, prescribed_at__date__lte=parsed_end_date)
-        else:
-            prescriptions = prescriptions.filter(prescribed_at__year=year_int)
-        total_prescriptions = prescriptions.count()
-        dispensed_prescriptions = prescriptions.filter(status='dispensed').count()
-        
-        lab_orders = LabOrder.objects.all()
-        if parsed_start_date and parsed_end_date:
-            lab_orders = lab_orders.filter(ordered_at__date__gte=parsed_start_date, ordered_at__date__lte=parsed_end_date)
-        else:
-            lab_orders = lab_orders.filter(ordered_at__year=year_int)
-        total_lab_tests = LabTest.objects.filter(order__in=lab_orders).count()
-        
-        nursing_orders = NursingOrder.objects.all()
-        if parsed_start_date and parsed_end_date:
-            nursing_orders = nursing_orders.filter(ordered_at__date__gte=parsed_start_date, ordered_at__date__lte=parsed_end_date)
-        else:
-            nursing_orders = nursing_orders.filter(ordered_at__year=year_int)
-        total_nursing_orders = nursing_orders.count()
-        
-        procedures = Procedure.objects.all()
-        if parsed_start_date and parsed_end_date:
-            procedures = procedures.filter(performed_at__date__gte=parsed_start_date, performed_at__date__lte=parsed_end_date)
-        else:
-            procedures = procedures.filter(performed_at__year=year_int)
-        injections = procedures.filter(procedure_type='injection').count()
-        dressing = procedures.filter(procedure_type='dressing').count()
-        
-        # Category breakdown (unique patient attendance cohort)
-        officers_qs = visits.filter(
-            patient__category='employee',
-            patient__employee_type__icontains='officer'
+        period = parse_report_period(request)
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
         )
-        
-        staff_qs = visits.filter(
-            patient__category='employee'
-        ).exclude(patient__employee_type__icontains='officer')
-        
-        emp_dep_qs = visits.filter(
-            patient__category='dependent',
-            patient__dependent_type__icontains='employee'
+        report = build_comprehensive_report(
+            period_start,
+            period_end,
+            all_time=period.all_time,
+            lifecycle_builder=_build_visit_lifecycle_summary,
+            attendable_visits_queryset=attendable_visits_queryset,
         )
-        
-        ret_dep_qs = visits.filter(
-            patient__category='dependent',
-            patient__dependent_type__icontains='retiree'
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="comprehensive",
+            title="Comprehensive Report",
         )
-        
-        nonnpa_qs = visits.filter(patient__category='nonnpa')
-        retiree_qs = visits.filter(patient__category='retiree')
-
-        def category_counts(qs):
-            male = qs.filter(patient__gender='male').values('patient').distinct().count()
-            female = qs.filter(patient__gender='female').values('patient').distinct().count()
-            total = qs.values('patient').distinct().count()
-            return male, female, total
-
-        officers_male, officers_female, officers_total = category_counts(officers_qs)
-        staff_male, staff_female, staff_total = category_counts(staff_qs)
-        emp_dep_male, emp_dep_female, emp_dep_total = category_counts(emp_dep_qs)
-        ret_dep_male, ret_dep_female, ret_dep_total = category_counts(ret_dep_qs)
-        nonnpa_male, nonnpa_female, nonnpa_total = category_counts(nonnpa_qs)
-        retiree_male, retiree_female, retiree_total = category_counts(retiree_qs)
-        category_grand_total = officers_total + staff_total + emp_dep_total + ret_dep_total + nonnpa_total + retiree_total
-        total_employee = officers_total + staff_total
-        total_non_employee = emp_dep_total + ret_dep_total + nonnpa_total + retiree_total
-        total_male = officers_male + staff_male + emp_dep_male + ret_dep_male + nonnpa_male + retiree_male
-        total_female = officers_female + staff_female + emp_dep_female + ret_dep_female + nonnpa_female + retiree_female
-
-        categories = [
-            {'sn': 1, 'category': 'Officers', 'male': officers_male, 'female': officers_female, 'total': officers_total},
-            {'sn': 2, 'category': 'Staff', 'male': staff_male, 'female': staff_female, 'total': staff_total},
-            {'sn': 3, 'category': 'Employee Dependents', 'male': emp_dep_male, 'female': emp_dep_female, 'total': emp_dep_total},
-            {'sn': 4, 'category': 'Retiree Dependents', 'male': ret_dep_male, 'female': ret_dep_female, 'total': ret_dep_total},
-            {'sn': 5, 'category': 'Non-NPA', 'male': nonnpa_male, 'female': nonnpa_female, 'total': nonnpa_total},
-            {'sn': 6, 'category': 'Retirees', 'male': retiree_male, 'female': retiree_female, 'total': retiree_total},
-        ]
-        for row in categories:
-            row['percentage'] = round((row['total'] / category_grand_total * 100) if category_grand_total > 0 else 0, 1)
-        
-        # Monthly trend
-        months = ['January', 'February', 'March', 'April', 'May', 'June',
-                 'July', 'August', 'September', 'October', 'November', 'December']
-        
-        monthly_trend = []
-        for i, month_name in enumerate(months, 1):
-            count = visits.filter(date__month=i).values('patient').distinct().count()
-            monthly_trend.append({
-                'month': month_name,
-                'count': count
-            })
-        
-        return Response({
-            'year': str(year_int),
-            'overview': {
-                'total_visits': total_visits,
-                'total_prescriptions': total_prescriptions,
-                'dispensed_prescriptions': dispensed_prescriptions,
-                'total_lab_tests': total_lab_tests,
-                'total_nursing_orders': total_nursing_orders,
-                'injections': injections,
-                'dressing': dressing,
-            },
-            'summary': {
-                'total_employee': total_employee,
-                'total_non_employee': total_non_employee,
-                'total_male': total_male,
-                'total_female': total_female,
-                'grand_total': category_grand_total,
-            },
-            'category_breakdown': categories,
-            'monthly_trend': monthly_trend
-        })
 
 
+@document_api_view(tag="Reports", summary="Clinic attendance report")
 class ClinicAttendanceReportView(views.APIView):
     """Generate clinic attendance report by clinic type."""
     
-    permission_classes = [IsAuthenticated]
-    
     def get(self, request):
         clinic_type = request.query_params.get('clinic_type', '')
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        from django.utils.dateparse import parse_date
-        
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
+
         # Filter visits by clinic
         history_queryset = Visit.objects.filter(
             status__in=['completed', 'in_progress'],
-            clinic__icontains=clinic_type
+            clinic__icontains=clinic_type,
         ).select_related('patient')
-        visits_queryset = history_queryset
-        
-        # Apply date filtering
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-        if start_date_str and end_date_str:
-            if parsed_start_date and parsed_end_date:
-                visits_queryset = visits_queryset.filter(date__gte=parsed_start_date, date__lte=parsed_end_date)
-        elif year:
-            try:
-                year_int = int(year)
-                visits_queryset = visits_queryset.filter(date__year=year_int)
-            except (ValueError, TypeError):
-                pass
-
-        period_start, period_end = _resolve_period_bounds(
-            year=year,
-            start_date=parsed_start_date,
-            end_date=parsed_end_date,
+        visits_queryset = history_queryset.filter(
+            date__gte=period_start,
+            date__lte=period_end,
         )
         lifecycle_summary = _build_visit_lifecycle_summary(
             period_visits_queryset=visits_queryset,
@@ -1518,8 +1017,7 @@ class ClinicAttendanceReportView(views.APIView):
                 'percentage': round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
         ]
-        
-        return Response({
+        report = {
             'data': categories,
             'summary': {
                 'total_employee': total_employee,
@@ -1529,398 +1027,79 @@ class ClinicAttendanceReportView(views.APIView):
                 'grand_total': grand_total,
                 **lifecycle_summary,
             }
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="clinic_attendance",
+            title="Clinic Attendance",
+        )
 
 
+@document_api_view(tag="Reports", summary="Radiological services report")
 class RadiologicalServicesReportView(views.APIView):
-    """Generate radiological services report."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """Radiology study volumes by modality for the selected period."""
+
     def get(self, request):
-        from django.utils.dateparse import parse_date
+        from reports.radiological_report import build_radiological_report
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Get radiology studies for period + history for lifecycle metrics.
-        history_studies = RadiologyStudy.objects.select_related('order__patient')
-        studies = history_studies
-        if parsed_start_date and parsed_end_date:
-            studies = studies.filter(created_at__date__gte=parsed_start_date, created_at__date__lte=parsed_end_date)
-        else:
-            studies = studies.filter(created_at__year=year_int)
-        
-        # Count by modality/type with gender breakdown
-        xray_male = studies.filter(
-            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') | Q(procedure__icontains='x-ray'),
-            order__patient__gender='male'
-        ).count()
-        xray_female = studies.filter(
-            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') | Q(procedure__icontains='x-ray'),
-            order__patient__gender='female'
-        ).count()
-        xray_count = xray_male + xray_female
-        
-        ecg_male = studies.filter(
-            Q(modality__icontains='ecg') | Q(procedure__icontains='ecg') | Q(procedure__icontains='electrocardiogram'),
-            order__patient__gender='male'
-        ).count()
-        ecg_female = studies.filter(
-            Q(modality__icontains='ecg') | Q(procedure__icontains='ecg') | Q(procedure__icontains='electrocardiogram'),
-            order__patient__gender='female'
-        ).count()
-        ecg_count = ecg_male + ecg_female
-        
-        ultrasound_male = studies.filter(
-            Q(modality__icontains='ultrasound') | Q(procedure__icontains='ultrasound'),
-            order__patient__gender='male'
-        ).count()
-        ultrasound_female = studies.filter(
-            Q(modality__icontains='ultrasound') | Q(procedure__icontains='ultrasound'),
-            order__patient__gender='female'
-        ).count()
-        ultrasound_count = ultrasound_male + ultrasound_female
-        
-        ct_male = studies.filter(
-            Q(modality__icontains='ct') | Q(modality__icontains='computed tomography') | Q(procedure__icontains='ct scan'),
-            order__patient__gender='male'
-        ).count()
-        ct_female = studies.filter(
-            Q(modality__icontains='ct') | Q(modality__icontains='computed tomography') | Q(procedure__icontains='ct scan'),
-            order__patient__gender='female'
-        ).count()
-        ct_count = ct_male + ct_female
-        
-        mri_male = studies.filter(
-            Q(modality__icontains='mri') | Q(procedure__icontains='magnetic resonance'),
-            order__patient__gender='male'
-        ).count()
-        mri_female = studies.filter(
-            Q(modality__icontains='mri') | Q(procedure__icontains='magnetic resonance'),
-            order__patient__gender='female'
-        ).count()
-        mri_count = mri_male + mri_female
-        
-        other_male = studies.exclude(
-            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') |
-            Q(modality__icontains='ecg') | Q(modality__icontains='ultrasound') |
-            Q(modality__icontains='ct') | Q(modality__icontains='mri')
-        ).exclude(
-            Q(procedure__icontains='x-ray') | Q(procedure__icontains='ecg') |
-            Q(procedure__icontains='ultrasound') | Q(procedure__icontains='ct scan') |
-            Q(procedure__icontains='magnetic resonance')
-        ).filter(
-            order__patient__gender='male'
-        ).count()
-        other_female = studies.exclude(
-            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') |
-            Q(modality__icontains='ecg') | Q(modality__icontains='ultrasound') |
-            Q(modality__icontains='ct') | Q(modality__icontains='mri')
-        ).exclude(
-            Q(procedure__icontains='x-ray') | Q(procedure__icontains='ecg') |
-            Q(procedure__icontains='ultrasound') | Q(procedure__icontains='ct scan') |
-            Q(procedure__icontains='magnetic resonance')
-        ).filter(
-            order__patient__gender='female'
-        ).count()
-        other_count = other_male + other_female
-        
-        total = studies.count()
-        total_male = xray_male + ecg_male + ultrasound_male + ct_male + mri_male + other_male
-        total_female = xray_female + ecg_female + ultrasound_female + ct_female + mri_female + other_female
-        total_employee = studies.filter(
-            Q(order__patient__category='employee') | Q(order__patient__category='retiree')
-        ).count()
-        total_non_employee = studies.filter(
-            Q(order__patient__category='dependent') | Q(order__patient__category='nonnpa')
-        ).count()
-        
-        categories = [
-            {
-                'sn': 1, 
-                'category': 'X-Ray', 
-                'count': xray_count,
-                'male': xray_male,
-                'female': xray_female,
-                'percentage': round((xray_count / total * 100) if total > 0 else 0, 1),
-            },
-            {
-                'sn': 2, 
-                'category': 'ECG', 
-                'count': ecg_count,
-                'male': ecg_male,
-                'female': ecg_female,
-                'percentage': round((ecg_count / total * 100) if total > 0 else 0, 1),
-            },
-            {
-                'sn': 3, 
-                'category': 'Ultrasound', 
-                'count': ultrasound_count,
-                'male': ultrasound_male,
-                'female': ultrasound_female,
-                'percentage': round((ultrasound_count / total * 100) if total > 0 else 0, 1),
-            },
-            {
-                'sn': 4, 
-                'category': 'CT Scan', 
-                'count': ct_count,
-                'male': ct_male,
-                'female': ct_female,
-                'percentage': round((ct_count / total * 100) if total > 0 else 0, 1),
-            },
-            {
-                'sn': 5, 
-                'category': 'MRI', 
-                'count': mri_count,
-                'male': mri_male,
-                'female': mri_female,
-                'percentage': round((mri_count / total * 100) if total > 0 else 0, 1),
-            },
-            {
-                'sn': 6, 
-                'category': 'Other', 
-                'count': other_count,
-                'male': other_male,
-                'female': other_female,
-                'percentage': round((other_count / total * 100) if total > 0 else 0, 1),
-            },
-        ]
-        
-        # Filter out zero counts
-        categories = [c for c in categories if c['count'] > 0]
-        
-        period_start, period_end = _resolve_period_bounds(
-            year=year,
-            start_date=parsed_start_date,
-            end_date=parsed_end_date,
-            default_to_current_year=not bool(year),
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
         )
-        patient_ids = studies.values_list('order__patient_id', flat=True).distinct()
-        patients_qs = Patient.objects.filter(id__in=patient_ids)
-        total_seen = patients_qs.count()
-        if period_start and period_end and total_seen > 0:
-            first_study_date_subquery = history_studies.filter(
-                order__patient=OuterRef('pk')
-            ).order_by('created_at', 'id').values('created_at__date')[:1]
-            patients_qs = patients_qs.annotate(
-                first_study_date=Subquery(first_study_date_subquery, output_field=DateField())
-            )
-            first_time_patients = patients_qs.filter(
-                first_study_date__gte=period_start,
-                first_study_date__lte=period_end,
-            ).count()
-            new_registrations = patients_qs.filter(
-                created_at__date__gte=period_start,
-                created_at__date__lte=period_end,
-            ).count()
-            returning_patients = max(total_seen - first_time_patients, 0)
-        else:
-            first_time_patients = 0
-            new_registrations = 0
-            returning_patients = total_seen
-        
-        return Response({
-            'data': categories,
-            'summary': {
-                'total_employee': total_employee,
-                'total_non_employee': total_non_employee,
-                'total_male': total_male,
-                'total_female': total_female,
-                'grand_total': total,
-                'new_registrations': new_registrations,
-                'first_time_patients': first_time_patients,
-                'returning_patients': returning_patients,
-                'total_unique_patients_seen': total_seen,
-                'total_visits': total,
-            }
-        })
+        report = build_radiological_report(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="radiological_services",
+            title="Radiological Services",
+        )
 
 
+@document_api_view(tag="Reports", summary="Referral tracking report")
 class ReferralTrackingReportView(views.APIView):
-    """Generate referral tracking report."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """Referral volume and workflow tracking for the selected period."""
+
     def get(self, request):
-        from django.utils.dateparse import parse_date
+        from reports.referral_tracking_report import build_referral_tracking_report
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Get referrals for the selected period
-        referrals = Referral.objects.select_related('patient')
-        if parsed_start_date and parsed_end_date:
-            referrals = referrals.filter(
-                referred_at__date__gte=parsed_start_date,
-                referred_at__date__lte=parsed_end_date,
-            )
-        else:
-            referrals = referrals.filter(referred_at__year=year_int)
-        
-        # Count by status
-        new_referrals = referrals.filter(status='sent').count()
-        follow_ups = referrals.filter(status__in=['accepted', 'scheduled', 'completed']).count()
-        completed = referrals.filter(status='completed').count()
-        
-        # Count by facility type
-        internal = referrals.filter(facility_type='internal').count()
-        external = referrals.filter(facility_type='external').count()
-        specialist = referrals.filter(facility_type='specialist').count()
-        
-        total = referrals.count()
-        
-        return Response({
-            'summary': {
-                'new_referrals': new_referrals,
-                'follow_ups': follow_ups,
-                'completed': completed,
-                'internal': internal,
-                'external': external,
-                'specialist': specialist,
-                'total': total
-            },
-            'data': list(
-                referrals.values(
-                    'referral_id',
-                    'patient__patient_id',
-                    'patient__first_name',
-                    'patient__surname',
-                    'status',
-                    'facility_type',
-                    'specialty',
-                    'facility',
-                    'referred_at',
-                )[:100]
-            )  # Limit to 100 for preview
-        })
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_referral_tracking_report(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="referral_tracking",
+            title="Referral Tracking",
+        )
 
 
+@document_api_view(tag="Reports", summary="Disease pattern report")
 class DiseasePatternReportView(views.APIView):
-    """Generate disease pattern report from consultation sessions."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """ICD-10 diagnosis frequency from completed consultations."""
+
     def get(self, request):
-        from django.utils.dateparse import parse_date
+        from reports.disease_pattern_report import build_disease_pattern_report
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Use structured ICD-10 diagnoses captured in consultation sessions.
-        from consultation.models import Diagnosis
-
-        diagnosis_qs = Diagnosis.objects.filter(
-            session__status='completed',
-            icd10_code__isnull=False,
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
         )
-        if parsed_start_date and parsed_end_date:
-            diagnosis_qs = diagnosis_qs.filter(
-                session__started_at__date__gte=parsed_start_date,
-                session__started_at__date__lte=parsed_end_date,
-            )
-        else:
-            diagnosis_qs = diagnosis_qs.filter(session__started_at__year=year_int)
-
-        diagnosis_rows = (
-            diagnosis_qs
-            .values(
-                code=F('icd10_code__code'),
-                description=F('icd10_code__description'),
-            )
-            .annotate(
-                employee=Count(
-                    'id',
-                    filter=Q(patient__category__in=['employee', 'retiree'])
-                ),
-                non_employee=Count(
-                    'id',
-                    filter=~Q(patient__category__in=['employee', 'retiree'])
-                ),
-                male=Count('id', filter=Q(patient__gender='male')),
-                female=Count('id', filter=Q(patient__gender='female')),
-            )
-            .annotate(total=F('employee') + F('non_employee'))
-            .order_by('-total', 'code')
+        report = build_disease_pattern_report(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="disease_pattern",
+            title="Disease Pattern",
         )
-        
-        result = []
-        for idx, row in enumerate(diagnosis_rows, 1):
-            code = row.get('code') or 'UNSPECIFIED'
-            description = row.get('description') or ''
-            male = row.get('male', 0) or 0
-            female = row.get('female', 0) or 0
-            total = row.get('total', 0) or 0
-            gender_other = max(0, (row.get('total', 0) or 0) - male - female)
-            result.append({
-                'sn': idx,
-                'diagnosis': f"{code} - {description}" if description else code,
-                'code': code,
-                'description': description,
-                'employee': row.get('employee', 0) or 0,
-                'non_employee': row.get('non_employee', 0) or 0,
-                'male': male,
-                'female': female,
-                'gender_other': gender_other,
-                'total': total,
-            })
-        
-        grand_total_e = sum(item['employee'] for item in result)
-        grand_total_ne = sum(item['non_employee'] for item in result)
-        grand_total_m = sum(item['male'] for item in result)
-        grand_total_f = sum(item['female'] for item in result)
-        grand_total_go = sum(item['gender_other'] for item in result)
-        
-        return Response({
-            'data': result,
-            'summary': {
-                'total_employee': grand_total_e,
-                'total_non_employee': grand_total_ne,
-                'grand_total': grand_total_e + grand_total_ne,
-                'total_male': grand_total_m,
-                'total_female': grand_total_f,
-                'total_gender_other': grand_total_go,
-            }
-        })
 
 
+@document_api_view(tag="Reports", summary="GOP attendance report")
 class GOPAttendanceReportView(views.APIView):
     """Generate GOPD (general outpatient) attendance report."""
     
-    permission_classes = [IsAuthenticated]
-    
     def get(self, request):
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        from django.utils.dateparse import parse_date
-        
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
+
         # GOPD / legacy general-outpatient visit lines (primary clinic, JSON clinics list, or legacy labels)
         history_visits = Visit.objects.filter(
             status__in=['completed', 'in_progress']
@@ -1934,18 +1113,9 @@ class GOPAttendanceReportView(views.APIView):
         ).select_related('patient').annotate(
             month=ExtractMonth('date')
         )
-        visits = history_visits.filter(date__year=year_int)
-
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-        if parsed_start_date and parsed_end_date:
-            visits = history_visits.filter(date__gte=parsed_start_date, date__lte=parsed_end_date)
-
-        period_start, period_end = _resolve_period_bounds(
-            year=year_int,
-            start_date=parsed_start_date,
-            end_date=parsed_end_date,
-            default_to_current_year=not bool(year),
+        visits = history_visits.filter(
+            date__gte=period_start,
+            date__lte=period_end,
         )
         lifecycle_summary = _build_visit_lifecycle_summary(
             period_visits_queryset=visits,
@@ -2018,8 +1188,7 @@ class GOPAttendanceReportView(views.APIView):
         ]
         for row in categories:
             row['percentage'] = round((row['total'] / grand_total * 100) if grand_total > 0 else 0, 1)
-        
-        return Response({
+        report = {
             'data': categories,
             'summary': {
                 'total_employee': total_employee,
@@ -2029,261 +1198,62 @@ class GOPAttendanceReportView(views.APIView):
             'grand_total': grand_total,
                 **lifecycle_summary,
             },
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="gop_attendance",
+            title="GOPD Attendance",
+        )
 
 
+@document_api_view(tag="Reports", summary="Escort log report")
 class EscortLogReportView(views.APIView):
-    """
-    Escort Log — every patient that physically left the ward with a nurse
-    accompanying them to an external facility.
-
-    Source of truth is :class:`wards.models.AdmissionEscort` (created during
-    discharge initiation when the doctor flags the discharge as a transfer
-    and the nurse confirms departure). Each row is one escort log entry and
-    carries its referral, transport, primary nurse, additional nurses, and
-    arrival confirmation outcome.
-    """
-
-    permission_classes = [IsAuthenticated]
+    """Patients escorted from ward to external facilities."""
 
     def get(self, request):
-        from django.utils.dateparse import parse_date
-        from wards.models import AdmissionEscort
+        from reports.escort_log_report import build_escort_log_report
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        status_filter = (request.query_params.get('status') or '').lower()
-        outcome_filter = (request.query_params.get('outcome') or '').lower()
-
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-
-        # Period scope — by departure timestamp, falling back to created_at
-        # for stub escorts that haven't been signed out yet (the doctor
-        # initiated the referral but the nurse hasn't completed discharge).
-        escorts = AdmissionEscort.objects.select_related(
-            'admission', 'admission__patient', 'admission__ward',
-            'referral', 'facility', 'primary_nurse',
-            'arrival_confirmed_by', 'created_by',
-        ).prefetch_related('additional_nurses')
-
-        if parsed_start_date and parsed_end_date:
-            escorts = escorts.filter(
-                Q(departure_at__date__gte=parsed_start_date, departure_at__date__lte=parsed_end_date)
-                | Q(departure_at__isnull=True, created_at__date__gte=parsed_start_date,
-                    created_at__date__lte=parsed_end_date)
-            )
-        else:
-            escorts = escorts.filter(
-                Q(departure_at__year=year_int)
-                | Q(departure_at__isnull=True, created_at__year=year_int)
-            )
-
-        # status: pending = not yet arrival-confirmed; confirmed = arrival logged.
-        if status_filter == 'pending':
-            escorts = escorts.filter(arrival_confirmed_at__isnull=True)
-        elif status_filter == 'confirmed':
-            escorts = escorts.filter(arrival_confirmed_at__isnull=False)
-
-        if outcome_filter:
-            escorts = escorts.filter(arrival_call_outcome=outcome_filter)
-
-        escorts = escorts.order_by('-departure_at', '-created_at')
-
-        # Summary metrics
-        total = escorts.count()
-        confirmed = escorts.filter(arrival_confirmed_at__isnull=False).count()
-        pending = total - confirmed
-        outcome_counts = {}
-        for row in escorts.values('arrival_call_outcome').annotate(c=Count('id')):
-            key = (row['arrival_call_outcome'] or 'unspecified') or 'unspecified'
-            outcome_counts[key] = row['c']
-
-        # Average time-to-arrival for confirmed escorts (departure → arrival).
-        avg_minutes_to_arrival = None
-        confirmed_with_times = escorts.filter(
-            arrival_confirmed_at__isnull=False,
-            departure_at__isnull=False,
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_escort_log_report(
+            period_start,
+            period_end,
+            status_filter=request.query_params.get("status") or "",
+            outcome_filter=request.query_params.get("outcome") or "",
         )
-        if confirmed_with_times.exists():
-            diffs = []
-            for esc in confirmed_with_times.only('departure_at', 'arrival_confirmed_at')[:500]:
-                if esc.arrival_confirmed_at and esc.departure_at:
-                    delta = esc.arrival_confirmed_at - esc.departure_at
-                    secs = delta.total_seconds()
-                    if secs >= 0:
-                        diffs.append(secs / 60.0)
-            if diffs:
-                avg_minutes_to_arrival = round(sum(diffs) / len(diffs), 1)
-
-        # Pending > 24h since departure — escorts that should already have
-        # been called back. Surfaced separately so duty nurses can chase.
-        cutoff = timezone.now() - timedelta(hours=24)
-        overdue = escorts.filter(
-            arrival_confirmed_at__isnull=True,
-            departure_at__isnull=False,
-            departure_at__lte=cutoff,
-        ).count()
-
-        # Top facilities (where do we send patients most?)
-        facility_counts = list(
-            escorts.values('facility_name_snapshot')
-            .annotate(c=Count('id'))
-            .order_by('-c')[:10]
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="escort_log",
+            title="Escort Log",
         )
-        top_facilities = [
-            {'facility': (row['facility_name_snapshot'] or 'Unspecified'), 'count': row['c']}
-            for row in facility_counts
-        ]
-
-        # Detail rows (cap to 200 for the on-screen table; CSV export reads the same).
-        rows = []
-        for idx, esc in enumerate(escorts[:200], 1):
-            adm = esc.admission
-            patient = adm.patient if adm else None
-            primary_name = esc.primary_nurse.get_full_name() if esc.primary_nurse_id else ''
-            additional_names = ', '.join(
-                n.get_full_name() for n in esc.additional_nurses.all()
-            )
-            rows.append({
-                'sn': idx,
-                'escort_id': esc.id,
-                'patient_id': getattr(patient, 'patient_id', '') if patient else '',
-                'patient_name': patient.get_full_name() if patient else '',
-                'admission_id': adm.admission_id if adm else '',
-                'ward': adm.ward.name if adm and adm.ward_id else '',
-                'departure_at': esc.departure_at.isoformat() if esc.departure_at else None,
-                'facility': esc.facility_name_snapshot or (
-                    esc.facility.name if esc.facility_id else ''
-                ),
-                'transport_mode': esc.transport_mode or '',
-                'primary_nurse': primary_name,
-                'additional_nurses': additional_names,
-                'referral_id': esc.referral.referral_id if esc.referral_id else '',
-                'referral_status': esc.referral.status if esc.referral_id else '',
-                'urgency': esc.referral.urgency if esc.referral_id else '',
-                'handover_summary': esc.handover_summary or '',
-                'arrival_confirmed_at': esc.arrival_confirmed_at.isoformat() if esc.arrival_confirmed_at else None,
-                'arrival_outcome': esc.arrival_call_outcome or '',
-                'arrival_notes': esc.arrival_notes or '',
-                'arrival_confirmed_by': (
-                    esc.arrival_confirmed_by.get_full_name() if esc.arrival_confirmed_by_id else ''
-                ),
-            })
-
-        return Response({
-            'summary': {
-                'total': total,
-                'pending': pending,
-                'confirmed': confirmed,
-                'overdue_pending': overdue,
-                'avg_minutes_to_arrival': avg_minutes_to_arrival,
-                'outcome_counts': outcome_counts,
-            },
-            'top_facilities': top_facilities,
-            'data': rows,
-        })
 
 
+@document_api_view(tag="Reports", summary="Weekend call duty report")
 class WeekendCallDutyReportView(views.APIView):
-    """Generate weekend call duty report."""
-    
-    permission_classes = [IsAuthenticated]
-    
+    """Weekend attendable visit volumes and patient breakdown."""
+
     def get(self, request):
-        from django.utils.dateparse import parse_date
+        from reports.attendance_statistics import attendable_visits_queryset
+        from reports.weekend_duty_report import build_weekend_duty_report
 
-        year = request.query_params.get('year')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
-        parsed_start_date = parse_date(start_date_str) if start_date_str else None
-        parsed_end_date = parse_date(end_date_str) if end_date_str else None
-
-        try:
-            year_int = int(year) if year else timezone.now().year
-        except (ValueError, TypeError):
-            year_int = timezone.now().year
-        
-        # Get visits on weekends (Saturday=5, Sunday=6)
-        # Database-agnostic approach: filter all visits, then filter by weekday in Python
-        all_visits = Visit.objects.filter(
-            status__in=['completed', 'in_progress']
-        ).select_related('patient')
-
-        if parsed_start_date and parsed_end_date:
-            all_visits = all_visits.filter(
-                date__gte=parsed_start_date,
-                date__lte=parsed_end_date,
-            )
-        else:
-            all_visits = all_visits.filter(date__year=year_int)
-        
-        # Filter for weekends (Saturday=5, Sunday=6 in Python weekday())
-        weekend_visit_ids = []
-        for visit in all_visits:
-            weekday = visit.date.weekday()  # Monday=0, Sunday=6
-            if weekday in [5, 6]:  # Saturday=5, Sunday=6
-                weekend_visit_ids.append(visit.id)
-        
-        visits = Visit.objects.filter(id__in=weekend_visit_ids).select_related('patient')
-        
-        # Count by category
-        officers = visits.filter(
-            patient__category='employee',
-            patient__employee_type__icontains='officer'
-        ).values('patient').distinct().count()
-        
-        staff = visits.filter(
-            patient__category='employee'
-        ).exclude(patient__employee_type__icontains='officer').values('patient').distinct().count()
-        
-        dependents = visits.filter(
-            patient__category='dependent'
-        ).values('patient').distinct().count()
-        
-        retirees = visits.filter(
-            patient__category='retiree'
-        ).values('patient').distinct().count()
-        
-        non_npa = visits.filter(
-            patient__category='nonnpa'
-        ).values('patient').distinct().count()
-        
-        total = visits.values('patient').distinct().count()
-        
-        # Monthly breakdown
-        months = ['January', 'February', 'March', 'April', 'May', 'June',
-                 'July', 'August', 'September', 'October', 'November', 'December']
-        
-        monthly_data = []
-        for i, month_name in enumerate(months, 1):
-            month_visits = visits.filter(date__month=i).values('patient').distinct().count()
-            if month_visits > 0:
-                monthly_data.append({
-                    'sn': len(monthly_data) + 1,
-                    'month': month_name,
-                    'count': month_visits
-                })
-        
-        return Response({
-            'summary': {
-                'officers': officers,
-                'staff': staff,
-                'dependents': dependents,
-                'retirees': retirees,
-                'non_npa': non_npa,
-                'total': total
-            },
-            'monthly_data': monthly_data
-        })
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
+        report = build_weekend_duty_report(
+            period_start,
+            period_end,
+            attendable_visits_queryset=attendable_visits_queryset,
+        )
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="weekend_duty",
+            title="Weekend Call Duty",
+        )
 
 
+@document_api_view(tag="Reports", summary="New registrations report")
 class NewRegistrationsReportView(views.APIView):
     """
     New patient registrations in the selected period.
@@ -2292,17 +1262,14 @@ class NewRegistrationsReportView(views.APIView):
     plus a summary of total / by-category counts.
     """
 
-    permission_classes = [IsAuthenticated]
-
     def get(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
+        period_start, period_end = _period_bounds_from_request(request)
 
-        qs = Patient.objects.filter(is_active=True)
-        if start_date:
-            qs = qs.filter(created_at__date__gte=start_date)
-        if end_date:
-            qs = qs.filter(created_at__date__lte=end_date)
+        qs = Patient.objects.filter(
+            is_active=True,
+            created_at__date__gte=period_start,
+            created_at__date__lte=period_end,
+        )
 
         total = qs.count()
 
@@ -2326,16 +1293,22 @@ class NewRegistrationsReportView(views.APIView):
                 'category': row['category'],
                 'count': row['count'],
             })
-
-        return Response({
+        report = {
             'total': total,
             'by_category': by_category,
             'daily_data': daily_data,
-            'start_date': start_date,
-            'end_date': end_date,
-        })
+            'start_date': period_start.isoformat(),
+            'end_date': period_end.isoformat(),
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="new_registrations",
+            title="New Registrations",
+        )
 
 
+@document_api_view(tag="Reports", summary="Drug expiry watch report")
 class DrugExpiryWatchReportView(views.APIView):
     """
     Drug expiry watch — pharmacy inventory batches expiring within N days.
@@ -2343,8 +1316,6 @@ class DrugExpiryWatchReportView(views.APIView):
     Query params:
       days (int, default 90) — buckets of 0-30, 31-60, 61-90, 90+
     """
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
@@ -2400,35 +1371,37 @@ class DrugExpiryWatchReportView(views.APIView):
                 'days_to_expiry': days_to_expiry,
                 'bucket': bucket,
             })
-
-        return Response({
+        report = {
             'days_window': days_window,
             'cutoff_date': cutoff.isoformat(),
             'summary': summary,
             'items': items,
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="drug_expiry",
+            title="Drug Expiry Watch",
+        )
 
 
+@document_api_view(tag="Reports", summary="Top prescribed drugs report")
 class TopPrescribedDrugsReportView(views.APIView):
     """
     Top prescribed drugs in the selected period, aggregated by medication (or generic).
     """
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
             limit = int(request.query_params.get('limit', 20))
         except (ValueError, TypeError):
             limit = 20
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
+        period_start, period_end = _period_bounds_from_request(request)
 
-        qs = PrescriptionItem.objects.all()
-        if start_date:
-            qs = qs.filter(prescription__prescribed_at__date__gte=start_date)
-        if end_date:
-            qs = qs.filter(prescription__prescribed_at__date__lte=end_date)
+        qs = PrescriptionItem.objects.filter(
+            prescription__prescribed_at__date__gte=period_start,
+            prescription__prescribed_at__date__lte=period_end,
+        )
 
         # Aggregate by medication (brand), falling back to generic for items without a brand.
         from django.db.models import Sum, F
@@ -2456,32 +1429,35 @@ class TopPrescribedDrugsReportView(views.APIView):
                 'prescription_count': count,
                 'percentage': round((count / total_lines * 100), 1) if total_lines > 0 else 0,
             })
-
-        return Response({
+        report = {
             'total_lines': total_lines,
             'limit': limit,
             'data': results,
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="top_drugs",
+            title="Top Prescribed Drugs",
+        )
 
 
+@document_api_view(tag="Reports", summary="Staff productivity report")
 class StaffProductivityReportView(views.APIView):
     """
     Staff productivity — visits/consultations handled by each medical doctor in period.
     """
 
-    permission_classes = [IsAuthenticated]
-
     def get(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
+        period_start, period_end = _period_bounds_from_request(request)
 
         from accounts.models import User
         doctors_qs = User.objects.filter(system_role='Medical Doctor', is_active=True)
-        visit_qs = Visit.objects.filter(doctor__isnull=False)
-        if start_date:
-            visit_qs = visit_qs.filter(date__gte=start_date)
-        if end_date:
-            visit_qs = visit_qs.filter(date__lte=end_date)
+        visit_qs = Visit.objects.filter(
+            doctor__isnull=False,
+            date__gte=period_start,
+            date__lte=period_end,
+        )
 
         rows = []
         for doctor in doctors_qs:
@@ -2506,33 +1482,37 @@ class StaffProductivityReportView(views.APIView):
         rows.sort(key=lambda r: r['total_visits'], reverse=True)
 
         grand_total = sum(r['total_visits'] for r in rows)
-        return Response({
+        report = {
             'total_visits': grand_total,
             'staff_count': len(rows),
             'data': rows,
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="staff_productivity",
+            title="Staff Productivity",
+        )
 
 
+@document_api_view(tag="Reports", summary="Critical lab results report")
 class CriticalLabResultsReportView(views.APIView):
     """
     Critical lab results — list of LabResult records flagged as critical in period.
     """
 
-    permission_classes = [IsAuthenticated]
-
     def get(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
+        period_start, period_end = _period_bounds_from_request(request)
 
         qs = (
             LabResult.objects
-            .filter(overall_status='critical')
+            .filter(
+                overall_status='critical',
+                created_at__date__gte=period_start,
+                created_at__date__lte=period_end,
+            )
             .select_related('test', 'test__order', 'patient', 'order__patient')
         )
-        if start_date:
-            qs = qs.filter(created_at__date__gte=start_date)
-        if end_date:
-            qs = qs.filter(created_at__date__lte=end_date)
 
         total = qs.count()
         items = []
@@ -2550,13 +1530,19 @@ class CriticalLabResultsReportView(views.APIView):
                 'order_id': order.order_id if order else '',
                 'created_at': r.created_at.isoformat() if r.created_at else None,
             })
-
-        return Response({
+        report = {
             'total': total,
             'items': items,
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="critical_lab",
+            title="Critical Lab Results",
+        )
 
 
+@document_api_view(tag="Reports", summary="Notifiable diseases report")
 class NotifiableDiseasesReportView(views.APIView):
     """
     Notifiable diseases report — diagnoses whose ICD-10 code falls into Nigeria NCDC
@@ -2583,8 +1569,6 @@ class NotifiableDiseasesReportView(views.APIView):
       B50-B54  Malaria
       U07  COVID-19
     """
-
-    permission_classes = [IsAuthenticated]
 
     NOTIFIABLE_PREFIXES = (
         'A00', 'A01', 'A15', 'A16', 'A17', 'A18', 'A19',
@@ -2633,17 +1617,13 @@ class NotifiableDiseasesReportView(views.APIView):
     }
 
     def get(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
+        period_start, period_end = _period_bounds_from_request(request)
 
         qs = Diagnosis.objects.filter(
             icd10_code__code__startswith=tuple(self.NOTIFIABLE_PREFIXES),
+            diagnosed_at__date__gte=period_start,
+            diagnosed_at__date__lte=period_end,
         ).select_related('icd10_code', 'patient', 'session', 'diagnosed_by')
-
-        if start_date:
-            qs = qs.filter(diagnosed_at__date__gte=start_date)
-        if end_date:
-            qs = qs.filter(diagnosed_at__date__lte=end_date)
 
         total = qs.count()
         items = []
@@ -2666,8 +1646,96 @@ class NotifiableDiseasesReportView(views.APIView):
                 'diagnosed_by': d.diagnosed_by.get_full_name() if d.diagnosed_by else '',
                 'diagnosed_at': d.diagnosed_at.isoformat() if d.diagnosed_at else None,
             })
-
-        return Response({
+        report = {
             'total': total,
             'items': items,
-        })
+        }
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="notifiable_diseases",
+            title="Notifiable Diseases",
+        )
+
+
+@document_api_view(tag="Reports", summary="Attendance statistics report")
+class AttendanceStatisticsReportView(views.APIView):
+    """
+    BTMC-style attendance matrix by clinic and patient category.
+
+    Query params: start_date, end_date, year, metric (attendance_count|distinct_patients),
+    clinic_type (optional single-clinic filter), export (json|pdf|csv).
+    Note: use ``export`` not ``format`` — DRF reserves ``format`` for content negotiation.
+    """
+
+    def get(self, request):
+        from django.utils.dateparse import parse_date
+
+        from reports.attendance_statistics import (
+            attendable_visits_queryset,
+            build_attendance_statistics_csv,
+            build_attendance_statistics_report,
+        )
+        from reports.attendance_statistics_pdf import build_attendance_statistics_pdf
+
+        from common.report_period import parse_report_period
+
+        year = request.query_params.get("year")
+        period = parse_report_period(request)
+        metric = request.query_params.get("metric", "attendance_count")
+        clinic_type = request.query_params.get("clinic_type") or None
+        format_type = request.query_params.get("export", "json")
+
+        if metric not in ("attendance_count", "distinct_patients"):
+            metric = "attendance_count"
+
+        from common.report_period import resolve_report_bounds
+
+        period_start, period_end = resolve_report_bounds(
+            period,
+            year=year,
+            default_to_current_year=not period.all_time,
+        )
+
+        report = build_attendance_statistics_report(
+            start_date=period_start,
+            end_date=period_end,
+            metric=metric,
+            clinic_filter=clinic_type,
+        )
+
+        history_qs = Visit.objects.all()
+        period_qs = attendable_visits_queryset().filter(
+            date__gte=period_start,
+            date__lte=period_end,
+        )
+        lifecycle = _build_visit_lifecycle_summary(
+            period_visits_queryset=period_qs,
+            history_visits_queryset=history_qs,
+            start_date=period_start,
+            end_date=period_end,
+        )
+        report["summary"] = lifecycle
+
+        user = request.user
+        generated_by = ""
+        if user and user.is_authenticated:
+            generated_by = user.get_full_name() or getattr(user, "username", "") or ""
+
+        if format_type == "pdf":
+            pdf_bytes = build_attendance_statistics_pdf(
+                report, generated_by=generated_by
+            )
+            filename = f"attendance_statistics_{period_start}_{period_end}.pdf"
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+
+        if format_type == "csv":
+            csv_text = build_attendance_statistics_csv(report)
+            filename = f"attendance_statistics_{period_start}_{period_end}.csv"
+            response = HttpResponse(csv_text, content_type="text/csv")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+
+        return Response(report)

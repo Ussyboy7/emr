@@ -176,6 +176,21 @@ class PhysioService {
     return apiFetch<{ results: PhysioOrder[]; count: number }>(`/orders/${query}`);
   }
 
+  getHomeDashboard(params?: { date?: string }): Promise<{
+    date: string;
+    stats: {
+      pending: number;
+      scheduled: number;
+      inProgress: number;
+      completedToday: number;
+      scheduledTomorrow: number;
+    };
+    recentOrders: PhysioOrder[];
+  }> {
+    const query = buildQueryString((params || {}) as Record<string, string | undefined>);
+    return apiFetch(`/orders/home-dashboard${query || '/'}`);
+  }
+
   getOrder(orderId: number): Promise<PhysioOrder> {
     return apiFetch<PhysioOrder>(`/orders/${orderId}/`);
   }
@@ -221,6 +236,11 @@ class PhysioService {
     template?: number;
     order?: number;
     search?: string;
+    ordering?: string;
+    has_diagnosis?: boolean;
+    has_findings?: boolean;
+    is_urgent?: boolean;
+    has_recommendations?: boolean;
     page?: number;
     page_size?: number;
     completed_after?: string;
@@ -228,6 +248,24 @@ class PhysioService {
   }): Promise<{ results: PhysioSession[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: PhysioSession[]; count: number }>(`/sessions/${query}`);
+  }
+
+  getCompletedStats(params?: {
+    search?: string;
+    completed_after?: string;
+    completed_before?: string;
+    has_diagnosis?: boolean;
+    has_findings?: boolean;
+    is_urgent?: boolean;
+    has_recommendations?: boolean;
+  }): Promise<{
+    total: number;
+    withDiagnosis: number;
+    urgent: number;
+    withFindings: number;
+  }> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    return apiFetch(`/sessions/completed-stats${query || '/'}`);
   }
 
   getSession(sessionId: number): Promise<PhysioSession> {
@@ -316,11 +354,13 @@ class PhysioService {
     return apiFetch(`/orders/stats/${qs ? `?${qs}` : ''}`);
   }
 
-  getAnalyticsSummary(params?: {
-    start_date?: string;
-    end_date?: string;
-  }): Promise<PhysiotherapyAnalyticsSummary> {
-    const query = buildQueryString(params || {});
+  getAnalyticsSummary(
+    period?: URLSearchParams | { start_date?: string; end_date?: string; start?: string; end?: string }
+  ): Promise<PhysiotherapyAnalyticsSummary> {
+    const query =
+      period instanceof URLSearchParams
+        ? `?${period.toString()}`
+        : buildQueryString(period || {});
     return apiFetch<PhysiotherapyAnalyticsSummary>(`/analytics/summary/${query}`);
   }
 

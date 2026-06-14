@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import (
@@ -36,6 +37,7 @@ from django.views.decorators.cache import never_cache
 from decimal import Decimal, InvalidOperation
 
 from common.mixins import ClinicScopedMixin
+from common.openapi import document_viewset
 from .combo_utils import combo_component_names_from_display_name
 from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine
 from .serializers import (
@@ -57,10 +59,10 @@ from organization.models import SystemConfig
 from accounts.utils import resolve_clinic_id
 
 
+@document_viewset(tag="Pharmacy", resource="generic medications")
 class GenericMedicationViewSet(viewsets.ModelViewSet):
     """ViewSet for managing generic medications."""
     queryset = GenericMedication.objects.all()
-    permission_classes = [IsAuthenticated]
     serializer_class = GenericMedicationSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -69,6 +71,7 @@ class GenericMedicationViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
 
+    @extend_schema(tags=["Pharmacy"], summary="For prescription", description="Get generics suitable for prescription creation with available brands.")
     @action(detail=False, methods=['get'])
     def for_prescription(self, request):
         """Get generics suitable for prescription creation with available brands."""
@@ -232,10 +235,9 @@ def check_drug_interactions(generic_ids=None, medication_ids=None):
 
 
 @method_decorator(never_cache, name='dispatch')
+@document_viewset(tag="Pharmacy", resource="medications")
 class MedicationViewSet(viewsets.ModelViewSet):
     """ViewSet for managing medications."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = MedicationSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -245,7 +247,31 @@ class MedicationViewSet(viewsets.ModelViewSet):
     ordering = ['name']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Medication.objects.none()
+        
         return Medication.objects.filter(is_active=True)
+
+    @extend_schema(tags=["Pharmacy"], summary="Resolve", description="Top medication match for a search term (interaction checks, substitutes).")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_medication(self, request):
+        """Top medication match for a search term (interaction checks, substitutes)."""
+        search = (request.query_params.get('search') or '').strip()
+        if not search:
+            return Response({'detail': 'search is required'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.get_queryset()
+        med = qs.filter(
+            Q(name__iexact=search) | Q(generic_name__iexact=search) | Q(code__iexact=search)
+        ).first()
+        if not med:
+            med = qs.filter(
+                Q(name__icontains=search)
+                | Q(generic_name__icontains=search)
+                | Q(code__icontains=search)
+            ).order_by('name').first()
+        if not med:
+            return Response({'detail': 'Medication not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(MedicationSerializer(med).data)
 
     def _annotate_store_stock(self, queryset, location: str):
         loc = (location or "Store").strip()
@@ -322,6 +348,7 @@ class MedicationViewSet(viewsets.ModelViewSet):
             )
         return qs
 
+    @extend_schema(tags=["Pharmacy"], summary="Store stock summary")
     @action(detail=False, methods=["get"], url_path="store-stock-summary")
     def store_stock_summary(self, request):
         location = (request.query_params.get("location") or "Store").strip()
@@ -333,6 +360,7 @@ class MedicationViewSet(viewsets.ModelViewSet):
         ser = StoreMedicationStockRowSerializer(qs, many=True)
         return Response(ser.data)
 
+    @extend_schema(tags=["Pharmacy"], summary="Store stock stats")
     @action(detail=False, methods=["get"], url_path="store-stock-stats")
     def store_stock_stats(self, request):
         location = (request.query_params.get("location") or "Store").strip()
@@ -404,11 +432,11 @@ class MedicationViewSet(viewsets.ModelViewSet):
             return Response({'detail': detail, 'error': detail, 'errors': {'message': msg}}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@document_viewset(tag="Pharmacy", resource="medication inventory")
 class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing medication inventory."""
     
     clinic_filter_field = 'location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = MedicationInventorySerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -433,6 +461,9 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 raise PermissionDenied("Central store is only accessible from Bode Thomas Clinic")
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return MedicationInventory.objects.none()
+        
         self._validate_store_access()
         if self._is_dispensary_request():
             qs = DispensaryReceiptLine.objects.all().select_related(
@@ -477,8 +508,7 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return self._list_dispensary_receipts(request, *args, **kwargs)
         return super().list(request, *args, **kwargs)
 
-    def _list_dispensary_receipts(self, request, *args, **kwargs):
-        from rest_framework.response import Response
+    def _dispensary_filtered_queryset(self, request, stock_status=None):
         queryset = self.get_queryset()
         medication_id = request.query_params.get('medication')
         if medication_id:
@@ -489,24 +519,28 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         search = (request.query_params.get('search') or '').strip()
         if search:
             queryset = queryset.filter(
-                Q(medication__name__icontains=search) |
-                Q(medication__generic__name__icontains=search) |
-                Q(medication__code__icontains=search) |
-                Q(batch_number__icontains=search)
+                Q(medication__name__icontains=search)
+                | Q(medication__generic__name__icontains=search)
+                | Q(medication__code__icontains=search)
+                | Q(batch_number__icontains=search)
             )
         category = request.query_params.get('medication__category', '').strip()
         if category:
             queryset = queryset.filter(medication__category=category)
-        stock_status = request.query_params.get('stock_status')
-        if not stock_status or stock_status == 'all':
+
+        status_val = stock_status if stock_status is not None else request.query_params.get('stock_status')
+        if not status_val or status_val == 'all':
             queryset = queryset.filter(quantity_remaining__gt=0)
-        elif stock_status == 'out':
+        elif status_val == 'out':
             queryset = queryset.filter(quantity_remaining=0)
-        elif stock_status == 'low':
-            queryset = queryset.filter(quantity_remaining__gt=0, quantity_remaining__lte=F('medication__min_stock_level'))
-        elif stock_status == 'normal':
+        elif status_val == 'low':
+            queryset = queryset.filter(
+                quantity_remaining__gt=0,
+                quantity_remaining__lte=F('medication__min_stock_level'),
+            )
+        elif status_val == 'normal':
             queryset = queryset.filter(quantity_remaining__gt=F('medication__min_stock_level'))
-        elif stock_status == 'near_expiry':
+        elif status_val == 'near_expiry':
             today = timezone.now().date()
             threshold = today + timedelta(days=180)
             queryset = queryset.filter(
@@ -514,9 +548,87 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 expiry_date__lte=threshold,
                 expiry_date__gte=today,
             )
-        elif stock_status == 'expired':
+        elif status_val == 'expired':
             today = timezone.now().date()
             queryset = queryset.filter(quantity_remaining__gt=0, expiry_date__lt=today)
+        return queryset
+
+    def _store_inventory_filtered_queryset(self, request, stock_status=None):
+        queryset = self.scope_queryset(
+            MedicationInventory.objects.all().select_related('medication')
+        )
+        location = request.query_params.get('location')
+        if location:
+            queryset = queryset.filter(location__iexact=location.strip())
+        medication_id = request.query_params.get('medication')
+        if medication_id:
+            queryset = queryset.filter(medication_id=medication_id)
+        generic_id = request.query_params.get('medication__generic')
+        if generic_id:
+            queryset = queryset.filter(medication__generic_id=generic_id)
+        category = (request.query_params.get('medication__category') or '').strip()
+        if category:
+            queryset = queryset.filter(medication__category=category)
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(medication__name__icontains=search)
+                | Q(medication__generic__name__icontains=search)
+                | Q(batch_number__icontains=search)
+            )
+
+        status_val = stock_status if stock_status is not None else request.query_params.get('stock_status')
+        if status_val:
+            if status_val == 'out':
+                queryset = queryset.filter(quantity=0)
+            elif status_val == 'low':
+                queryset = queryset.filter(quantity__gt=0, quantity__lte=F('min_stock_level'))
+            elif status_val == 'normal':
+                queryset = queryset.filter(quantity__gt=F('min_stock_level')).filter(
+                    Q(max_stock_level__isnull=True) | Q(quantity__lte=F('max_stock_level'))
+                )
+            elif status_val == 'over':
+                queryset = queryset.filter(quantity__gt=F('max_stock_level'))
+            elif status_val == 'near_expiry':
+                today = timezone.now().date()
+                threshold = today + timedelta(days=180)
+                queryset = queryset.filter(
+                    quantity__gt=0,
+                    expiry_date__lte=threshold,
+                    expiry_date__gte=today,
+                )
+            elif status_val == 'expired':
+                today = timezone.now().date()
+                queryset = queryset.filter(quantity__gt=0, expiry_date__lt=today)
+        return queryset
+
+    @extend_schema(tags=["Pharmacy"], summary="List stats", description="Inventory tab counts + total units (replaces parallel COUNT/page fan-out).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Inventory tab counts + total units (replaces parallel COUNT/page fan-out)."""
+        self._validate_store_access()
+        if self._is_dispensary_request():
+            base = self._dispensary_filtered_queryset(request, stock_status='all')
+            units_field = 'quantity_remaining'
+            count = lambda status: self._dispensary_filtered_queryset(request, stock_status=status).count()
+        else:
+            base = self._store_inventory_filtered_queryset(request, stock_status=None)
+            units_field = 'quantity'
+            count = lambda status: self._store_inventory_filtered_queryset(request, stock_status=status).count()
+
+        total_units = base.aggregate(s=Sum(units_field))['s'] or 0
+        return Response({
+            'total': base.count(),
+            'out_of_stock': count('out'),
+            'low_stock': count('low'),
+            'expiring_soon': count('near_expiry'),
+            'expired': count('expired'),
+            'total_units': str(total_units),
+        })
+
+    def _list_dispensary_receipts(self, request, *args, **kwargs):
+        from rest_framework.response import Response
+        queryset = self._dispensary_filtered_queryset(request)
         queryset = queryset.order_by('received_at')
         page = self.paginate_queryset(queryset)
         if page is not None:
@@ -566,6 +678,7 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @extend_schema(tags=["Pharmacy"], summary="Adjustment history", description="Return adjustment history for a specific batch inventory item.")
     @action(detail=True, methods=['get'], url_path='adjustment_history')
     def adjustment_history(self, request, pk=None):
         """
@@ -633,6 +746,7 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(data)
 
+    @extend_schema(tags=["Pharmacy"], summary="Record adjustment", description="Record a quantity adjustment for a batch inventory item.")
     @action(detail=True, methods=['post'], url_path='record_adjustment')
     def record_adjustment(self, request, pk=None):
         """
@@ -732,10 +846,16 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
 
 
+@extend_schema_view(
+    list=extend_schema(summary="List prescriptions", tags=["Pharmacy"]),
+    retrieve=extend_schema(summary="Retrieve prescription", tags=["Pharmacy"]),
+    create=extend_schema(summary="Create prescription", tags=["Pharmacy"]),
+    update=extend_schema(summary="Update prescription", tags=["Pharmacy"]),
+    partial_update=extend_schema(summary="Partially update prescription", tags=["Pharmacy"]),
+    destroy=extend_schema(summary="Delete prescription", tags=["Pharmacy"]),
+)
 class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing prescriptions."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = PrescriptionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'status', 'consultation_session', 'visit']
@@ -750,10 +870,19 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ]
     ordering_fields = ['prescribed_at']
     ordering = ['-prescribed_at']
+    queryset = Prescription.objects.none()
     
     def _prescription_base_qs(self):
         return Prescription.objects.all().select_related(
-            'patient', 'doctor', 'visit', 'consultation_session', 'created_by'
+            'patient',
+            'doctor',
+            'visit',
+            'visit__location_clinic',
+            'consultation_session',
+            'consultation_session__location_clinic',
+            'consultation_session__room__clinic',
+            'location_clinic',
+            'created_by',
         ).prefetch_related(
             'medications__medication',
             'medications__dispenses',
@@ -767,24 +896,22 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         gender = (params.get('gender') or 'all').lower()
         if gender in ('male', 'female'):
             qs = qs.filter(patient__gender=gender)
+        from common.report_period import apply_date_preset
+
         date_preset = (params.get('date_preset') or 'all').lower()
-        today = timezone.localdate()
-        if date_preset == 'today':
-            qs = qs.filter(prescribed_at__date=today)
-        elif date_preset == 'week':
-            start = today - timedelta(days=6)
-            qs = qs.filter(prescribed_at__date__gte=start, prescribed_at__date__lte=today)
-        elif date_preset == 'month':
-            start = today.replace(day=1)
-            qs = qs.filter(prescribed_at__date__gte=start, prescribed_at__date__lte=today)
+        qs = apply_date_preset(qs, date_preset, 'prescribed_at')
         return qs
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Prescription.objects.none()
+
         qs = self._prescription_base_qs()
         if getattr(self, 'action', None) == 'list':
             qs = self._apply_prescription_list_filters(self.request, qs)
         return self.scope_queryset(qs)
 
+    @extend_schema(tags=["Pharmacy"], summary="Queue stats", description="Counts for the queue matching the same filters as the list (full result set, not one page).")
     @action(detail=False, methods=['get'], url_path='queue-stats')
     def queue_stats(self, request):
         """Counts for the queue matching the same filters as the list (full result set, not one page)."""
@@ -803,6 +930,33 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             }
         )
 
+    @extend_schema(tags=["Pharmacy"], summary="Home stats", description="Pharmacy home dashboard KPIs in one request.")
+    @action(detail=False, methods=['get'], url_path='home-stats')
+    def home_stats(self, request):
+        """Pharmacy home dashboard KPIs in one request."""
+        from datetime import timedelta
+
+        today = timezone.localdate()
+        rx_qs = self.scope_queryset(Prescription.objects.all())
+        pending_rx = rx_qs.filter(status='pending').count()
+        dispensed_today = rx_qs.filter(
+            status__in=['dispensed', 'partially_dispensed'],
+            dispensed_at__date=today,
+        ).count()
+
+        inv_qs = self.scope_queryset(MedicationInventory.objects.all())
+        expiry_threshold = today + timedelta(days=30)
+        low_stock = inv_qs.filter(quantity__lte=F('min_stock_level')).count()
+        total_inventory = inv_qs.count()
+
+        return Response({
+            'pendingRx': pending_rx,
+            'dispensedToday': dispensed_today,
+            'lowStock': low_stock,
+            'totalInventory': total_inventory,
+        })
+
+    @extend_schema(tags=["Pharmacy"], summary="Dispense context", description="Return batch/stock context for all active prescription lines in one response.")
     @action(detail=True, methods=['get'], url_path='dispense-context')
     def dispense_context(self, request, pk=None):
         """
@@ -960,6 +1114,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             # Notifications must never break prescription creation
             pass
 
+    @extend_schema(tags=["Pharmacy"], summary="Cancel", description="Cancel a prescription only if no medication has been dispensed.")
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         """Cancel a prescription only if no medication has been dispensed."""
@@ -1035,6 +1190,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
         return placeholder
 
+    @extend_schema(tags=["Pharmacy"], summary="Split combo item", description="Split a combo prescription item (e.g., A/B) into separate component items.")
     @action(detail=True, methods=['post'], url_path='split-combo-item')
     def split_combo_item(self, request, pk=None):
         """Split a combo prescription item (e.g., A/B) into separate component items."""
@@ -1164,6 +1320,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         }
         return Response(payload)
     
+    @extend_schema(tags=["Pharmacy"], summary="Check interactions", description="Check for drug interactions between drugs.")
     @action(detail=False, methods=['post'])
     def check_interactions(self, request):
         """
@@ -1226,6 +1383,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response({'interactions': interactions})
     
+    @extend_schema(tags=["Pharmacy"], summary="Dispense", description="Dispense medication from a prescription.")
     @action(detail=True, methods=['post'])
     def dispense(self, request, pk=None):
         """Dispense medication from a prescription."""
@@ -1376,6 +1534,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+    @extend_schema(tags=["Pharmacy"], summary="Substitute item", description="Substitute medication in a prescription item.")
     @action(detail=True, methods=['post'], url_path='substitute-item')
     def substitute_item(self, request, pk=None):
         """Substitute medication in a prescription item."""
@@ -1494,6 +1653,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @extend_schema(tags=["Pharmacy"], summary="Complete dispensing", description="Manually mark a prescription as fully dispensed/completed.")
     @action(detail=True, methods=['post'])
     def complete_dispensing(self, request, pk=None):
         """Manually mark a prescription as fully dispensed/completed."""
@@ -1531,6 +1691,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(prescription)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Pharmacy"], summary="Recalculate status", description="Recalculate and update prescription status.")
     @action(detail=True, methods=['post'])
     def recalculate_status(self, request, pk=None):
         """Recalculate and update prescription status."""
@@ -1556,6 +1717,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(prescription)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Pharmacy"], summary="Download", description="Download prescription as PDF.")
     @action(detail=True, methods=['get'], url_path='download')
     def download_prescription(self, request, pk=None):
         """Download prescription as PDF."""
@@ -1564,16 +1726,17 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return build_prescription_pdf(prescription)
 
 
+@document_viewset(tag="Pharmacy", resource="dispenses", read_only=True)
 class DispenseViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing dispense history."""
     
     clinic_filter_field = 'prescription__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = DispenseSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['prescription', 'medication', 'dispensed_by']
     ordering_fields = ['dispensed_at']
     ordering = ['-dispensed_at']
+    queryset = Dispense.objects.none()
     
     @staticmethod
     def _apply_history_filters(request, qs):
@@ -1583,16 +1746,10 @@ class DispenseViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         if gender in ('male', 'female'):
             qs = qs.filter(prescription__patient__gender=gender)
 
+        from common.report_period import apply_date_preset
+
         date_preset = (params.get('date_preset') or 'all').lower()
-        today = timezone.localdate()
-        if date_preset == 'today':
-            qs = qs.filter(dispensed_at__date=today)
-        elif date_preset == 'week':
-            start = today - timedelta(days=7)
-            qs = qs.filter(dispensed_at__date__gte=start, dispensed_at__date__lte=today)
-        elif date_preset == 'month':
-            start = today - timedelta(days=30)
-            qs = qs.filter(dispensed_at__date__gte=start, dispensed_at__date__lte=today)
+        qs = apply_date_preset(qs, date_preset, 'dispensed_at')
 
         search = (params.get('search') or '').strip()
         if search:
@@ -1615,11 +1772,15 @@ class DispenseViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         )
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Dispense.objects.none()
+
         qs = self._base_dispense_qs()
         if getattr(self, 'action', None) == 'list':
             qs = self._apply_history_filters(self.request, qs)
         return qs
 
+    @extend_schema(tags=["Pharmacy"], summary="Summary stats", description="Dispense KPIs for the same filter set as the history list (not limited to one page).")
     @action(detail=False, methods=['get'], url_path='summary-stats')
     def summary_stats(self, request):
         """
@@ -1659,17 +1820,20 @@ class DispenseViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         )
 
 
+@document_viewset(tag="Pharmacy", resource="inventory alerts", read_only=True)
 class InventoryAlertViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for inventory alerts (low stock, expiring items)."""
     
     clinic_filter_field = 'location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = MedicationInventorySerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     ordering_fields = ['expiry_date', 'quantity']
     ordering = ['expiry_date']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return MedicationInventory.objects.none()
+        
         """Get inventory items that need attention."""
         alert_type = self.request.query_params.get('type', 'all')
         queryset = self.scope_queryset(MedicationInventory.objects.all().select_related('medication'))
@@ -1696,6 +1860,7 @@ class InventoryAlertViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         
         return queryset
     
+    @extend_schema(tags=["Pharmacy"], summary="Summary", description="Get summary of inventory alerts.")
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """Get summary of inventory alerts."""
@@ -1725,12 +1890,12 @@ class InventoryAlertViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         return Response(summary)
 
 
+@document_viewset(tag="Pharmacy", resource="stock requests")
 class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing stock requests."""
     
     clinic_filter_field = 'clinic'
     queryset = StockRequest.objects.all()
-    permission_classes = [IsAuthenticated]
     serializer_class = StockRequestSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -1762,6 +1927,9 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return super().scope_queryset(qs)
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return StockRequest.objects.none()
+        
         self._validate_store_access()
         from datetime import datetime
         qs = self.scope_queryset(StockRequest.objects.all())
@@ -1781,6 +1949,25 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 pass
         return qs
     
+    @extend_schema(tags=["Pharmacy"], summary="List stats", description="Tab counts for stock requests (replaces 5+ parallel COUNT requests).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Tab counts for stock requests (replaces 5+ parallel COUNT requests)."""
+        from common.list_stats import viewset_queryset_excluding_params
+
+        qs = viewset_queryset_excluding_params(self, frozenset({'status', 'page', 'page_size', 'ordering'}))
+        rows = qs.values('status').annotate(count=Count('id'))
+        counts = {row['status']: row['count'] for row in rows}
+        partially = counts.get('partially_fulfilled', 0)
+        fulfilled = counts.get('fulfilled', 0)
+        return Response({
+            'total': sum(counts.values()),
+            'pending': counts.get('pending', 0),
+            'approved': counts.get('approved', 0),
+            'confirmed': counts.get('received', 0),
+            'awaitingConfirmation': fulfilled + partially,
+        })
+
     def perform_create(self, serializer):
         self.auto_set_clinic(serializer)
         serializer.save(requested_by=self.request.user)
@@ -1826,6 +2013,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             logger.exception('StockRequest partial_update failed: %s', e)
             raise
 
+    @extend_schema(tags=["Pharmacy"], summary="Approve", description="Approve a stock request.")
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         """
@@ -1847,6 +2035,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         
         return Response(StockRequestSerializer(stock_request).data)
 
+    @extend_schema(tags=["Pharmacy"], summary="Reject", description="Reject a stock request.")
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         """
@@ -1866,6 +2055,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         
         return Response(StockRequestSerializer(stock_request).data)
 
+    @extend_schema(tags=["Pharmacy"], summary="Cancel", description="Cancel a stock request.")
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         """
@@ -1885,6 +2075,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         
         return Response(StockRequestSerializer(stock_request).data)
 
+    @extend_schema(tags=["Pharmacy"], summary="Update items", description="Update item quantities for a pending or approved request.")
     @action(detail=True, methods=['post'], url_path='update_items')
     def update_items(self, request, pk=None):
         """
@@ -1936,6 +2127,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'request': StockRequestSerializer(stock_request).data
         })
 
+    @extend_schema(tags=["Pharmacy"], summary="Fulfill", description="Fulfill a stock request.")
     @action(detail=True, methods=['post'])
     def fulfill(self, request, pk=None):
         """
@@ -2107,6 +2299,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'issue': StockIssueSerializer(issue).data if issue else None
         })
 
+    @extend_schema(tags=["Pharmacy"], summary="Confirm receipt", description="Confirm receipt of stock.")
     @action(detail=True, methods=['post'])
     def confirm_receipt(self, request, pk=None):
         """
@@ -2133,11 +2326,11 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         })
 
 
+@document_viewset(tag="Pharmacy", resource="stock issues", read_only=True)
 class StockIssueViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for listing stock issues (e.g. receipts from Central Store to Dispensary)."""
     clinic_filter_field = 'request__clinic'
     queryset = StockIssue.objects.select_related('request', 'issued_by').prefetch_related('lines__medication').all()
-    permission_classes = [IsAuthenticated]
     serializer_class = StockIssueSerializer
     pagination_class = FlexiblePageNumberPagination
 

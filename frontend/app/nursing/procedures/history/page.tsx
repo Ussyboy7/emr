@@ -1,4 +1,5 @@
 "use client";
+import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -15,6 +16,7 @@ import {
   Activity, User, Clock, Stethoscope, FileText, Loader2, AlertTriangle
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import { nursingService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -29,7 +31,10 @@ interface CompletedProcedure {
   age: number;
   dob?: string;
   gender: string;
+  category: string;
+  bloodGroup: string;
   ward: string;
+  orderInstructions?: string;
   orderedBy: string;
   completedAt: string;
   completedBy: string;
@@ -82,8 +87,8 @@ const formatDateTime = (dateString: string) => {
     return { date: 'Date unavailable', time: '' };
   }
   return {
-    date: date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-    time: date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+    date: formatDisplayDateMedium(date),
+    time: formatDisplayTime(date),
   };
 };
 
@@ -139,6 +144,77 @@ const formatGender = (gender?: string): string => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
+const PATIENT_CATEGORY_LABELS: Record<string, string> = {
+  employee: 'Employee',
+  retiree: 'Retiree',
+  dependent: 'Dependent',
+  nonnpa: 'Non-NPA',
+};
+
+const WOUND_INTERVENTION_LABELS: Record<string, string> = {
+  dressing: 'Dressing',
+  sutures: 'Suturing',
+  suture_removal: 'Suture removal',
+  i_and_d: 'Incision and drainage',
+};
+
+function formatCategoryLabel(category?: string): string {
+  const key = String(category || '').trim().toLowerCase();
+  if (!key) return '—';
+  return PATIENT_CATEGORY_LABELS[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function parseDressingNotes(notes: string): Pick<CompletedProcedure['record'], 'dressingType' | 'woundCondition' | 'notes'> {
+  const raw = String(notes || '').trim();
+  if (!raw) return {};
+
+  const dressingType = raw.match(/Type:\s*([^|]+)/i)?.[1]?.trim();
+  const woundCondition = raw.match(/Condition:\s*([^|]+)/i)?.[1]?.trim();
+  const observations = raw.match(/Observations:\s*(.+)$/i)?.[1]?.trim();
+
+  if (!dressingType && !woundCondition && !observations) {
+    return { notes: raw };
+  }
+
+  return { dressingType, woundCondition, notes: observations };
+}
+
+function parseDressingDescription(description: string): {
+  woundType?: string;
+  woundLocation?: string;
+  orderInstructions?: string;
+} {
+  const body = String(description || '').replace(/^Dressing:\s*/i, '').trim();
+  if (!body) return {};
+
+  const parts = body.split(/\s*•\s*/).map((s) => s.trim()).filter(Boolean);
+  const out: { woundType?: string; woundLocation?: string; orderInstructions?: string } = {};
+  let woundType = '';
+
+  for (const part of parts) {
+    const loc = part.match(/^Location:\s*(.+)$/i);
+    const instr = part.match(/^Instructions:\s*(.+)$/i);
+    if (loc) out.woundLocation = loc[1].trim();
+    else if (instr) out.orderInstructions = instr[1].trim();
+    else if (!woundType) woundType = part;
+  }
+  if (woundType) out.woundType = woundType;
+
+  const at = body.match(/^(.+?)\s+dressing\s+at\s+([^.]+)/i);
+  if (at && !out.woundType) {
+    out.woundType = at[1].trim();
+    out.woundLocation = at[2].trim();
+  }
+
+  const dash = body.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+  if (dash && !out.woundType && dash[1].length > 1) {
+    out.woundType = dash[1].trim();
+    out.woundLocation = dash[2].trim();
+  }
+
+  return out;
+}
+
 function nursingProcedureToHistory(proc: any): CompletedProcedure {
   const typeMap: Record<string, CompletedProcedure['type']> = {
     injection: 'injection',
@@ -171,6 +247,7 @@ function nursingProcedureToHistory(proc: any): CompletedProcedure {
     '';
 
   const details: CompletedProcedure['details'] = {};
+  let orderInstructions: string | undefined;
   const record: CompletedProcedure['record'] = {
     site: proc.site || '',
     notes: proc.notes || '',
@@ -187,11 +264,16 @@ function nursingProcedureToHistory(proc: any): CompletedProcedure {
         details.route = parts[1] || '';
       }
     } else if (procedureType === 'dressing') {
-      const match = description.match(/([^:]+):\s*(.+)/);
-      if (match) {
-        details.woundType = match[1].trim();
-        details.woundLocation = match[2].trim();
-      }
+      const parsed = parseDressingDescription(description);
+      details.woundType = parsed.woundType;
+      details.woundLocation = parsed.woundLocation || proc.site || '';
+      orderInstructions = parsed.orderInstructions;
+      const parsedNotes = parseDressingNotes(proc.notes || '');
+      record.dressingType =
+        WOUND_INTERVENTION_LABELS[String(proc.wound_intervention || '')] ||
+        parsedNotes.dressingType;
+      record.woundCondition = parsedNotes.woundCondition;
+      record.notes = parsedNotes.notes || '';
     } else {
       const match = description.match(/([^:]+):\s*(.+)/);
       if (match) {
@@ -215,7 +297,10 @@ function nursingProcedureToHistory(proc: any): CompletedProcedure {
     age,
     dob: proc.patient_date_of_birth || '',
     gender: formatGender(proc.patient_gender),
+    category: formatCategoryLabel(proc.patient_category),
+    bloodGroup: proc.patient_blood_group ? String(proc.patient_blood_group) : '',
     ward: wardLabel,
+    orderInstructions,
     orderedBy: orderedByLabel,
     completedAt: proc.performed_at || proc.created_at || new Date().toISOString(),
     completedBy: proc.performed_by_name || 'Unknown',
@@ -242,7 +327,7 @@ export default function ProceduresHistoryPage() {
     injections: 0,
     dressings: 0,
     medications: 0,
-    todayCount: 0,
+    observations: 0,
   });
   
   // Pagination state
@@ -274,35 +359,28 @@ export default function ProceduresHistoryPage() {
 
   const loadHistoryStats = useCallback(async () => {
     try {
-      const mk = (extra: Record<string, string> = {}) => {
-        const qs = new URLSearchParams({ page: '1', page_size: '1' });
-        appendHistoryFilters(qs);
-        Object.entries(extra).forEach(([k, v]) => qs.set(k, v));
-        return apiFetch<{ count?: number }>(`/nursing/procedures/?${qs.toString()}`);
-      };
-      const mkToday = () => {
-        const qs = new URLSearchParams({ page: '1', page_size: '1', date_filter: 'today' });
-        appendHistoryFilters(qs, { skipDate: true });
-        return apiFetch<{ count?: number }>(`/nursing/procedures/?${qs.toString()}`);
-      };
-      const [total, inj, dress, med, today] = await Promise.all([
-        mk(),
-        mk({ history_type: 'injection' }),
-        mk({ history_type: 'dressing' }),
-        mk({ history_type: 'medication' }),
-        mkToday(),
-      ]);
+      const params: Record<string, string | undefined> = {};
+      const q = debouncedSearch.trim();
+      if (q) params.search = q;
+      if (genderFilter !== 'all') params.patient_gender = genderFilter.toLowerCase();
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) params.performed_at_after = dateRange.from;
+        if (dateRange.to) params.performed_at_before = dateRange.to;
+      } else if (dateFilter !== 'all') {
+        params.date_filter = dateFilter;
+      }
+      const stats = await nursingService.getProceduresHistoryStats(params);
       setHistoryStats({
-        total: typeof total.count === 'number' ? total.count : 0,
-        injections: typeof inj.count === 'number' ? inj.count : 0,
-        dressings: typeof dress.count === 'number' ? dress.count : 0,
-        medications: typeof med.count === 'number' ? med.count : 0,
-        todayCount: typeof today.count === 'number' ? today.count : 0,
+        total: stats.total ?? 0,
+        injections: stats.injections ?? 0,
+        dressings: stats.dressings ?? 0,
+        medications: stats.medications ?? 0,
+        observations: stats.observations ?? 0,
       });
     } catch (e) {
       console.error('Failed to load procedure history stats:', e);
     }
-  }, [appendHistoryFilters]);
+  }, [debouncedSearch, genderFilter, dateFilter, dateRange.from, dateRange.to]);
 
   const loadHistoryPage = useCallback(async () => {
     try {
@@ -364,26 +442,15 @@ export default function ProceduresHistoryPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-5">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Card className="border-l-4 border-l-slate-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Records</p>
-                  <p className="text-3xl font-bold">{historyStats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.total}</p>
                 </div>
-                <FileText className="h-10 w-10 text-slate-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-3xl font-bold">{historyStats.todayCount}</p>
-                </div>
-                <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+                <FileText className="h-8 w-8 text-slate-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -392,9 +459,9 @@ export default function ProceduresHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Injections</p>
-                  <p className="text-3xl font-bold">{historyStats.injections}</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.injections}</p>
                 </div>
-                <Syringe className="h-10 w-10 text-emerald-500" />
+                <Syringe className="h-8 w-8 text-emerald-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -403,9 +470,9 @@ export default function ProceduresHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Dressings</p>
-                  <p className="text-3xl font-bold">{historyStats.dressings}</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.dressings}</p>
                 </div>
-                <Bandage className="h-10 w-10 text-violet-500" />
+                <Bandage className="h-8 w-8 text-violet-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -414,9 +481,20 @@ export default function ProceduresHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Medications</p>
-                  <p className="text-3xl font-bold">{historyStats.medications}</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.medications}</p>
                 </div>
-                <Pill className="h-10 w-10 text-blue-500" />
+                <Pill className="h-8 w-8 text-blue-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-amber-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Observations</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.observations}</p>
+                </div>
+                <Activity className="h-8 w-8 text-amber-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -547,8 +625,12 @@ export default function ProceduresHistoryPage() {
                           <span>{procedure.patientId}</span>
                           <span>•</span>
                           <span>{formatDisplayAge(procedure.age, procedure.dob)}</span>
-                          <span>•</span>
-                          <span>{procedure.ward || 'Ward not specified'}</span>
+                          {procedure.type === 'ward_admission' && (
+                            <>
+                              <span>•</span>
+                              <span>{procedure.ward || 'Ward not specified'}</span>
+                            </>
+                          )}
                           <span>•</span>
                           <span className="flex items-center gap-1"><User className="h-3 w-3" />{procedure.completedBy}</span>
                           {procedure.orderedBy && procedure.orderedBy !== procedure.completedBy && (
@@ -589,92 +671,130 @@ export default function ProceduresHistoryPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {selectedProcedure && (() => {
                   const config = getTypeConfig(selectedProcedure.type);
                   const Icon = config.icon;
-                  return <><Icon className={`h-5 w-5 ${config.color}`} />{config.label} Record</>;
+                  return <><Icon className={`h-5 w-5 ${config.color}`} />{config.label}</>;
                 })()}
               </DialogTitle>
-              <DialogDescription>{selectedProcedure?.patientName} - {selectedProcedure?.patientId}</DialogDescription>
+              <DialogDescription>
+                {selectedProcedure?.patientName} - {selectedProcedure?.patientId}
+              </DialogDescription>
             </DialogHeader>
             {selectedProcedure && (
               <div className="py-4 space-y-4">
-                {/* Patient Info */}
-                <div className="p-4 rounded-lg bg-muted/50 grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Patient</p>
-                    <p className="font-medium">{selectedProcedure.patientName}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Patient ID</p>
-                    <p className="font-medium">{selectedProcedure.patientId}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Age / Gender</p>
-                    <p className="font-medium">{selectedProcedure.age}y {selectedProcedure.gender}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Ward</p>
-                    <p className="font-medium">{selectedProcedure.ward}</p>
-                  </div>
+                <p className="text-sm text-muted-foreground">
+                  {selectedProcedure.age > 0 ? `${selectedProcedure.age}y` : 'Age unknown'} · {selectedProcedure.gender}
+                </p>
+
+                <div className="p-4 rounded-lg bg-muted/50 space-y-3">
+                  {selectedProcedure.orderedBy && (
+                    <p className="text-xs text-muted-foreground">Ordered by {selectedProcedure.orderedBy}</p>
+                  )}
+                  {selectedProcedure.type === 'injection' && (
+                    <>
+                      <p className="font-medium text-foreground">
+                        {selectedProcedure.details.medication} - {selectedProcedure.details.dosage}
+                      </p>
+                      <p className="text-sm text-muted-foreground">{selectedProcedure.details.route}</p>
+                    </>
+                  )}
+                  {selectedProcedure.type === 'dressing' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Wound type</p>
+                        <p className="font-medium">{selectedProcedure.details.woundType || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Location</p>
+                        <p className="font-medium">{selectedProcedure.details.woundLocation || '—'}</p>
+                      </div>
+                      {selectedProcedure.orderInstructions ? (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Instructions</p>
+                          <p className="text-sm">{selectedProcedure.orderInstructions}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                  {selectedProcedure.type === 'medication' && (
+                    <>
+                      <p className="font-medium text-foreground">{selectedProcedure.details.medication}</p>
+                      <p className="text-sm text-muted-foreground">{selectedProcedure.details.route}</p>
+                    </>
+                  )}
+                  {selectedProcedure.type === 'ward_admission' && (
+                    <>
+                      <p className="font-medium text-foreground">Observation Admission</p>
+                      <p className="text-sm text-muted-foreground">{selectedProcedure.ward || 'Ward not specified'}</p>
+                    </>
+                  )}
                 </div>
 
-                {/* Procedure Details */}
-                <div className="space-y-2">
-                  <h4 className="font-medium text-foreground">Procedure Details</h4>
-                  <div className="p-3 rounded-lg border grid grid-cols-2 gap-2">
-                    {selectedProcedure.type === 'injection' && (
-                      <>
-                        <div><p className="text-xs text-muted-foreground">Medication</p><p className="font-medium">{selectedProcedure.details.medication}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Dose</p><p className="font-medium">{selectedProcedure.details.dosage}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Route</p><p className="font-medium">{selectedProcedure.details.route}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Site</p><p className="font-medium">{selectedProcedure.record.site}</p></div>
-                        {selectedProcedure.record.batchNumber && (
-                          <div className="col-span-2"><p className="text-xs text-muted-foreground">Batch #</p><p className="font-medium">{selectedProcedure.record.batchNumber}</p></div>
-                        )}
-                      </>
-                    )}
-                    {selectedProcedure.type === 'dressing' && (
-                      <>
-                        <div><p className="text-xs text-muted-foreground">Wound Type</p><p className="font-medium">{selectedProcedure.details.woundType}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Location</p><p className="font-medium">{selectedProcedure.details.woundLocation}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Dressing Type</p><p className="font-medium">{selectedProcedure.record.dressingType}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Condition</p><p className="font-medium">{selectedProcedure.record.woundCondition}</p></div>
-                      </>
-                    )}
-                    {selectedProcedure.type === 'medication' && (
-                      <>
-                        <div><p className="text-xs text-muted-foreground">Medication</p><p className="font-medium">{selectedProcedure.details.medication}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Route</p><p className="font-medium">{selectedProcedure.details.route}</p></div>
-                        {selectedProcedure.record.site && (
-                          <div className="col-span-2"><p className="text-xs text-muted-foreground">Site</p><p className="font-medium">{selectedProcedure.record.site}</p></div>
-                        )}
-                      </>
-                    )}
+                {selectedProcedure.type === 'dressing' &&
+                  (selectedProcedure.record.dressingType ||
+                    selectedProcedure.record.woundCondition ||
+                    selectedProcedure.record.notes) && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedProcedure.record.dressingType ? (
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Procedure performed</p>
+                        <p className="text-sm text-muted-foreground">{selectedProcedure.record.dressingType}</p>
+                      </div>
+                    ) : null}
+                    {selectedProcedure.record.woundCondition ? (
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Wound condition</p>
+                        <p className="text-sm text-muted-foreground">{selectedProcedure.record.woundCondition}</p>
+                      </div>
+                    ) : null}
+                    {selectedProcedure.record.notes ? (
+                      <div className="col-span-2 space-y-1">
+                        <p className="text-sm font-medium">Observations</p>
+                        <p className="text-sm text-muted-foreground">{selectedProcedure.record.notes}</p>
+                      </div>
+                    ) : null}
                   </div>
-                </div>
+                )}
 
-                {/* Notes */}
-                {selectedProcedure.record.notes && (
+                {selectedProcedure.type === 'injection' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedProcedure.record.site ? (
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Injection site</p>
+                        <p className="text-sm text-muted-foreground">{selectedProcedure.record.site}</p>
+                      </div>
+                    ) : null}
+                    {selectedProcedure.record.batchNumber ? (
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Batch #</p>
+                        <p className="text-sm text-muted-foreground">{selectedProcedure.record.batchNumber}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {selectedProcedure.type === 'medication' && selectedProcedure.record.site && (
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Administration site</p>
+                    <p className="text-sm text-muted-foreground">{selectedProcedure.record.site}</p>
+                  </div>
+                )}
+
+                {selectedProcedure.type !== 'dressing' && selectedProcedure.record.notes && (
                   <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
                     <p className="text-xs text-blue-600 dark:text-blue-400">Notes</p>
                     <p className="text-sm mt-1">{selectedProcedure.record.notes}</p>
                   </div>
                 )}
 
-                {/* Meta */}
                 <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
-                  {selectedProcedure.orderedBy && (
-                    <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />Ordered by: {selectedProcedure.orderedBy}</span>
-                  )}
-                  <span className="flex items-center gap-1"><User className="h-3 w-3" />Completed by: {selectedProcedure.completedBy}</span>
+                  <span className="flex items-center gap-1"><User className="h-3 w-3" />Completed by {selectedProcedure.completedBy}</span>
+                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatDateTime(selectedProcedure.completedAt).date} at {formatDateTime(selectedProcedure.completedAt).time}</span>
                 </div>
-                <p className="text-xs text-center text-muted-foreground">
-                  {formatDateTime(selectedProcedure.completedAt).date} at {formatDateTime(selectedProcedure.completedAt).time}
-                </p>
               </div>
             )}
             <DialogFooter>

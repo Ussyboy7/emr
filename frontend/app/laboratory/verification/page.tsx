@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StandardPagination } from '@/components/shared/StandardPagination';
+import { getMediaUrl, openMediaInNewTab } from '@/lib/media-url';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { labService, type LabResult as ApiLabResult } from '@/lib/services';
+import { DEFAULT_CATALOG_PAGE_SIZE } from '@/lib/pagination-constants';
 import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
@@ -38,20 +39,17 @@ import {
 } from '@/lib/laboratory/completedLabReport';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
-  Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, Send, Download
+  Loader2, User, Calendar, FileText, Stethoscope, Send, Download
 } from 'lucide-react';
+
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 
 function formatLabDateTime(isoString: string | undefined): string {
   if (!isoString) return '';
-  try {
-    const date = new Date(isoString);
-    if (Number.isNaN(date.getTime())) return '';
-    const datePart = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-    const timePart = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    return `${datePart}, ${timePart}`;
-  } catch {
-    return '';
-  }
+  const datePart = formatDisplayDateMedium(isoString);
+  const timePart = formatDisplayTime(isoString);
+  if (datePart === '—') return '';
+  return `${datePart}, ${timePart}`;
 }
 
 interface TestResult {
@@ -111,14 +109,7 @@ const transformResult = (
     (testDetails as any)?.template?.normal_range ||
     (testCodeForTemplate ? templateNormalRangesByCode?.[testCodeForTemplate] : undefined);
 
-  const toAbsoluteResultFileUrl = (url: string): string => {
-    if (!url) return url;
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
-    const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
-    if (url.startsWith('/media/')) return `${mediaBase}${url}`;
-    return `${mediaBase}/media/${url.replace(/^\/+/, '')}`;
-  };
+  const toAbsoluteResultFileUrl = (url: string): string => getMediaUrl(url) ?? url;
   const displayNameFromResultFileUrl = (url: string): string => {
     try {
       return decodeURIComponent(url.split('?')[0].split('/').filter(Boolean).pop() || 'Result file');
@@ -335,7 +326,7 @@ export default function ResultsVerificationPage() {
   const ensureTemplateRangesMap = useCallback(async (): Promise<Record<string, any>> => {
     if (Object.keys(templateNormalRangesByCode).length > 0) return templateNormalRangesByCode;
     try {
-      const templatesRes = await labService.getTemplates({ page_size: 500 });
+      const templatesRes = await labService.getTemplates({ page_size: DEFAULT_CATALOG_PAGE_SIZE });
       const map: Record<string, any> = {};
       for (const t of templatesRes.results || []) {
         const code = (t as any)?.code;
@@ -519,7 +510,7 @@ export default function ResultsVerificationPage() {
     }
   };
 
-  const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const formatTime = (isoString: string) => formatDisplayTime(isoString);
 
   const handleVerify = async () => {
     if (!selectedResult) return;
@@ -673,17 +664,12 @@ export default function ResultsVerificationPage() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <ShieldCheck className="h-8 w-8 text-amber-500" />
-              Results Verification
-            </h1>
-            <p className="text-muted-foreground mt-1">Senior Admin / Pathologist - Verify lab results before completion</p>
-          </div>
-          <Button variant="outline" onClick={loadResults} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-          </Button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
+            <ShieldCheck className="h-8 w-8 text-amber-500" />
+            Results Verification
+          </h1>
+          <p className="text-muted-foreground mt-1">Senior Admin / Pathologist - Verify lab results before completion</p>
         </div>
 
         {/* Tabs & Filters */}
@@ -1068,7 +1054,11 @@ export default function ResultsVerificationPage() {
                                       variant="outline"
                                       size="sm"
                                       className="h-7 px-2"
-                                      onClick={() => window.open(r.attachment!.url, '_blank', 'noopener,noreferrer')}
+                                      onClick={() => {
+                                        void openMediaInNewTab(r.attachment!.url).catch((err: any) =>
+                                          toast.error(err?.message || 'Failed to open file')
+                                        );
+                                      }}
                                     >
                                       <Download className="h-3.5 w-3.5 mr-1" />
                                       View
@@ -1104,7 +1094,9 @@ export default function ResultsVerificationPage() {
                           size="sm"
                           onClick={() => {
                             if (selectedResult.resultFile && selectedResult.resultFileExists !== false) {
-                              window.open(selectedResult.resultFile, '_blank');
+                              void openMediaInNewTab(selectedResult.resultFile).catch((err: any) =>
+                                toast.error(err?.message || 'Failed to open file')
+                              );
                             }
                           }}
                           className="border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
@@ -1145,7 +1137,11 @@ export default function ResultsVerificationPage() {
                             variant="outline"
                             size="sm"
                             className="h-6 px-2 text-xs text-indigo-600 shrink-0"
-                            onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
+                            onClick={() => {
+                              void openMediaInNewTab(att.url).catch((err: any) =>
+                                toast.error(err?.message || 'Failed to open file')
+                              );
+                            }}
                           >
                             <Eye className="h-3 w-3 mr-1" />View
                           </Button>

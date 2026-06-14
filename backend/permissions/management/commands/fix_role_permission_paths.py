@@ -5,6 +5,7 @@ Fix legacy role.permissions shape and page paths in the database.
 - Path rewrites (extend as needed):
   - /consultation/dashboard  -> /consultation
   - /physiotherapy/pool-queue -> /physiotherapy/orders
+  - /nursing/patient-vitals -> /nursing/vitals-history
 
 Usage:
   python manage.py fix_role_permission_paths          # dry run
@@ -33,6 +34,10 @@ class Command(BaseCommand):
         replacements = {
             "/consultation/dashboard": "/consultation",
             "/physiotherapy/pool-queue": "/physiotherapy/orders",
+            "/nursing/patient-vitals": "/nursing/vitals-history",
+            "/medical-records/reports/attendance-summary": "/medical-records/reports/attendance-statistics",
+            "/medical-records/reports/clinic-attendance": "/medical-records/reports/clinic-statistics",
+            "/medical-records/reports/gop-attendance": "/medical-records/reports/clinic-statistics",
         }
 
         changed_roles = 0

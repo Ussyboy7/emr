@@ -11,6 +11,7 @@ export interface EyeOrder {
   ordered_by: number;
   ordered_by_name?: string;
   visit?: number;
+  consultation_session?: number | null;
   chief_complaint: string;
   visual_acuity_od: string;
   visual_acuity_os: string;
@@ -135,6 +136,41 @@ export const eyeCareService = {
   },
 
   /**
+   * Single-request eye clinic home dashboard payload.
+   */
+  async getHomeDashboard(params?: { date?: string }): Promise<{
+    date: string;
+    stats: {
+      queue: number;
+      inProgress: number;
+      activeSessions: number;
+      completedToday: number;
+      scheduledToday: number;
+    };
+    queuePreview: EyeOrder[];
+    inProgressOrders: EyeOrder[];
+    activeSessions: EyeSession[];
+    recentCompletedSessions: EyeSession[];
+  }> {
+    const qs = buildQueryString((params || {}) as Record<string, string | undefined>);
+    return apiFetch(`/eyecare/orders/home-dashboard${qs || '/'}`);
+  },
+
+  async getOrderStats(params?: {
+    date_filter?: string;
+    ordered_at_after?: string;
+    ordered_at_before?: string;
+  }): Promise<{
+    pending: number;
+    in_progress: number;
+    cancelled: number;
+    completed: number;
+  }> {
+    const qs = buildQueryString((params || {}) as Record<string, string | undefined>);
+    return apiFetch(`/eyecare/orders/stats/${qs || ''}`);
+  },
+
+  /**
    * Create a new eye order
    */
   async createOrder(data: Partial<EyeOrder>) {
@@ -189,6 +225,10 @@ export const eyeCareService = {
     page?: number;
     page_size?: number;
     search?: string;
+    ordering?: string;
+    has_diagnosis?: boolean;
+    has_findings?: boolean;
+    is_urgent?: boolean;
     completed_after?: string;
     completed_before?: string;
   }) {
@@ -196,10 +236,24 @@ export const eyeCareService = {
     return apiFetch<{ results: EyeSession[]; count?: number }>(`/eyecare/sessions/${query}`);
   },
 
-  async downloadSessionReportPdf(sessionId: number): Promise<Blob> {
-    return apiFetch<Blob>(`/eyecare/sessions/${sessionId}/session_report_pdf/`, {
-      responseType: 'blob',
-    });
+  /**
+   * Aggregate completed-session card counts (single DB round-trip).
+   */
+  async getCompletedStats(params?: {
+    search?: string;
+    completed_after?: string;
+    completed_before?: string;
+    has_diagnosis?: boolean;
+    has_findings?: boolean;
+    is_urgent?: boolean;
+  }): Promise<{
+    total: number;
+    withDiagnosis: number;
+    urgent: number;
+    withFindings: number;
+  }> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    return apiFetch(`/eyecare/sessions/completed-stats${query || '/'}`);
   },
 
   /**

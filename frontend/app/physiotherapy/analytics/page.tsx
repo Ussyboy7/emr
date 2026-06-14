@@ -4,15 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import {
   AnalyticsReportLayout,
-  analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
+import { useReportDateRange } from "@/hooks/use-report-date-range";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { apiFetch, getReadableApiError } from '@/lib/api-client';
+import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
 import { physioService, type PhysiotherapyAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
-import { endOfMonth, format, startOfMonth } from 'date-fns';
+import { endOfMonth, startOfMonth } from 'date-fns';
+import { toApiDateString, peekServerTodayMonthPrefix, peekServerTodayYear } from '@/lib/dates';
+import { buildReportPeriodQuery, canFetchReportPeriod } from '@/lib/report-period-query';
 import {
   Bar,
   BarChart,
@@ -41,10 +44,6 @@ const CHART_COLORS = {
   info: "#06b6d4",
   muted: "#64748b",
 };
-
-function toYmd(d: Date) {
-  return format(d, 'yyyy-MM-dd');
-}
 
 function physiotherapyAnalyticsToCsv(
   d: PhysiotherapyAnalyticsSummary,
@@ -80,29 +79,42 @@ export default function PhysiotherapyAnalyticsPage() {
   const [year, setYear] = useState(() => new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
+
+  const { handleExportCsv, handleDownloadPdf } = useAnalyticsExportHandlers({
+    apiPath: "/analytics/summary/",
+    filenameBase: "physiotherapy_analytics",
+    viewMode,
+    year,
+    startDate,
+    endDate,
+    queryStyle: "start_date",
+  });
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PhysiotherapyAnalyticsSummary | null>(null);
 
   const range = useMemo(
-    () => analyticsRangeFromFilters(viewMode, year, startDate, endDate),
-    [viewMode, year, startDate, endDate]
+    () => reportRange,
+    [reportRange]
   );
 
   const highlightThisMonth =
     viewMode === 'range' &&
     Boolean(startDate) &&
-    startDate.includes(new Date().toISOString().slice(0, 7));
-  const highlightThisYear = viewMode === 'year' && year === new Date().getFullYear().toString();
+    startDate.includes(peekServerTodayMonthPrefix());
+  const highlightThisYear = viewMode === 'year' && year === peekServerTodayYear();
 
   const fetchReport = useCallback(async () => {
-    const r = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    if (!r) {
+    const params = buildReportPeriodQuery(viewMode, reportRange, 'start_date');
+    if (!params) {
       if (viewMode === 'range') toast.error('Please select start and end dates');
       return;
     }
     setLoading(true);
     try {
-      const res = await physioService.getAnalyticsSummary({ start_date: r.start, end_date: r.end });
+      const res = await physioService.getAnalyticsSummary(params);
       setData(res);
     } catch (e: unknown) {
       console.error(e);
@@ -111,17 +123,13 @@ export default function PhysiotherapyAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewMode, year, startDate, endDate]);
+  }, [reportRange]);
 
   useEffect(() => {
-    const shouldFetch =
-      (viewMode === 'year' && year) ||
-      (viewMode === 'range' && startDate && endDate) ||
-      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
-    if (shouldFetch) {
+    if (canFetchReportPeriod(viewMode, reportRange)) {
       void fetchReport();
     }
-  }, [viewMode, year, startDate, endDate, fetchReport]);
+  }, [reportRange, fetchReport, viewMode]);
 
   const periodBreakdown = useMemo(() => {
     if (!data) return [];
@@ -162,8 +170,8 @@ export default function PhysiotherapyAnalyticsPage() {
 
   const setThisMonth = () => {
     const n = new Date();
-    setStartDate(toYmd(startOfMonth(n)));
-    setEndDate(toYmd(endOfMonth(n)));
+    setStartDate(toApiDateString(startOfMonth(n)));
+    setEndDate(toApiDateString(endOfMonth(n)));
     setViewMode('range');
   };
 
@@ -172,16 +180,6 @@ export default function PhysiotherapyAnalyticsPage() {
     setViewMode('year');
   };
 
-  const exportCsv = () => {
-    if (!data || !range) {
-      toast.error('No data to export');
-      return;
-    }
-    const csv = physiotherapyAnalyticsToCsv(data, viewMode, year, startDate, endDate);
-    const period = viewMode === 'year' ? year : `${startDate}_to_${endDate}`;
-    triggerCsvDownload(`physiotherapy_analytics_${period}.csv`, csv);
-    toast.success('Exported CSV');
-  };
 
   return (
     <DashboardLayout>
@@ -191,10 +189,10 @@ export default function PhysiotherapyAnalyticsPage() {
         ReportIcon={Activity}
         reportIconClassName="text-emerald-600 dark:text-emerald-400"
         loading={loading}
-        onRefresh={fetchReport}
         onGenerate={fetchReport}
         exportCsvDisabled={!data}
-        onExportCsv={exportCsv}
+        onExportCsv={handleExportCsv}
+        onPrint={handleDownloadPdf}
         printDisabled={!data}
         viewMode={viewMode}
         onViewModeChange={setViewMode}

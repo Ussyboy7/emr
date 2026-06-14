@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api-client";
+import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { useCurrentUser } from "@/hooks/use-current-user";
 
 export interface ClinicInfo {
@@ -49,7 +50,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     apiFetch<{ results: { id: number; name: string; code?: string }[] }>(
-      "/organization/clinics/?page_size=200"
+      `/organization/clinics/?page_size=${MAX_LIST_PAGE_SIZE}`
     )
       .then((data) => {
         if (cancelled) return;

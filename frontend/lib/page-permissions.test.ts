@@ -17,15 +17,15 @@ describe('groupPagePermissionsByModule', () => {
 });
 
 describe('normalizeRolePagePath', () => {
-  it('maps legacy physiotherapy pool-queue to orders', () => {
-    expect(normalizeRolePagePath('/physiotherapy/pool-queue')).toBe('/physiotherapy/orders');
+  it('maps legacy nursing patient-vitals to vitals-history', () => {
+    expect(normalizeRolePagePath('/nursing/patient-vitals')).toBe('/nursing/vitals-history');
   });
 });
 
 describe('normalizeRolePagePaths', () => {
   it('deduplicates and maps legacy paths', () => {
     expect(
-      normalizeRolePagePaths(['/physiotherapy/pool-queue', '/physiotherapy/orders'])
-    ).toEqual(['/physiotherapy/orders']);
+      normalizeRolePagePaths(['/nursing/patient-vitals', '/nursing/vitals-history'])
+    ).toEqual(['/nursing/vitals-history']);
   });
 });

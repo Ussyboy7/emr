@@ -7,11 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Stethoscope, Users, Pill, FlaskConical, Heart, Calendar, Clock, CheckCircle2, ArrowRight, UserCheck, Activity, Plus, Eye, Hospital, ClipboardList, AlertCircle, ScanLine } from 'lucide-react';
 import Link from 'next/link';
+import { peekServerTodayApi, toApiDateFromInstant } from "@/lib/dates";
 import { useRouter } from 'next/navigation';
 import { consultationService, pharmacyService, labService, radiologyService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 interface ConsultationStats {
   totalConsultations: number;
@@ -45,19 +47,18 @@ export default function ConsultationPage() {
         setLoading(true);
         setError(null);
 
-        // Get today's date (in local timezone)
-        const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD format
+        const today = peekServerTodayApi();
 
         // Fetch consultation sessions for today
         try {
           const sessionsResult = await consultationService.getSessions({
-            page_size: 100,
+            page_size: MAX_LIST_PAGE_SIZE,
           });
           const sessions = sessionsResult.results || [];
           
           // Filter sessions for today by doctor
           const todaySessions = sessions.filter((s: any) => {
-            const sessionDate = s.started_at ? new Date(s.started_at).toLocaleDateString('en-CA') : '';
+            const sessionDate = s.started_at ? toApiDateFromInstant(s.started_at) : '';
             const isToday = sessionDate === today;
             const isCurrentDoctor = !currentUser || (
               String(s.doctor) === String(currentUser.id) ||
@@ -89,13 +90,13 @@ export default function ConsultationPage() {
         // Fetch prescriptions for today
         try {
           const prescriptionsResult = await pharmacyService.getPrescriptions({
-            page_size: 100,
+            page_size: MAX_LIST_PAGE_SIZE,
           });
           const prescriptions = prescriptionsResult.results || [];
           
           // Filter prescriptions for today
           const todayPrescriptions = prescriptions.filter((p: any) => {
-            const prescDate = p.prescribed_at ? new Date(p.prescribed_at).toLocaleDateString('en-CA') : '';
+            const prescDate = p.prescribed_at ? toApiDateFromInstant(p.prescribed_at) : '';
             return prescDate === today;
           });
 
@@ -111,13 +112,13 @@ export default function ConsultationPage() {
         // Fetch lab orders for today
         try {
           const labOrdersResult = await labService.getOrders({
-            page_size: 100,
+            page_size: MAX_LIST_PAGE_SIZE,
           });
           const labOrders = labOrdersResult.results || [];
 
           // Filter lab orders for today
           const todayLabOrders = labOrders.filter((l: any) => {
-            const orderDate = l.ordered_at ? new Date(l.ordered_at).toLocaleDateString('en-CA') : '';
+            const orderDate = l.ordered_at ? toApiDateFromInstant(l.ordered_at) : '';
             return orderDate === today;
           });
 
@@ -133,13 +134,13 @@ export default function ConsultationPage() {
         // Fetch radiology orders for today
         try {
           const radiologyResult = await radiologyService.getOrders({
-            page_size: 100,
+            page_size: MAX_LIST_PAGE_SIZE,
           });
           const radiologyOrders = radiologyResult.results || [];
 
           // Filter radiology orders for today
           const todayRadiologyOrders = radiologyOrders.filter((r: any) => {
-            const orderDate = r.ordered_at ? new Date(r.ordered_at).toLocaleDateString('en-CA') : '';
+            const orderDate = r.ordered_at ? toApiDateFromInstant(r.ordered_at) : '';
             return orderDate === today;
           });
 

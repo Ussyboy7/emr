@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { pharmacyService } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { formatDisplayDate, formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import { getServerToday, peekServerTimezone } from '@/lib/utils/serverTime';
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
@@ -164,12 +165,8 @@ export default function DispenseHistoryPage() {
           medications,
           doctor: doctorName,
           pharmacist: dispense.dispensed_by_name || '',
-          date: new Date(dispense.dispensed_at).toLocaleDateString('en-CA', { timeZone: serverTz }),
-          time: new Date(dispense.dispensed_at).toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: serverTz,
-          }),
+          date: formatDisplayDate(dispense.dispensed_at),
+          time: formatDisplayTime(dispense.dispensed_at),
           status: 'Dispensed',
           waitTime,
           substitutions,
@@ -204,18 +201,7 @@ export default function DispenseHistoryPage() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const parts = dateString.split('-').map(Number);
-    if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
-      return dateString;
-    }
-    const [y, m, d] = parts;
-    return new Date(y, m - 1, d).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
+  const formatDate = (dateString: string) => formatDisplayDateMedium(dateString);
 
   const handleViewDetails = (record: DispenseHistoryRecord) => {
     setSelectedRecord(record);

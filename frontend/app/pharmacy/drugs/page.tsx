@@ -18,6 +18,7 @@ import { pharmacyService, type Medication } from "@/lib/services";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { MEDICATION_CATEGORIES, MEDICATION_STRENGTHS, MEDICATION_MANUFACTURERS, DOSAGE_FORMS } from "@/lib/constants/pharmacy";
 import { Plus, Search, Edit, Eye, Pill, Loader2 } from "lucide-react";
+import { DEFAULT_CATALOG_PAGE_SIZE } from '@/lib/pagination-constants';
 
 export default function DrugMasterPage() {
   const [medLoading, setMedLoading] = useState(false);
@@ -101,7 +102,7 @@ export default function DrugMasterPage() {
   useEffect(() => {
     const loadGenerics = async () => {
       try {
-        const params: any = { page: 1, page_size: 200 };
+        const params: any = { page: 1, page_size: DEFAULT_CATALOG_PAGE_SIZE };
         if (debouncedGenericSearch.trim()) params.search = debouncedGenericSearch.trim();
         const res = await pharmacyService.getGenerics(params);
         setGenerics((res.results || []).map((g: any) => ({ id: g.id, name: g.name, unit: g.unit })));

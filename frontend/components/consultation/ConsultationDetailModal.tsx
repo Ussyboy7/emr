@@ -1,4 +1,6 @@
 "use client";
+import { formatDisplayDate, formatDisplayDateTime, formatDisplayTime, todayApiDateString, toApiDateFromInstant } from "@/lib/dates";
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,11 +13,13 @@ import {
   Stethoscope, Printer, Edit, CheckCircle2, Loader2, User, Activity, FlaskConical, Syringe, Pill, Download, Calendar, FileText, ScanLine, AlertTriangle
 } from "lucide-react";
 import { apiFetch } from '@/lib/api-client';
-import { patientService, wardService, physioService, labService } from '@/lib/services';
+import { patientService, wardService, physioService, labService, consultationService, visitService } from '@/lib/services';
 import { toast } from 'sonner';
 import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultation/orders/LabOrderModal';
+import { AnnualCheckupPanel } from '@/components/consultation/AnnualCheckupPanel';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { summarizeLabTestForConsultationReport } from '@/lib/consultation-report';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -97,6 +101,8 @@ export interface ConsultationRecord {
   patientIdNumeric?: number;
   /** Visit id for API when adding orders from Edit modal. */
   visitId?: number;
+  /** Visit type from linked visit (e.g. annual_checkup). */
+  visitType?: string;
   patientAge?: number;
   patientGender?: string;
   doctor: string;
@@ -227,6 +233,7 @@ export interface ConsultationSessionData {
   clinic_name?: string;
   location_clinic_name?: string;
   visit_clinics?: string[];
+  visit_type?: string;
   date?: string;
   time?: string;
 }
@@ -344,16 +351,10 @@ const resolveDoctorName = async (
   return resolvedName || 'Unknown';
 };
 
-// Safe date formatting utility
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Date';
-    return date.toLocaleDateString();
-  } catch {
-    return 'Invalid Date';
-  }
+  const formatted = formatDisplayDate(dateString);
+  return formatted === '—' ? 'Invalid Date' : formatted;
 };
 
 // Ward Admission Status Component
@@ -720,9 +721,9 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     const visit = await apiFetch<VisitData>(`/visits/${visitId}/`);
     
     // Get patient details and sessions in parallel
-    const [patient, sessionsResult] = await Promise.all([
+    const [patient, resolvedSession] = await Promise.all([
       patientService.getPatient(visit.patient),
-      apiFetch<ApiResponse<ConsultationSessionData>>(`/consultation/sessions/?visit=${visitId}&page_size=1`).catch(() => ({ results: [] })),
+      consultationService.resolveSessionForVisit({ visit: Number(visitId) }),
     ]);
     
     // Get prescriptions, lab orders, radiology orders, and nursing orders - FILTERED BY CURRENT VISIT/CONSULTATION SESSION
@@ -734,13 +735,9 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     // First try to get the consultation session to filter by session if available
     let consultationSessionId: string | null = null;
     let consultationSession: ConsultationSessionData | null = null;
-    try {
-      if (sessionsResult.results && sessionsResult.results.length > 0) {
-        consultationSession = sessionsResult.results[0];
-        consultationSessionId = String(consultationSession.id);
-      }
-    } catch (err) {
-      // Ignore - will use visit filter
+    if (resolvedSession) {
+      consultationSession = resolvedSession as ConsultationSessionData;
+      consultationSessionId = String(consultationSession.id);
     }
     
     // Get session timeframe for filtering orders by creation time
@@ -755,78 +752,38 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
         return orderDate >= sessionStart && orderDate <= sessionEnd!;
       });
     };
-    
-    // Use consultation_session filter if available, otherwise use visit
-    const sessionFilter = consultationSessionId ? `consultation_session=${consultationSessionId}` : '';
-    const visitFilter = `visit=${visitId}`;
-    // If we have a consultation session, only use session filtering - don't fall back to visit
-    const filterParam = consultationSessionId ? sessionFilter : visitFilter;
 
-    // Fire all enrichment API calls in parallel
-    const [prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioResult, vitalsResult] = await Promise.all([
-      (async () => {
-        if (consultationSessionId) {
-          try {
-            return await apiFetch<ApiResponse<PrescriptionData>>(`/pharmacy/prescriptions/?${sessionFilter}&page_size=100`);
-          } catch { return { results: [] }; }
-        }
-        return await apiFetch<ApiResponse<PrescriptionData>>(`/pharmacy/prescriptions/?${visitFilter}&page_size=100`);
-      })(),
-      (async () => {
-        if (consultationSessionId) {
-          try {
-            return await apiFetch<ApiResponse<LabOrderData>>(`/laboratory/orders/?${sessionFilter}&page_size=100`);
-          } catch { return { results: [] }; }
-        }
-        return await apiFetch<ApiResponse<LabOrderData>>(`/laboratory/orders/?${visitFilter}&page_size=100`);
-      })(),
-      (async () => {
-        if (consultationSessionId) {
-          try {
-            return await apiFetch<{ results: any[] }>(`/radiology/orders/?${sessionFilter}&page_size=100`);
-          } catch { return { results: [] }; }
-        }
-        return await apiFetch<{ results: any[] }>(`/radiology/orders/?${visitFilter}&page_size=100`);
-      })(),
-      (async () => {
-        if (consultationSessionId) {
-          try {
-            return await apiFetch<{ results: any[] }>(`/nursing/orders/?${sessionFilter}&page_size=100`);
-          } catch { return { results: [] }; }
-        }
-        return await apiFetch<{ results: any[] }>(`/nursing/orders/?${visitFilter}&page_size=100`);
-      })(),
-      (async () => {
-        if (consultationSessionId) {
-          try {
-            return await physioService.getOrders({ consultation_session: Number(consultationSessionId), page_size: 100 });
-          } catch { return { results: [] }; }
-        }
-        return { results: [] };
-      })(),
-      (async () => {
-        try {
-          if (consultationSessionId) {
-            return await apiFetch<{ results: any[] }>(`/vitals/?consultation_session=${consultationSessionId}&page_size=10`);
-          }
-          throw new Error('No session ID');
-        } catch {
-          const vResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`).catch(() => ({ results: [] }));
-          if (consultationSession && vResult.results && consultationSession.started_at) {
-            const sStart = new Date(consultationSession.started_at);
-            const sEnd = consultationSession.ended_at ? new Date(consultationSession.ended_at) : new Date();
-            vResult.results = vResult.results.filter((v: any) => {
-              const vitalDate = new Date(v.recorded_at || v.created_at);
-              return vitalDate >= sStart && vitalDate <= sEnd;
-            });
-          }
-          return vResult;
-        }
-      })(),
-    ]);
+    let prescriptionsResult: ApiResponse<PrescriptionData>;
+    let labOrdersResult: ApiResponse<LabOrderData>;
+    let radiologyOrdersResult: { results: any[] };
+    let nursingOrdersResult: { results: any[] };
+    let physioResult: { results: any[] };
+    let vitalsResult: { results: any[] };
+
+    if (consultationSessionId) {
+      const bundle = await consultationService.getSessionWorkspaceBundle(Number(consultationSessionId));
+      prescriptionsResult = bundle.prescriptions as ApiResponse<PrescriptionData>;
+      labOrdersResult = bundle.lab_orders as ApiResponse<LabOrderData>;
+      radiologyOrdersResult = bundle.radiology_orders as { results: any[] };
+      nursingOrdersResult = bundle.nursing_orders as { results: any[] };
+      physioResult = bundle.physio_orders as { results: any[] };
+      vitalsResult = bundle.vitals as { results: any[] };
+    } else {
+      const bundle = await visitService.getVisitWorkspaceBundle(Number(visitId));
+      prescriptionsResult = bundle.prescriptions as ApiResponse<PrescriptionData>;
+      labOrdersResult = bundle.lab_orders as ApiResponse<LabOrderData>;
+      radiologyOrdersResult = bundle.radiology_orders as { results: any[] };
+      nursingOrdersResult = bundle.nursing_orders as { results: any[] };
+      physioResult = bundle.physio_orders as { results: any[] };
+      vitalsResult = bundle.vitals as { results: any[] };
+      if (!vitalsResult.results?.length) {
+        const vital = await patientService.resolveVital({ visit: Number(visitId) }).catch(() => null);
+        vitalsResult = { results: vital ? [vital] : [] };
+      }
+    }
 
     try {
-      const filteredPrescriptions = filterBySessionTime(prescriptionsResult.results || []);
+      const filteredPrescriptions = filterBySessionTime((prescriptionsResult.results || []) as PrescriptionData[]);
       prescriptions = filteredPrescriptions.map((p: PrescriptionData) => ({
         id: String(p.id),
         medication: p.medication_name ||
@@ -845,7 +802,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     }
     
     try {
-      const filteredLabOrders = filterBySessionTime(labOrdersResult.results || []);
+      const filteredLabOrders = filterBySessionTime((labOrdersResult.results || []) as LabOrderData[]);
       // Flatten lab orders - each test in an order should be a separate entry
       labOrders = filteredLabOrders.flatMap((l: LabOrderData) => {
         // If order has tests array, create an entry for each test
@@ -879,7 +836,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     }
     
     try {
-      const filteredRadiologyOrders = filterBySessionTime(radiologyOrdersResult.results || []);
+      const filteredRadiologyOrders = filterBySessionTime((radiologyOrdersResult.results || []) as any[]);
       // Flatten radiology orders - each study in an order should be a separate entry
       radiologyOrders = filteredRadiologyOrders.flatMap((r: any) => {
         // If order has studies array, create an entry for each study
@@ -911,7 +868,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     }
     
     try {
-      const filteredNursingOrders = filterBySessionTime(nursingOrdersResult.results || []);
+      const filteredNursingOrders = filterBySessionTime((nursingOrdersResult.results || []) as any[]);
       nursingOrders = filteredNursingOrders.map((n: any) => ({
         id: String(n.id),
         type: n.order_type || n.type || 'General',
@@ -926,18 +883,16 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     }
 
     let physioOrders: ConsultationRecord['physioOrders'] = [];
-    if (consultationSessionId) {
-      try {
-        physioOrders = (physioResult.results || []).map((o: any) => ({
+    try {
+      physioOrders = (physioResult.results || []).map((o: any) => ({
           id: String(o.id),
           diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
           chiefComplaint: o.chief_complaint ?? '',
           priority: o.priority === 'stat' ? 'STAT' : o.priority === 'urgent' ? 'Urgent' : String(o.priority || 'Routine'),
           status: o.status ?? 'pending',
         }));
-      } catch (err) {
-        console.warn('Could not load physio orders:', err);
-      }
+    } catch (err) {
+      console.warn('Could not load physio orders:', err);
     }
     
     // Get vitals - filter by consultation session if available, otherwise by visit
@@ -975,7 +930,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
           comment: v.notes || v.comment || '',
           recordedBy: v.recorded_by_name || (typeof v.recorded_by === 'object' ? v.recorded_by?.full_name || v.recorded_by?.username : v.recorded_by) || 'Unknown',
           date: v.recorded_at || v.created_at || new Date().toISOString(),
-          time: v.recorded_at ? new Date(v.recorded_at).toLocaleTimeString() : '00:00:00',
+          time: formatDisplayTime(v.recorded_at) || '00:00',
         };
       });
     } catch (err) {
@@ -1000,7 +955,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
       ),
       doctorId: String(visit.doctor || consultationSession?.doctor || ''),
       doctorSpecialty: visit.doctor_specialty || consultationSession?.doctor_specialty || undefined,
-      date: visit.visit_date || visit.date || new Date().toISOString().split('T')[0],
+      date: visit.visit_date || visit.date || todayApiDateString(),
       time: visit.visit_time || visit.time || '',
       clinic: getVisitServiceClinicsDisplay({
         clinic: visit.clinic_name || visit.clinic,
@@ -1089,6 +1044,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
         nursingOrders
       ),
       type: 'visit',
+      visitType: visit.visit_type || undefined,
     };
   } catch (error) {
     console.error('Error loading visit data:', error);
@@ -1105,14 +1061,16 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     const patient = await patientService.getPatient(session.patient);
     
     // Get visit details if available
-    let visitDate = session.started_at ? new Date(session.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+    let visitDate = session.started_at ? toApiDateFromInstant(session.started_at) : todayApiDateString();
     let visitTime = session.started_at ? new Date(session.started_at).toTimeString().slice(0, 5) : '';
+    let visitType = session.visit_type || undefined;
     
     if (session.visit) {
       try {
         const visit = await apiFetch<VisitData>(`/visits/${session.visit}/`);
         visitDate = visit.visit_date || visit.date || visitDate;
         visitTime = visit.visit_time || visit.time || visitTime;
+        visitType = visit.visit_type || visitType;
       } catch (visitErr) {
         console.warn('Could not load visit details:', visitErr);
       }
@@ -1149,71 +1107,20 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     const sessionFilter = `consultation_session=${sessionId}`;
     const visitFilter = session.visit ? `visit=${session.visit}` : '';
 
-    // Fire all enrichment API calls in parallel
-    const [prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioResult, vitalsResult] = await Promise.all([
-      (async () => {
-        try {
-          return await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?${sessionFilter}&page_size=100`);
-        } catch {
-          return { results: [] };
-        }
-      })(),
-      (async () => {
-        try {
-          return await apiFetch<{ results: any[] }>(`/laboratory/orders/?${sessionFilter}&page_size=100`);
-        } catch {
-          return { results: [] };
-        }
-      })(),
-      (async () => {
-        try {
-          return await apiFetch<{ results: any[] }>(`/radiology/orders/?${sessionFilter}&page_size=100`);
-        } catch {
-          return { results: [] };
-        }
-      })(),
-      (async () => {
-        try {
-          return await apiFetch<{ results: any[] }>(`/nursing/orders/?${sessionFilter}&page_size=100`);
-        } catch {
-          return { results: [] };
-        }
-      })(),
-      (async () => {
-        try {
-          return await physioService.getOrders({ consultation_session: Number(sessionId), page_size: 100 });
-        } catch {
-          return { results: [] };
-        }
-      })(),
-      (async () => {
-        try {
-          return await apiFetch<{ results: any[] }>(`/vitals/?consultation_session=${sessionId}&page_size=10`);
-        } catch {
-          const visitId = session.visit || '';
-          if (visitId) {
-            try {
-              const vResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
-              if (vResult.results && session.started_at) {
-                const sStart = new Date(session.started_at);
-                const sEnd = session.ended_at ? new Date(session.ended_at) : new Date();
-                vResult.results = vResult.results.filter((v: any) => {
-                  const vitalDate = new Date(v.recorded_at || v.created_at);
-                  return vitalDate >= sStart && vitalDate <= sEnd;
-                });
-              }
-              return vResult;
-            } catch {
-              return { results: [] };
-            }
-          }
-          return { results: [] };
-        }
-      })(),
-    ]);
+    const bundle = await consultationService.getSessionWorkspaceBundle(Number(sessionId));
+    const prescriptionsResult = bundle.prescriptions;
+    const labOrdersResult = bundle.lab_orders;
+    const radiologyOrdersResult = bundle.radiology_orders;
+    const nursingOrdersResult = bundle.nursing_orders;
+    const physioResult = bundle.physio_orders;
+    let vitalsResult = bundle.vitals as { results: any[] };
+    if (!vitalsResult.results?.length && session.visit) {
+      const vital = await patientService.resolveVital({ visit: Number(session.visit) }).catch(() => null);
+      vitalsResult = { results: vital ? [vital] : [] };
+    }
 
     try {
-      const filteredPrescriptions = filterBySessionTime(prescriptionsResult.results || []);
+      const filteredPrescriptions = filterBySessionTime((prescriptionsResult.results || []) as PrescriptionData[]);
       prescriptions = filteredPrescriptions.map((p: PrescriptionData) => ({
         id: String(p.id),
         medication: p.medication_name ||
@@ -1232,7 +1139,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     }
     
     try {
-      const filteredLabOrders = filterBySessionTime(labOrdersResult.results || []);
+      const filteredLabOrders = filterBySessionTime((labOrdersResult.results || []) as LabOrderData[]);
       // Flatten lab orders - each test in an order should be a separate entry
       labOrders = filteredLabOrders.flatMap((l: LabOrderData) => {
         // If order has tests array, create an entry for each test
@@ -1266,7 +1173,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     }
     
     try {
-      const filteredRadiologyOrders = filterBySessionTime(radiologyOrdersResult.results || []);
+      const filteredRadiologyOrders = filterBySessionTime((radiologyOrdersResult.results || []) as any[]);
       // Flatten radiology orders - each study in an order should be a separate entry
       radiologyOrders = filteredRadiologyOrders.flatMap((r: any) => {
         // If order has studies array, create an entry for each study
@@ -1298,7 +1205,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     }
     
     try {
-      const filteredNursingOrders = filterBySessionTime(nursingOrdersResult.results || []);
+      const filteredNursingOrders = filterBySessionTime((nursingOrdersResult.results || []) as any[]);
       nursingOrders = filteredNursingOrders.map((n: any) => ({
         id: String(n.id),
         type: n.order_type || n.type || 'General',
@@ -1360,7 +1267,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
           comment: v.notes || v.comment || '',
           recordedBy: v.recorded_by_name || (typeof v.recorded_by === 'object' ? v.recorded_by?.full_name || v.recorded_by?.username : v.recorded_by) || 'Unknown',
           date: v.recorded_at || v.created_at || new Date().toISOString(),
-          time: v.recorded_at ? new Date(v.recorded_at).toLocaleTimeString() : '00:00:00',
+          time: formatDisplayTime(v.recorded_at) || '00:00',
         };
       });
     } catch (err) {
@@ -1465,6 +1372,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       /** For ordering labs from detail modal (same as consultation session API) */
       patientIdNumeric: session.patient,
       visitId: session.visit ?? undefined,
+      visitType,
     };
   } catch (error) {
     console.error('Error loading consultation session data:', error);
@@ -1483,6 +1391,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
   onPrint,
   isSubmitting = false,
 }: ConsultationDetailModalProps) {
+  const { currentUser } = useCurrentUser();
   const [loadedConsultation, setLoadedConsultation] = useState<ConsultationRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [showAddLabOrder, setShowAddLabOrder] = useState(false);
@@ -1664,7 +1573,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                             if (isNaN(dateTime.getTime())) {
                               return `${safeConsultation.date} • ${safeConsultation.time} • ${safeConsultation.clinic}`;
                             }
-                            return `${dateTime.toLocaleDateString()} • ${dateTime.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} • ${safeConsultation.clinic}`;
+                            return `${formatDisplayDate(dateTime)} • ${formatDisplayTime(dateTime)} • ${safeConsultation.clinic}`;
                           } catch {
                             return `${safeConsultation.date} • ${safeConsultation.time} • ${safeConsultation.clinic}`;
                           }
@@ -2140,11 +2049,21 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                           )}
                           <div className="text-xs text-gray-500 dark:text-gray-500 flex items-center justify-between">
                             <span>Ordered by: {order.orderedBy}</span>
-                            <span>{new Date(order.createdAt).toLocaleString()}</span>
+                            <span>{formatDisplayDateTime(order.createdAt)}</span>
                           </div>
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Annual employee check-up */}
+                {safeConsultation.visitType === 'annual_checkup' && safeConsultation.visitId && (
+                  <div className="border-b pb-4">
+                    <AnnualCheckupPanel
+                      visitId={safeConsultation.visitId}
+                      systemRole={currentUser?.systemRole}
+                    />
                   </div>
                 )}
 
@@ -2196,7 +2115,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                                     if (isNaN(eventDate.getTime())) {
                                       return 'Invalid Time';
                                     }
-                                    return eventDate.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'});
+                                    return formatDisplayTime(eventDate);
                                   } catch {
                                     return 'Invalid Time';
                                   }
@@ -2250,7 +2169,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
 
                 {/* Footer */}
                 <div className="mt-8 pt-4 border-t text-xs text-gray-500 dark:text-gray-600 text-center print:block">
-                  <p>Generated: {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</p>
+                  <p>Generated: {formatDisplayDateTime(new Date())}</p>
                   <p className="mt-1">Document ID: {safeConsultation.id}</p>
                   <p className="mt-1">Nigerian Ports Authority • Medical Services Department</p>
                 </div>

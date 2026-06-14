@@ -489,6 +489,8 @@ class Visit(models.Model):
         ("emergency", "Emergency"),
         ("routine", "Routine Checkup"),
         ("responsibility_form", "Responsibility Form"),
+        ("annual_checkup", "Annual Check-up"),
+        ("nursing_procedure", "Nursing Procedure"),
     ]
 
     STATUS_CHOICES = [
@@ -831,6 +833,230 @@ class MedicalHistory(models.Model):
 
     def __str__(self):
         return f"Medical History for {self.patient.get_full_name()}"
+
+
+class AnnualCheckupComponentDefinition(models.Model):
+    """Master catalog entry for annual check-up investigations / clinical steps."""
+
+    CAPTURED_VIA_CHOICES = [
+        ("vitals", "Vitals"),
+        ("laboratory", "Laboratory"),
+        ("radiology", "Radiology"),
+        ("eyecare", "Eye care"),
+        ("consultation", "Consultation"),
+        ("medical_history", "Medical history"),
+        ("patient_record", "Patient record"),
+        ("annual_checkup", "Annual check-up"),
+    ]
+    TIER_CHOICES = [
+        ("A", "Tier A"),
+        ("B", "Tier B"),
+        ("C", "Tier C"),
+    ]
+
+    code = models.CharField(max_length=50, unique=True)
+    label = models.CharField(max_length=200)
+    captured_via = models.CharField(max_length=30, choices=CAPTURED_VIA_CHOICES)
+    tier = models.CharField(max_length=1, choices=TIER_CHOICES, default="A")
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    skippable = models.BooleanField(default=True)
+    lab_template_codes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="LabTemplate.code values used for ordering and auto-completion.",
+    )
+    radiology_template_codes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="RadiologyTemplate.code values for ordering and auto-completion.",
+    )
+    name_aliases = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Lowercase aliases for matching existing orders/results.",
+    )
+
+    class Meta:
+        db_table = "annual_checkup_component_definitions"
+        ordering = ["sort_order", "label"]
+
+    def __str__(self):
+        return f"{self.label} ({self.code})"
+
+
+class AnnualCheckupProgrammeSettings(models.Model):
+    """Per-year programme defaults — which catalog items are pre-ticked for new visits."""
+
+    programme_year = models.PositiveSmallIntegerField(unique=True)
+    default_selected_codes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Component codes pre-selected when a new annual check-up visit starts.",
+    )
+    updated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="annual_checkup_programme_updates",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "annual_checkup_programme_settings"
+        ordering = ["-programme_year"]
+
+    def __str__(self):
+        return f"Annual check-up programme {self.programme_year}"
+
+
+class AnnualCheckup(models.Model):
+    """
+    Programme wrapper for employee annual check-up visits.
+
+    Clinical work happens on the linked Visit; this record tracks compliance
+    components, fitness outcome, and the signed clinical report PDF.
+    """
+
+    STATUS_CHOICES = [
+        ("in_progress", "In Progress"),
+        ("completed", "Completed"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    FITNESS_OUTCOME_CHOICES = [
+        ("fit", "Fit for duty"),
+        ("fit_with_conditions", "Fit with conditions"),
+        ("temporarily_unfit", "Temporarily unfit"),
+        ("unfit", "Unfit for duty"),
+    ]
+
+    visit = models.OneToOneField(
+        Visit,
+        on_delete=models.PROTECT,
+        related_name="annual_checkup",
+    )
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="annual_checkups",
+    )
+    programme_year = models.PositiveSmallIntegerField()
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="in_progress"
+    )
+    fitness_outcome = models.CharField(
+        max_length=30, choices=FITNESS_OUTCOME_CHOICES, blank=True
+    )
+    outcome_notes = models.TextField(
+        blank=True,
+        help_text="HR-safe fitness guidance (non-clinical wording).",
+    )
+    signed_off_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="signed_annual_checkups",
+        limit_choices_to={"system_role": "Medical Doctor"},
+    )
+    signed_off_at = models.DateTimeField(null=True, blank=True)
+    sign_off_override_reason = models.TextField(
+        blank=True,
+        help_text="Reason incomplete components were overridden at sign-off.",
+    )
+    components_required = models.JSONField(default=list, blank=True)
+    components_completed = models.JSONField(default=list, blank=True)
+    component_overrides = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Manually marked complete: {component_code: reason}.",
+    )
+    report_pdf = models.FileField(
+        upload_to="annual_checkups/reports/",
+        blank=True,
+        null=True,
+    )
+    outcome_letter_pdf = models.FileField(
+        upload_to="annual_checkups/outcome_letters/",
+        blank=True,
+        null=True,
+        help_text="HR-safe fit-for-duty letter (no clinical detail).",
+    )
+    next_due_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Suggested date for next programme-year check-up.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "annual_checkups"
+        ordering = ["-programme_year", "-created_at"]
+        indexes = [
+            models.Index(fields=["patient", "programme_year"]),
+            models.Index(fields=["status", "programme_year"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["patient", "programme_year"],
+                condition=models.Q(status__in=["in_progress", "completed"]),
+                name="uniq_active_annual_checkup_per_patient_year",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Annual check-up {self.programme_year} — "
+            f"{self.patient.get_full_name()} ({self.status})"
+        )
+
+
+class AnnualCheckupExemption(models.Model):
+    """HR-managed exemption from the annual check-up programme for a given year."""
+
+    REASON_CHOICES = [
+        ("maternity", "Maternity"),
+        ("on_leave", "On leave"),
+        ("secondment", "Secondment"),
+        ("medical", "Medical deferral"),
+        ("other", "Other"),
+    ]
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="annual_checkup_exemptions",
+    )
+    programme_year = models.PositiveSmallIntegerField()
+    reason = models.CharField(max_length=30, choices=REASON_CHOICES)
+    notes = models.TextField(blank=True)
+    granted_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="granted_annual_checkup_exemptions",
+    )
+    granted_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = "annual_checkup_exemptions"
+        ordering = ["-programme_year", "-granted_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["patient", "programme_year"],
+                name="uniq_annual_checkup_exemption_per_patient_year",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Exemption {self.programme_year} — {self.patient.get_full_name()} "
+            f"({self.get_reason_display()})"
+        )
 
 
 class MedicalCertificate(models.Model):

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { MAX_LIST_PAGE_SIZE, DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { getMediaUrl, openMediaInNewTab } from '@/lib/media-url';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import Link from 'next/link';
@@ -50,17 +52,14 @@ import {
   Send, Printer, FileSignature, Mail, History, Hash, Pencil,
 } from 'lucide-react';
 
+import { formatDisplayDate, formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
+
 const formatOrderedAtDisplay = (isoString: string | undefined): string => {
   if (!isoString) return '';
-  try {
-    const date = new Date(isoString);
-    if (Number.isNaN(date.getTime())) return '';
-    const datePart = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-    const timePart = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    return `${datePart}, ${timePart}`;
-  } catch {
-    return '';
-  }
+  const datePart = formatDisplayDateMedium(isoString);
+  const timePart = formatDisplayTime(isoString);
+  if (datePart === '—') return '';
+  return `${datePart}, ${timePart}`;
 };
 
 /** External/manual request: explicit flag, or form doctor present without an EMR ordering doctor. */
@@ -101,14 +100,8 @@ const createCustomRadiologyRow = (procedure = ''): CustomRadiologyReportRow => (
   critical: false,
 });
 
-const getRadiologyReportFileUrl = (filePath?: string | null) => {
-  if (!filePath) return '';
-  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
-  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
-  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
-  if (filePath.startsWith('/media/')) return `${mediaBase}${filePath}`;
-  return `${mediaBase}/media/${filePath.replace(/^\/+/, '')}`;
-};
+const getRadiologyReportFileUrl = (filePath?: string | null) =>
+  getMediaUrl(filePath ?? '') ?? '';
 
 const parseCustomRadiologyNames = (study: any, order?: any): string[] => {
   const existingRows = Array.isArray(study?.custom_reports) ? study.custom_reports : [];
@@ -343,7 +336,7 @@ export default function RadiologyOrdersPage() {
   const loadImagingPartners = useCallback(async () => {
     setLoadingImagingPartners(true);
     try {
-      const res = await radiologyService.getImagingPartners({ page_size: 200 });
+      const res = await radiologyService.getImagingPartners();
       setImagingPartners(res.results || []);
     } catch (e: any) {
       console.error('getImagingPartners failed', e?.status, e?.body, e);
@@ -996,7 +989,7 @@ export default function RadiologyOrdersPage() {
   const loadTemplates = useCallback(async () => {
     setLoadingTemplates(true);
     try {
-      const response = await radiologyService.getTemplates({ page_size: 200 });
+      const response = await radiologyService.getTemplates();
       setTemplates(response.results || []);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to load templates');
@@ -1017,7 +1010,7 @@ export default function RadiologyOrdersPage() {
     if (templates.length === 0) loadTemplates();
     (async () => {
       try {
-        const res = await adminService.getClinics({ is_active: true, page_size: 200 });
+        const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
         setExternalClinics(res.results || []);
       } catch (err: any) {
         toast.error(err?.message || 'Failed to load originating clinics');
@@ -1039,7 +1032,7 @@ export default function RadiologyOrdersPage() {
     const t = setTimeout(async () => {
       setSearchingExternalPatients(true);
       try {
-        const res = await patientService.getPatients({ search: q, page_size: 10 });
+        const res = await patientService.getPatients({ search: q, page_size: DEFAULT_LIST_PAGE_SIZE });
         if (!cancelled) setExternalPatientResults(res.results || []);
       } catch {
         if (!cancelled) setExternalPatientResults([]);
@@ -1158,12 +1151,7 @@ export default function RadiologyOrdersPage() {
     }
   };
 
-  const formatLmp = (value: any) => {
-    if (!value) return '';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
-  };
+  const formatLmp = (value: any) => formatDisplayDateMedium(value);
 
   const handleAddStudy = async () => {
     if (!selectedOrder) return;
@@ -2498,7 +2486,7 @@ export default function RadiologyOrdersPage() {
                       {/* Study Details & Actions */}
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-muted-foreground">
-                          {study.acquired_by_name && <span>Acquired by {study.acquired_by_name} {study.acquired_at && `at ${new Date(study.acquired_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`}</span>}
+                          {study.acquired_by_name && <span>Acquired by {study.acquired_by_name} {study.acquired_at && `at ${formatDisplayTime(study.acquired_at)}`}</span>}
                         </div>
 
                         {/* Action Buttons */}
@@ -2562,7 +2550,11 @@ export default function RadiologyOrdersPage() {
                                         variant="ghost"
                                         size="sm"
                                         className="h-6 px-2 text-xs text-blue-600"
-                                        onClick={() => window.open(fileUrl, '_blank', 'noopener,noreferrer')}
+                                        onClick={() => {
+                                          void openMediaInNewTab(attachment?.file).catch((err: any) =>
+                                            toast.error(err?.message || 'Failed to open file')
+                                          );
+                                        }}
                                       >
                                         <Eye className="h-3 w-3 mr-1" />View file
                                       </Button>
@@ -2629,7 +2621,11 @@ export default function RadiologyOrdersPage() {
                                         variant="ghost"
                                         size="sm"
                                         className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700"
-                                        onClick={() => window.open(fileUrl, '_blank', 'noopener,noreferrer')}
+                                        onClick={() => {
+                                          void openMediaInNewTab(att.file).catch((err: any) =>
+                                            toast.error(err?.message || 'Failed to open file')
+                                          );
+                                        }}
                                       >
                                         <Eye className="h-3 w-3 mr-1" />View
                                       </Button>
@@ -2661,11 +2657,8 @@ export default function RadiologyOrdersPage() {
                         const isActive = d.status === 'issued';
                         const fmtTime = (iso?: string | null) => {
                           if (!iso) return '';
-                          try {
-                            return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                          } catch {
-                            return '';
-                          }
+                          const formatted = formatDisplayTime(iso);
+                          return formatted === '—' ? '' : formatted;
                         };
                         return (
                           <div
@@ -2700,7 +2693,7 @@ export default function RadiologyOrdersPage() {
                                 </span>
                                 {issuedDate && (
                                   <span className="text-muted-foreground">
-                                    • {issuedDate.toLocaleDateString()} {fmtTime(d.issued_at)}
+                                    • {formatDisplayDate(d.issued_at)} {fmtTime(d.issued_at)}
                                     {d.issued_by_name ? ` by ${d.issued_by_name}` : ''}
                                   </span>
                                 )}

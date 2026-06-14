@@ -14,12 +14,12 @@ from pharmacy.models import Prescription
 from radiology.models import RadiologyOrder, RadiologyStudy
 from consultation.models import ConsultationSession
 from nursing.models import NursingOrder
+from common.openapi import document_api_view
 
 
+@document_api_view(tag="Dashboard", summary="Module dashboard statistics")
 class DashboardStatsView(views.APIView):
     """Get dashboard statistics."""
-    
-    permission_classes = [IsAuthenticated]
     
     def get(self, request):
         today = timezone.now().date()

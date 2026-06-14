@@ -1,99 +1,53 @@
-# NPA ECM Frontend
+# NPA EMR Frontend
 
-A modern React-based frontend application for the NPA Electronic Content Management (ECM) system, part of the NPA EMR suite.
+Next.js 16 (App Router) + React 18 + TypeScript + Tailwind + shadcn/ui.
 
-## 🚀 Quick Start
+## Quick start
 
-### Prerequisites
-- Node.js 18+
-- npm or yarn
-
-### Installation
 ```bash
 npm install
-```
-
-### Development
-```bash
 npm run dev
 ```
-Runs the development server on http://localhost:3001
 
-### Building
-```bash
-npm run build
-```
+→ http://localhost:3001
 
-### Testing
-```bash
-npm run test
-```
+## Scripts
 
-### Linting
-```bash
-npm run lint
-```
+| Command | Purpose |
+|---------|---------|
+| `npm run dev` | Development server (port 3001) |
+| `npm run build` | Production build |
+| `npm run lint` | ESLint |
+| `npm run type-check` | TypeScript |
+| `npm run test` | Vitest unit tests |
 
-### Type Checking
-```bash
-npm run type-check
-```
-
-## 📁 Project Structure
+## Structure
 
 ```
 frontend/
-├── app/                    # Next.js app router pages
-│   ├── (auth)/            # Authentication pages
-│   ├── admin/             # Admin modules
-│   ├── consultation/      # Consultation module
-│   ├── dashboard/         # Dashboard
-│   ├── laboratory/        # Laboratory module
-│   ├── medical-records/   # Medical records
-│   ├── nursing/           # Nursing module
-│   ├── pharmacy/          # Pharmacy module
-│   ├── radiology/         # Radiology module
-│   └── ...
-├── components/            # Reusable UI components
-│   ├── ui/               # shadcn/ui components
-│   └── ...
-├── contexts/             # React contexts
-├── hooks/                # Custom hooks
-├── lib/                  # Utilities and services
-│   ├── services/         # API services
-│   └── ...
-├── types/                # TypeScript type definitions
-└── ...
+├── app/              # Routes (admin, consultation, nursing, …)
+├── components/       # UI (shadcn/ui) and shared layouts
+├── lib/
+│   ├── api-client.ts      # HTTP + auth cookies
+│   ├── page-permissions.ts # RBAC page catalog (sync with backend)
+│   └── services/          # API service modules
+├── hooks/
+├── middleware.ts     # Auth + page permission guard
+└── contexts/
 ```
 
-## 🛠️ Technologies
+## Configuration
 
-- **Framework**: Next.js 16 with App Router
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS + shadcn/ui
-- **State Management**: React Query + Context API
-- **Forms**: React Hook Form + Zod
-- **Testing**: Vitest
-- **Linting**: ESLint
-- **Build Tool**: Vite
+- API URL: `NEXT_PUBLIC_API_URL` (use `/api` in local dev for Next proxy)
+- Env files: `.env.local`, `.env.stag`, `.env.prod`
 
-## 🔧 Configuration
+## RBAC
 
-- **Port**: 3001 (development)
-- **API Base URL**: Configured via environment variables
-- **Theme**: Supports light/dark mode
+Route access is enforced in `middleware.ts` using cookies from `/auth/me` permissions. Page IDs must match `lib/page-permissions.ts` and backend `permissions/page_catalog.py`.
 
-## 📚 Documentation
+See [../docs/architecture/AUTH_AND_RBAC.md](../docs/architecture/AUTH_AND_RBAC.md).
 
-See the main project README at `../README.md` for full system overview and `../docs/IMPLEMENTATION_STATUS.md` for backend implementation details.
+## Documentation
 
-## 🤝 Contributing
-
-1. Follow the existing code style
-2. Run tests before committing
-3. Ensure TypeScript types are correct
-4. Update documentation as needed
-
-## 📄 License
-
-This project is part of the NPA EMR system.
+- [../docs/README.md](../docs/README.md)
+- [../README.md](../README.md)

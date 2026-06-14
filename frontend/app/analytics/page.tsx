@@ -4,15 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import {
   AnalyticsReportLayout,
-  analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
+import { useReportDateRange } from "@/hooks/use-report-date-range";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { apiFetch, getReadableApiError } from '@/lib/api-client';
+import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
 import { analyticsService, type ClinicalDashboardData } from '@/lib/services';
 import { toast } from 'sonner';
-import { endOfMonth, format, startOfMonth } from 'date-fns';
+import { endOfMonth, startOfMonth } from 'date-fns';
+import { toApiDateString, peekServerTodayMonthPrefix, peekServerTodayYear } from '@/lib/dates';
+import { buildReportPeriodQuery, canFetchReportPeriod } from '@/lib/report-period-query';
 import {
   Bar,
   BarChart,
@@ -42,72 +45,47 @@ const CHART_COLORS = {
   muted: "#64748b",
 };
 
-function toYmd(d: Date) {
-  return format(d, 'yyyy-MM-dd');
-}
-
-function clinicalDashboardToCsv(
-  d: ClinicalDashboardData,
-  viewMode: AnalyticsViewMode,
-  year: string,
-  start: string,
-  end: string
-) {
-  const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
-  const lines: string[] = [];
-  const periodLabel = viewMode === 'year' ? year : `${start}_to_${end}`;
-  lines.push(['Clinical Analytics Dashboard', periodLabel].map(esc).join(','));
-  lines.push(['Period start', d.period.start_date].map(esc).join(','));
-  lines.push(['Period end', d.period.end_date].map(esc).join(','));
-  lines.push('');
-  lines.push(['Metric', 'Value'].map(esc).join(','));
-  lines.push(['Total Patients', String(d.metrics.total_patients)].map(esc).join(','));
-  lines.push(['Total Visits', String(d.metrics.total_visits)].map(esc).join(','));
-  lines.push(['Avg Wait Time (minutes)', String(d.metrics.avg_wait_time_minutes)].map(esc).join(','));
-  lines.push(['Completion Rate (%)', String(d.metrics.completion_rate_percentage)].map(esc).join(','));
-  lines.push('');
-  lines.push(['Category', 'Male', 'Female', 'Total', 'Percentage'].map(esc).join(','));
-  d.patient_demographics.attendance_by_category.forEach((row) =>
-    lines.push(
-      [row.label, String(row.male), String(row.female), String(row.total), String(row.percentage)].map(esc).join(',')
-    )
-  );
-  lines.push('');
-  lines.push(['Month', 'Visits'].map(esc).join(','));
-  d.visits_trend.forEach((row) =>
-    lines.push([row.month, String(row.visits)].map(esc).join(','))
-  );
-  return lines.join('\n');
-}
-
 export default function ClinicalAnalyticsPage() {
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>('year');
   const [year, setYear] = useState(() => new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
+
+  const { handleExportCsv, handleDownloadPdf } = useAnalyticsExportHandlers({
+    apiPath: "/analytics/dashboard/",
+    filenameBase: "clinical_analytics",
+    viewMode,
+    year,
+    startDate,
+    endDate,
+    queryStyle: "start_date",
+  });
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ClinicalDashboardData | null>(null);
 
   const range = useMemo(
-    () => analyticsRangeFromFilters(viewMode, year, startDate, endDate),
-    [viewMode, year, startDate, endDate]
+    () => reportRange,
+    [reportRange]
   );
 
   const highlightThisMonth =
     viewMode === 'range' &&
     Boolean(startDate) &&
-    startDate.includes(new Date().toISOString().slice(0, 7));
-  const highlightThisYear = viewMode === 'year' && year === new Date().getFullYear().toString();
+    startDate.includes(peekServerTodayMonthPrefix());
+  const highlightThisYear = viewMode === 'year' && year === peekServerTodayYear();
 
   const fetchReport = useCallback(async () => {
-    const r = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    if (!r) {
+    const params = buildReportPeriodQuery(viewMode, reportRange, 'start_date');
+    if (!params) {
       if (viewMode === 'range') toast.error('Please select start and end dates');
       return;
     }
     setLoading(true);
     try {
-      const res = await analyticsService.getClinicalDashboard(r.start, r.end);
+      const res = await apiFetch<ClinicalDashboardData>(`/analytics/dashboard/?${params.toString()}`);
       setData(res);
     } catch (e: unknown) {
       console.error(e);
@@ -116,20 +94,18 @@ export default function ClinicalAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewMode, year, startDate, endDate]);
+  }, [reportRange]);
 
   useEffect(() => {
-    if (viewMode === 'year' && year) {
-      void fetchReport();
-    } else if (viewMode === 'range' && startDate && endDate) {
+    if (canFetchReportPeriod(viewMode, reportRange)) {
       void fetchReport();
     }
-  }, [viewMode, year, startDate, endDate, fetchReport]);
+  }, [reportRange, fetchReport, viewMode]);
 
   const setThisMonth = () => {
     const n = new Date();
-    setStartDate(toYmd(startOfMonth(n)));
-    setEndDate(toYmd(endOfMonth(n)));
+    setStartDate(toApiDateString(startOfMonth(n)));
+    setEndDate(toApiDateString(endOfMonth(n)));
     setViewMode('range');
   };
 
@@ -138,16 +114,6 @@ export default function ClinicalAnalyticsPage() {
     setViewMode('year');
   };
 
-  const exportCsv = () => {
-    if (!data || !range) {
-      toast.error('No data to export');
-      return;
-    }
-    const csv = clinicalDashboardToCsv(data, viewMode, year, startDate, endDate);
-    const period = viewMode === 'year' ? year : `${startDate}_to_${endDate}`;
-    triggerCsvDownload(`clinical_analytics_${period}.csv`, csv);
-    toast.success('Exported CSV');
-  };
 
   // Prepare chart data
   const visitsTrendData = useMemo(() => {
@@ -155,7 +121,7 @@ export default function ClinicalAnalyticsPage() {
     return data.visits_trend.map(item => ({
       month: item.month,
       totalVisits: item.visits,
-      newPatients: Math.floor(item.visits * 0.7) // Estimate
+      newPatients: item.newPatients ?? 0,
     }));
   }, [data]);
 
@@ -187,10 +153,10 @@ export default function ClinicalAnalyticsPage() {
         ReportIcon={Activity}
         reportIconClassName="text-blue-600 dark:text-blue-400"
         loading={loading}
-        onRefresh={fetchReport}
         onGenerate={fetchReport}
         exportCsvDisabled={!data}
-        onExportCsv={exportCsv}
+        onExportCsv={handleExportCsv}
+        onPrint={handleDownloadPdf}
         printDisabled={!data}
         viewMode={viewMode}
         onViewModeChange={setViewMode}

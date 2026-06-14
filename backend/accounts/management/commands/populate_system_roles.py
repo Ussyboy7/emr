@@ -49,7 +49,11 @@ class Command(BaseCommand):
             {
                 'name': 'Physiotherapist',
                 'description': 'Physical therapy and rehabilitation services'
-            }
+            },
+            {
+                'name': 'Human Resources Officer',
+                'description': 'Employee annual check-up compliance and HR-safe outcomes'
+            },
         ]
 
         created_count = 0

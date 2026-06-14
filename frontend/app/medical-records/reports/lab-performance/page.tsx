@@ -1,15 +1,13 @@
 "use client";
+import { formatDisplayMonthYear, todayApiDateString } from '@/lib/dates';
 
 import React, { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  Download,
-  FileSpreadsheet,
   RefreshCw,
   ArrowLeft,
-  Printer,
   FlaskConical,
   Activity,
   Timer,
@@ -18,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 
 interface LabPerformance {
@@ -50,30 +49,8 @@ export default function LabPerformanceReport() {
     fetchReport();
   }, []);
 
-  const exportToCSV = () => {
-    if (!data) {
-      toast.error("No data to export");
-      return;
-    }
-    const lines: string[] = [
-      "Metric,Value",
-      `Tests this month,${data.tests_this_month}`,
-      `Completed tests,${data.completed_tests}`,
-      `Completion rate (%),${data.completion_rate}`,
-      `Avg turnaround (hours),${data.avg_turnaround_hours}`,
-      `Critical values,${data.critical_values}`,
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `lab_performance_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
-  };
 
-  const monthName = new Date().toLocaleString("default", { month: "long", year: "numeric" });
+  const monthName = formatDisplayMonthYear();
 
   return (
     <DashboardLayout>
@@ -98,18 +75,11 @@ export default function LabPerformanceReport() {
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={!data}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={!data}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/lab-performance/"
+              filenameBase={`lab_performance_${todayApiDateString()}`}
+              disabled={!data}
+            />
           </div>
         </div>
 

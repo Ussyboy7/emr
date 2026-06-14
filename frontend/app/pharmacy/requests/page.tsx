@@ -14,7 +14,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type Medication } from "@/lib/services";
+import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
+import { formatDisplayDate, localMonthBounds, localWeekToTodayBounds, todayApiDateString, formatDisplayDateTime } from "@/lib/dates";
 import { useClinic } from "@/hooks/use-clinic";
 import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye, HelpCircle, Building2 } from "lucide-react";
 
@@ -64,20 +66,17 @@ export default function DispensaryRequestsPage() {
   const buildDateParams = useCallback(() => {
     const p: Record<string, string> = {};
     if (dateFilter === "today") {
-      const today = new Date().toISOString().split("T")[0];
+      const today = todayApiDateString();
       p.date_after = today;
       p.date_before = today;
     } else if (dateFilter === "week") {
-      const today = new Date();
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay());
-      p.date_after = weekStart.toISOString().split("T")[0];
-      p.date_before = today.toISOString().split("T")[0];
+      const week = localWeekToTodayBounds();
+      p.date_after = week.start;
+      p.date_before = week.end;
     } else if (dateFilter === "month") {
-      const today = new Date();
-      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      p.date_after = monthStart.toISOString().split("T")[0];
-      p.date_before = today.toISOString().split("T")[0];
+      const month = localMonthBounds();
+      p.date_after = month.start;
+      p.date_before = todayApiDateString();
     }
     return p;
   }, [dateFilter]);
@@ -119,24 +118,17 @@ export default function DispensaryRequestsPage() {
 
   const loadStats = async () => {
     try {
-      const baseParams: Record<string, string | number> = { page: 1, page_size: 1 };
+      const baseParams: Record<string, string> = {};
       if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
       Object.assign(baseParams, buildDateParams());
       baseParams.to_location = requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE;
-      const [all, pending, approved, received, fulfilled] = await Promise.all([
-        pharmacyService.getStockRequests(baseParams),
-        pharmacyService.getStockRequests({ ...baseParams, status: "pending" }),
-        pharmacyService.getStockRequests({ ...baseParams, status: "approved" }),
-        pharmacyService.getStockRequests({ ...baseParams, status: "received" }),
-        pharmacyService.getStockRequests({ ...baseParams, status: "fulfilled" }),
-      ]);
-      const partResp = await pharmacyService.getStockRequests({ ...baseParams, status: "partially_fulfilled" });
+      const stats = await pharmacyService.getStockRequestListStats(baseParams);
       setStats({
-        total: all.count ?? 0,
-        pending: pending.count ?? 0,
-        approved: approved.count ?? 0,
-        confirmed: received.count ?? 0,
-        awaitingConfirmation: (fulfilled.count ?? 0) + (partResp.count ?? 0),
+        total: stats.total,
+        pending: stats.pending,
+        approved: stats.approved,
+        confirmed: stats.confirmed,
+        awaitingConfirmation: stats.awaitingConfirmation,
       });
     } catch {
       // ignore
@@ -145,7 +137,7 @@ export default function DispensaryRequestsPage() {
 
   const loadMedications = async () => {
     try {
-      const response = await pharmacyService.getMedications({ page: 1, page_size: 500 });
+      const response = await pharmacyService.getMedications({ page: 1, page_size: MAX_LIST_PAGE_SIZE });
       setMedications(response.results || []);
     } catch (err) {
       console.error("Error loading medications:", err);
@@ -416,7 +408,7 @@ export default function DispensaryRequestsPage() {
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                             <span>{req.items?.length || 0} item(s)</span>
                             <span>•</span>
-                            <span>{new Date(req.created_at).toLocaleDateString()}</span>
+                            <span>{formatDisplayDate(req.created_at)}</span>
                             <span>•</span>
                             <span>From: {req.from_location || 'Store'}</span>
                             {req.requested_by_name && (
@@ -444,7 +436,7 @@ export default function DispensaryRequestsPage() {
                   onPageChange={setCurrentPage}
                   onItemsPerPageChange={(s) => { setItemsPerPage(s); setCurrentPage(1); }}
                   itemName="requests"
-                  pageSizeOptions={[25, 50, 75, 100]}
+                  pageSizeOptions={[25, 50, 100]}
                 />
               </Card>
             )}
@@ -584,14 +576,14 @@ export default function DispensaryRequestsPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Created</p>
-                    <p className="font-medium">{new Date(selectedRequest.created_at).toLocaleDateString()}</p>
+                    <p className="font-medium">{formatDisplayDate(selectedRequest.created_at)}</p>
                   </div>
                 </div>
                 {selectedRequest.confirmed_at && (
                   <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg p-3">
                     <p className="text-sm font-medium mb-1 text-green-800 dark:text-green-200">✓ Receipt Confirmed</p>
                     <p className="text-xs text-green-700 dark:text-green-300">Confirmed by: {selectedRequest.confirmed_by_name}</p>
-                    <p className="text-xs text-green-700 dark:text-green-300">On: {new Date(selectedRequest.confirmed_at).toLocaleString()}</p>
+                    <p className="text-xs text-green-700 dark:text-green-300">On: {formatDisplayDateTime(selectedRequest.confirmed_at)}</p>
                   </div>
                 )}
                 <div>

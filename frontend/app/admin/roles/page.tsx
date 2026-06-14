@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { toApiDateFromInstant } from "@/lib/dates";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type Role as ApiRole } from "@/lib/services";
 import {
@@ -158,20 +159,12 @@ export default function RolesPermissionsPage() {
 
   const loadRoleStats = useCallback(async () => {
     try {
-      const base = { page: 1, page_size: 1 } as const;
-      const [t, a, c, ur] = await Promise.all([
-        adminService.getRoles({ ...base }),
-        adminService.getRoles({ ...base, is_active: true }),
-        adminService.getRoles({ ...base, type_group: 'clinical' }),
-        apiFetch<{ unique_users?: number; assignments?: number }>(
-          '/permissions/user-roles/summary/'
-        ),
-      ]);
+      const stats = await adminService.getRoleListStats();
       setRoleStats({
-        total: t.count ?? 0,
-        active: a.count ?? 0,
-        clinical: c.count ?? 0,
-        totalUsers: ur.unique_users ?? 0,
+        total: stats.total ?? 0,
+        active: stats.active ?? 0,
+        clinical: stats.clinical ?? 0,
+        totalUsers: stats.totalUsers ?? 0,
       });
     } catch (e) {
       console.error('Error loading role stats:', e);
@@ -200,8 +193,8 @@ export default function RolesPermissionsPage() {
         permissions: normalizeRolePagePaths(convertPermissionsFromBackend(role.permissions)),
         userCount: role.user_count || 0,
         isActive: role.is_active,
-        createdAt: role.created_at?.split('T')[0] || '',
-        updatedAt: role.updated_at?.split('T')[0] || '',
+        createdAt: toApiDateFromInstant(role.created_at),
+        updatedAt: toApiDateFromInstant(role.updated_at),
       }));
 
       setRoles(transformedRoles);

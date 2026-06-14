@@ -15,11 +15,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, formatDisplayTime, toApiDateFromInstant } from '@/lib/dates';
 import { pharmacyService, type Prescription as ApiPrescription, type PrescriptionItem } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { 
   ClipboardList, Search, Eye, Clock, CheckCircle2, CheckCircle, Pill, Calendar,
   AlertTriangle, Package, User, Activity, Stethoscope,
@@ -154,7 +156,7 @@ const resolveGenericIdForBrandSelect = (med: any): number | null => {
 /** Batch is expired only if calendar expiry is strictly before today (local). */
 const isBatchExpired = (exp: string | undefined): boolean => {
   if (!exp) return false;
-  const day = String(exp).split('T')[0];
+  const day = toApiDateFromInstant(exp) || String(exp).slice(0, 10);
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (!m) return new Date(exp) < new Date(new Date().setHours(0, 0, 0, 0));
   const expUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
@@ -181,9 +183,9 @@ const checkInteractions = async (medications: string[]): Promise<DrugInteraction
     for (const medName of medications) {
       try {
         // Search for medication by name to get ID
-        const searchResults = await pharmacyService.getMedications({ search: medName, page_size: 1 });
-        if (searchResults.results.length > 0) {
-          medicationIds.push(searchResults.results[0].id);
+        const searchResults = await pharmacyService.resolveMedication(medName);
+        if (searchResults) {
+          medicationIds.push(searchResults.id);
         }
       } catch (err) {
         console.warn(`Could not find medication ID for ${medName}:`, err);
@@ -208,13 +210,13 @@ const checkInteractions = async (medications: string[]): Promise<DrugInteraction
 const getSubstitutesForMedication = async (medicationName: string): Promise<SubstituteOption[]> => {
   try {
     // First find the medication ID by name
-    const searchResults = await pharmacyService.getMedications({ search: medicationName, page_size: 1 });
-    if (searchResults.results.length === 0) {
+    const match = await pharmacyService.resolveMedication(medicationName);
+    if (!match) {
       console.warn(`No medication found for name: ${medicationName}`);
       return [];
     }
 
-    const medicationId = searchResults.results[0].id;
+    const medicationId = match.id;
 
     // Get substitutes using the pharmacy service API
     const substitutes = await pharmacyService.getSubstitutes(medicationId);
@@ -226,7 +228,7 @@ const getSubstitutesForMedication = async (medicationName: string): Promise<Subs
           const batches = await pharmacyService.getMedicationBatches(Number(substitute.id));
           const stock = batches.reduce((total, b) => total + Number(b.quantity || 0), 0);
           const firstExpiry = batches.find((b) => Boolean(b.expiryDate))?.expiryDate || '';
-          const expiryDate = firstExpiry ? new Date(firstExpiry).toLocaleDateString() : '';
+          const expiryDate = firstExpiry ? formatDisplayDate(firstExpiry) : '';
           const daysToExpiry = firstExpiry
             ? Math.ceil((new Date(firstExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
             : 0;
@@ -604,8 +606,8 @@ export default function PrescriptionsPage() {
           clinic,
           location,
           location_clinic_name: locationClinicName,
-          date: rx.prescribed_at.split('T')[0],
-          time: new Date(rx.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          date: toApiDateFromInstant(rx.prescribed_at),
+          time: formatDisplayTime(rx.prescribed_at),
           status:
             rx.status === 'pending'
               ? 'Pending'
@@ -768,7 +770,7 @@ export default function PrescriptionsPage() {
               byMed.set(medId, {
                 med: medObj,
                 stock: qty,
-                expiryDate: exp ? new Date(exp).toLocaleDateString() : '',
+                expiryDate: exp ? formatDisplayDate(exp) : '',
                 isNearExpiry: daysToExpiry <= 90,
               });
             } else {
@@ -777,7 +779,7 @@ export default function PrescriptionsPage() {
                 const existingExp = existing.expiryDate ? new Date(existing.expiryDate) : null;
                 const newExp = new Date(exp);
                 if (!existingExp || newExp.getTime() < existingExp.getTime()) {
-                  existing.expiryDate = newExp.toLocaleDateString();
+                  existing.expiryDate = formatDisplayDate(exp);
                   const daysToExpiry = Math.ceil((newExp.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
                   existing.isNearExpiry = daysToExpiry <= 90;
                 }
@@ -804,7 +806,7 @@ export default function PrescriptionsPage() {
           location: PHARMACY_LOCATIONS.DISPENSARY,
           medication__generic: genericId,
           page: 1,
-          page_size: 250,
+          page_size: MAX_LIST_PAGE_SIZE,
         } as const;
 
         let res = await pharmacyService.getInventory({ ...baseParams, search });
@@ -1659,7 +1661,7 @@ export default function PrescriptionsPage() {
           <div class="footer">
             <div>Priority: ${prescription.priority}</div>
             <div>Status: ${prescription.status}</div>
-            <div>Printed: ${new Date().toLocaleString()}</div>
+            <div>Printed: ${formatDisplayDateTime(new Date())}</div>
             ${isLabel ? '<div>⚠️ Keep out of reach of children</div>' : ''}
           </div>
         </body>
@@ -2014,7 +2016,7 @@ export default function PrescriptionsPage() {
                       <span className="text-muted-foreground">Date:</span>{' '}
                       <span className="font-medium">
                         {selectedPrescription.prescribed_at
-                          ? `${new Date(selectedPrescription.prescribed_at).toLocaleDateString()} ${new Date(selectedPrescription.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+                          ? formatDisplayDateTime(selectedPrescription.prescribed_at)
                           : `${selectedPrescription.date || ''} ${selectedPrescription.time || ''}`.trim()}
                       </span>
                     </div>
@@ -2230,7 +2232,7 @@ export default function PrescriptionsPage() {
                       <span className="text-muted-foreground">Date:</span>{' '}
                       <span className="font-medium">
                         {selectedPrescription.prescribed_at
-                          ? new Date(selectedPrescription.prescribed_at).toLocaleDateString()
+                          ? formatDisplayDate(selectedPrescription.prescribed_at)
                           : selectedPrescription.date}
                       </span>
                     </div>
@@ -3120,7 +3122,7 @@ export default function PrescriptionsPage() {
                             const genericId = Number(selectedSub.id);
                             const refreshedBrands = await pharmacyService.getMedications({
                               generic: genericId,
-                              page_size: 100,
+                              page_size: MAX_LIST_PAGE_SIZE,
                             });
                             const mapped = (refreshedBrands.results || []).map((b: any) => ({
                               id: String(b.id),

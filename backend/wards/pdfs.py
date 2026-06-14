@@ -35,6 +35,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from common.date_display import format_display_date, format_display_datetime
 from common.pdf import (
     COLOR_ABNORMAL,
     COLOR_ACCENT,
@@ -73,7 +74,7 @@ def _fmt_dt(dt) -> str:
     if not dt:
         return "—"
     try:
-        return timezone.localtime(dt).strftime("%d %b %Y, %H:%M")
+        return format_display_datetime(dt)
     except Exception:
         return str(dt)
 
@@ -82,7 +83,8 @@ def _fmt_date(dt) -> str:
     if not dt:
         return "—"
     try:
-        return timezone.localtime(dt).strftime("%d %b %Y")
+        formatted = format_display_date(dt)
+        return formatted or "—"
     except Exception:
         return str(dt)
 

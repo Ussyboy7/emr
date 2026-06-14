@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type StockRequestItem } from "@/lib/services";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
+import { formatDisplayDate, localMonthBounds, localWeekToTodayBounds, todayApiDateString } from "@/lib/dates";
 import { Send, CheckCircle2, Clock, Loader2, Eye, Zap, Search, Plus, Minus, HelpCircle, Building2 } from "lucide-react";
 
 function useDebouncedValue<T>(value: T, delay: number): T {
@@ -48,43 +49,33 @@ export default function StoreRequestsPage() {
   const buildDateParams = () => {
     const p: Record<string, string> = {};
     if (dateFilter === "today") {
-      const today = new Date().toISOString().split("T")[0];
+      const today = todayApiDateString();
       p.date_after = today;
       p.date_before = today;
     } else if (dateFilter === "week") {
-      const today = new Date();
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay());
-      p.date_after = weekStart.toISOString().split("T")[0];
-      p.date_before = today.toISOString().split("T")[0];
+      const week = localWeekToTodayBounds();
+      p.date_after = week.start;
+      p.date_before = week.end;
     } else if (dateFilter === "month") {
-      const today = new Date();
-      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      p.date_after = monthStart.toISOString().split("T")[0];
-      p.date_before = today.toISOString().split("T")[0];
+      const month = localMonthBounds();
+      p.date_after = month.start;
+      p.date_before = todayApiDateString();
     }
     return p;
   };
 
   const loadStats = async () => {
     try {
-      const baseParams: Record<string, string | number> = { page: 1, page_size: 1 };
+      const baseParams: Record<string, string> = { show_all: 'true' };
       if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
       Object.assign(baseParams, buildDateParams());
       baseParams.to_location = requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE;
-      baseParams.show_all = 'true';
-      const [all, pending, approved, fulfilled, partResp] = await Promise.all([
-        pharmacyService.getStockRequests(baseParams),
-        pharmacyService.getStockRequests({ ...baseParams, status: "pending" }),
-        pharmacyService.getStockRequests({ ...baseParams, status: "approved" }),
-        pharmacyService.getStockRequests({ ...baseParams, status: "fulfilled" }),
-        pharmacyService.getStockRequests({ ...baseParams, status: "partially_fulfilled" }),
-      ]);
+      const stats = await pharmacyService.getStockRequestListStats(baseParams);
       setStatsData({
-        total: all.count ?? 0,
-        pending: pending.count ?? 0,
-        approved: approved.count ?? 0,
-        awaiting: (fulfilled.count ?? 0) + (partResp.count ?? 0),
+        total: stats.total,
+        pending: stats.pending,
+        approved: stats.approved,
+        awaiting: stats.awaitingConfirmation,
       });
     } catch {
       // ignore
@@ -423,7 +414,7 @@ export default function StoreRequestsPage() {
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                             <span>{req.items?.length || 0} item(s)</span>
                             <span>•</span>
-                            <span>{new Date(req.created_at).toLocaleDateString()}</span>
+                            <span>{formatDisplayDate(req.created_at)}</span>
                             <span>•</span>
                             <span>Store → {req.to_location || 'Dispensary'}</span>
                             {req.requested_by_name && (
@@ -451,7 +442,7 @@ export default function StoreRequestsPage() {
                   onPageChange={setCurrentPage}
                   onItemsPerPageChange={(s) => { setItemsPerPage(s); setCurrentPage(1); }}
                   itemName="requests"
-                  pageSizeOptions={[25, 50, 75, 100]}
+                  pageSizeOptions={[25, 50, 100]}
                 />
               </Card>
             )}
@@ -471,7 +462,7 @@ export default function StoreRequestsPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Created</p>
-                    <p className="font-medium">{new Date(selectedRequest.created_at).toLocaleDateString()}</p>
+                    <p className="font-medium">{formatDisplayDate(selectedRequest.created_at)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Requesting Clinic</p>

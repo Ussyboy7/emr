@@ -2,6 +2,7 @@
  * Radiology API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { DEFAULT_CATALOG_PAGE_SIZE } from '../pagination-constants';
 
 export interface RadiologyOrder {
   id: number;
@@ -461,6 +462,27 @@ class RadiologyService {
     return apiFetch<{ results: RadiologyTemplate[]; count: number }>(`/radiology/templates/${query}`);
   }
 
+  async getTemplateListStats(): Promise<{
+    total: number;
+    active: number;
+    xray: number;
+    ultrasound: number;
+    mri: number;
+    ct: number;
+  }> {
+    return apiFetch('/radiology/templates/list-stats/');
+  }
+
+  /** Exact template lookup by code (e.g. OTHER). */
+  async resolveTemplateByCode(code: string): Promise<RadiologyTemplate | null> {
+    try {
+      const query = buildQueryString({ code });
+      return await apiFetch<RadiologyTemplate>(`/radiology/templates/resolve/${query}`);
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Get a single radiology template
    */
@@ -515,32 +537,12 @@ class RadiologyService {
     awaitingReport: number;
     criticalFindings: number;
   }> {
-    // Get all orders - use a larger page size to get more data for stats
-    const ordersResponse = await this.getOrders({ page: 1, page_size: 100 });
-    const allOrders = ordersResponse.results;
-
-    // Calculate stats based on studies within orders
-    const pendingOrders = allOrders.filter(order =>
-      order.studies && order.studies.some(s => s.status === 'pending')
-    ).length;
-
-    const inProgress = allOrders.filter(order =>
-      order.studies && order.studies.some(s => s.status === 'processing')
-    ).length;
-
-    const awaitingReport = allOrders.filter(order =>
-      order.studies && order.studies.some(s => s.status === 'reported')
-    ).length;
-
-    const criticalFindings = allOrders.filter(order =>
-      order.studies && order.studies.some(s => (s as any).critical === true)
-    ).length;
-
+    const stats = await this.getOrderStats();
     return {
-      pendingOrders,
-      inProgress,
-      awaitingReport,
-      criticalFindings,
+      pendingOrders: stats.pending,
+      inProgress: stats.processing,
+      awaitingReport: stats.results_ready,
+      criticalFindings: stats.stat,
     };
   }
 
@@ -674,8 +676,11 @@ class RadiologyService {
     });
   }
 
-  async getAnalyticsSummary(start: string, end: string): Promise<RadiologyAnalyticsSummary> {
-    const query = buildQueryString({ start, end });
+  async getAnalyticsSummary(period: URLSearchParams | { start: string; end: string }): Promise<RadiologyAnalyticsSummary> {
+    const query =
+      period instanceof URLSearchParams
+        ? `?${period.toString()}`
+        : buildQueryString({ start: period.start, end: period.end });
     return apiFetch<RadiologyAnalyticsSummary>(`/radiology/analytics/summary/${query}`);
   }
 
@@ -690,7 +695,7 @@ class RadiologyService {
   }): Promise<{ results: ImagingPartner[]; count: number }> {
     const query = buildQueryString({
       is_active: true,
-      page_size: 200,
+      page_size: DEFAULT_CATALOG_PAGE_SIZE,
       ...params,
     });
     const path = `/radiology/imaging-partners/${query}`;

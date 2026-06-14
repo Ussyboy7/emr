@@ -1,4 +1,6 @@
+import { todayApiDateString, toApiDateFromInstant } from "@/lib/dates";
 import { apiFetch, buildQueryString } from '../api-client';
+import { MAX_LIST_PAGE_SIZE } from '../pagination-constants';
 import { visitService, type VisitFilters } from './visit-service';
 import type { Visit, VitalReading } from './patient-service';
 import { getVisitServiceClinicsDisplay } from '../utils/clinic-utils';
@@ -78,14 +80,6 @@ function poolMetricsParams(serverToday: string): Omit<VisitFilters, 'page' | 'pa
   };
 }
 
-function ymdFromIso(iso?: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 function formatRelativeTime(iso?: string | null): string {
   if (!iso) return 'Recently';
   try {
@@ -118,10 +112,7 @@ function visitToTask(visit: Visit, segment: NursingPendingTask['segment']): Nurs
     patientId,
     segment,
     subtitle: clinic ? `${subtitles[segment]} · ${clinic}` : subtitles[segment],
-    href:
-      segment === 'ready'
-        ? '/nursing/pool-queue'
-        : '/nursing/patient-vitals',
+    href: '/nursing/pool-queue',
   };
 }
 
@@ -145,10 +136,10 @@ class NursingService {
   async getRoomQueueCount(serverToday: string): Promise<number> {
     try {
       const res = await apiFetch<{ results: Array<{ queued_at?: string }>; count?: number }>(
-        '/consultation/queue/?is_active=true&page_size=500',
+        `/consultation/queue/?is_active=true&page_size=${MAX_LIST_PAGE_SIZE}`,
       );
       const rows = res.results ?? [];
-      const todayRows = rows.filter((row) => ymdFromIso(row.queued_at) === serverToday);
+      const todayRows = rows.filter((row) => toApiDateFromInstant(row.queued_at) === serverToday);
       return todayRows.length;
     } catch (error) {
       logError('Error getting room queue count:', error);
@@ -209,11 +200,9 @@ class NursingService {
   async getRecentActivities(serverToday: string, limit = 6): Promise<NursingActivity[]> {
     try {
       const vitalsRes = await apiFetch<{ results: VitalReading[] }>(
-        '/vitals/?ordering=-recorded_at&page_size=30',
+        `/vitals/?recorded_at_after=${encodeURIComponent(serverToday)}&ordering=-recorded_at&page_size=${limit}`,
       );
-      const todayVitals = (vitalsRes.results ?? []).filter(
-        (v) => ymdFromIso(v.recorded_at) === serverToday,
-      );
+      const todayVitals = vitalsRes.results ?? [];
 
       const activities: NursingActivity[] = todayVitals.slice(0, limit).map((vital) => ({
         id: `vital-${vital.id}`,
@@ -222,7 +211,7 @@ class NursingService {
         action: 'Vitals recorded',
         time: formatRelativeTime(vital.recorded_at),
         status: 'completed' as const,
-        href: '/nursing/patient-vitals',
+        href: '/nursing/vitals-history',
       }));
 
       if (activities.length >= limit) {
@@ -262,7 +251,7 @@ class NursingService {
   async getPoolQueueCount(serverToday?: string): Promise<{ count: number }> {
     try {
       const date =
-        serverToday ?? new Date().toISOString().split('T')[0];
+        serverToday ?? todayApiDateString();
       const metrics = await this.getPoolMetrics(date);
       return { count: metrics.totalInPool };
     } catch (error) {
@@ -294,9 +283,51 @@ class NursingService {
     };
   }
 
-  async getAnalyticsSummary(start: string, end: string): Promise<NursingAnalyticsSummary> {
-    const query = buildQueryString({ start, end });
+  async getAnalyticsSummary(period: URLSearchParams | { start: string; end: string }): Promise<NursingAnalyticsSummary> {
+    const query =
+      period instanceof URLSearchParams
+        ? `?${period.toString()}`
+        : buildQueryString({ start: period.start, end: period.end });
     return apiFetch<NursingAnalyticsSummary>(`/nursing/analytics/summary/${query}`);
+  }
+
+  /** Latest procedure record for a nursing order (no paginated list hop). */
+  async resolveProcedureForOrder(nursingOrderId: number): Promise<Record<string, unknown> | null> {
+    try {
+      return await apiFetch<Record<string, unknown>>(
+        `/nursing/procedures/resolve/?nursing_order=${nursingOrderId}`
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** Procedure queue stat cards (replaces 4 parallel COUNT list calls). */
+  async getProceduresQueueStats(params?: Record<string, string | undefined>): Promise<{
+    total: number;
+    pending: number;
+    completed: number;
+    injections: number;
+  }> {
+    const query = buildQueryString({
+      procedures_queue: '1',
+      ...(params || {}),
+    } as Record<string, string | number | undefined>);
+    const path = query ? `/nursing/orders/list-stats/${query}` : '/nursing/orders/list-stats/';
+    return apiFetch(path);
+  }
+
+  /** Completed procedures history stat cards (replaces 5 parallel COUNT list calls). */
+  async getProceduresHistoryStats(params?: Record<string, string | undefined>): Promise<{
+    total: number;
+    injections: number;
+    dressings: number;
+    medications: number;
+    observations: number;
+  }> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | undefined>);
+    const path = query ? `/nursing/procedures/history-stats/${query}` : '/nursing/procedures/history-stats/';
+    return apiFetch(path);
   }
 }
 

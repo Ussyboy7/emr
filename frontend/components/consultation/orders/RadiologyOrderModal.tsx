@@ -97,8 +97,7 @@ export function RadiologyOrderModal({
     let cancelled = false;
     (async () => {
       try {
-        const res = await radiologyService.getTemplates({ code: RAD_OTHER_TEMPLATE_CODE, page_size: 1 });
-        const row = res.results?.[0];
+        const row = await radiologyService.resolveTemplateByCode(RAD_OTHER_TEMPLATE_CODE);
         if (!cancelled && row?.id) {
           setOtherTemplate(row as RadiologyTemplateLike);
         } else if (!cancelled) {

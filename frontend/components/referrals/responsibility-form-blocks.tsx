@@ -8,17 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Printer } from "lucide-react";
 import type { ResponsibilityFormIssuance } from "@/lib/services/referral-service";
+import { todayApiDateString } from "@/lib/dates";
 import { formatPrintDate, toLabel } from "@/lib/referrals/referral-helpers";
 
 export type ResponsibilityFormPayload = { valid_from: string; valid_to: string; notes: string };
 
 const ymdSlice = (s: string) => (s && s.length >= 10 ? s.slice(0, 10) : "");
-
-/** Today as YYYY-MM-DD in local time. */
-function todayYmdLocal(): string {
-  const t = new Date();
-  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
-}
 
 /**
  * True when proposed validity overlaps any still-current active form (inclusive ranges).
@@ -33,7 +28,7 @@ export function hasOverlappingActiveResponsibilityForm(
   const nf = ymdSlice(proposedValidFrom.trim());
   const nt = ymdSlice(proposedValidTo.trim());
   if (!nf || !nt || nf > nt) return false;
-  const today = todayYmdLocal();
+  const today = todayApiDateString();
   return forms.some((f) => {
     if (f.status !== "active") return false;
     const ef = ymdSlice(f.valid_from);
@@ -46,7 +41,7 @@ export function hasOverlappingActiveResponsibilityForm(
 /** Active in DB but valid_to is in the past — show as Expired (matches eventual API status after expiry job). */
 function effectiveResponsibilityFormStatus(form: { status: string; valid_to: string }): string {
   const et = ymdSlice(form.valid_to);
-  if (form.status === "active" && et && et < todayYmdLocal()) {
+  if (form.status === "active" && et && et < todayApiDateString()) {
     return "expired";
   }
   return form.status;
@@ -75,8 +70,10 @@ export function ResponsibilityFormHistoryTable(props: {
   onPrint: (form: ResponsibilityFormIssuance) => void;
   /** If set, shown as the only empty-state line; otherwise a short default. */
   emptyHint?: string;
-  /** Medical Records: show stamp column */
+  /** Medical Records: show stamp column with acknowledge actions */
   isRecordsUser?: boolean;
+  /** Clinician / read-only: show whether Medical Records has stamped each row */
+  showStampStatus?: boolean;
   /** When true (consultation has submitted to records), show Acknowledge stamp buttons for pending rows */
   allowStampAcknowledgement?: boolean;
   onAcknowledgeForm?: (form: ResponsibilityFormIssuance) => void;
@@ -89,10 +86,13 @@ export function ResponsibilityFormHistoryTable(props: {
     onPrint,
     emptyHint,
     isRecordsUser,
+    showStampStatus,
     allowStampAcknowledgement,
     onAcknowledgeForm,
     acknowledgingFormId,
   } = props;
+
+  const showStampColumn = isRecordsUser || showStampStatus;
 
   return (
     <div className="rounded-md border bg-background">
@@ -113,7 +113,7 @@ export function ResponsibilityFormHistoryTable(props: {
               <TableHead className="min-w-[10rem]">Facility</TableHead>
               <TableHead className="min-w-[9rem] hidden sm:table-cell">Valid period</TableHead>
               <TableHead className="w-24 hidden md:table-cell">Status</TableHead>
-              {isRecordsUser ? <TableHead className="min-w-[9rem]">Records stamp</TableHead> : null}
+              {showStampColumn ? <TableHead className="min-w-[9rem]">Records stamp</TableHead> : null}
               <TableHead className="w-[5.5rem] text-right"> </TableHead>
             </TableRow>
           </TableHeader>
@@ -140,7 +140,7 @@ export function ResponsibilityFormHistoryTable(props: {
                       {statusLabel}
                     </Badge>
                   </TableCell>
-                  {isRecordsUser ? (
+                  {showStampColumn ? (
                     <TableCell className="py-2.5 px-3 align-top">
                       {stamped ? (
                         <div className="text-xs text-muted-foreground space-y-0.5">
@@ -166,7 +166,12 @@ export function ResponsibilityFormHistoryTable(props: {
                           {acknowledgingFormId === form.id ? "Saving…" : "Acknowledge stamp"}
                         </Button>
                       ) : (
-                        <span className="text-xs text-muted-foreground" />
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] font-normal bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300"
+                        >
+                          Awaiting stamp
+                        </Badge>
                       )}
                     </TableCell>
                   ) : null}
@@ -196,6 +201,9 @@ export function ResponsibilityFormReissuePanel(props: {
   issuing: boolean;
   submitLabel: string;
   submittingLabel: string;
+  /** Optional secondary action (e.g. issue without sending to Medical Records). */
+  secondarySubmitLabel?: string;
+  onSecondarySubmit?: () => void;
   /** When true, another active form exists; backend requires override + reason. */
   blockingActiveForm?: boolean;
   overrideReason?: string;
@@ -210,10 +218,14 @@ export function ResponsibilityFormReissuePanel(props: {
     issuing,
     submitLabel,
     submittingLabel,
+    secondarySubmitLabel,
+    onSecondarySubmit,
     blockingActiveForm,
     overrideReason = "",
     onOverrideReasonChange,
   } = props;
+
+  const submitDisabled = issuing || (blockingActiveForm && !overrideReason.trim());
 
   return (
     <div className="rounded-lg border border-dashed border-primary/25 bg-muted/30 p-4 space-y-3">
@@ -267,14 +279,22 @@ export function ResponsibilityFormReissuePanel(props: {
           />
         </div>
       </div>
-      <Button
-        type="button"
-        size="sm"
-        onClick={() => void onSubmit()}
-        disabled={issuing || (blockingActiveForm && !overrideReason.trim())}
-      >
-        {issuing ? submittingLabel : submitLabel}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" onClick={() => void onSubmit()} disabled={submitDisabled}>
+          {issuing ? submittingLabel : submitLabel}
+        </Button>
+        {secondarySubmitLabel && onSecondarySubmit ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void onSecondarySubmit()}
+            disabled={submitDisabled}
+          >
+            {issuing ? submittingLabel : secondarySubmitLabel}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

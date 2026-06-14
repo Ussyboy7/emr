@@ -2,19 +2,22 @@
 Serializers for the Patients app.
 """
 from rest_framework import serializers
-from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
+from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate, AnnualCheckup
 
 
 class PatientSerializer(serializers.ModelSerializer):
     """Serializer for Patient model."""
     
     full_name = serializers.SerializerMethodField()
-    age = serializers.ReadOnlyField()
-    age_display = serializers.ReadOnlyField()
+    age = serializers.IntegerField(read_only=True)
+    age_display = serializers.CharField(read_only=True)
     photo = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_created_by_name(self, obj):
         user = getattr(obj, 'created_by', None)
         if not user:
@@ -24,6 +27,7 @@ class PatientSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(user) if user else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_updated_by_name(self, obj):
         user = getattr(obj, 'updated_by', None)
         if not user:
@@ -48,9 +52,11 @@ class PatientSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'updated_at', 'age']
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_full_name(self, obj):
         return obj.get_full_name()
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_photo(self, obj):
         """Return the photo URL if photo exists."""
         if obj.photo:
@@ -125,8 +131,8 @@ class PatientListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for patient lists."""
 
     full_name = serializers.SerializerMethodField()
-    age = serializers.ReadOnlyField()
-    age_display = serializers.ReadOnlyField()
+    age = serializers.IntegerField(read_only=True)
+    age_display = serializers.CharField(read_only=True)
     gender = serializers.SerializerMethodField()
     photo = serializers.SerializerMethodField()
     total_visits = serializers.SerializerMethodField()
@@ -144,34 +150,40 @@ class PatientListSerializer(serializers.ModelSerializer):
             'total_visits', 'last_visit_at',
             'dependent_type', 'principal_staff', 'nok_relationship',
             'principal_staff_full_name', 'principal_staff_patient_id', 'principal_staff_category',
-            'employee_type',
+            'employee_type', 'location', 'division',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'age']
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_full_name(self, obj):
         return obj.get_full_name()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_gender(self, obj):
         return obj.get_gender_display() if obj.gender else ''
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_principal_staff_full_name(self, obj):
         p = getattr(obj, 'principal_staff', None)
         if p is None:
             return ''
         return p.get_full_name()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_principal_staff_patient_id(self, obj):
         p = getattr(obj, 'principal_staff', None)
         if p is None:
             return ''
         return (p.patient_id or '').strip()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_principal_staff_category(self, obj):
         p = getattr(obj, 'principal_staff', None)
         if p is None:
             return ''
         return p.category or ''
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_photo(self, obj):
         """Return the photo URL if photo exists."""
         if obj.photo:
@@ -179,14 +191,24 @@ class PatientListSerializer(serializers.ModelSerializer):
             return obj.photo.url
         return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_visits(self, obj):
+        annotated = getattr(obj, '_total_visits', None)
+        if annotated is not None:
+            return annotated
         return obj.visits.count()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_last_visit_at(self, obj):
+        last_date = getattr(obj, '_last_visit_date', None)
+        last_time = getattr(obj, '_last_visit_time', None)
+        if hasattr(obj, '_last_visit_date'):
+            if last_date is None or last_time is None:
+                return None
+            return f"{last_date}T{last_time}"
         last_visit = obj.visits.order_by('-date', '-time', '-created_at').first()
         if not last_visit:
             return None
-        # Combine visit date+time to preserve chronology in UI
         return f"{last_visit.date}T{last_visit.time}"
     
 
@@ -203,10 +225,12 @@ class VisitSerializer(serializers.ModelSerializer):
     location_clinic_name = serializers.SerializerMethodField()
     is_new_registration = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
         clinic = getattr(obj, 'location_clinic', None)
         return clinic.name if clinic else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_created_by_name(self, obj):
         user = getattr(obj, 'created_by', None)
         if not user:
@@ -220,12 +244,14 @@ class VisitSerializer(serializers.ModelSerializer):
     patient_visit_status = serializers.SerializerMethodField()
     vitals = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_gender(self, obj):
         patient = getattr(obj, 'patient', None)
         if not patient or not patient.gender:
             return ''
         return patient.get_gender_display()
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_vitals(self, obj):
         """Get the most recent vital reading for this visit."""
         vital = obj.vital_readings.first()
@@ -247,12 +273,14 @@ class VisitSerializer(serializers.ModelSerializer):
             'bp': '', 'pulse': '', 'temp': '', 'respRate': '', 'spo2': '', 'weight': '', 'height': '', 'bmi': ''
         }
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_new_registration(self, obj):
         patient = getattr(obj, 'patient', None)
         if not patient or not patient.created_at:
             return False
         return patient.created_at.date() == obj.date
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_first_visit(self, obj):
         annotated_first_visit_id = getattr(obj, 'first_visit_id', None)
         if annotated_first_visit_id is not None:
@@ -261,9 +289,11 @@ class VisitSerializer(serializers.ModelSerializer):
         first_visit = obj.patient.visits.order_by('date', 'time', 'created_at', 'id').values_list('id', flat=True).first()
         return first_visit == obj.id
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_returning_visit(self, obj):
         return not self.get_is_first_visit(obj)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_visit_status(self, obj):
         if self.get_is_first_visit(obj):
             return 'First Visit'
@@ -351,6 +381,17 @@ class VisitSerializer(serializers.ModelSerializer):
             key in attrs for key in ('patient', 'date', 'status')
         )
 
+        visit_type = attrs.get('visit_type', self.instance.visit_type if self.instance else None)
+        if visit_type == 'annual_checkup' and patient:
+            if patient.category != 'employee':
+                raise serializers.ValidationError({
+                    'visit_type': 'Annual check-ups are only for employee patients.',
+                })
+            if not patient.is_active:
+                raise serializers.ValidationError({
+                    'visit_type': 'Annual check-ups require an active employee patient.',
+                })
+
         if should_check_duplicates and patient and date:
             open_statuses = ['scheduled', 'in_progress']
             if status in open_statuses:
@@ -399,9 +440,12 @@ class VitalReadingSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True, allow_null=True)
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj.visit, 'location_clinic', None) if obj.visit else None
-        return clinic.name if clinic else None
+        from common.order_location import location_clinic_name
+
+        visit = getattr(obj, "visit", None)
+        return location_clinic_name(visit)
 
     class Meta:
         model = VitalReading
@@ -528,3 +572,147 @@ class MedicalCertificateSerializer(serializers.ModelSerializer):
             "doctor_name_snapshot",
             "patient_name",
         ]
+
+
+class AnnualCheckupSerializer(serializers.ModelSerializer):
+    """Read/update serializer for annual check-up records."""
+
+    patient_name = serializers.CharField(source="patient.get_full_name", read_only=True)
+    patient_id = serializers.CharField(source="patient.patient_id", read_only=True)
+    visit_id = serializers.CharField(source="visit.visit_id", read_only=True)
+    visit_date = serializers.DateField(source="visit.date", read_only=True)
+    visit_status = serializers.CharField(source="visit.status", read_only=True)
+    signed_off_by_name = serializers.SerializerMethodField()
+    fitness_outcome_display = serializers.CharField(
+        source="get_fitness_outcome_display", read_only=True
+    )
+    checklist = serializers.SerializerMethodField()
+    catalog = serializers.SerializerMethodField()
+    incomplete_components = serializers.SerializerMethodField()
+    has_report_pdf = serializers.SerializerMethodField()
+    has_outcome_letter = serializers.SerializerMethodField()
+    next_due_date = serializers.DateField(read_only=True)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_signed_off_by_name(self, obj):
+        user = getattr(obj, "signed_off_by", None)
+        if not user:
+            return None
+        try:
+            return user.get_full_name() or getattr(user, "username", None)
+        except (AttributeError, TypeError):
+            return str(user)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_checklist(self, obj):
+        from .annual_checkup_services import build_component_checklist
+
+        return build_component_checklist(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_catalog(self, obj):
+        from .annual_checkup_services import build_full_catalog_with_selection
+
+        return build_full_catalog_with_selection(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_incomplete_components(self, obj):
+        from .annual_checkup_services import evaluate_components
+
+        _, incomplete = evaluate_components(obj)
+        return incomplete
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_has_report_pdf(self, obj):
+        return bool(obj.report_pdf)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_has_outcome_letter(self, obj):
+        return bool(obj.outcome_letter_pdf)
+
+    class Meta:
+        model = AnnualCheckup
+        fields = [
+            "id",
+            "visit",
+            "visit_id",
+            "visit_date",
+            "visit_status",
+            "patient",
+            "patient_id",
+            "patient_name",
+            "programme_year",
+            "status",
+            "fitness_outcome",
+            "fitness_outcome_display",
+            "outcome_notes",
+            "signed_off_by",
+            "signed_off_by_name",
+            "signed_off_at",
+            "sign_off_override_reason",
+            "components_required",
+            "components_completed",
+            "component_overrides",
+            "checklist",
+            "catalog",
+            "incomplete_components",
+            "has_report_pdf",
+            "has_outcome_letter",
+            "next_due_date",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "patient",
+            "programme_year",
+            "status",
+            "signed_off_by",
+            "signed_off_at",
+            "sign_off_override_reason",
+            "components_completed",
+            "checklist",
+            "catalog",
+            "incomplete_components",
+            "has_report_pdf",
+            "has_outcome_letter",
+            "next_due_date",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class AnnualCheckupSignOffSerializer(serializers.Serializer):
+    fitness_outcome = serializers.ChoiceField(
+        choices=AnnualCheckup.FITNESS_OUTCOME_CHOICES
+    )
+    outcome_notes = serializers.CharField(required=False, allow_blank=True, default="")
+    override_reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class AnnualCheckupCreateSerializer(serializers.Serializer):
+    """Create an annual check-up wrapper for an existing visit."""
+
+    visit = serializers.PrimaryKeyRelatedField(queryset=Visit.objects.all())
+    programme_year = serializers.IntegerField(required=False, min_value=2000, max_value=2100)
+
+
+class AnnualCheckupProgrammeSerializer(serializers.Serializer):
+    programme_year = serializers.IntegerField()
+    catalog = serializers.ListField(child=serializers.DictField(), read_only=True)
+    default_selected_codes = serializers.ListField(
+        child=serializers.CharField(max_length=50)
+    )
+
+
+class AnnualCheckupOrderInvestigationsSerializer(serializers.Serializer):
+    consultation_session = serializers.IntegerField(required=False)
+    component_codes = serializers.ListField(
+        child=serializers.CharField(max_length=50),
+        required=False,
+    )
+    priority = serializers.ChoiceField(
+        choices=["routine", "urgent", "stat"],
+        default="routine",
+        required=False,
+    )

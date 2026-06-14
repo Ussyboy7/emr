@@ -1,26 +1,24 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import {
-  Download,
-  FileSpreadsheet,
   RefreshCw,
   ArrowLeft,
-  Printer,
   Pill,
   TrendingUp,
   Calendar,
-} from "lucide-react";
-import { toast } from "sonner";
-import { apiFetch } from "@/lib/api-client";
-import Link from "next/link";
-import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
+  } from "lucide-react";
+  import { toast } from "sonner";
+  import { apiFetch } from "@/lib/api-client";
+  import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
+  import Link from "next/link";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
 
 interface TopDrugRow {
   sn: number;
@@ -37,10 +35,21 @@ interface TopDrugs {
 }
 
 export default function TopDrugsReport() {
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<string>("monthly");
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    periodLabel,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    years,
+  } = useMrReportPeriod("all");
   const [limit, setLimit] = useState("20");
   const [data, setData] = useState<TopDrugs | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -48,19 +57,19 @@ export default function TopDrugsReport() {
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-      if (!range) {
-        toast.error("Please select a valid date range");
-        setIsLoading(false);
-        return;
-      }
       const lim = parseInt(limit, 10);
       if (Number.isNaN(lim) || lim < 1 || lim > 200) {
         toast.error("Limit must be between 1 and 200");
         setIsLoading(false);
         return;
       }
-      const url = `/reports/top-drugs/?start_date=${range.start}&end_date=${range.end}&limit=${lim}`;
+      const params = buildQuery({ limit: String(lim) });
+      if (!params) {
+        toast.error("Please select a valid date range");
+        setIsLoading(false);
+        return;
+      }
+      const url = `/reports/top-drugs/?${params.toString()}`;
       const response = await apiFetch<TopDrugs>(url);
       setData(response);
     } catch (error: any) {
@@ -73,47 +82,10 @@ export default function TopDrugsReport() {
   };
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    if (range) fetchReport();
+    if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode, limit]);
 
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
-
-  const periodLabel = useMemo(() => {
-    if (viewMode === "year") return String(year);
-    if (startDate && endDate) return `${startDate} — ${endDate}`;
-    return "selected period";
-  }, [viewMode, year, startDate, endDate]);
-
-  const exportToCSV = () => {
-    if (!data || data.data.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-    const lines = [
-      "S/N,Drug Name,Total Quantity,Prescription Count,% of Lines",
-      ...data.data.map((r) =>
-        [
-          r.sn,
-          `"${(r.drug_name || "").replace(/"/g, '""')}"`,
-          r.total_quantity,
-          r.prescription_count,
-          `${r.percentage}%`,
-        ].join(","),
-      ),
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    const period = range ? `${range.start}_to_${range.end}` : "unknown";
-    a.download = `top_drugs_${period}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
-  };
 
   return (
     <DashboardLayout>
@@ -138,18 +110,12 @@ export default function TopDrugsReport() {
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={!data}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={!data}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/top-drugs/"
+              buildQuery={() => buildQuery({ limit: String(limit) })}
+              filenameBase={`top_drugs_${filenameSuffix}`}
+              disabled={!data}
+            />
           </div>
         </div>
 
@@ -163,58 +129,17 @@ export default function TopDrugsReport() {
           </CardHeader>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={setViewMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {viewMode === "year" ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map((y) => (
-                        <SelectItem key={y} value={y}>
-                          {y}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : viewMode === "range" ? (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                  </div>
-                </>
-              ) : (
-                <div className="col-span-2">
-                  <Label>Period</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {viewMode === "monthly" && "This month"}
-                    {viewMode === "quarterly" && "This quarter"}
-                    {viewMode === "annually" && "This year"}
-                  </p>
-                </div>
-              )}
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
               <div>
                 <Label>Top N</Label>
                 <Input
@@ -224,6 +149,12 @@ export default function TopDrugsReport() {
                   value={limit}
                   onChange={(e) => setLimit(e.target.value)}
                 />
+              </div>
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
               </div>
             </div>
           </CardContent>

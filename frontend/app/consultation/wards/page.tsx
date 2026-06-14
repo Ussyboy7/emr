@@ -26,6 +26,7 @@ import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/compon
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { toast } from 'sonner';
+import { formatDisplayDateMedium, formatDisplayDateTime, localWeekToTodayBounds } from '@/lib/dates';
 import { wardService, type Ward, type PatientAdmission, type WardAssignment } from '@/lib/services/ward-service';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
@@ -148,9 +149,8 @@ export default function WardOverviewPage() {
     }
     if (dateFilter === 'today') return { admission_date: todayYmd };
     if (dateFilter === 'week') {
-      const start = new Date(today);
-      start.setDate(today.getDate() - today.getDay());
-      return { admission_date_after: formatLocalYmd(start), admission_date_before: todayYmd };
+      const { start, end } = localWeekToTodayBounds(serverToday || undefined);
+      return { admission_date_after: start, admission_date_before: end };
     }
     if (dateFilter === 'month') {
       const start = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -442,10 +442,7 @@ export default function WardOverviewPage() {
     }
     setIsSavingNote(true);
     try {
-      const timestamp = new Date().toLocaleString('en-GB', {
-        day: 'numeric', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-      });
+      const timestamp = formatDisplayDateTime(new Date());
       const authorName = currentUser?.name || currentUser?.username || 'Unknown';
       const newNote = `[${timestamp} — Dr. ${authorName}]\n${progressNote.trim()}`;
       const existing = selectedAdmission.admission_notes?.trim();
@@ -902,9 +899,7 @@ export default function WardOverviewPage() {
                               }
                               <span>·</span>
                               <span>
-                                {new Date(admission.admission_date).toLocaleDateString('en-GB', {
-                                  day: 'numeric', month: 'short', year: 'numeric',
-                                })}
+                                {formatDisplayDateMedium(admission.admission_date)}
                               </span>
                               <span>·</span>
                               <span>
@@ -1002,9 +997,7 @@ export default function WardOverviewPage() {
                     <div>
                       <Label className="text-muted-foreground text-xs">Admission Date</Label>
                       <p className="font-medium text-sm">
-                        {new Date(selectedAdmission.admission_date).toLocaleDateString('en-GB', {
-                          day: 'numeric', month: 'short', year: 'numeric',
-                        })}
+                        {formatDisplayDateMedium(selectedAdmission.admission_date)}
                       </p>
                     </div>
                     <div>
@@ -1072,9 +1065,7 @@ export default function WardOverviewPage() {
                               {selectedAdmission.status === 'discharged' ? 'Discharged on' : 'Initiated on'}
                             </Label>
                             <p className="font-medium">
-                              {new Date(selectedAdmission.discharge_date).toLocaleString('en-GB', {
-                                day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-                              })}
+                              {formatDisplayDateTime(selectedAdmission.discharge_date)}
                             </p>
                           </div>
                         )}
@@ -1186,9 +1177,7 @@ export default function WardOverviewPage() {
                               <div>
                                 <Label className="text-muted-foreground text-xs">Departed</Label>
                                 <p className="font-medium text-sm">
-                                  {new Date(selectedAdmission.escort.departure_at).toLocaleString('en-GB', {
-                                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                                  })}
+                                  {formatDisplayDateTime(selectedAdmission.escort.departure_at)}
                                 </p>
                               </div>
                             )}
@@ -1196,9 +1185,7 @@ export default function WardOverviewPage() {
                               <div>
                                 <Label className="text-muted-foreground text-xs">Arrived</Label>
                                 <p className="font-medium text-sm">
-                                  {new Date(selectedAdmission.escort.arrival_confirmed_at).toLocaleString('en-GB', {
-                                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                                  })}
+                                  {formatDisplayDateTime(selectedAdmission.escort.arrival_confirmed_at)}
                                   {selectedAdmission.escort.arrival_call_outcome && (
                                     <span className="text-muted-foreground ml-1 capitalize">· {selectedAdmission.escort.arrival_call_outcome.replace(/_/g, ' ')}</span>
                                   )}

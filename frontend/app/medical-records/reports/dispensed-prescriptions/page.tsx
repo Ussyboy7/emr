@@ -1,155 +1,141 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  Pill, TrendingUp, Printer, Calendar, Users
-} from "lucide-react";
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
+import { RefreshCw, ArrowLeft, Pill, TrendingUp, Calendar, Users } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
 
-interface MonthlyData {
+interface PeriodRow {
   sn: number;
-  month: string;
+  period_label: string;
   total: number;
   percentage: number;
 }
 
 interface DispensedSummary {
   total: number;
+  total_patients: number;
   total_male: number;
   total_female: number;
   grand_total: number;
 }
 
-interface DispensedItemRow {
-  sn: number;
-  medication: string;
-  unit: string;
-  quantity_dispensed: number;
+const emptySummary: DispensedSummary = {
+  total: 0,
+  total_patients: 0,
+  total_male: 0,
+  total_female: 0,
+  grand_total: 0,
+};
+
+function normalizePeriodRows(rows: unknown[] | null | undefined): PeriodRow[] {
+  if (!rows?.length) return [];
+  return rows
+    .map((raw, index) => {
+      const row = raw as Record<string, unknown>;
+      const total = Number(row.total ?? row.count ?? 0);
+      const periodLabel = String(
+        row.period_label ?? row.month ?? row.period ?? ""
+      ).trim();
+      return {
+        sn: Number(row.sn ?? index + 1),
+        period_label: periodLabel,
+        total: Number.isFinite(total) ? total : 0,
+        percentage: Number(row.percentage ?? 0),
+      };
+    })
+    .filter((row) => row.period_label.length > 0 || row.total > 0);
 }
 
-export default function DispensedPrescriptionsReport() {
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<string>("monthly");
-  const [data, setData] = useState<MonthlyData[]>([]);
-  const [summary, setSummary] = useState<DispensedSummary>({
-    total: 0,
-    total_male: 0,
-    total_female: 0,
-    grand_total: 0,
-  });
-  const [dispensedItems, setDispensedItems] = useState<DispensedItemRow[]>([]);
+function normalizeSummary(raw?: Partial<DispensedSummary> | null): DispensedSummary {
+  const total = raw?.total ?? 0;
+  const total_patients = raw?.total_patients ?? raw?.grand_total ?? 0;
+  return {
+    total,
+    total_patients,
+    total_male: raw?.total_male ?? 0,
+    total_female: raw?.total_female ?? 0,
+    grand_total: raw?.grand_total ?? total_patients,
+  };
+}
+
+function groupByForViewMode(viewMode: string): "day" | "week" | "month" {
+  if (viewMode === "daily") return "day";
+  if (viewMode === "weekly") return "week";
+  return "month";
+}
+
+export default function PrescriptionsReport() {
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    periodLabel,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    years,
+  } = useMrReportPeriod("all");
+
+  const groupBy = useMemo(() => groupByForViewMode(viewMode), [viewMode]);
+  const breakdownTitle =
+    groupBy === "day" ? "Daily breakdown" : groupBy === "week" ? "Weekly breakdown" : "Monthly breakdown";
+
+  const [data, setData] = useState<PeriodRow[]>([]);
+  const [groupByLabel, setGroupByLabel] = useState("Monthly");
+  const [summary, setSummary] = useState<DispensedSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchReport = async () => {
+    const params = buildQuery({ group_by: groupBy });
+    if (!params) {
+      toast.error("Please select a valid date range");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-      if (!range) {
-        toast.error("Please select a valid date range");
-        setIsLoading(false);
-        return;
-      }
-      const url = `/reports/dispensed-prescriptions/?start_date=${range.start}&end_date=${range.end}`;
-
       const response = await apiFetch<{
-        data: MonthlyData[];
+        data?: PeriodRow[];
+        monthly_data?: PeriodRow[];
+        group_by_label?: string;
         summary: DispensedSummary;
-        dispensed_items: DispensedItemRow[];
-      }>(url);
-      setData(response.data || []);
-      setSummary(
-        response.summary || {
-          total: 0,
-          total_male: 0,
-          total_female: 0,
-          grand_total: 0,
-        }
-      );
-      setDispensedItems(response.dispensed_items || []);
-    } catch (error: any) {
+      }>(`/reports/dispensed-prescriptions/?${params.toString()}`);
+
+      const rows = response.data ?? response.monthly_data ?? [];
+      setData(normalizePeriodRows(rows));
+      setGroupByLabel(response.group_by_label ?? breakdownTitle.replace(" breakdown", ""));
+      setSummary(normalizeSummary(response.summary));
+    } catch (error: unknown) {
       console.error("Error fetching prescriptions report:", error);
-      toast.error(error.message || "Failed to load prescriptions report");
+      toast.error(error instanceof Error ? error.message : "Failed to load prescriptions report");
       setData([]);
-      setSummary({
-        total: 0,
-        total_male: 0,
-        total_female: 0,
-        grand_total: 0,
-      });
-      setDispensedItems([]);
+      setSummary(emptySummary);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    if (range) fetchReport();
+    if (canFetch) fetchReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);
-
-  const exportToCSV = () => {
-    if (data.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-
-    const headers = ["S/N", "Month", "Total", "%"];
-    const rows = data.map(row => [row.sn, row.month, row.total, `${row.percentage}%`]);
-    
-    let csv = [
-      headers.join(','),
-      ...rows.map(row => row.join(',')),
-      `TOTAL,,${summary.total},100.0%`
-    ].join('\n');
-    
-    if (dispensedItems.length > 0) {
-      const dispensedHeaders = ["S/N", "Medication", "Unit", "Quantity Dispensed"];
-      const dispensedRows = dispensedItems.map((r) => [
-        r.sn,
-        r.medication,
-        r.unit,
-        r.quantity_dispensed,
-      ]);
-      const dispensedLines = [
-        "",
-        "Dispensed Items",
-        dispensedHeaders.join(","),
-        ...dispensedRows.map((row) => row.join(",")),
-      ].join("\n");
-      csv = `${csv}\n${dispensedLines}`;
-    }
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    const period = range ? `${range.start}_to_${range.end}` : 'unknown';
-    a.download = `dispensed_prescriptions_${period}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    
-    toast.success("Report exported successfully");
-  };
-
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header */}
         <div className="mb-2 print:hidden">
           <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
             <Link href="/medical-records/reports">
@@ -163,97 +149,45 @@ export default function DispensedPrescriptionsReport() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Pill className="h-8 w-8 text-purple-500" />
-              Dispensed Prescriptions Report
+              Prescriptions Report
             </h1>
-            <p className="text-muted-foreground mt-1">Monthly prescription dispensing statistics</p>
+            <p className="text-muted-foreground mt-1">
+              Fully dispensed prescription orders — {periodLabel}
+            </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={data.length === 0}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={data.length === 0}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/dispensed-prescriptions/"
+              buildQuery={() => buildQuery({ group_by: groupBy })}
+              filenameBase={`prescriptions_${filenameSuffix}`}
+              disabled={data.length === 0}
+            />
           </div>
         </div>
 
-        {/* Filters */}
         <Card className="print:hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />
               Filters
             </CardTitle>
-            <CardDescription>Adjust date range for detailed reporting</CardDescription>
+            <CardDescription>
+              Daily and weekly views group the breakdown by day or week; other modes use monthly buckets.
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={setViewMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {viewMode === 'year' ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map((y) => (
-                        <SelectItem key={y} value={y}>
-                          {y}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : viewMode === 'range' ? (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                  </div>
-                </>
-              ) : (
-                <div className="col-span-2">
-                  <Label>Period</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {viewMode === 'daily' && 'Today'}
-                    {viewMode === 'weekly' && 'This week'}
-                    {viewMode === 'monthly' && 'This month'}
-                    {viewMode === 'bimonthly' && 'Last 2 months'}
-                    {viewMode === 'quarterly' && 'This quarter'}
-                    {viewMode === 'half-yearly' && 'This half-year'}
-                    {viewMode === 'annually' && 'This year'}
-                  </p>
-                </div>
-              )}
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                   <TrendingUp className="h-4 w-4 mr-2" />
@@ -264,15 +198,18 @@ export default function DispensedPrescriptionsReport() {
           </CardContent>
         </Card>
 
-        {/* Summary Cards */}
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="border-l-4 border-l-purple-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Prescriptions Dispensed</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600">{summary.total.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Includes all dispensed prescription records</p>
+                  <p className="text-sm text-muted-foreground">Prescriptions</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-purple-600">
+                    {(summary.total ?? 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {(summary.total_patients ?? summary.grand_total ?? 0).toLocaleString()} patients
+                  </p>
                 </div>
                 <Pill className="h-10 w-10 text-purple-500 opacity-50" />
               </div>
@@ -282,10 +219,15 @@ export default function DispensedPrescriptionsReport() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Male Patients</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
+                  <p className="text-sm text-muted-foreground">Male patients</p>
+                  <p className="text-2xl sm:text-3xl font-bold">
+                    {(summary.total_male ?? 0).toLocaleString()}
+                  </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0 ? `${((summary.total_male / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                    {(summary.grand_total ?? 0) > 0
+                      ? `${(((summary.total_male ?? 0) / (summary.grand_total ?? 1)) * 100).toFixed(1)}%`
+                      : "0%"}{" "}
+                    of patients
                   </p>
                 </div>
                 <Users className="h-10 w-10 text-cyan-500 opacity-50" />
@@ -296,10 +238,15 @@ export default function DispensedPrescriptionsReport() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Female Patients</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
+                  <p className="text-sm text-muted-foreground">Female patients</p>
+                  <p className="text-2xl sm:text-3xl font-bold">
+                    {(summary.total_female ?? 0).toLocaleString()}
+                  </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0 ? `${((summary.total_female / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                    {(summary.grand_total ?? 0) > 0
+                      ? `${(((summary.total_female ?? 0) / (summary.grand_total ?? 1)) * 100).toFixed(1)}%`
+                      : "0%"}{" "}
+                    of patients
                   </p>
                 </div>
                 <Users className="h-10 w-10 text-pink-500 opacity-50" />
@@ -308,14 +255,15 @@ export default function DispensedPrescriptionsReport() {
           </Card>
         </div>
 
-        {/* Data Table */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Pill className="h-5 w-5" />
-              Monthly Breakdown
+              {breakdownTitle}
             </CardTitle>
-            <CardDescription>Monthly prescription dispensing statistics</CardDescription>
+            <CardDescription>
+              {groupByLabel} prescription orders in {periodLabel}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -329,8 +277,8 @@ export default function DispensedPrescriptionsReport() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Month</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Period</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Prescriptions</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">%</th>
                     </tr>
                   </thead>
@@ -338,14 +286,14 @@ export default function DispensedPrescriptionsReport() {
                     {data.map((row) => (
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
-                        <td className="p-3 font-medium text-foreground">{row.month}</td>
+                        <td className="p-3 font-medium text-foreground">{row.period_label}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{row.percentage.toFixed(1)}%</td>
                       </tr>
                     ))}
                     <tr className="border-t-2 border-border bg-muted/50 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">Total</td>
-                      <td className="p-3 text-right text-foreground">{summary.total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{(summary.total ?? 0).toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
@@ -355,13 +303,14 @@ export default function DispensedPrescriptionsReport() {
               <div className="text-center py-12">
                 <Pill className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-1">No data available</p>
-                <p className="text-sm text-muted-foreground">No prescription records found for this year</p>
+                <p className="text-sm text-muted-foreground">
+                  No fully dispensed prescription orders in {periodLabel}. Try All Time — your
+                  orders may fall in an earlier month.
+                </p>
               </div>
             )}
           </CardContent>
         </Card>
-
-
       </div>
     </DashboardLayout>
   );

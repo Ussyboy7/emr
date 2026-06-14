@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { patientService, visitService, type Visit } from "@/lib/services";
+import { PREVIEW_PAGE_SIZE } from "@/lib/pagination-constants";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
 import { useServerToday } from "@/hooks/use-server-today";
@@ -70,38 +71,26 @@ export default function MedicalRecordsPage() {
       setLoading(true);
       setError(null);
 
-      const visitBase = {
-        date: serverToday,
-        page: 1,
-        page_size: 1,
-      };
-
       const [
         patientCounts,
-        visitsTodayRes,
-        scheduledRes,
-        inProgressRes,
-        completedRes,
+        visitStatsRes,
         inProgressListRes,
         scheduledListRes,
         recentPatientsRes,
       ] = await Promise.all([
         patientService.getPatientCounts().catch(() => ({ total: 0 })),
-        visitService.getVisits(visitBase),
-        visitService.getVisits({ ...visitBase, status: "scheduled" }),
-        visitService.getVisits({ ...visitBase, status: "in_progress" }),
-        visitService.getVisits({ ...visitBase, status: "completed" }),
-        visitService.getVisits({ date: serverToday, status: "in_progress", page: 1, page_size: 5 }),
-        visitService.getVisits({ date: serverToday, status: "scheduled", page: 1, page_size: 4 }),
-        patientService.getPatients({ page: 1, page_size: 5, ordering: "-created_at" }),
+        visitService.getListStats({ date: serverToday }),
+        visitService.getVisits({ date: serverToday, status: "in_progress", page: 1, page_size: PREVIEW_PAGE_SIZE }),
+        visitService.getVisits({ date: serverToday, status: "scheduled", page: 1, page_size: PREVIEW_PAGE_SIZE }),
+        patientService.getPatients({ page: 1, page_size: PREVIEW_PAGE_SIZE, ordering: "-created_at" }),
       ]);
 
       setTotalPatients(patientCounts.total ?? 0);
       setVisitStats({
-        visitsToday: visitsTodayRes.count ?? 0,
-        scheduled: scheduledRes.count ?? 0,
-        inProgress: inProgressRes.count ?? 0,
-        completed: completedRes.count ?? 0,
+        visitsToday: visitStatsRes.total ?? 0,
+        scheduled: visitStatsRes.scheduled ?? 0,
+        inProgress: visitStatsRes.inProgress ?? 0,
+        completed: visitStatsRes.completed ?? 0,
       });
       setActiveVisits(inProgressListRes.results ?? []);
       setScheduledVisits(scheduledListRes.results ?? []);
@@ -319,7 +308,7 @@ export default function MedicalRecordsPage() {
             >
               <FileText className="h-5 w-5 sm:h-6 sm:w-6 text-purple-500 dark:text-purple-400" />
               <span className="text-xs sm:text-sm font-medium">View Reports</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Medical certificates & reports</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Departmental & statistical reports</span>
             </Button>
           </div>
         </div>

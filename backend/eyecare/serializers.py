@@ -2,6 +2,8 @@
 Serializers for the Eye Care app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from .models import EyeOrder, EyeSession, EyeSessionDiagnosticFile
 
 
@@ -13,9 +15,11 @@ class EyeOrderSerializer(serializers.ModelSerializer):
     completed_sessions_count = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj, 'location_clinic', None)
-        return clinic.name if clinic else None
+        from common.order_location import order_location_clinic_name
+
+        return order_location_clinic_name(obj)
 
     class Meta:
         model = EyeOrder
@@ -30,6 +34,7 @@ class EyeOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'ordered_at']
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_completed_sessions_count(self, obj):
         return getattr(obj, 'completed_sessions_count', 0)
 
@@ -111,6 +116,7 @@ class EyeSessionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at']
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_diagnostic_attachments(self, obj):
         return diagnostic_attachments_for_session(obj, self.context.get('request'))
 

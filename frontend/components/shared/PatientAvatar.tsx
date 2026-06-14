@@ -1,6 +1,6 @@
 "use client";
 
-import { getPhotoUrl } from "@/lib/api-client";
+import { getPhotoUrl, getMediaUrl } from "@/lib/media-url";
 
 interface PatientAvatarProps {
   name: string;

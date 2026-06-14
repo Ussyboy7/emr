@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.openapi import document_api_view
 from eyecare.models import EyeOrder, EyeSession
 
 
@@ -50,14 +51,13 @@ def _filter_orders_by_search(qs, search: str):
     ).distinct()
 
 
+@document_api_view(tag="Eyecare", summary="Cross-workflow eyecare patient tracker")
 class EyecarePatientTrackerView(APIView):
     """
     GET /eyecare/patient-tracker/?search=...
 
     Returns eye clinic orders/sessions with screen/tab hints for the frontend.
     """
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         search = (request.query_params.get('search') or '').strip()

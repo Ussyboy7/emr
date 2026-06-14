@@ -1,4 +1,5 @@
 "use client";
+import { formatDisplayDateTime } from '@/lib/dates';
 
 /**
  * Merge History tab for the patient overview modal.
@@ -57,7 +58,7 @@ function formatCounters(counters: Record<string, number> | undefined): string {
 function formatDateTime(iso: string): string {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString();
+    return formatDisplayDateTime(iso);
   } catch {
     return iso;
   }

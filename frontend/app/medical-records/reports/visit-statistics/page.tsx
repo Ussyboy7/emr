@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
   type AnalyticsViewMode,
-  analyticsRangeFromFilters,
 } from "@/components/analytics/AnalyticsReportLayout";
+import { useReportDateRange } from "@/hooks/use-report-date-range";
+import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RefreshCw, Activity, CheckCircle, XCircle, Clock, Calendar } from "lucide-react";
 import { toast } from "sonner";
@@ -68,67 +69,98 @@ export default function VisitStatisticsReport() {
   const emptySummary: VisitStatSummary = { completed: 0, cancelled: 0, in_progress: 0, scheduled: 0, total: 0, male: 0, female: 0, employee: 0, non_employee: 0, officer: 0, staff: 0, emp_dependent: 0, ret_dependent: 0, nonnpa: 0, retiree: 0 };
   const [summary, setSummary] = useState<VisitStatSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
-  const setThisMonth = () => setViewMode("monthly");
+  const groupBy =
+    viewMode === "daily"
+      ? "day"
+      : viewMode === "weekly"
+        ? "week"
+        : "month";
 
-  const setThisYear = () => setViewMode("annually");
+  const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
 
-  const fetchReport = async () => {
+  const buildQuery = useCallback(
+    (extra?: Record<string, string>) => {
+      const periodParams = buildReportPeriodQuery(viewMode, reportRange, "start_date");
+      if (!periodParams) return null;
+      periodParams.set("group_by", groupBy);
+      if (extra) {
+        Object.entries(extra).forEach(([k, v]) => periodParams.set(k, v));
+      }
+      return periodParams.toString();
+    },
+    [reportRange, groupBy, viewMode]
+  );
+
+  const fetchReport = useCallback(async () => {
+    const qs = buildQuery();
+    if (!qs) {
+      toast.error("Please select a valid date range");
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-      if (!range) {
-        toast.error("Please select a valid date range");
-        setIsLoading(false);
-        return;
-      }
-
-      const groupBy = viewMode === 'daily' ? 'day' : 
-                      viewMode === 'weekly' ? 'week' : 
-                      viewMode === 'monthly' || viewMode === 'bimonthly' || viewMode === 'year' ? 'month' :
-                      viewMode === 'quarterly' || viewMode === 'half-yearly' || viewMode === 'annually' ? 'month' : 'month';
-
-      let url = `/reports/visit-statistics/?group_by=${groupBy}&start_date=${range.start}&end_date=${range.end}`;
-      const response = await apiFetch<{ data: VisitStatRow[]; summary: VisitStatSummary }>(url);
+      const response = await apiFetch<{ data: VisitStatRow[]; summary: VisitStatSummary }>(
+        `/reports/visit-statistics/?${qs}`
+      );
       setData(response.data || []);
       setSummary(response.summary || emptySummary);
-    } catch (error: any) {
+      setHasLoaded(true);
+    } catch (error: unknown) {
       console.error("Error fetching visit statistics:", error);
-      toast.error(error.message || "Failed to load visit statistics");
+      const msg = error instanceof Error ? error.message : "Failed to load visit statistics";
+      toast.error(msg);
       setData([]);
       setSummary(emptySummary);
+      setHasLoaded(false);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [buildQuery]);
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    if (range) fetchReport();
-  }, [year, startDate, endDate, viewMode]);
+    if (canFetchReportPeriod(viewMode, reportRange)) void fetchReport();
+  }, [fetchReport, reportRange, viewMode]);
 
-  const exportToCSV = () => {
-    if (data.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-    const headers = ["Period", "Completed", "Cancelled", "In Progress", "Scheduled", "Total", "Male", "Female", "Officer", "Staff", "Employee", "Emp Dependent", "Ret Dependent", "Non-NPA", "Retiree", "Non-Employee"];
-    const rows = data.map(row => [row.period_label, row.completed, row.cancelled, row.in_progress, row.scheduled, row.total, row.male, row.female, row.officer, row.staff, row.employee, row.emp_dependent, row.ret_dependent, row.nonnpa, row.retiree, row.non_employee]);
-    const csv = [
-      headers.join(","),
-      ...rows.map(row => row.join(",")),
-      `TOTAL,${summary.completed},${summary.cancelled},${summary.in_progress},${summary.scheduled},${summary.total},${summary.male},${summary.female},${summary.officer},${summary.staff},${summary.employee},${summary.emp_dependent},${summary.ret_dependent},${summary.nonnpa},${summary.retiree},${summary.non_employee}`,
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    const periodLabel = viewMode === 'year' ? year : (range ? `${range.start}_to_${range.end}` : 'custom');
-    a.download = `visit_statistics_${periodLabel}.csv`;
+    a.download = filename;
     a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportCsv = async () => {
+    const qs = buildQuery({ export: "csv" });
+    if (!qs) return;
+    try {
+      const blob = await apiFetch<Blob>(`/reports/visit-statistics/?${qs}`, {
+        responseType: "blob",
+      });
+      const label = reportRange ? `${reportRange.start}_${reportRange.end}` : "export";
+      downloadBlob(blob, `visit_statistics_${label}.csv`);
+      toast.success("CSV exported");
+    } catch {
+      toast.error("CSV export failed");
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    const qs = buildQuery({ export: "pdf" });
+    if (!qs) return;
+    try {
+      const blob = await apiFetch<Blob>(`/reports/visit-statistics/?${qs}`, {
+        responseType: "blob",
+      });
+      const label = reportRange ? `${reportRange.start}_${reportRange.end}` : "export";
+      downloadBlob(blob, `visit_statistics_${label}.pdf`);
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("PDF download failed");
+    }
   };
 
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
@@ -138,20 +170,6 @@ export default function VisitStatisticsReport() {
     { key: "cancelled", label: "Cancelled", icon: XCircle, color: "text-red-500", border: "border-l-red-500", value: summary.cancelled },
     { key: "in_progress", label: "In Progress", icon: Clock, color: "text-amber-500", border: "border-l-amber-500", value: summary.in_progress },
     { key: "scheduled", label: "Scheduled", icon: Calendar, color: "text-blue-500", border: "border-l-blue-500", value: summary.scheduled },
-    { key: "total", label: "Total Visits", icon: Activity, color: "text-slate-500", border: "border-l-slate-500", value: summary.total },
-  ];
-
-  const demogCards = [
-    { key: "male", label: "Male", icon: Activity, color: "text-blue-500", border: "border-l-blue-500", value: summary.male },
-    { key: "female", label: "Female", icon: Activity, color: "text-pink-500", border: "border-l-pink-500", value: summary.female },
-    { key: "officer", label: "Officer", icon: Activity, color: "text-violet-500", border: "border-l-violet-500", value: summary.officer },
-    { key: "staff", label: "Staff", icon: Activity, color: "text-indigo-500", border: "border-l-indigo-500", value: summary.staff },
-    { key: "employee", label: "Employee", icon: Activity, color: "text-purple-500", border: "border-l-purple-500", value: summary.employee },
-    { key: "emp_dependent", label: "Emp Dependent", icon: Activity, color: "text-cyan-500", border: "border-l-cyan-500", value: summary.emp_dependent },
-    { key: "ret_dependent", label: "Ret Dependent", icon: Activity, color: "text-teal-500", border: "border-l-teal-500", value: summary.ret_dependent },
-    { key: "nonnpa", label: "Non-NPA", icon: Activity, color: "text-orange-500", border: "border-l-orange-500", value: summary.nonnpa },
-    { key: "retiree", label: "Retiree", icon: Activity, color: "text-rose-500", border: "border-l-rose-500", value: summary.retiree },
-    { key: "non_employee", label: "Non-Employee", icon: Activity, color: "text-stone-500", border: "border-l-stone-500", value: summary.non_employee },
   ];
 
   return (
@@ -163,11 +181,12 @@ export default function VisitStatisticsReport() {
         ReportIcon={Activity}
         reportIconClassName="text-purple-500"
         loading={isLoading}
-        onRefresh={fetchReport}
         onGenerate={fetchReport}
-        exportCsvDisabled={data.length === 0}
-        onExportCsv={exportToCSV}
-        printDisabled={data.length === 0}
+        exportCsvDisabled={!hasLoaded}
+        onExportCsv={handleExportCsv}
+        printDisabled={!hasLoaded}
+        onPrint={handleDownloadPdf}
+        contentClassName="print:px-0"
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         year={year}
@@ -183,8 +202,7 @@ export default function VisitStatisticsReport() {
         hideQuickButtons
         yearOptions={years}
       >
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {summaryCards.map((card) => (
             <Card key={card.key} className={`border-l-4 ${card.border}`}>
               <CardContent className="p-4">
@@ -203,27 +221,12 @@ export default function VisitStatisticsReport() {
           ))}
         </div>
 
-        {/* Demographic Summary Cards */}
-        <div className="grid gap-4 grid-cols-2 sm:grid-cols-5 md:grid-cols-5 lg:grid-cols-10">
-          {demogCards.map((card) => (
-            <Card key={card.key} className={`border-l-4 ${card.border}`}>
-              <CardContent className="p-3">
-                <p className="text-xs text-muted-foreground">{card.label}</p>
-                <p className="text-lg sm:text-xl font-bold">{card.value.toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {summary.total > 0 ? `${((card.value / summary.total) * 100).toFixed(1)}%` : "0%"}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
         {/* Status Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Visit Records</CardTitle>
+            <CardTitle>Status breakdown</CardTitle>
             <CardDescription>
-              {viewMode === 'daily' ? 'Daily' : viewMode === 'weekly' ? 'Weekly' : 'Monthly'} breakdown by status
+              {viewMode === 'daily' ? 'Daily' : viewMode === 'weekly' ? 'Weekly' : 'Monthly'} visits by completion status
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -279,9 +282,9 @@ export default function VisitStatisticsReport() {
         {/* Demographic Breakdown Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Demographic Breakdown</CardTitle>
+            <CardTitle>Patient category breakdown</CardTitle>
             <CardDescription>
-              {viewMode === 'daily' ? 'Daily' : viewMode === 'weekly' ? 'Weekly' : 'Monthly'} breakdown by patient category
+              {viewMode === 'daily' ? 'Daily' : viewMode === 'weekly' ? 'Weekly' : 'Monthly'} visits by gender and NPA category
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -124,6 +124,7 @@ LOCAL_APPS = [
     "reports",
     "analytics",
     "appointments",
+    "hr",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -238,6 +239,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# OpenAPI Swagger/ReDoc — off in production unless explicitly enabled.
+ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "").lower() == "true"
+
+# Deprecated: public media serving removed; use /api/v1/common/media/ instead.
 SERVE_MEDIA = os.getenv("SERVE_MEDIA", "").lower() == "true"
 
 
@@ -246,7 +251,10 @@ SERVE_MEDIA = os.getenv("SERVE_MEDIA", "").lower() == "true"
 # ---------------------------------------------------------------------------
 
 REST_FRAMEWORK = {
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+        "permissions.drf_permissions.ApiPageAccessPermission",
+    ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "accounts.authentication.JWTAuthenticationWithActivity"
     ],
@@ -257,7 +265,7 @@ REST_FRAMEWORK = {
     ],
     # Enable `page_size` query param consistently across endpoints.
     "DEFAULT_PAGINATION_CLASS": "common.pagination.StandardPageNumberPagination",
-    "PAGE_SIZE": int(os.getenv("PAGINATION_PAGE_SIZE", "100")),
+    "PAGE_SIZE": int(os.getenv("PAGINATION_PAGE_SIZE", "50")),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # --- Throttling ---------------------------------------------------------
     # Baseline protection against brute-force and scraping. Views that need a
@@ -284,9 +292,49 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "NPA EMR API",
-    "DESCRIPTION": "API documentation for the NPA EMR platform",
+    "DESCRIPTION": (
+        "REST API for the NPA Electronic Medical Records platform. "
+        "Authenticate with JWT; module access is enforced via role page permissions."
+    ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "TAGS": [
+        {"name": "Authentication", "description": "Login, token refresh, logout"},
+        {"name": "Accounts", "description": "Users and system roles"},
+        {"name": "Organization", "description": "Clinics, departments, rooms, configuration"},
+        {"name": "Patients", "description": "Patient registration and demographics"},
+        {"name": "Visits", "description": "Patient visits and workflow"},
+        {"name": "Vitals", "description": "Vital sign recordings"},
+        {"name": "Appointments", "description": "Scheduling and slots"},
+        {"name": "Consultation", "description": "Sessions, queues, diagnoses, referrals"},
+        {"name": "Nursing", "description": "Orders and procedures"},
+        {"name": "Wards", "description": "Wards, beds, admissions"},
+        {"name": "Laboratory", "description": "Lab orders, tests, results"},
+        {"name": "Pharmacy", "description": "Prescriptions, inventory, dispensing"},
+        {"name": "Radiology", "description": "Imaging orders and studies"},
+        {"name": "Permissions", "description": "Roles and user-role assignments"},
+        {"name": "Audit", "description": "Activity and security audit log"},
+        {"name": "Notifications", "description": "User notifications and preferences"},
+        {"name": "HR", "description": "Annual check-up compliance"},
+        {"name": "Physiotherapy", "description": "Physio orders, sessions, templates"},
+        {"name": "Eyecare", "description": "Eye clinic orders and sessions"},
+        {"name": "Reports", "description": "Operational and clinical reports"},
+        {"name": "Dashboard", "description": "Dashboard aggregates and statistics"},
+        {"name": "Common", "description": "Uploads, export, metrics, system health"},
+        {"name": "Analytics", "description": "Module analytics summaries"},
+    ],
+    "ENUM_NAME_OVERRIDES": {
+        "LabTestStatusEnum": "laboratory.models.LabTest.STATUS_CHOICES",
+        "PhysioOrderStatusEnum": "physiotherapy.models.PhysioOrder.STATUS_CHOICES",
+        "PhysioSessionStatusEnum": "physiotherapy.models.PhysioSession.STATUS_CHOICES",
+        "AppointmentStatusEnum": "appointments.models.Appointment.STATUS_CHOICES",
+        "RoomStatusEnum": "organization.models.Room.STATUS_CHOICES",
+        "LabOrderPriorityEnum": "laboratory.models.LabOrder.PRIORITY_CHOICES",
+        "NotificationPriorityEnum": "notifications.models.Notification.PRIORITY_CHOICES",
+        "NursingOrderPriorityEnum": "nursing.models.NursingOrder.PRIORITY_CHOICES",
+        "RadiologyReportPriorityEnum": "radiology.models.RadiologyReport.PRIORITY_CHOICES",
+        "PatientCategoryEnum": "patients.models.Patient.CATEGORY_CHOICES",
+    },
 }
 
 
@@ -396,6 +444,41 @@ CELERY_TIMEZONE = os.getenv("TIME_ZONE", "UTC")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+
+CELERY_BEAT_SCHEDULE = {
+    "annual_checkup_reminders_daily": {
+        "task": "hr.tasks.send_annual_checkup_reminders_task",
+        "schedule": 60 * 60 * 24,  # daily
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Cache (Redis) — dashboard stats, metrics snapshots
+# ---------------------------------------------------------------------------
+
+def _cache_redis_url(db_index: str = "1") -> str:
+    password = (REDIS_PASSWORD or "").strip()
+    if password:
+        safe_pw = quote(password, safe="")
+        return f"redis://:{safe_pw}@{REDIS_HOST}:{REDIS_PORT}/{db_index}"
+    return f"redis://{REDIS_HOST}:{REDIS_PORT}/{db_index}"
+
+
+if DJANGO_ENV == "local" and not USE_REDIS_CHANNEL_LAYER:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "emr-default",
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.getenv("CACHE_REDIS_URL", _cache_redis_url("1")),
+        }
+    }
 
 
 # ---------------------------------------------------------------------------

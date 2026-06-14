@@ -16,22 +16,11 @@ export const LAB_ORDER_STATUS = {
   COMPLETED: 'Completed',
 } as const;
 
+import { toApiDateString } from "@/lib/dates";
+
 export type DateQuery = { date?: string; start_date?: string; end_date?: string };
 
-/**
- * Format a Date as `YYYY-MM-DD` in the **local** timezone.
- *
- * NOTE: Do not use `toISOString()` for this — it converts to UTC first, which
- * silently shifts the date by a day for any user in a non-UTC timezone (e.g.
- * a Lagos user clicking "Today" just after local midnight would ask the
- * backend for yesterday's UTC date and miss everything created today).
- */
-export const formatLocalYmd = (d: Date): string => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-};
+export { toApiDateString as formatLocalYmd } from "@/lib/dates";
 
 /**
  * Build the `date` / `start_date` / `end_date` query params for list/stats
@@ -54,18 +43,18 @@ export const buildDateQuery = (dateFilter: string, todayIso?: string): DateQuery
         return d;
       })();
 
-  const anchorYmd = todayIso ?? formatLocalYmd(anchor);
+  const anchorYmd = todayIso ?? toApiDateString(anchor);
 
   if (dateFilter === 'today') return { date: anchorYmd };
   if (dateFilter === 'week') {
     const weekAgo = new Date(anchor);
     weekAgo.setDate(weekAgo.getDate() - 7);
-    return { start_date: formatLocalYmd(weekAgo), end_date: anchorYmd };
+    return { start_date: toApiDateString(weekAgo), end_date: anchorYmd };
   }
   if (dateFilter === 'month') {
     const monthAgo = new Date(anchor);
     monthAgo.setMonth(monthAgo.getMonth() - 1);
-    return { start_date: formatLocalYmd(monthAgo), end_date: anchorYmd };
+    return { start_date: toApiDateString(monthAgo), end_date: anchorYmd };
   }
   return {};
 };

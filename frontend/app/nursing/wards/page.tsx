@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import Link from 'next/link';
+import { formatDisplayDateMedium, formatDisplayDateTime, localWeekToTodayBounds } from '@/lib/dates';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -159,7 +161,7 @@ export default function WardCarePage() {
     if (nurseDirectory.length || nurseDirectoryLoading) return;
     setNurseDirectoryLoading(true);
     try {
-      const res = await adminService.getUsers({ is_active: true, page_size: 200 });
+      const res = await adminService.getUsers({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
       const filtered = (res.results || []).filter((u) => {
         const role = (u.system_role || '').toLowerCase();
         return NURSE_ROLE_HINTS.some((hint) => role.includes(hint));
@@ -202,9 +204,8 @@ export default function WardCarePage() {
     }
     if (dateFilter === 'today') return { admission_date: todayYmd };
     if (dateFilter === 'week') {
-      const start = new Date(today);
-      start.setDate(today.getDate() - today.getDay());
-      return { admission_date_after: formatLocalYmd(start), admission_date_before: todayYmd };
+      const { start, end } = localWeekToTodayBounds(serverToday || undefined);
+      return { admission_date_after: start, admission_date_before: end };
     }
     if (dateFilter === 'month') {
       const start = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -217,7 +218,7 @@ export default function WardCarePage() {
     setIsLoading(true);
 
     try {
-      const wardsResponse = await wardService.getWards({ page_size: 200 });
+      const wardsResponse = await wardService.getWards({ page_size: MAX_LIST_PAGE_SIZE });
       setWards(wardsResponse.results || []);
     } catch (error: unknown) {
       console.error('Error fetching wards:', error);
@@ -229,19 +230,14 @@ export default function WardCarePage() {
 
     const kpiBase = {
       ...dateParams,
-      page: 1,
-      page_size: 1,
       ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
       ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
     };
 
     try {
-      const [admittedRes, pendingRes] = await Promise.all([
-        wardService.getAdmissions({ ...kpiBase, status: 'admitted' }),
-        wardService.getAdmissions({ ...kpiBase, status: 'pending_discharge' }),
-      ]);
-      setKpiAdmittedTotal(admittedRes.count ?? 0);
-      setKpiPendingDischargeTotal(pendingRes.count ?? 0);
+      const stats = await wardService.getAdmissionListStats(kpiBase);
+      setKpiAdmittedTotal(stats.admitted ?? 0);
+      setKpiPendingDischargeTotal(stats.pending_discharge ?? 0);
     } catch (error: unknown) {
       console.error('Error fetching admission KPI counts:', error);
       setKpiAdmittedTotal(0);
@@ -475,7 +471,7 @@ export default function WardCarePage() {
       // / reserved beds (disabled, with a status pill) instead of pretending a
       // ward with only one bed has "no available beds". Wards rarely have more
       // than 50 beds, so 200 is a safe ceiling.
-      const bedsResponse = await wardService.getBeds({ ward: admission.ward, page_size: 200 });
+      const bedsResponse = await wardService.getBeds({ ward: admission.ward, page_size: MAX_LIST_PAGE_SIZE });
       const sorted = (bedsResponse.results || []).slice().sort((a, b) => {
         const an = parseInt(a.bed_number, 10);
         const bn = parseInt(b.bed_number, 10);
@@ -1140,7 +1136,7 @@ export default function WardCarePage() {
                       {pendingEscorts.slice(0, 6).map((esc) => {
                         const facility = esc.facility_name_snapshot || esc.facility_name || '—';
                         const departed = esc.departure_at
-                          ? new Date(esc.departure_at).toLocaleString()
+                          ? formatDisplayDateTime(esc.departure_at)
                           : '—';
                         return (
                           <div
@@ -1324,9 +1320,7 @@ export default function WardCarePage() {
                                 }
                                 <span>•</span>
                                 <span>
-                                  {new Date(admission.admission_date).toLocaleDateString('en-GB', {
-                                    day: 'numeric', month: 'short', year: 'numeric',
-                                  })}
+                                  {formatDisplayDateMedium(admission.admission_date)}
                                 </span>
                                 <span>•</span>
                                 <span>
@@ -1465,9 +1459,7 @@ export default function WardCarePage() {
                       <div>
                         <Label className="text-muted-foreground text-xs">Admission date</Label>
                         <p className="font-medium text-sm mt-0.5">
-                          {new Date(selectedAdmission.admission_date).toLocaleDateString('en-GB', {
-                            day: 'numeric', month: 'short', year: 'numeric',
-                          })}
+                          {formatDisplayDateMedium(selectedAdmission.admission_date)}
                         </p>
                       </div>
                       <div>
@@ -1521,7 +1513,7 @@ export default function WardCarePage() {
                               <p className="text-xs text-muted-foreground capitalize">
                                 {assignment.assignment_type}
                                 {assignment.assigned_at && (
-                                  <> · since {new Date(assignment.assigned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</>
+                                  <> · since {formatDisplayDateMedium(assignment.assigned_at)}</>
                                 )}
                               </p>
                             </div>
@@ -1733,9 +1725,7 @@ export default function WardCarePage() {
             !!observationData.pulse.trim() ||
             !!observationData.spo2.trim();
 
-          const recordedAtLabel = new Date().toLocaleString('en-GB', {
-            hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short',
-          });
+          const recordedAtLabel = formatDisplayDateTime(new Date());
 
           const warnText = (kind: 'low' | 'high' | null, lowLabel: string, highLabel: string) =>
             kind === 'low' ? lowLabel : kind === 'high' ? highLabel : null;

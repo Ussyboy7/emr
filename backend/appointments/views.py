@@ -13,6 +13,8 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 
 from common.mixins import ClinicScopedMixin
+from common.openapi import document_viewset
+from drf_spectacular.utils import extend_schema
 from .models import Appointment, AppointmentSlot
 from .serializers import AppointmentSerializer, AppointmentSlotSerializer
 from .filters import AppointmentFilter
@@ -21,11 +23,11 @@ from notifications.services import NotificationService
 logger = logging.getLogger(__name__)
 
 
+@document_viewset(tag="Appointments", resource="appointments")
 class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing appointments."""
     
     clinic_filter_field = 'clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = AppointmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = AppointmentFilter
@@ -41,6 +43,9 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['appointment_date', 'appointment_time']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Appointment.objects.none()
+        
         return self.scope_queryset(
             Appointment.objects.all().select_related('patient', 'doctor', 'clinic', 'room', 'created_by')
         )
@@ -64,6 +69,7 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             except Exception:
                 logger.exception("Failed to create appointment notification (appointment already saved)")
     
+    @extend_schema(tags=["Appointments"], summary="Confirm appointment")
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
         """Confirm an appointment."""
@@ -72,6 +78,7 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         appointment.save()
         return Response(AppointmentSerializer(appointment).data)
     
+    @extend_schema(tags=["Appointments"], summary="Cancel appointment")
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         """Cancel an appointment."""
@@ -80,6 +87,7 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         appointment.save()
         return Response(AppointmentSerializer(appointment).data)
     
+    @extend_schema(tags=["Appointments"], summary="List upcoming appointments")
     @action(detail=False, methods=['get'])
     def upcoming(self, request):
         """Get upcoming appointments."""
@@ -91,6 +99,7 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = AppointmentSerializer(appointments, many=True)
         return Response(serializer.data)
     
+    @extend_schema(tags=["Appointments"], summary="List today's appointments")
     @action(detail=False, methods=['get'])
     def today(self, request):
         """Get today's appointments."""
@@ -99,12 +108,31 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = AppointmentSerializer(appointments, many=True)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Appointments"], summary="Appointment list tab counts")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Tab counts for appointments list (replaces 4 parallel COUNT requests)."""
+        from common.list_stats import aggregate_status_counts, viewset_queryset_excluding_params
 
+        qs = viewset_queryset_excluding_params(self, frozenset({'status', 'page', 'page_size', 'ordering'}))
+        return Response(
+            aggregate_status_counts(
+                qs,
+                'status',
+                {
+                    'scheduled': 'scheduled',
+                    'confirmed': 'confirmed',
+                    'inProgress': 'in_progress',
+                },
+            )
+        )
+
+
+@document_viewset(tag="Appointments", resource="appointment slots")
 class AppointmentSlotViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing appointment slots."""
     
     clinic_filter_field = 'clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = AppointmentSlotSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['doctor', 'clinic', 'day_of_week', 'is_available']
@@ -112,6 +140,9 @@ class AppointmentSlotViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['day_of_week', 'start_time']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return AppointmentSlot.objects.none()
+        
         return self.scope_queryset(
             AppointmentSlot.objects.all().select_related('doctor', 'clinic', 'room')
         )

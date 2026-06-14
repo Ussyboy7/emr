@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.openapi import document_api_view
 from physiotherapy.models import PhysioOrder, PhysioSession
 
 
@@ -51,14 +52,13 @@ def _filter_orders_by_search(qs, search: str):
     ).distinct()
 
 
+@document_api_view(tag="Physiotherapy", summary="Cross-workflow physiotherapy patient tracker")
 class PhysiotherapyPatientTrackerView(APIView):
     """
     GET /patient-tracker/?search=...
 
     Returns physiotherapy orders/sessions with screen/tab hints for the frontend.
     """
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         search = (request.query_params.get('search') or '').strip()

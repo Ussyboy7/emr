@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { patientService } from '@/lib/services/patient-service';
+import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { 
   UserPlus, User, Phone, Heart, Users, Send, ArrowLeft, ArrowRight, 
   Briefcase, MapPin, Upload, Camera, FileText, Save, Trash2, 
@@ -325,7 +326,7 @@ export default function NewPatientPage() {
       let foundPatient: any = null;
       let numericId: number | null = null;
 
-      const searchResult = await patientService.getPatients({ search: trimmedId, page_size: 50 }).catch(() => ({ results: [] }));
+      const searchResult = await patientService.getPatients({ search: trimmedId, page_size: DEFAULT_LIST_PAGE_SIZE }).catch(() => ({ results: [] }));
       const results = searchResult.results || [];
 
       const matchPrincipal = (p: any) =>
@@ -561,7 +562,7 @@ export default function NewPatientPage() {
       if (patientCategory === 'dependent') {
         // Resolve principal via personal_number on an employee or retiree record.
         const principalIdStr = formData.principalStaffId.trim();
-        const searchResult = await patientService.getPatients({ search: principalIdStr }).catch(() => ({ results: [] }));
+        const searchResult = await patientService.getPatients({ search: principalIdStr, page_size: DEFAULT_LIST_PAGE_SIZE }).catch(() => ({ results: [] }));
         const principalMatches = searchResult.results || [];
         let matchedPrincipal = principalMatches.find(
           p => p.personal_number === principalIdStr

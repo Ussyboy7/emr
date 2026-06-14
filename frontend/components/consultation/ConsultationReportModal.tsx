@@ -22,13 +22,17 @@ import {
   Pill,
   Activity,
   Loader2,
+  ClipboardCheck,
 } from "lucide-react";
+import { AnnualCheckupPanel } from "@/components/consultation/AnnualCheckupPanel";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   reportFormatters,
   type ConsultationReportSession,
 } from "@/lib/consultation-report";
 import { getOrganizationServicesHeader } from "@/lib/constants/organization";
 import { toast } from "sonner";
+import { annualCheckupService } from "@/lib/services/annual-checkup-service";
 
 const { formatDate, formatTime, formatPriority, vitalLabel, formatVitalDisplay } = reportFormatters;
 
@@ -52,11 +56,20 @@ async function openReportPrint(session: ConsultationReportSession) {
 async function openReportDownload(session: ConsultationReportSession) {
   toast.loading('Generating PDF...', { id: 'report-download' });
   try {
+    if (session.visit_type === 'annual_checkup' && session.annual_checkup_id) {
+      const blob = await annualCheckupService.fetchReportPdf(session.annual_checkup_id);
+      annualCheckupService.downloadBlob(
+        blob,
+        `annual_checkup_${session.patient_id ?? 'patient'}_${session.started_at?.slice(0, 4) ?? 'report'}.pdf`
+      );
+      toast.success('Report downloaded successfully', { id: 'report-download' });
+      return;
+    }
     const { downloadConsultationPdf } = await import('@/lib/consultation/reportPdf');
     await downloadConsultationPdf(session.id, String(session.id));
     toast.success('Report downloaded successfully', { id: 'report-download' });
   } catch {
-    toast.error('Unable to download consultation report', { id: 'report-download' });
+    toast.error('Unable to download report', { id: 'report-download' });
   }
 }
 
@@ -66,13 +79,20 @@ export function ConsultationReportModal({
   session,
   loading = false,
 }: ConsultationReportModalProps) {
+  const { currentUser } = useCurrentUser();
+  const isAnnualReport = session?.visit_type === 'annual_checkup';
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={MODAL_SIZES.xl}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-blue-500" />
-            Consultation Report
+            {isAnnualReport ? (
+              <ClipboardCheck className="h-5 w-5 text-amber-500" />
+            ) : (
+              <FileText className="h-5 w-5 text-blue-500" />
+            )}
+            {isAnnualReport ? 'Annual Check-up Report' : 'Consultation Report'}
           </DialogTitle>
           <DialogDescription>
             {session ? `${formatDate(session.started_at)} • ${formatTime(session.started_at)} • ${session.room_name ?? ''}` : ''}
@@ -82,12 +102,14 @@ export function ConsultationReportModal({
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="ml-2 text-muted-foreground">Loading consultation report...</span>
+            <span className="ml-2 text-muted-foreground">Loading report...</span>
           </div>
         ) : session ? (
           <div className="space-y-6 py-4">
             <div className="text-center p-4 border-b">
-              <h2 className="text-xl font-bold">CONSULTATION REPORT</h2>
+              <h2 className="text-xl font-bold">
+                {isAnnualReport ? 'ANNUAL CHECK-UP REPORT' : 'CONSULTATION REPORT'}
+              </h2>
               <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
             </div>
 
@@ -378,6 +400,21 @@ export function ConsultationReportModal({
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {/* Annual employee check-up */}
+            {session.visit_type === 'annual_checkup' && session.visit && (
+              <div>
+                <h3 className="font-semibold mb-3 flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                  <ClipboardCheck className="h-4 w-4" />
+                  ANNUAL CHECK-UP
+                </h3>
+                <AnnualCheckupPanel
+                  visitId={session.visit}
+                  systemRole={currentUser?.systemRole}
+                  readOnly
+                />
               </div>
             )}
 

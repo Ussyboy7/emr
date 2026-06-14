@@ -110,7 +110,7 @@ export default function NursingDashboardPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="bg-white text-rose-600 hover:bg-rose-50 shadow-md"
-                  onClick={() => router.push("/nursing/patient-vitals")}
+                  onClick={() => router.push("/nursing/pool-queue")}
                 >
                   <Activity className="h-4 w-4 mr-2" />
                   Record Vitals
@@ -220,7 +220,7 @@ export default function NursingDashboardPage() {
                         </p>
                       </div>
                       <Button asChild size="sm" variant="outline">
-                        <Link href="/nursing/patient-vitals">Record</Link>
+                        <Link href="/nursing/pool-queue">Record</Link>
                       </Button>
                     </div>
                   </CardContent>
@@ -253,13 +253,13 @@ export default function NursingDashboardPage() {
               <span className="text-[10px] sm:text-xs opacity-90">Patient assignments</span>
             </Button>
             <Button
-              onClick={() => router.push("/nursing/patient-vitals")}
+              onClick={() => router.push("/nursing/vitals-history")}
               variant="outline"
               className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-rose-500"
             >
               <Thermometer className="h-5 w-5 sm:h-6 sm:w-6 text-rose-500 dark:text-rose-400" />
-              <span className="text-xs sm:text-sm font-medium">Record Vitals</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Patient monitoring</span>
+              <span className="text-xs sm:text-sm font-medium">Vitals History</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">View recorded vitals</span>
             </Button>
             <Button
               onClick={() => router.push("/nursing/procedures")}
@@ -429,7 +429,7 @@ export default function NursingDashboardPage() {
                     variant="ghost"
                     size="sm"
                     className="w-full text-rose-600"
-                    onClick={() => router.push("/nursing/patient-vitals")}
+                    onClick={() => router.push("/nursing/vitals-history")}
                   >
                     View vitals history
                   </Button>

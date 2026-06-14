@@ -20,6 +20,7 @@ import {
   Layers, XCircle, TrendingUp, Hash, Clock, Loader2
 } from 'lucide-react';
 
+import { toApiDateFromInstant } from '@/lib/dates';
 import { MEDICATION_CATEGORIES } from '@/lib/constants/pharmacy';
 
 // Batch interface
@@ -85,25 +86,22 @@ export default function InventoryPage() {
 
   const loadStats = useCallback(async () => {
     try {
-      const base = { location, page: 1, page_size: 1 } as const;
-      const [totalRes, outRes, lowRes, nearRes, expiredRes] = await Promise.all([
-        pharmacyService.getInventory({ ...base }),
-        pharmacyService.getInventory({ ...base, stock_status: 'out' }),
-        pharmacyService.getInventory({ ...base, stock_status: 'low' }),
-        pharmacyService.getInventory({ ...base, stock_status: 'near_expiry' }),
-        pharmacyService.getInventory({ ...base, stock_status: 'expired' }),
-      ]);
+      const s = await pharmacyService.getInventoryStats({
+        location,
+        medication__category: categoryFilter !== 'All Categories' ? categoryFilter : undefined,
+        search: debouncedSearch.trim() || undefined,
+      });
       setStats({
-        total: totalRes.count ?? 0,
-        outOfStock: outRes.count ?? 0,
-        lowStock: lowRes.count ?? 0,
-        nearExpiry: nearRes.count ?? 0,
-        expired: expiredRes.count ?? 0,
+        total: s.total ?? 0,
+        outOfStock: s.out_of_stock ?? 0,
+        lowStock: s.low_stock ?? 0,
+        nearExpiry: s.expiring_soon ?? 0,
+        expired: s.expired ?? 0,
       });
     } catch (err) {
       console.error('Error loading dispensary inventory stats:', err);
     }
-  }, [location]);
+  }, [location, categoryFilter, debouncedSearch]);
 
   useEffect(() => {
     void loadStats();
@@ -169,7 +167,7 @@ export default function InventoryPage() {
         manufacturer: medication.manufacturer || '', // Get from backend
         currentStock: Number(item.quantity),
         minimumStock: Number(item.min_stock_level),
-        lastRestocked: (item as any).created_at?.split('T')[0] || (item as any).updated_at?.split('T')[0] || '',
+        lastRestocked: toApiDateFromInstant((item as any).created_at) || toApiDateFromInstant((item as any).updated_at),
         expiryDate: item.expiry_date,
         locationClinicName: item.location_clinic_name || '',
           batches: [{
@@ -177,7 +175,7 @@ export default function InventoryPage() {
             batchNumber: item.batch_number,
             quantity: Number(item.quantity),
             expiryDate: item.expiry_date,
-            receivedDate: (item.source_from_central_store?.issued_at?.split('T')[0]) || (item as any).created_at?.split('T')[0] || '',
+            receivedDate: toApiDateFromInstant(item.source_from_central_store?.issued_at) || toApiDateFromInstant((item as any).created_at),
             supplier: item.supplier || '',
             locationClinicName: item.location_clinic_name || '',
             sourceFromCentralStore: item.source_from_central_store || null,
@@ -599,7 +597,7 @@ export default function InventoryPage() {
                     const sourceLabel =
                       batch.sourceFromCentralStore?.from_location || batch.supplier || '';
                     const requestId = batch.sourceFromCentralStore?.request_id || '';
-                    const issuedDate = batch.sourceFromCentralStore?.issued_at?.split('T')[0] || '';
+                    const issuedDate = toApiDateFromInstant(batch.sourceFromCentralStore?.issued_at);
                     
                     return (
                       <Card key={batch.id} className={`border-l-4 ${

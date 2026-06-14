@@ -1,20 +1,15 @@
 "use client";
 
 import { useMemo } from 'react';
+import { formatDisplayDateMedium, toApiDateFromInstant } from "@/lib/dates";
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Calendar, Clock, Stethoscope, TestTube, ScanLine, Pill, Heart, FileText } from 'lucide-react';
 
 // Helper function to normalize date to YYYY-MM-DD format for consistent grouping
 const normalizeDate = (dateString: string | undefined): string => {
-  if (!dateString) return '';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toISOString().split('T')[0];
-  } catch {
-    return '';
-  }
+  if (!dateString) return "";
+  return toApiDateFromInstant(dateString);
 };
 
 // Helper function to safely parse date
@@ -251,12 +246,7 @@ export function TimelineTab({
               <div className="flex items-center gap-3 sticky top-0 bg-background/95 backdrop-blur-sm z-10 py-2 border-b pb-2">
                 <Calendar className="h-5 w-5 text-muted-foreground" />
                 <h3 className="text-lg font-semibold">
-                  {safeParseDate(date)?.toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                  }) || date}
+                  {formatDisplayDateMedium(date) || date}
                 </h3>
                 <Badge variant="outline" className="ml-auto">
                   {events.length} {events.length === 1 ? 'event' : 'events'}

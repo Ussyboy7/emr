@@ -4,8 +4,11 @@ Views for the Wards app.
 import logging
 
 from django.core.files.base import ContentFile
+from drf_spectacular.utils import extend_schema
 from django.http import HttpResponse
 from django.utils import timezone
+
+from common.date_display import format_display_datetime
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -34,15 +37,16 @@ from .serializers import (
     AdmissionEscortSerializer,
 )
 from common.mixins import ClinicScopedMixin
+from common.openapi import document_viewset
 from organization.models import SystemConfig
 from audit.services import AuditService
 
 
+@document_viewset(tag="Wards", resource="wards")
 class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing wards."""
 
     clinic_filter_field = 'clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = WardSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['ward_type', 'status', 'floor', 'building', 'clinic']
@@ -51,6 +55,9 @@ class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['name']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Ward.objects.none()
+        
         return self.scope_queryset(Ward.objects.all().prefetch_related('beds'))
 
     def perform_create(self, serializer):
@@ -70,6 +77,7 @@ class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @extend_schema(tags=["Wards"], summary="Beds", description="Get all beds in a ward.")
     @action(detail=True, methods=['get'])
     def beds(self, request, pk=None):
         """Get all beds in a ward."""
@@ -78,6 +86,7 @@ class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = BedSerializer(beds, many=True)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Wards"], summary="Occupancy", description="Get ward occupancy information.")
     @action(detail=True, methods=['get'])
     def occupancy(self, request, pk=None):
         """Get ward occupancy information."""
@@ -93,11 +102,11 @@ class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         })
 
 
+@document_viewset(tag="Wards", resource="beds")
 class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing beds."""
 
     clinic_filter_field = 'ward__clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = BedSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['ward', 'bed_type', 'status']
@@ -106,6 +115,9 @@ class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['bed_number']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Bed.objects.none()
+        
         return self.scope_queryset(
             Bed.objects.all().select_related('ward', 'current_patient')
         )
@@ -126,6 +138,7 @@ class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @extend_schema(tags=["Wards"], summary="Assign patient", description="Assign a patient to this bed.")
     @action(detail=True, methods=['post'])
     def assign_patient(self, request, pk=None):
         """Assign a patient to this bed."""
@@ -154,6 +167,7 @@ class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(tags=["Wards"], summary="Discharge patient", description="Discharge patient from this bed.")
     @action(detail=True, methods=['post'])
     def discharge_patient(self, request, pk=None):
         """Discharge patient from this bed."""
@@ -181,11 +195,11 @@ class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@document_viewset(tag="Wards", resource="patient admissions")
 class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing patient admissions."""
 
     clinic_filter_field = 'visit__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = PatientAdmissionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'ward', 'bed', 'status', 'admission_type', 'admitting_doctor']
@@ -194,10 +208,23 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-admission_date']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return PatientAdmission.objects.none()
+        
         qs = PatientAdmission.objects.all().select_related(
-            'patient', 'visit', 'ward', 'bed', 'admitting_doctor',
-            'discharge_doctor', 'confirmed_by_nurse', 'nursing_order',
-            'transfer_to_ward', 'escort__referral', 'escort__facility',
+            'patient',
+            'visit',
+            'visit__location_clinic',
+            'ward',
+            'ward__clinic',
+            'bed',
+            'admitting_doctor',
+            'discharge_doctor',
+            'confirmed_by_nurse',
+            'nursing_order',
+            'transfer_to_ward',
+            'escort__referral',
+            'escort__facility',
             'escort__primary_nurse',
         )
 
@@ -220,7 +247,32 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             if values:
                 qs = qs.filter(status__in=values)
 
+        admission_date = self.request.query_params.get('admission_date')
+        if admission_date:
+            qs = qs.filter(admission_date__date=admission_date)
+        admission_date_after = self.request.query_params.get('admission_date_after')
+        if admission_date_after:
+            qs = qs.filter(admission_date__date__gte=admission_date_after)
+        admission_date_before = self.request.query_params.get('admission_date_before')
+        if admission_date_before:
+            qs = qs.filter(admission_date__date__lte=admission_date_before)
+
         return self.scope_queryset(qs)
+
+    @extend_schema(tags=["Wards"], summary="List stats", description="Admission KPI counts (replaces parallel COUNT requests).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Admission KPI counts (replaces parallel COUNT requests)."""
+        from common.list_stats import viewset_queryset_excluding_params
+
+        qs = viewset_queryset_excluding_params(
+            self, frozenset({'status', 'page', 'page_size', 'ordering'})
+        )
+        return Response({
+            'total': qs.count(),
+            'admitted': qs.filter(status='admitted').count(),
+            'pending_discharge': qs.filter(status='pending_discharge').count(),
+        })
 
     def perform_create(self, serializer):
         admission = serializer.save(created_by=self.request.user)
@@ -242,6 +294,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @extend_schema(tags=["Wards"], summary="Initiate discharge", description="Step 1 of 2-step discharge: doctor fills discharge details and sets")
     @action(detail=True, methods=['post'])
     def initiate_discharge(self, request, pk=None):
         """
@@ -382,6 +435,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(admission)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Wards"], summary="Cancel referral", description="Cancel the external-care referral that was attached during")
     @action(detail=True, methods=['post'])
     def cancel_referral(self, request, pk=None):
         """
@@ -429,7 +483,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         referral.status = 'cancelled'
         referral.closed_at = timezone.now()
         if reason:
-            stamp = timezone.now().strftime('%d %b %Y %H:%M')
+            stamp = format_display_datetime()
             user_label = request.user.get_full_name() or request.user.username
             referral.notes = (
                 (referral.notes or '').rstrip()
@@ -463,6 +517,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(admission)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Wards"], summary="Update referral", description="Update fields on the external-care referral attached during")
     @action(detail=True, methods=['post'])
     def update_referral(self, request, pk=None):
         """
@@ -620,6 +675,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(admission)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Wards"], summary="Discharge", description="Step 2 of 2-step discharge (nurse confirms) OR direct one-step discharge.")
     @action(detail=True, methods=['post'])
     def discharge(self, request, pk=None):
         """
@@ -729,6 +785,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     # window the cached snapshot locks as the audit copy.
     SUMMARY_PDF_LIVE_GRACE_DAYS = 7
 
+    @extend_schema(tags=["Wards"], summary="Summary pdf", description="Return the Ward Admission Summary PDF for this admission.")
     @action(detail=True, methods=['get'])
     def summary_pdf(self, request, pk=None):
         """
@@ -821,6 +878,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Wards"], summary="Discharge slip pdf", description="Return the patient-facing one-page Discharge Slip PDF.")
     @action(detail=True, methods=['get'])
     def discharge_slip_pdf(self, request, pk=None):
         """
@@ -856,6 +914,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Wards"], summary="Referral letter pdf", description="Return a formal Referral Letter PDF for the receiving facility.")
     @action(detail=True, methods=['get'])
     def referral_letter_pdf(self, request, pk=None):
         """
@@ -899,6 +958,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Wards"], summary="Responsibility form pdf", description="Return a Patient / Guardian Responsibility Form PDF.")
     @action(detail=True, methods=['get'])
     def responsibility_form_pdf(self, request, pk=None):
         """
@@ -950,6 +1010,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Wards"], summary="Assign bed", description="Assign or change a bed for an admitted patient.")
     @action(detail=True, methods=['post'])
     def assign_bed(self, request, pk=None):
         """Assign or change a bed for an admitted patient."""
@@ -1020,6 +1081,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(tags=["Wards"], summary="Transfer", description="Transfer patient to another ward.")
     @action(detail=True, methods=['post'])
     def transfer(self, request, pk=None):
         """Transfer patient to another ward."""
@@ -1062,11 +1124,11 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@document_viewset(tag="Wards", resource="ward assignments")
 class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing ward assignments."""
 
     clinic_filter_field = 'admission__visit__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = WardAssignmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['admission', 'nurse', 'assignment_type', 'status']
@@ -1075,6 +1137,9 @@ class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-assigned_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return WardAssignment.objects.none()
+        
         return self.scope_queryset(
             WardAssignment.objects.all().select_related('admission__patient', 'admission__ward', 'nurse', 'assigned_by')
         )
@@ -1099,6 +1164,7 @@ class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @extend_schema(tags=["Wards"], summary="Complete", description="Mark assignment as completed.")
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         """Mark assignment as completed."""
@@ -1165,17 +1231,20 @@ class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response({'results': data, 'count': len(data)})
 
 
+@document_viewset(tag="Wards", resource="admission observation vitals")
 class AdmissionObservationVitalViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Continuous observation vitals for a ward admission (filter: ?admission=)."""
 
     clinic_filter_field = 'admission__visit__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = AdmissionObservationVitalSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ["admission"]
     ordering = ["-recorded_at"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return AdmissionObservationVital.objects.none()
+        
         return self.scope_queryset(
             AdmissionObservationVital.objects.select_related("admission", "recorded_by")
         )
@@ -1184,6 +1253,7 @@ class AdmissionObservationVitalViewSet(ClinicScopedMixin, viewsets.ModelViewSet)
         serializer.save(recorded_by=self.request.user)
 
 
+@document_viewset(tag="Wards", resource="admission escorts")
 class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Escort assignments for ward admissions.
 
@@ -1194,7 +1264,6 @@ class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
 
     clinic_filter_field = 'admission__visit__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = AdmissionEscortSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['admission', 'facility', 'referral']
@@ -1202,6 +1271,9 @@ class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return AdmissionEscort.objects.none()
+        
         qs = AdmissionEscort.objects.select_related(
             'admission__patient',
             'admission__ward',
@@ -1221,6 +1293,7 @@ class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    @extend_schema(tags=["Wards"], summary="Confirm arrival", description="Nurse calls/visits the receiving facility and records handover.")
     @action(detail=True, methods=['post'])
     def confirm_arrival(self, request, pk=None):
         """Nurse calls/visits the receiving facility and records handover."""
@@ -1300,17 +1373,20 @@ class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+@document_viewset(tag="Wards", resource="admission treatment rows")
 class AdmissionTreatmentRowViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Treatment sheet rows for a ward admission (filter: ?admission=)."""
 
     clinic_filter_field = 'admission__visit__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = AdmissionTreatmentRowSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ["admission"]
     ordering = ["-created_at"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return AdmissionTreatmentRow.objects.none()
+        
         return self.scope_queryset(
             AdmissionTreatmentRow.objects.select_related("admission", "recorded_by")
         )

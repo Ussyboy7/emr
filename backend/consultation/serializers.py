@@ -2,10 +2,13 @@
 Serializers for the Consultation app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from .models import (
     ConsultationRoom,
     ConsultationSession,
     ConsultationQueue,
+    consultation_queue_priority_for_visit,
     Referral,
     ReferralFacility,
     ResponsibilityFormIssuance,
@@ -54,10 +57,12 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at', 'queue_count', 'active_session', 'clinic_name']
     
+    @extend_schema_field(OpenApiTypes.INT)
     def get_queue_count(self, obj):
         """Get count of active queue items for this room."""
         return obj.queue_items.filter(is_active=True).count()
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_active_session(self, obj):
         """Get active session for this room if any."""
         active_session = obj.sessions.filter(status='active').first()
@@ -85,26 +90,27 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
     location_clinic_name = serializers.SerializerMethodField()
     active_duration_seconds = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj.room, 'clinic', None) if obj.room else None
-        if clinic:
-            return clinic.name
-        if obj.location_clinic_id:
-            return obj.location_clinic.name
-        return None
+        from common.order_location import location_clinic_name
+
+        return location_clinic_name(obj)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
         v = getattr(instance, 'visit', None)
         data['visit_clinics'] = (getattr(v, 'clinics', None) or []) if v else []
+        data['visit_type'] = getattr(v, 'visit_type', None) if v else None
         return data
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_gender(self, obj):
         p = getattr(obj, 'patient', None)
         if not p or not p.gender:
             return ''
         return p.get_gender_display()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_active_duration_seconds(self, obj):
         if hasattr(obj, 'get_active_duration_seconds'):
             return obj.get_active_duration_seconds()
@@ -140,24 +146,28 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     visit_completed_clinics = serializers.SerializerMethodField()  # Completed clinics
     latest_vitals = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_gender(self, obj):
         p = getattr(obj, 'patient', None)
         if not p or not p.gender:
             return ''
         return p.get_gender_display()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_visit_clinics(self, obj):
         """Get all clinics for this visit."""
         if not obj.visit:
             return []
         return getattr(obj.visit, 'clinics', []) or []
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_visit_completed_clinics(self, obj):
         """Get completed clinics for this visit."""
         if not obj.visit:
             return []
         return getattr(obj.visit, 'completed_clinics', []) or []
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_latest_vitals(self, obj):
         visit = getattr(obj, 'visit', None)
         if not visit:
@@ -169,6 +179,14 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
 
         latest = max(vitals, key=lambda v: v.recorded_at or v.created_at)
         return VitalReadingSerializer(latest).data
+
+    def validate(self, attrs):
+        """Derive queue priority from visit type; ignore client-supplied tier values."""
+        visit = attrs.get('visit')
+        if visit is None and self.instance is not None:
+            visit = self.instance.visit
+        attrs['priority'] = consultation_queue_priority_for_visit(visit)
+        return attrs
 
     class Meta:
         model = ConsultationQueue
@@ -244,14 +262,17 @@ class ReferralSerializer(serializers.ModelSerializer):
     referred_by_name = serializers.CharField(source='referred_by.get_full_name', read_only=True, allow_null=True)
     referral_letter_acknowledged_by_name = serializers.SerializerMethodField()
     responsibility_forms_count = serializers.IntegerField(source='responsibility_forms.count', read_only=True)
+    unstamped_responsibility_forms_count = serializers.SerializerMethodField()
     latest_responsibility_form = serializers.SerializerMethodField()
     facility_partner_detail = ReferralFacilityMiniSerializer(source='facility_partner', read_only=True)
     location_clinic_name = serializers.SerializerMethodField()
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
+        from common.order_location import location_clinic_name
+
         if obj.session_id:
-            clinic = getattr(obj.session, 'location_clinic', None) or getattr(getattr(obj.session, 'room', None), 'clinic', None)
-            return clinic.name if clinic else None
+            return location_clinic_name(obj.session)
         return None
 
     class Meta:
@@ -259,6 +280,7 @@ class ReferralSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['referral_id', 'referred_at', 'created_at']
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_referral_letter_acknowledged_by_name(self, obj):
         u = getattr(obj, 'referral_letter_acknowledged_by', None)
         if u is not None and hasattr(u, 'get_full_name'):
@@ -300,6 +322,11 @@ class ReferralSerializer(serializers.ModelSerializer):
                 return (principal.division or '').strip()
         return ''
 
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_unstamped_responsibility_forms_count(self, obj):
+        return obj.responsibility_forms.filter(records_acknowledged_at__isnull=True).count()
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_latest_responsibility_form(self, obj):
         latest = obj.responsibility_forms.order_by('-issue_date').first()
         if not latest:
@@ -336,12 +363,14 @@ class ResponsibilityFormIssuanceSerializer(serializers.ModelSerializer):
             'records_acknowledged_by',
         ]
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_records_acknowledged_by_name(self, obj):
         u = getattr(obj, 'records_acknowledged_by', None)
         if u is not None and hasattr(u, 'get_full_name'):
             return u.get_full_name()
         return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_document_file_url(self, obj):
         return obj.document_file.url if obj.document_file else None
 
@@ -366,6 +395,7 @@ class DiagnosisSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['diagnosed_at']
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_icd10_code_details(self, obj):
         """Get full ICD-10 code details."""
         if obj.icd10_code:
@@ -398,6 +428,7 @@ class PresentingComplaintCategorySerializer(serializers.ModelSerializer):
         model = PresentingComplaintCategory
         fields = '__all__'
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_complaints(self, obj):
         include_complaints = bool(self.context.get('include_complaints'))
         if not include_complaints:

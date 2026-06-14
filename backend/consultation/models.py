@@ -222,24 +222,32 @@ class PresentingComplaint(models.Model):
         return self.label
 
 
+def consultation_queue_priority_for_visit(visit) -> int:
+    """
+    Priority tier for consultation queue ordering.
+    0 = emergency (jumps ahead); 1 = normal FIFO tier (all other visit types).
+    """
+    if visit is not None and getattr(visit, 'visit_type', None) == 'emergency':
+        return 0
+    return 1
+
+
 class ConsultationQueue(models.Model):
     """
     Patient queue for consultation rooms.
     
-    NOTE: Priority is automatically derived from the visit's visit_type when adding to queue.
-    Users do NOT manually select priority - it's calculated from:
-    - emergency -> 0 (highest)
-    - follow_up -> 1
-    - consultation -> 2
-    - routine -> 3 (lowest)
-    
-    This ensures consistent queue ordering based on visit urgency.
+    Queue ordering: emergency patients first (priority 0), then FIFO by queued_at
+    for all other visit types (priority 1). Visit type labels (follow-up, consultation,
+    etc.) are shown in the UI; they do not change queue position except for emergency.
     """
     
     room = models.ForeignKey(ConsultationRoom, on_delete=models.CASCADE, related_name='queue_items')
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='queue_items')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='queue_items')
-    priority = models.IntegerField(default=0, help_text="Lower number = higher priority. Automatically set from visit_type.")
+    priority = models.IntegerField(
+        default=1,
+        help_text="0 = emergency (jumps queue); 1 = normal tier (FIFO by queued_at).",
+    )
     notes = models.TextField(blank=True)
     queued_at = models.DateTimeField(auto_now_add=True)
     called_at = models.DateTimeField(null=True, blank=True)

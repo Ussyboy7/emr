@@ -22,6 +22,7 @@ import {
   type AdmissionTreatmentRow,
 } from '@/lib/services/ward-service';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 
 // Strips honorifics (Dr, Prof, Mr/Mrs/Ms/Miss) then takes the first letter of
 // each remaining word. Caps at 4 characters so a name like "Mary Jane Smith"
@@ -72,11 +73,10 @@ const dayLabel = (d: Date) => {
   yesterday.setDate(yesterday.getDate() - 1);
   if (isSameDay(d, today)) return 'Today';
   if (isSameDay(d, yesterday)) return 'Yesterday';
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return formatDisplayDateMedium(d);
 };
 
-const timeLabel = (d: Date) =>
-  d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+const timeLabel = (d: Date) => formatDisplayTime(d);
 
 export function ObservationChartDialog({ open, onOpenChange, admission }: Props) {
   const { currentUser } = useCurrentUser();

@@ -1,13 +1,10 @@
 from .settings import *
+import os
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+DATABASES["default"]["TEST"] = {
+    "NAME": os.getenv("TEST_DB_NAME", "test_emr_db"),
 }
 
-# Disable Redis for tests
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels.layers.InMemoryChannelLayer",

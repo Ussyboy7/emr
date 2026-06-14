@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   Dialog,
   DialogContent,
@@ -22,20 +23,12 @@ import {
   refillLineKey,
   type RefillLineKey,
 } from "@/lib/consultation/prescription-refill";
+import { formatDisplayDateMedium } from "@/lib/dates";
 import type { PrescriptionOrderItemInput } from "./PrescriptionOrderModal";
 
 function formatRxDate(rx: Prescription): string {
   const raw = rx.dispensed_at || rx.prescribed_at || rx.date;
-  if (!raw) return "—";
-  try {
-    return new Date(raw).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return String(raw);
-  }
+  return formatDisplayDateMedium(raw);
 }
 
 function statusLabel(status: Prescription["status"]): string {
@@ -44,6 +37,12 @@ function statusLabel(status: Prescription["status"]): string {
       return "Dispensed";
     case "partially_dispensed":
       return "Partially dispensed";
+    case "dispensing":
+      return "Dispensing";
+    case "pending":
+      return "Pending";
+    case "cancelled":
+      return "Cancelled";
     default:
       return status;
   }
@@ -75,7 +74,7 @@ export function PrescriptionRefillDialog({
     try {
       const res = await pharmacyService.getPrescriptions({
         patient: String(patientId),
-        page_size: 100,
+        page_size: MAX_LIST_PAGE_SIZE,
       });
       const refillable = getRefillablePrescriptions(res.results || []);
       setPrescriptions(refillable);
@@ -148,7 +147,7 @@ export function PrescriptionRefillDialog({
 
   const handleContinue = () => {
     if (selectedItems.length === 0) {
-      toast.error("Select at least one dispensed medication line");
+      toast.error("Select at least one medication line");
       return;
     }
     onContinue(selectedItems);
@@ -164,8 +163,8 @@ export function PrescriptionRefillDialog({
             Refill from previous prescriptions
           </DialogTitle>
           <DialogDescription>
-            Choose medications from past dispensed (or partially dispensed) orders. You can review and
-            edit them before they are added as drafts in this visit.
+            Choose medications from previous prescriptions — dispensed or still in the pharmacy queue.
+            You can review and edit them before they are added as drafts in this visit.
           </DialogDescription>
         </DialogHeader>
 
@@ -194,8 +193,7 @@ export function PrescriptionRefillDialog({
           </div>
         ) : prescriptions.length === 0 ? (
           <div className="py-10 text-center text-muted-foreground text-sm">
-            No dispensed prescriptions found for this patient. Refill is available after pharmacy has
-            dispensed at least one order.
+            No previous prescriptions found for this patient.
           </div>
         ) : (
           <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
@@ -260,7 +258,7 @@ export function PrescriptionRefillDialog({
                       </div>
                       {lines.length === 0 ? (
                         <p className="text-xs text-muted-foreground py-2">
-                          No refillable lines (missing generic or not yet dispensed).
+                          No refillable lines (missing generic, superseded, or record-only).
                         </p>
                       ) : (
                         lines.map((line) => {

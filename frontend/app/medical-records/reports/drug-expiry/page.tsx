@@ -7,19 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Download,
-  FileSpreadsheet,
   RefreshCw,
   ArrowLeft,
-  Printer,
   Pill,
   AlertTriangle,
   AlertOctagon,
   Calendar,
   Package,
+  TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 
 interface ExpiryItem {
@@ -91,35 +90,6 @@ export default function DrugExpiryReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const exportToCSV = () => {
-    if (!data || data.items.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-    const lines = [
-      "Medication,Generic,Batch,Quantity,Unit,Expiry Date,Days To Expiry,Bucket",
-      ...data.items.map((i) =>
-        [
-          `"${(i.medication_name || "").replace(/"/g, '""')}"`,
-          `"${(i.generic_name || "").replace(/"/g, '""')}"`,
-          `"${(i.batch_number || "").replace(/"/g, '""')}"`,
-          i.quantity,
-          i.unit,
-          i.expiry_date,
-          i.days_to_expiry,
-          BUCKET_LABELS[i.bucket] || i.bucket,
-        ].join(","),
-      ),
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `drug_expiry_${data.cutoff_date}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
-  };
 
   return (
     <DashboardLayout>
@@ -144,18 +114,12 @@ export default function DrugExpiryReport() {
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={!data}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={!data}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/drug-expiry/"
+              buildQuery={() => new URLSearchParams({ days: String(days) })}
+              filenameBase={`drug_expiry_${days}d`}
+              disabled={!data}
+            />
           </div>
         </div>
 
@@ -163,9 +127,9 @@ export default function DrugExpiryReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Calendar className="h-5 w-5" />
-              Window
+              Filters
             </CardTitle>
-            <CardDescription>Look ahead N days from today (1–730)</CardDescription>
+            <CardDescription>Inventory batches expiring within the next N days (1–730)</CardDescription>
           </CardHeader>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
@@ -180,8 +144,8 @@ export default function DrugExpiryReport() {
                 />
               </div>
               <Button onClick={fetchReport} disabled={isLoading}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-                {isLoading ? "Loading..." : "Apply"}
+                <TrendingUp className="h-4 w-4 mr-2" />
+                {isLoading ? "Loading..." : "Generate Report"}
               </Button>
             </div>
           </CardContent>

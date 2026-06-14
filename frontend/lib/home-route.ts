@@ -1,5 +1,5 @@
 import type { User } from "@/lib/npa-structure";
-import { ALL_PAGE_PERMISSIONS } from "@/lib/page-permissions";
+import { ALL_PAGE_PERMISSIONS, normalizeRolePagePath } from "@/lib/page-permissions";
 
 type ModuleRoute = {
   basePath: string;
@@ -47,20 +47,25 @@ export const MODULE_ROUTE_PRIORITY: ModuleRoute[] = (() => {
 export function isPathAllowedByPages(pathname: string, allowedPages: string[]): boolean {
   if (!pathname || pathname === "/") return false;
   const allowed = Array.isArray(allowedPages) ? allowedPages : [];
+  const normalizedPath = normalizeRolePagePath(pathname);
+  const normalizedAllowed = allowed.map(normalizeRolePagePath);
 
   // Exact match
-  if (allowed.includes(pathname)) return true;
+  if (normalizedAllowed.includes(normalizedPath)) return true;
 
   // Prefix match for nested routes (e.g. /medical-records/patients/123 allowed by /medical-records/patients)
-  if (allowed.some((p) => {
+  if (normalizedAllowed.some((p) => {
     if (!p || p === "/") return false;
-    return pathname === p || pathname.startsWith(p + "/");
+    return normalizedPath === p || normalizedPath.startsWith(p + "/");
   })) {
     return true;
   }
 
   // Special case: allow /medical-records/patients/* if user has /medical-records/patient-records
-  if (pathname.startsWith("/medical-records/patients/") && allowed.includes("/medical-records/patient-records")) {
+  if (
+    normalizedPath.startsWith("/medical-records/patients/") &&
+    normalizedAllowed.includes("/medical-records/patient-records")
+  ) {
     return true;
   }
 
@@ -71,7 +76,8 @@ export function getHomeRouteFromAllowedPages(allowedPages: string[]): string | n
   const pages = Array.isArray(allowedPages) ? allowedPages : [];
   if (pages.length === 0) return null;
 
-  const allowedSet = new Set(pages);
+  const normalizedPages = pages.map(normalizeRolePagePath);
+  const allowedSet = new Set(normalizedPages);
 
   // Prefer module dashboards (exact)
   for (const m of MODULE_ROUTE_PRIORITY) {
@@ -84,7 +90,7 @@ export function getHomeRouteFromAllowedPages(allowedPages: string[]): string | n
 
   // Otherwise choose the shortest allowed page inside the highest-priority module.
   for (const m of MODULE_ROUTE_PRIORITY) {
-    const candidates = pages
+    const candidates = normalizedPages
       .filter((p) => p === m.basePath || p.startsWith(m.basePath + "/"))
       .sort((a, b) => a.length - b.length);
     if (candidates.length > 0) return candidates[0];

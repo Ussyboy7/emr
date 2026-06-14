@@ -13,6 +13,7 @@ import { labService, formatPatientGenderLabel } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
 import {
   transformApiRowToCompletedTest,
@@ -23,7 +24,7 @@ import { useServerToday } from '@/hooks/use-server-today';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
-  User, Stethoscope, RefreshCw, FlaskConical, Loader2
+  User, Stethoscope, FlaskConical, Loader2
 } from 'lucide-react';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 
@@ -199,13 +200,10 @@ export default function CompletedTestsPage() {
     }
   };
 
-  const formatDateTime = (isoString: string) => {
-    const date = new Date(isoString);
-    return {
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-    };
-  };
+  const formatDateTime = (isoString: string) => ({
+    date: formatDisplayDateMedium(isoString),
+    time: formatDisplayTime(isoString),
+  });
 
   const openViewDialog = (test: CompletedTest) => {
     setSelectedTest(test);
@@ -215,17 +213,12 @@ export default function CompletedTestsPage() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-              Completed Tests
-            </h1>
-            <p className="text-muted-foreground mt-1">History of verified and completed lab tests</p>
-          </div>
-          <Button variant="outline" onClick={loadTests} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-          </Button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
+            <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+            Completed Tests
+          </h1>
+          <p className="text-muted-foreground mt-1">History of verified and completed lab tests</p>
         </div>
 
         {/* Stats */}

@@ -24,15 +24,15 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/medical-records/visits", name: "Manage Visits", description: "View and manage patient visits", module: "Medical Records" },
   { id: "/medical-records/appointments", name: "Appointments", description: "Manage patient appointments", module: "Medical Records" },
   { id: "/medical-records/reports", name: "Reports", description: "View and generate reports", module: "Medical Records" },
-  { id: "/medical-records/reports/attendance-summary", name: "Attendance Summary", description: "Attendance summary report", module: "Medical Records" },
-  { id: "/medical-records/reports/clinic-attendance", name: "Clinic Attendance", description: "Clinic attendance report", module: "Medical Records" },
+  { id: "/medical-records/reports/attendance-statistics", name: "Attendance Statistics", description: "BTMC-style attendance matrix by clinic and category", module: "Medical Records" },
+  { id: "/medical-records/reports/clinic-statistics", name: "Clinic Statistics", description: "Per-clinic attendance statistics", module: "Medical Records" },
   { id: "/medical-records/reports/comprehensive", name: "Comprehensive Report", description: "Comprehensive medical records report", module: "Medical Records" },
   { id: "/medical-records/reports/disease-pattern", name: "Disease Pattern", description: "Disease pattern analysis report", module: "Medical Records" },
-  { id: "/medical-records/reports/dispensed-prescriptions", name: "Dispensed Prescriptions", description: "Dispensed prescriptions report", module: "Medical Records" },
+  { id: "/medical-records/reports/top-diagnoses", name: "Top Diagnoses", description: "Top ICD-10 diagnoses report", module: "Medical Records" },
+  { id: "/medical-records/reports/dispensed-prescriptions", name: "Prescriptions Report", description: "Fully dispensed prescription orders by period", module: "Medical Records" },
   { id: "/medical-records/reports/escort-log", name: "Escort Log", description: "Escort/transfer log report", module: "Medical Records" },
-  { id: "/medical-records/reports/gop-attendance", name: "GOP Attendance", description: "General outpatient attendance report", module: "Medical Records" },
-  { id: "/medical-records/reports/laboratory-attendance", name: "Lab Attendance", description: "Laboratory attendance report", module: "Medical Records" },
-  { id: "/medical-records/reports/radiological-services", name: "Radiology Services", description: "Radiological services report", module: "Medical Records" },
+  { id: "/medical-records/reports/laboratory-attendance", name: "Lab Attendance", description: "Distinct patients with lab orders by category", module: "Medical Records" },
+  { id: "/medical-records/reports/radiological-services", name: "Radiology Services", description: "Radiology studies by modality", module: "Medical Records" },
   { id: "/medical-records/reports/referral-tracking", name: "Referral Tracking", description: "Referral tracking report", module: "Medical Records" },
   { id: "/medical-records/reports/services-activities", name: "Services Activities", description: "Services and activities report", module: "Medical Records" },
   { id: "/medical-records/reports/weekend-duty", name: "Weekend Duty", description: "Weekend duty roster report", module: "Medical Records" },
@@ -44,7 +44,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/nursing", name: "Dashboard", description: "Nursing Dashboard", module: "Nursing" },
   { id: "/nursing/pool-queue", name: "Pool Queue", description: "Manage nursing pool queue", module: "Nursing" },
   { id: "/nursing/room-queue", name: "Room Queue", description: "Manage nursing room queue", module: "Nursing" },
-  { id: "/nursing/patient-vitals", name: "Patient Vitals", description: "Record patient vital signs", module: "Nursing" },
+  { id: "/nursing/vitals-history", name: "Vitals History", description: "View recorded patient vital signs", module: "Nursing" },
   { id: "/nursing/procedures", name: "Procedures", description: "Manage nursing procedures", module: "Nursing" },
   { id: "/nursing/procedures/history", name: "Procedures History", description: "View procedures history", module: "Nursing" },
   { id: "/nursing/wards", name: "Ward Care", description: "Record observations, execute doctor orders, and manage bed assignments", module: "Nursing" },
@@ -103,6 +103,11 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/eyecare/completed", name: "Completed Sessions", description: "Completed eye clinic sessions", module: "Eye Clinic" },
   { id: "/eyecare/analytics", name: "Eye Clinic Analytics", description: "View eye clinic analytics", module: "Eye Clinic" },
 
+  // Human Resources
+  { id: "/hr", name: "Dashboard", description: "HR annual check-up compliance dashboard", module: "Human Resources" },
+  { id: "/hr/annual-checkups", name: "Annual Check-ups", description: "Employee annual check-up compliance list", module: "Human Resources" },
+  { id: "/hr/exemptions", name: "Exemptions", description: "Manage annual check-up exemptions", module: "Human Resources" },
+
   // Analytics
   { id: "/analytics", name: "Clinical Reports", description: "Clinical reports & analytics", module: "Analytics" },
   { id: "/analytics/executive", name: "Executive Analytics", description: "Executive analytics", module: "Analytics" },
@@ -114,12 +119,18 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/admin/clinics", name: "Facilities & Departments", description: "Manage clinics and departments", module: "Administration" },
   { id: "/admin/rooms", name: "Room Management", description: "Manage rooms", module: "Administration" },
   { id: "/admin/settings", name: "System Settings", description: "System settings", module: "Administration" },
+  { id: "/admin/health", name: "System Health", description: "Infrastructure status, storage, and backups", module: "Administration" },
+  { id: "/admin/annual-checkup-programme", name: "Annual Check-up Programme", description: "Default pre-ticked annual check-up investigations", module: "Administration" },
   { id: "/admin/audit", name: "Audit Trail", description: "View audit logs", module: "Administration" },
 ];
 
 /** DB / seed paths that no longer match a route id — map to the canonical path used in the UI. */
 const LEGACY_PAGE_PATH_ALIASES: Record<string, string> = {
   "/consultation/dashboard": "/consultation",
+  "/nursing/patient-vitals": "/nursing/vitals-history",
+  "/medical-records/reports/attendance-summary": "/medical-records/reports/attendance-statistics",
+  "/medical-records/reports/clinic-attendance": "/medical-records/reports/clinic-statistics",
+  "/medical-records/reports/gop-attendance": "/medical-records/reports/clinic-statistics",
 };
 
 /**

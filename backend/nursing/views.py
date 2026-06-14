@@ -3,14 +3,18 @@ Views for the Nursing app.
 """
 from datetime import timedelta
 
-from django.db.models import Case, IntegerField, Q, When
+from django.db.models import Case, Count, IntegerField, Q, When
 from django.utils import timezone
-from rest_framework import viewsets
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema, extend_schema_view
 
 from common.mixins import ClinicScopedMixin
+from common.openapi import document_viewset
 from accounts.utils import resolve_clinic_id
 from organization.models import SystemConfig
 from .models import NursingOrder, Procedure
@@ -18,10 +22,16 @@ from .serializers import NursingOrderSerializer, ProcedureSerializer
 from audit.services import AuditService
 
 
+@extend_schema_view(
+    list=extend_schema(summary="List nursing orders", tags=["Nursing"]),
+    retrieve=extend_schema(summary="Retrieve nursing order", tags=["Nursing"]),
+    create=extend_schema(summary="Create nursing order", tags=["Nursing"]),
+    update=extend_schema(summary="Update nursing order", tags=["Nursing"]),
+    partial_update=extend_schema(summary="Partially update nursing order", tags=["Nursing"]),
+    destroy=extend_schema(summary="Delete nursing order", tags=["Nursing"]),
+)
 class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing nursing orders."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = NursingOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'ordered_by', 'status', 'priority', 'order_type', 'consultation_session', 'visit', 'admission']
@@ -37,6 +47,9 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-ordered_at']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return NursingOrder.objects.none()
+        
         qs = (
             NursingOrder.objects.all()
             .select_related(
@@ -52,15 +65,10 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if self.request.query_params.get('procedures_queue') == '1':
             qs = qs.exclude(order_type__iexact='ward instruction')
 
+        from common.report_period import apply_date_preset
+
         df = (self.request.query_params.get('date_filter') or '').strip().lower()
-        if df and df != 'all':
-            today = timezone.now().date()
-            if df == 'today':
-                qs = qs.filter(ordered_at__date=today)
-            elif df == 'week':
-                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=7))
-            elif df == 'month':
-                qs = qs.filter(ordered_at__date__gte=today - timedelta(days=31))
+        qs = apply_date_preset(qs, df, 'ordered_at')
 
         after = (self.request.query_params.get('ordered_at_after') or '').strip()
         before = (self.request.query_params.get('ordered_at_before') or '').strip()
@@ -110,6 +118,36 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 ).order_by("_pq_rank", "ordered_at")
         return queryset
 
+    @extend_schema(tags=["Nursing"], summary="List stats", description="Procedure queue dashboard cards (replaces 4 parallel COUNT list calls).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Procedure queue dashboard cards (replaces 4 parallel COUNT list calls)."""
+        from common.list_stats import viewset_queryset_excluding_params
+
+        base = viewset_queryset_excluding_params(
+            self,
+            frozenset({'status', 'queue_type', 'page', 'page_size', 'ordering'}),
+        )
+        row = base.aggregate(
+            total=Count('pk'),
+            pending=Count('pk', filter=Q(status='pending')),
+            completed=Count('pk', filter=Q(status='completed')),
+            injections=Count(
+                'pk',
+                filter=Q(status='pending')
+                & (
+                    Q(order_type__icontains='injection')
+                    | Q(order_type__icontains='iv infusion')
+                ),
+            ),
+        )
+        return Response({
+            'total': row['total'] or 0,
+            'pending': row['pending'] or 0,
+            'completed': row['completed'] or 0,
+            'injections': row['injections'] or 0,
+        })
+
     def perform_create(self, serializer):
         self.auto_set_clinic(serializer)
         order = serializer.save(created_by=self.request.user)
@@ -158,13 +196,12 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             pass
 
 
+@document_viewset(tag="Nursing", resource="nursing procedures")
 class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing procedures."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = ProcedureSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'procedure_type', 'performed_by']
+    filterset_fields = ['patient', 'procedure_type', 'performed_by', 'nursing_order']
     search_fields = [
         'procedure_id',
         'description',
@@ -188,6 +225,9 @@ class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return qs
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Procedure.objects.none()
+        
         qs = Procedure.objects.all().select_related(
             'patient',
             'patient__medical_history',
@@ -201,37 +241,62 @@ class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if gender in ('male', 'female'):
             qs = qs.filter(patient__gender=gender)
 
+        from .procedure_queries import (
+            filter_procedures_by_date_preset,
+            filter_procedures_by_history_type,
+            filter_procedures_by_performed_period,
+        )
+
         df = (self.request.query_params.get('date_filter') or '').strip().lower()
-        if df and df != 'all':
-            today = timezone.now().date()
-            if df == 'today':
-                qs = qs.filter(performed_at__date=today)
-            elif df == 'week':
-                qs = qs.filter(performed_at__date__gte=today - timedelta(days=7))
-            elif df == 'month':
-                qs = qs.filter(performed_at__date__gte=today - timedelta(days=31))
+        qs = filter_procedures_by_date_preset(qs, df)
 
         after = (self.request.query_params.get('performed_at_after') or '').strip()
         before = (self.request.query_params.get('performed_at_before') or '').strip()
-        if after:
-            qs = qs.filter(performed_at__date__gte=after)
-        if before:
-            qs = qs.filter(performed_at__date__lte=before)
+        if after or before:
+            from django.utils.dateparse import parse_date
+
+            qs = filter_procedures_by_performed_period(
+                qs,
+                start_date=parse_date(after) if after else None,
+                end_date=parse_date(before) if before else None,
+            )
 
         ht = (self.request.query_params.get('history_type') or 'all').strip().lower()
-        if ht != 'all':
-            if ht == 'injection':
-                qs = qs.filter(procedure_type='injection')
-            elif ht == 'dressing':
-                qs = qs.filter(Q(procedure_type='dressing') | Q(procedure_type='wound_care'))
-            elif ht == 'ward_admission':
-                qs = qs.filter(procedure_type='ward_admission')
-            elif ht == 'medication':
-                qs = qs.exclude(
-                    procedure_type__in=['injection', 'dressing', 'wound_care', 'ward_admission']
-                )
+        qs = filter_procedures_by_history_type(qs, ht)
 
         return qs
+
+    @extend_schema(tags=["Nursing"], summary="History stats", description="Procedures history dashboard cards (replaces 5 parallel COUNT list calls).")
+    @action(detail=False, methods=['get'], url_path='history-stats')
+    def history_stats(self, request):
+        """Procedures history dashboard cards (replaces 5 parallel COUNT list calls)."""
+        from common.list_stats import viewset_queryset_excluding_params
+        from .procedure_queries import filter_procedures_by_history_type
+
+        base = viewset_queryset_excluding_params(
+            self,
+            frozenset({'history_type', 'page', 'page_size', 'ordering'}),
+        )
+        return Response({
+            'total': base.count(),
+            'injections': filter_procedures_by_history_type(base, 'injection').count(),
+            'dressings': filter_procedures_by_history_type(base, 'dressing').count(),
+            'medications': filter_procedures_by_history_type(base, 'medication').count(),
+            'observations': filter_procedures_by_history_type(base, 'ward_admission').count(),
+        })
+
+    @extend_schema(tags=["Nursing"], summary="Resolve", description="Return the latest procedure record for a nursing order.")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_procedure(self, request):
+        """Return the latest procedure record for a nursing order."""
+        nursing_order_id = request.query_params.get('nursing_order')
+        if not nursing_order_id:
+            return Response({'detail': 'nursing_order is required'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.filter_queryset(self.get_queryset()).filter(nursing_order_id=nursing_order_id)
+        procedure = qs.first()
+        if not procedure:
+            return Response({'detail': 'Procedure not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(procedure).data)
     
     def perform_create(self, serializer):
         procedure = serializer.save(performed_by=self.request.user)

@@ -1,4 +1,5 @@
 "use client";
+import { todayApiDateString } from "@/lib/dates";
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -60,8 +61,8 @@ const transformTemplate = (apiTemplate: ApiRadiologyTemplate): RadiologyTemplate
     turnaround_time: apiTemplate.turnaround_time,
     report_template: apiTemplate.report_template,
     is_active: apiTemplate.is_active,
-    createdAt: apiTemplate.created_at || new Date().toISOString().split('T')[0],
-    updatedAt: apiTemplate.updated_at || new Date().toISOString().split('T')[0],
+    createdAt: apiTemplate.created_at || todayApiDateString(),
+    updatedAt: apiTemplate.updated_at || todayApiDateString(),
     version: 1, // Radiology templates don't have versions like lab templates
   };
 };
@@ -108,22 +109,14 @@ export default function RadiologyTemplatesPage() {
 
   const loadTemplateStats = useCallback(async () => {
     try {
-      const base = { page: 1, page_size: 1 } as const;
-      const [totalRes, activeRes, xrayRes, usRes, mriRes, ctRes] = await Promise.all([
-        radiologyService.getTemplates({ ...base }),
-        radiologyService.getTemplates({ ...base, is_active: true }),
-        radiologyService.getTemplates({ ...base, category: 'xray' }),
-        radiologyService.getTemplates({ ...base, category: 'ultrasound' }),
-        radiologyService.getTemplates({ ...base, category: 'mri' }),
-        radiologyService.getTemplates({ ...base, category: 'ct' }),
-      ]);
+      const stats = await radiologyService.getTemplateListStats();
       setStats({
-        total: totalRes.count ?? 0,
-        active: activeRes.count ?? 0,
-        xray: xrayRes.count ?? 0,
-        ultrasound: usRes.count ?? 0,
-        mri: mriRes.count ?? 0,
-        ct: ctRes.count ?? 0,
+        total: stats.total ?? 0,
+        active: stats.active ?? 0,
+        xray: stats.xray ?? 0,
+        ultrasound: stats.ultrasound ?? 0,
+        mri: stats.mri ?? 0,
+        ct: stats.ct ?? 0,
       });
     } catch {
       /* keep */

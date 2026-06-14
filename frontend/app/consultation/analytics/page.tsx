@@ -4,15 +4,19 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
-  analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
+import { useReportDateRange } from "@/hooks/use-report-date-range";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Activity, Heart, Timer, Users, Stethoscope, FileText, TestTube, Pill } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, buildQueryString } from "@/lib/api-client";
+import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
+import { localMonthBounds, peekServerTodayMonthPrefix, peekServerTodayYear } from "@/lib/dates";
+import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
+import { useServerDateAnchor } from "@/components/providers/ServerDateProvider";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ConsultationAnalytics } from "@/lib/services";
 
@@ -32,14 +36,25 @@ export default function ConsultationAnalyticsPage() {
   const [endDate, setEndDate] = useState("");
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>("year");
 
+  const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
+  const serverToday = useServerDateAnchor();
+
+  const { handleExportCsv, handleDownloadPdf } = useAnalyticsExportHandlers({
+    apiPath: "/consultation/sessions/comprehensive-analytics/",
+    filenameBase: "consultation_analytics",
+    viewMode,
+    year,
+    startDate,
+    endDate,
+    queryStyle: "start",
+  });
+
   const emptyState = () => setAnalyticsData(null);
 
   const setThisMonth = () => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setStartDate(firstDay.toISOString().split("T")[0]);
-    setEndDate(lastDay.toISOString().split("T")[0]);
+    const { start, end } = localMonthBounds(serverToday);
+    setStartDate(start);
+    setEndDate(end);
     setViewMode("range");
   };
 
@@ -49,18 +64,15 @@ export default function ConsultationAnalyticsPage() {
   };
 
   const loadAnalytics = useCallback(async () => {
-    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    if (!range) {
+    const params = buildReportPeriodQuery(viewMode, reportRange, "start");
+    if (!params) {
       toast.error("Please select a valid date range");
       return;
     }
 
     setLoading(true);
     try {
-      const qs = buildQueryString({ start: range.start, end: range.end });
-      const path = qs
-        ? `/consultation/sessions/comprehensive-analytics/?${qs.slice(1)}`
-        : "/consultation/sessions/comprehensive-analytics/";
+      const path = `/consultation/sessions/comprehensive-analytics/?${params.toString()}`;
       const data = await apiFetch<ConsultationAnalytics>(path);
       setAnalyticsData(data);
     } catch (error: any) {
@@ -70,116 +82,14 @@ export default function ConsultationAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewMode, year, startDate, endDate]);
+  }, [reportRange]);
 
   useEffect(() => {
-    const shouldFetch =
-      (viewMode === "year" && year) ||
-      (viewMode === "range" && startDate && endDate) ||
-      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
-    if (shouldFetch) {
+    if (canFetchReportPeriod(viewMode, reportRange)) {
       void loadAnalytics();
     }
-  }, [viewMode, year, startDate, endDate, loadAnalytics]);
+  }, [reportRange, loadAnalytics, viewMode]);
 
-  const exportCSV = () => {
-    if (!analyticsData) {
-      toast.error("No data to export");
-      return;
-    }
-
-    const csvData = [
-      ["Consultation Analytics Report"],
-      ["Period", `${analyticsData.period.start_date} to ${analyticsData.period.end_date}`],
-      [""],
-      ["Session Metrics"],
-      ["Total Sessions", analyticsData.session_metrics.total_sessions],
-      ["Completed Sessions", analyticsData.session_metrics.completed_sessions],
-      ["Active Sessions", analyticsData.session_metrics.active_sessions],
-      ["Completion Rate (%)", analyticsData.session_metrics.completion_rate.toFixed(2)],
-      ["Average Duration (min)", analyticsData.session_metrics.avg_duration.toFixed(2)],
-      ["Median Duration (min)", analyticsData.session_metrics.median_duration.toFixed(2)],
-      ["Max Duration (min)", analyticsData.session_metrics.max_duration.toFixed(2)],
-      [""],
-      ["Clinical Outcomes"],
-      ["Prescriptions", analyticsData.clinical_outcomes.prescriptions],
-      ["Lab Orders", analyticsData.clinical_outcomes.lab_orders],
-      ["Nursing Orders", analyticsData.clinical_outcomes.nursing_orders],
-      [""],
-      ["Referrals"],
-      ["Total Referrals", analyticsData.referrals.total],
-      ["Pending Referrals", analyticsData.referrals.pending],
-      ["Completed Referrals", analyticsData.referrals.completed],
-      [""],
-      ["Diagnoses"],
-      ["Total Diagnoses", analyticsData.diagnoses.total],
-    ];
-
-    // Add diagnoses by certainty
-    Object.entries(analyticsData.diagnoses.by_certainty).forEach(([certainty, count]) => {
-      csvData.push([`${certainty} Diagnoses`, count]);
-    });
-
-    // Add period breakdowns
-    if (analyticsData.by_day?.length) {
-      csvData.push([""]);
-      csvData.push(["Sessions by Day"]);
-      csvData.push(["Date", "Sessions", "Completed"]);
-      analyticsData.by_day.forEach((row) => {
-        csvData.push([row.date || '', row.sessions, row.completed]);
-      });
-    }
-    if (analyticsData.by_week?.length) {
-      csvData.push([""]);
-      csvData.push(["Sessions by Week"]);
-      csvData.push(["Week", "Sessions", "Completed"]);
-      analyticsData.by_week.forEach((row) => {
-        csvData.push([row.week || '', row.sessions, row.completed]);
-      });
-    }
-    if (analyticsData.by_month?.length) {
-      csvData.push([""]);
-      csvData.push(["Sessions by Month"]);
-      csvData.push(["Month", "Sessions", "Completed"]);
-      analyticsData.by_month.forEach((row) => {
-        csvData.push([row.month || '', row.sessions, row.completed]);
-      });
-    }
-    if (analyticsData.by_bimonth?.length) {
-      csvData.push([""]);
-      csvData.push(["Sessions by Bi-Month"]);
-      csvData.push(["Bi-Month", "Sessions", "Completed"]);
-      analyticsData.by_bimonth.forEach((row) => {
-        csvData.push([row.bimonth || '', row.sessions, row.completed]);
-      });
-    }
-    if (analyticsData.by_quarter?.length) {
-      csvData.push([""]);
-      csvData.push(["Sessions by Quarter"]);
-      csvData.push(["Quarter", "Sessions", "Completed"]);
-      analyticsData.by_quarter.forEach((row) => {
-        csvData.push([row.quarter || '', row.sessions, row.completed]);
-      });
-    }
-    if (analyticsData.by_halfyear?.length) {
-      csvData.push([""]);
-      csvData.push(["Sessions by Half-Year"]);
-      csvData.push(["Half-Year", "Sessions", "Completed"]);
-      analyticsData.by_halfyear.forEach((row) => {
-        csvData.push([row.halfyear || '', row.sessions, row.completed]);
-      });
-    }
-
-    const csvContent = csvData.map((row) => row.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `consultation-analytics-${analyticsData.period.start_date}-to-${analyticsData.period.end_date}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
-  };
 
   const summaryStats = useMemo(() => {
     if (!analyticsData) return null;
@@ -299,8 +209,8 @@ export default function ConsultationAnalyticsPage() {
   const highlightThisMonth =
     viewMode === "range" &&
     Boolean(startDate) &&
-    startDate.includes(new Date().toISOString().slice(0, 7));
-  const highlightThisYear = viewMode === "year" && year === new Date().getFullYear().toString();
+    startDate.includes(peekServerTodayMonthPrefix());
+  const highlightThisYear = viewMode === "year" && year === peekServerTodayYear();
 
   return (
     <DashboardLayout>
@@ -310,10 +220,10 @@ export default function ConsultationAnalyticsPage() {
         ReportIcon={Stethoscope}
         reportIconClassName="text-blue-500"
         loading={loading}
-        onRefresh={loadAnalytics}
         onGenerate={loadAnalytics}
         exportCsvDisabled={!analyticsData}
-        onExportCsv={exportCSV}
+        onExportCsv={handleExportCsv}
+        onPrint={handleDownloadPdf}
         printDisabled={!analyticsData}
         viewMode={viewMode}
         onViewModeChange={setViewMode}

@@ -8,6 +8,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { referralService } from "@/lib/services/referral-service";
 import type { ReferralWithPatient } from "@/lib/referrals/referral-helpers";
+import { localWeekToTodayBounds, toApiDateString } from "@/lib/dates";
 
 type ReferralListParams = Parameters<typeof referralService.getReferrals>[0];
 
@@ -37,13 +38,6 @@ async function getReferralsWithStatusFallback(params: ReferralListParams) {
     ...params,
     status: normalizeReferralStatusForApi(status),
   });
-}
-
-function formatLocalYyyyMmDd(d: Date) {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 export type ReferralsDateFilter = "all" | "today" | "week" | "month";
@@ -142,16 +136,15 @@ export function useReferralsQueue(
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (dateFilter === "today") {
-      date = formatLocalYyyyMmDd(today);
+      date = toApiDateString(today);
     } else if (dateFilter === "week") {
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay());
-      start_date = formatLocalYyyyMmDd(weekStart);
-      end_date = formatLocalYyyyMmDd(today);
+      const { start, end } = localWeekToTodayBounds();
+      start_date = start;
+      end_date = end;
     } else if (dateFilter === "month") {
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      start_date = formatLocalYyyyMmDd(monthStart);
-      end_date = formatLocalYyyyMmDd(today);
+      start_date = toApiDateString(monthStart);
+      end_date = toApiDateString(today);
     }
     return { date, start_date, end_date };
   }, [dateFilter]);
@@ -203,39 +196,15 @@ export function useReferralsQueue(
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const commonParams: ReferralListParams = {
+      const stats = await referralService.getListStats({
         ...baseFilterParams(),
-        page: 1,
-        page_size: 1,
-      };
-      const countForStatuses = async (statuses: string[]) => {
-        const counts = await Promise.all(
-          statuses.map(async (status) => {
-            const res = await getReferralsWithStatusFallback({
-              ...commonParams,
-              status,
-            });
-            return res.count || 0;
-          }),
-        );
-        return counts.reduce((acc, c) => acc + c, 0);
-      };
-
-      const [totalRes, submittedCount, inReviewCount, approvedCount] =
-        await Promise.all([
-          getReferralsWithStatusFallback({
-            ...commonParams,
-            status: undefined,
-          }),
-          countForStatuses([...SUBMITTED_STATUSES]),
-          countForStatuses([...REVIEW_STATUSES]),
-          countForStatuses([...APPROVED_STATUSES]),
-        ]);
+        exclude_draft: true,
+      });
       setStats({
-        total: totalRes.count || 0,
-        submitted: submittedCount,
-        inReview: inReviewCount,
-        approved: approvedCount,
+        total: stats.total,
+        submitted: stats.submitted,
+        inReview: stats.inReview,
+        approved: stats.approved,
       });
     } catch (error) {
       console.error(error);

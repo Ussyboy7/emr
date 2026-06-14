@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from 'react';
+import { formatDisplayDate } from '@/lib/dates';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -94,7 +95,7 @@ export function CurrentCareTab({
                               <p>Dose: {med.dosage}</p>
                               <p>Frequency: {med.frequency}</p>
                               <p>Prescribed by: {med.prescribedBy}</p>
-                              <p>Started: {new Date(med.startDate).toLocaleDateString()}</p>
+                              <p>Started: {formatDisplayDate(med.startDate)}</p>
                             </div>
                           </div>
                         </div>

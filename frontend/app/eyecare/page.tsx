@@ -19,13 +19,18 @@ import {
   TrendingUp,
   Plus,
   UserCheck,
-  RefreshCw,
 } from 'lucide-react';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import {
+  DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+  useReloadOnFocus,
+} from '@/hooks/use-reload-on-focus';
 import { useServerToday } from '@/hooks/use-server-today';
+import { isAuthenticationError } from '@/lib/auth-errors';
+import { formatDisplayDateTime } from '@/lib/dates';
 import { toast } from 'sonner';
 import { eyeCareService, type EyeOrder, type EyeSession } from '@/lib/services/eye-care-service';
+import { eyeSessionSubtitle } from '@/lib/eyecare/session-display';
 import { NewEyeOrderModal } from '@/components/eyecare/NewEyeOrderModal';
 import { EyecarePatientFinder } from '@/components/eyecare/EyecarePatientFinder';
 
@@ -37,38 +42,15 @@ interface EyeDashboardStats {
   scheduledToday: number;
 }
 
-function ymdFromIso(iso?: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 function formatTime(iso?: string | null): string {
   if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  } catch {
-    return '';
-  }
+  const formatted = formatDisplayDateTime(iso);
+  return formatted === '—' ? '' : formatted;
 }
 
 function statusLabel(status: string): string {
   return status.replace(/_/g, ' ');
-}
-
-function sessionSubtitle(session: EyeSession): string {
-  const order = session.order_details;
-  return (
-    order?.chief_complaint ||
-    order?.diagnosis ||
-    session.findings ||
-    session.procedures_performed ||
-    'Eye clinic review underway'
-  );
 }
 
 export default function EyeClinicPage() {
@@ -91,75 +73,42 @@ export default function EyeClinicPage() {
   const [loading, setLoading] = useState(true);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (opts: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
-      const dayStart = `${serverToday}T00:00:00`;
-      const dayEnd = `${serverToday}T23:59:59`;
+      if (!opts.silent) setLoading(true);
 
-      const [
-        queueRes,
-        inProgressRes,
-        activeSessionsCountRes,
-        activeSessionsListRes,
-        completedTodayRes,
-        queueListRes,
-        queuePreviewRes,
-        inProgressPreviewRes,
-        recentCompletedRes,
-      ] = await Promise.all([
-        eyeCareService.getOrders({ status_tab: 'pending', date_filter: 'all', page_size: 1 }),
-        eyeCareService.getOrders({ status_tab: 'in_progress', date_filter: 'all', page_size: 1 }),
-        eyeCareService.getSessions({ status: 'in_progress', page_size: 1 }),
-        eyeCareService.getSessions({ status: 'in_progress', page_size: 5 }),
-        eyeCareService.getSessions({
-          status: 'completed',
-          completed_after: dayStart,
-          completed_before: dayEnd,
-          page_size: 1,
-        }),
-        eyeCareService.getOrders({ status_tab: 'pending', date_filter: 'all', page_size: 100 }),
-        eyeCareService.getOrders({ status_tab: 'pending', date_filter: 'all', page: 1, page_size: 4 }),
-        eyeCareService.getOrders({ status_tab: 'in_progress', date_filter: 'all', page: 1, page_size: 4 }),
-        eyeCareService.getSessions({
-          status: 'completed',
-          completed_after: dayStart,
-          completed_before: dayEnd,
-          page: 1,
-          page_size: 5,
-        }),
-      ]);
-
-      const scheduledToday = (queueListRes.results ?? []).filter(
-        (order) => ymdFromIso(order.scheduled_at) === serverToday,
-      ).length;
+      const data = await eyeCareService.getHomeDashboard({ date: serverToday });
 
       setStats({
-        queue: queueRes.count ?? 0,
-        inProgress: inProgressRes.count ?? 0,
-        activeSessions: activeSessionsCountRes.count ?? 0,
-        completedToday: completedTodayRes.count ?? 0,
-        scheduledToday,
+        queue: data.stats.queue,
+        inProgress: data.stats.inProgress,
+        activeSessions: data.stats.activeSessions,
+        completedToday: data.stats.completedToday,
+        scheduledToday: data.stats.scheduledToday,
       });
-      setQueuePreview(queuePreviewRes.results ?? []);
-      setInProgressOrders(inProgressPreviewRes.results ?? []);
-      setActiveSessions(activeSessionsListRes.results ?? []);
-      setRecentCompletedSessions(recentCompletedRes.results ?? []);
+      setQueuePreview(data.queuePreview ?? []);
+      setInProgressOrders(data.inProgressOrders ?? []);
+      setActiveSessions(data.activeSessions ?? []);
+      setRecentCompletedSessions(data.recentCompletedSessions ?? []);
     } catch (error) {
       console.error('Error loading eye clinic dashboard:', error);
       if (isAuthenticationError(error)) {
         setAuthError(error);
-      } else {
+      } else if (!opts.silent) {
         toast.error('Failed to load eye clinic dashboard. Please try again.');
       }
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, [serverToday]);
 
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  useReloadOnFocus(() => loadDashboard({ silent: true }), {
+    pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+  });
 
   const activePatients = useMemo(
     () => Math.max(stats.inProgress, stats.activeSessions),
@@ -192,7 +141,7 @@ export default function EyeClinicPage() {
         title: session.order_details?.patient_name
           ? `${session.order_details.patient_name} — session ${session.session_number}`
           : `Session ${session.session_number} in progress`,
-        subtitle: sessionSubtitle(session),
+        subtitle: eyeSessionSubtitle(session),
         time: session.started_at || session.scheduled_at,
         tone: 'active' as const,
       }));
@@ -202,7 +151,7 @@ export default function EyeClinicPage() {
       title: session.order_details?.patient_name
         ? `${session.order_details.patient_name} session completed`
         : `Session ${session.session_number} completed`,
-      subtitle: sessionSubtitle(session),
+      subtitle: eyeSessionSubtitle(session),
       time: session.completed_at || session.started_at || session.scheduled_at,
       tone: 'completed' as const,
     }));
@@ -246,15 +195,6 @@ export default function EyeClinicPage() {
                     <ClipboardList className="h-4 w-4 mr-2" />
                     Review Orders
                   </Link>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => void loadDashboard()}
-                  disabled={loading}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh
                 </Button>
               </div>
             </div>

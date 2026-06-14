@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MODAL_SIZES, modalNoOverflow } from "@/components/ui/modal-sizes";
+import { DEFAULT_LIST_PAGE_SIZE, DEFAULT_CATALOG_PAGE_SIZE } from "@/lib/pagination-constants";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { pharmacyService, type GenericMedication } from "@/lib/services";
@@ -55,7 +56,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
   const [routeFilter, setRouteFilter] = useState(ANY);
   const [formFilter, setFormFilter] = useState(ANY);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_LIST_PAGE_SIZE);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -84,7 +85,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
       setLoading(true);
       const response = await pharmacyService.getGenerics({
         page: 1,
-        page_size: 500,
+        page_size: DEFAULT_CATALOG_PAGE_SIZE,
       });
       setGenerics(response.results || []);
     } catch (err) {

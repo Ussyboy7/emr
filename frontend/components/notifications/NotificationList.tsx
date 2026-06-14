@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDisplayDateTime } from '@/lib/dates';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
@@ -31,15 +32,8 @@ import { NOTIFICATION_POLL_INTERVAL_MS } from '@/lib/constants';
 
 const formatDateTime = (dateString: string): string => {
   if (!dateString) return '';
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const formatted = formatDisplayDateTime(dateString);
+  return formatted === '—' ? '' : formatted;
 };
 
 const PRIORITY_RANK: Record<Notification['priority'], number> = {

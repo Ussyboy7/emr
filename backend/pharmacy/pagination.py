@@ -1,14 +1,13 @@
 """
-Custom pagination classes for pharmacy app.
+Pharmacy pagination classes.
 """
-from rest_framework.pagination import PageNumberPagination
+from common.pagination import CatalogPageNumberPagination, StandardPageNumberPagination
 
 
-class FlexiblePageNumberPagination(PageNumberPagination):
-    """
-    Page number pagination that allows clients to override page size.
-    """
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 1000
+class FlexiblePageNumberPagination(StandardPageNumberPagination):
+    """Pharmacy operational lists — same defaults as the global standard."""
+
+
+class PharmacyCatalogPagination(CatalogPageNumberPagination):
+    """Pharmacy catalog / reference data."""
 

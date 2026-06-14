@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { adminService, type OutpatientClinicType } from "@/lib/services";
+import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 
 /**
  * Active OPD visit clinic types from the API (Admin → Visit clinics).
@@ -17,7 +18,7 @@ export function useOutpatientClinicTypes(options?: { includeInactive?: boolean }
       setLoading(true);
       setError(null);
       const res = await adminService.getOutpatientClinicTypes({
-        page_size: 500,
+        page_size: MAX_LIST_PAGE_SIZE,
         ...(options?.includeInactive ? {} : { is_active: true }),
       });
       const list = [...(res.results || [])].sort(

@@ -90,8 +90,7 @@ export function LabOrderModal({
     let cancelled = false;
     (async () => {
       try {
-        const res = await labService.getTemplates({ code: LAB_OTHER_TEMPLATE_CODE, page_size: 1 });
-        const row = res.results?.[0];
+        const row = await labService.resolveTemplateByCode(LAB_OTHER_TEMPLATE_CODE);
         if (!cancelled && row?.id) {
           setOtherTemplate(row as LabTemplateLike);
         } else if (!cancelled) {

@@ -1,4 +1,5 @@
 "use client";
+import { formatDisplayDate, formatDisplayTime, toApiDateFromInstant } from "@/lib/dates";
 
 import { useState, useMemo, useEffect, useCallback, useRef, Suspense } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -16,6 +17,7 @@ import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { patientService, type Patient as ApiPatient } from '@/lib/services';
+import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   PATIENT_TITLE_OPTIONS,
   normalizePatientTitleValue,
@@ -46,32 +48,22 @@ import { useWorkLocationOptions } from '@/hooks/use-work-location-options';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedFiltersButton } from '@/components/shared/AdvancedFiltersButton';
 import { MergePatientDialog } from './merge-patient-dialog';
+import { getMediaUrl } from '@/lib/media-url';
 
 // ==========================================
 // UTILITY FUNCTIONS
 // ==========================================
 
-// Safe date formatting utility
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return '';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleDateString();
-  } catch {
-    return '';
-  }
+  const formatted = formatDisplayDate(dateString);
+  return formatted === '—' ? '' : formatted;
 };
 
 const formatTime = (dateString: string | undefined): string => {
   if (!dateString) return '';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-  } catch {
-    return '';
-  }
+  const formatted = formatDisplayTime(dateString);
+  return formatted === '—' ? '' : formatted;
 };
 
 
@@ -105,30 +97,8 @@ type Patient = {
   dependentsCount?: number;
 };
 
-// Helper function to construct full photo URL from relative path
-const getPhotoUrl = (photoPath: string | null | undefined): string => {
-  if (!photoPath) return '';
-  
-  // If it's already a full URL, return as is
-  if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
-    return photoPath;
-  }
-  
-  // If it starts with /media/, construct full URL from API base URL
-  if (photoPath.startsWith('/media/')) {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!apiUrl) return photoPath;
-    // Remove /api from the end to get base URL, then append the media path
-    const baseUrl = apiUrl.replace(/\/api\/?$/, '');
-    return `${baseUrl}${photoPath}`;
-  }
-
-  // If it's a relative path without /media/, assume it's already relative to media
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (!apiUrl) return photoPath;
-  const baseUrl = apiUrl.replace(/\/api\/?$/, '');
-  return `${baseUrl}/media/${photoPath.startsWith('/') ? photoPath.slice(1) : photoPath}`;
-};
+const photoUrlFromPath = (photoPath: string | null | undefined): string =>
+  getMediaUrl(photoPath) ?? '';
 
 // Safe property access helper
 const getLocation = (patient: any): string => {
@@ -199,9 +169,9 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
     lastVisit: apiPatient.last_visit_at ? formatDate(apiPatient.last_visit_at) : '',
     totalVisits: Number(apiPatient.total_visits || 0),
     location: getLocation(apiPatient),
-    photoUrl: getPhotoUrl(apiPatient.photo),
-    registeredAt: apiPatient.created_at?.split('T')[0] || '',
-    primaryPatient: '', // Will be populated if principal_staff data is available
+    photoUrl: photoUrlFromPath(apiPatient.photo),
+    registeredAt: toApiDateFromInstant(apiPatient.created_at),
+    primaryPatient: apiPatient.principal_staff_full_name || '',
     relationship: apiPatient.nok_relationship || '',
     nonNpaType: apiPatient.nonnpa_type || '',
   };
@@ -452,99 +422,40 @@ function PatientsListPageContent() {
       if (reqId !== loadReqId.current) return;
       setTotalCount(Math.max(response.count, response.results.length));
       
-      // Transform patients (visit data will be fetched on-demand when viewing patient details)
+      // Transform patients (visit counts, employment, principal come from list serializer)
       const transformedPatients = response.results.map(apiPatient => transformPatient(apiPatient));
 
-      // Backward-compatible fallback:
-      // If backend hasn't reloaded the new `total_visits`/`last_visit_at` fields yet,
-      // compute last visit + visit count per patient for the current page.
-      const needsVisitFallback = response.results.some(
-        (p: any) => p.total_visits === undefined || p.last_visit_at === undefined
-      );
-      if (needsVisitFallback) {
-        await Promise.allSettled(
-          transformedPatients.map(async (patient) => {
-            const pid = Number(patient.numericId || patient.id);
-            if (!Number.isFinite(pid) || pid <= 0) return;
-            try {
-              const visits = await patientService.getPatientVisits(pid);
-              patient.totalVisits = visits.length;
-              if (visits.length > 0) {
-                const latest = [...visits].sort((a, b) => {
-                  const aTs = new Date(`${a.date}T${a.time || '00:00:00'}`).getTime();
-                  const bTs = new Date(`${b.date}T${b.time || '00:00:00'}`).getTime();
-                  return bTs - aTs;
-                })[0];
-                patient.lastVisit = latest?.date ? formatDate(latest.date) : '';
-              } else {
-                patient.lastVisit = '';
-              }
-            } catch {
-              // Keep default values if fallback call fails.
-            }
-          })
-        );
-      }
-      
-      // Fetch employment details for Employee and Retiree patients
-      await Promise.allSettled(
-        transformedPatients.map(async (patient, index) => {
-          const apiPatient = response.results[index];
-          
-          // Only fetch employment details for Employee and Retiree patients
-          if ((apiPatient.category === 'employee' || apiPatient.category === 'retiree') && apiPatient.id) {
-            try {
-              const fullPatient = await patientService.getPatient(apiPatient.id);
-              patient.location = fullPatient.location || '';
-              patient.division = fullPatient.division || '';
-              patient.employeeType = fullPatient.employee_type || '';
-            } catch (err) {
-              console.debug('Could not fetch employment details for patient', apiPatient.id);
-            }
-          }
-        })
-      );
-
       if (principalIdFromUrl == null) {
-        await Promise.allSettled(
-          transformedPatients.map(async (patient, index) => {
+        const employeeIds = transformedPatients
+          .map((patient, index) => {
             const apiPatient = response.results[index];
-            if ((apiPatient.category === 'employee' || apiPatient.category === 'retiree') && apiPatient.id) {
-              try {
-                const depList = await patientService.getPatients({
-                  category: 'dependent',
-                  principal_staff: apiPatient.id,
-                  page_size: 1,
-                });
-                patient.dependentsCount =
-                  typeof depList.count === 'number' ? depList.count : depList.results?.length ?? 0;
-              } catch {
-                patient.dependentsCount = undefined;
-              }
+            if (
+              (apiPatient.category === 'employee' || apiPatient.category === 'retiree') &&
+              apiPatient.id
+            ) {
+              return apiPatient.id;
             }
+            return null;
           })
-        );
-      }
-      
-      // Optionally fetch visit counts and principal staff names in parallel (but limit to avoid slowdown)
-      // For better performance, we'll only fetch these when opening the view modal
-      // For now, we'll fetch principal staff names for dependents as it's important info
-      await Promise.allSettled(
-        transformedPatients.map(async (patient, index) => {
-          const apiPatient = response.results[index];
-          
-          // Fetch principal staff name for dependents only
-          if (apiPatient.category === 'dependent' && apiPatient.principal_staff) {
-            try {
-              const principal = await patientService.getPatient(apiPatient.principal_staff);
-              patient.primaryPatient = principal.full_name ?? '';
-            } catch (err) {
-              // Silently fail - principal staff data is optional
-              console.debug('Could not fetch principal staff for dependent', apiPatient.id);
-            }
+          .filter((id): id is number => id != null);
+
+        if (employeeIds.length > 0) {
+          try {
+            const depCounts = await patientService.getDependentsCounts(employeeIds);
+            transformedPatients.forEach((patient, index) => {
+              const apiPatient = response.results[index];
+              if (
+                (apiPatient.category === 'employee' || apiPatient.category === 'retiree') &&
+                apiPatient.id
+              ) {
+                patient.dependentsCount = depCounts[String(apiPatient.id)] ?? 0;
+              }
+            });
+          } catch {
+            /* leave dependentsCount undefined */
           }
-        })
-      );
+        }
+      }
       
       if (reqId !== loadReqId.current) return;
       setPatients(transformedPatients);
@@ -759,7 +670,7 @@ function PatientsListPageContent() {
         numericId = parsedId;
       } else {
         // It's a string patient_id (like "E-A2962") - search for it to get numeric ID
-        const searchResult = await patientService.getPatients({ search: patientIdStr });
+        const searchResult = await patientService.getPatients({ search: patientIdStr, page_size: DEFAULT_LIST_PAGE_SIZE });
         const matchedPatient = searchResult.results.find(
           p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
         );
@@ -772,9 +683,10 @@ function PatientsListPageContent() {
       // Always fetch full patient details using numeric ID (this returns PatientSerializer with all fields)
       apiPatient = await patientService.getPatient(numericId);
 
-      let historyPayload: Awaited<ReturnType<typeof patientService.getPatientHistory>> | null = null;
+      let historyPayload: Record<string, unknown> | null = null;
       try {
-        historyPayload = await patientService.getPatientHistory(numericId);
+        const overview = await patientService.getClinicalOverview(numericId);
+        historyPayload = (overview.medical_history as Record<string, unknown>) ?? null;
       } catch (historyErr: any) {
         console.warn('Failed to load patient history:', historyErr);
       }
@@ -799,7 +711,7 @@ function PatientsListPageContent() {
         try {
           const date = new Date(apiPatient.date_of_birth);
           if (!isNaN(date.getTime())) {
-            dobFormatted = date.toISOString().split('T')[0];
+            dobFormatted = toApiDateFromInstant(date);
           }
         } catch (e) {
           console.warn('Failed to parse date_of_birth:', e);
@@ -814,7 +726,7 @@ function PatientsListPageContent() {
       
       const mergedOccupation =
         (apiPatient.occupation || '').trim() ||
-        (historyPayload?.social_history?.occupation || '').trim();
+        ((historyPayload?.social_history as { occupation?: string } | undefined)?.occupation || '').trim();
 
       // Use a single setEditForm call to ensure all fields update together
       // Note: API returns snake_case (first_name, surname, etc.)
@@ -859,7 +771,7 @@ function PatientsListPageContent() {
       
       // Set photo preview if patient has photo
       if (apiPatient.photo) {
-        setPhotoPreview(getPhotoUrl(apiPatient.photo));
+        setPhotoPreview(photoUrlFromPath(apiPatient.photo));
       } else {
         setPhotoPreview(null);
       }
@@ -867,15 +779,20 @@ function PatientsListPageContent() {
       
       // Medical history (occupation is edited once under Personal Information; synced on save)
       if (historyPayload) {
+        const social = historyPayload.social_history as {
+          smoking?: string;
+          alcohol?: string;
+          exercise?: string;
+        } | undefined;
         setMedicalHistory({
-          allergies: Array.isArray(historyPayload.allergies) ? historyPayload.allergies : [],
-          diagnoses: Array.isArray(historyPayload.diagnoses) ? historyPayload.diagnoses : [],
-          surgicalHistory: Array.isArray(historyPayload.surgical_history) ? historyPayload.surgical_history : [],
-          familyHistory: Array.isArray(historyPayload.family_history) ? historyPayload.family_history : [],
+          allergies: Array.isArray(historyPayload.allergies) ? historyPayload.allergies as string[] : [],
+          diagnoses: Array.isArray(historyPayload.diagnoses) ? historyPayload.diagnoses as Array<{ code?: string; name: string; status: string; diagnosedDate?: string; treatingDoctor?: string }> : [],
+          surgicalHistory: Array.isArray(historyPayload.surgical_history) ? historyPayload.surgical_history as Array<{ procedure: string; date: string; hospital: string }> : [],
+          familyHistory: Array.isArray(historyPayload.family_history) ? historyPayload.family_history as Array<{ relation: string; condition: string }> : [],
           socialHistory: {
-            smoking: historyPayload.social_history?.smoking || '',
-            alcohol: historyPayload.social_history?.alcohol || '',
-            exercise: historyPayload.social_history?.exercise || '',
+            smoking: social?.smoking || '',
+            alcohol: social?.alcohol || '',
+            exercise: social?.exercise || '',
             occupation: '',
           },
         });
@@ -937,7 +854,7 @@ function PatientsListPageContent() {
         numericId = parsedId;
       } else {
         // It's a string patient_id (like "E-A2962") - search for it
-        const searchResult = await patientService.getPatients({ search: patientIdStr });
+        const searchResult = await patientService.getPatients({ search: patientIdStr, page_size: DEFAULT_LIST_PAGE_SIZE });
         const matchedPatient = searchResult.results.find(
           p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
         );

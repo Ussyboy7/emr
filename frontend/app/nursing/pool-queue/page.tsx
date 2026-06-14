@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,7 +17,11 @@ import { visitService, roomService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { apiFetch } from '@/lib/api-client';
-import { getPriorityFromVisitType } from '@/lib/utils/priority';
+import {
+  getQueuePriorityFromVisitType,
+  getVisitTypeBadgeClass,
+  getVisitTypeLabel,
+} from '@/lib/utils/priority';
 import {
   Users, Search, Stethoscope, UserCheck, ArrowRight, Clock, AlertTriangle,
   Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer,
@@ -34,23 +39,13 @@ import {
 } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { useServerToday } from '@/hooks/use-server-today';
+import { localWeekToTodayBounds } from '@/lib/dates';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
-
-// Format visit type for display
-const getVisitTypeLabel = (type: string) => {
-  const typeMap: Record<string, string> = {
-    'consultation': 'Consultation',
-    'follow_up': 'Follow-up',
-    'emergency': 'Emergency',
-    'routine': 'Routine Checkup',
-  };
-  return typeMap[type] || type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, '-');
-};
 
 const formatWaitTime = (minutes: number): string => {
   if (minutes < 60) return `${minutes}m`;
@@ -229,10 +224,9 @@ export default function NursingPoolQueuePage() {
         } else if (dateFilter === 'today') {
           dateParam = anchorYmd;
         } else if (dateFilter === 'week') {
-          const weekStart = new Date(anchor);
-          weekStart.setDate(anchor.getDate() - anchor.getDay());
-          startDate = formatLocalYmd(weekStart);
-          endDate = anchorYmd;
+          const weekBounds = localWeekToTodayBounds(serverToday || undefined);
+          startDate = weekBounds.start;
+          endDate = weekBounds.end;
         } else if (dateFilter === 'month') {
           const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
           startDate = formatLocalYmd(monthStart);
@@ -267,7 +261,7 @@ export default function NursingPoolQueuePage() {
           ...metricsParams,
           nursing_status: usePhysioClientFilter ? undefined : nursingStatusApi,
           page: usePhysioClientFilter ? 1 : currentPage,
-          page_size: usePhysioClientFilter ? 250 : itemsPerPage,
+          page_size: usePhysioClientFilter ? MAX_LIST_PAGE_SIZE : itemsPerPage,
         });
 
         const result = await visitFetch;
@@ -649,7 +643,7 @@ export default function NursingPoolQueuePage() {
     const loadRooms = async () => {
       setRoomsLoading(true);
       try {
-        const roomsResult = await roomService.getRooms({ page_size: 200 });
+        const roomsResult = await roomService.getRooms({ page_size: MAX_LIST_PAGE_SIZE });
         if (cancelled) return;
         const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
           id: String(room.id),
@@ -954,11 +948,8 @@ export default function NursingPoolQueuePage() {
         return;
       }
       
-      // Determine priority based on visit type using centralized utility
-      // NOTE: Priority is automatically derived from visit_type - no manual selection needed.
-      // The visit_type was selected when the visit was created, and we use it to determine
-      // queue priority automatically. Lower number = higher priority (0 = Emergency, 1 = High, 2 = Medium, 3 = Low)
-      const priority = getPriorityFromVisitType(selectedPatient.visitType);
+      // Queue tier: emergency may jump ahead; all other visit types are FIFO by send time.
+      const priority = getQueuePriorityFromVisitType(selectedPatient.visitType);
       // Note: visits shown on this page are already `in_progress` (see loadData filter),
       // so we don't PATCH the visit status again here. Re-patching can fail if the patient
       // has legacy duplicate open visits in the system.
@@ -1048,16 +1039,6 @@ export default function NursingPoolQueuePage() {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const getVisitTypeBadge = (type: string) => {
-    const styles: Record<string, string> = {
-      'consultation': 'border-teal-500/50 text-teal-600 dark:text-teal-400',
-      'follow_up': 'border-blue-500/50 text-blue-600 dark:text-blue-400',
-      'emergency': 'border-rose-500/50 text-rose-600 dark:text-rose-400',
-      'routine': 'border-violet-500/50 text-violet-600 dark:text-violet-400',
-    };
-    return styles[type] || 'border-muted-foreground/50 text-muted-foreground';
   };
 
   const getStatusColor = (status: string) => {
@@ -1287,7 +1268,7 @@ export default function NursingPoolQueuePage() {
                         <div className="flex flex-col gap-1 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap min-w-0">
                             <span className="font-semibold text-foreground truncate">{patient.name}</span>
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getVisitTypeBadge(patient.visitType)}`}>{getVisitTypeLabel(patient.visitType)}</Badge>
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getVisitTypeBadgeClass(patient.visitType)}`}>{getVisitTypeLabel(patient.visitType)}</Badge>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>
                               {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
                                 ? `Sent to ${patient.consultationRoom}`
@@ -1593,7 +1574,7 @@ export default function NursingPoolQueuePage() {
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
               itemName="patients"
-              pageSizeOptions={[50, 75, 100]}
+              pageSizeOptions={[25, 50, 100]}
             />
           </Card>
         )}

@@ -2,6 +2,8 @@
 Serializers for the Wards app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from .models import (
     Ward,
     Bed,
@@ -17,8 +19,8 @@ class WardSerializer(serializers.ModelSerializer):
     """Serializer for Ward model."""
 
     head_nurse_name = serializers.CharField(source='head_nurse.get_full_name', read_only=True)
-    available_beds = serializers.ReadOnlyField()
-    occupancy_rate = serializers.ReadOnlyField()
+    available_beds = serializers.IntegerField(read_only=True)
+    occupancy_rate = serializers.FloatField(read_only=True)
     beds_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -26,6 +28,7 @@ class WardSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'occupied_beds']
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_beds_count(self, obj):
         return obj.beds.count()
 
@@ -122,9 +125,11 @@ class AdmissionEscortSerializer(serializers.ModelSerializer):
             'arrival_confirmed_by',
         ]
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_additional_nurse_names(self, obj):
         return [u.get_full_name() for u in obj.additional_nurses.all()]
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_arrival_confirmed(self, obj):
         return obj.arrival_confirmed_at is not None
 
@@ -138,14 +143,16 @@ class PatientAdmissionSerializer(serializers.ModelSerializer):
     admitting_doctor_name = serializers.CharField(source='admitting_doctor.get_full_name', read_only=True, allow_null=True)
     discharge_doctor_name = serializers.CharField(source='discharge_doctor.get_full_name', read_only=True, allow_null=True)
     confirmed_by_nurse_name = serializers.CharField(source='confirmed_by_nurse.get_full_name', read_only=True, allow_null=True)
-    length_of_stay = serializers.ReadOnlyField()
-    is_active = serializers.ReadOnlyField()
+    length_of_stay = serializers.IntegerField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
     escort = AdmissionEscortSerializer(read_only=True)
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj.ward, 'clinic', None) if obj.ward else None
-        return clinic.name if clinic else None
+        from common.order_location import ward_clinic_name
+
+        return ward_clinic_name(obj)
 
     class Meta:
         model = PatientAdmission
@@ -178,7 +185,7 @@ class WardAssignmentSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='admission.patient.get_full_name', read_only=True)
     ward_name = serializers.CharField(source='admission.ward.name', read_only=True)
     assigned_by_name = serializers.CharField(source='assigned_by.get_full_name', read_only=True, allow_null=True)
-    is_active = serializers.ReadOnlyField()
+    is_active = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = WardAssignment

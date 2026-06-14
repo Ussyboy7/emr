@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { openMediaInNewTab } from '@/lib/media-url';
 import { Download, Eye, FileText, FlaskConical, Printer } from 'lucide-react';
 import {
   displayNameFromLabResultFileUrl,
@@ -181,7 +182,9 @@ export function LabCompletedReportDialog({
                           variant="outline"
                           onClick={() => {
                             if (test.result_file) {
-                              window.open(test.result_file, '_blank', 'noopener,noreferrer');
+                              void openMediaInNewTab(test.result_file).catch((err: unknown) =>
+                                toast.error(err instanceof Error ? err.message : 'Failed to open file')
+                              );
                             }
                           }}
                         >
@@ -230,9 +233,11 @@ export function LabCompletedReportDialog({
                                   variant="outline"
                                   size="sm"
                                   className="h-7 px-2"
-                                  onClick={() =>
-                                    window.open(result.attachment!.url, '_blank', 'noopener,noreferrer')
-                                  }
+                                  onClick={() => {
+                                    void openMediaInNewTab(result.attachment!.url).catch((err: unknown) =>
+                                      toast.error(err instanceof Error ? err.message : 'Failed to open file')
+                                    );
+                                  }}
                                 >
                                   <Download className="h-3.5 w-3.5 mr-1" />
                                   View
@@ -288,7 +293,11 @@ export function LabCompletedReportDialog({
                         variant="outline"
                         size="sm"
                         className="h-6 px-2 text-xs text-blue-600 shrink-0"
-                        onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
+                        onClick={() => {
+                          void openMediaInNewTab(att.url).catch((err: unknown) =>
+                            toast.error(err instanceof Error ? err.message : 'Failed to open file')
+                          );
+                        }}
                       >
                         <Eye className="h-3 w-3 mr-1" />View
                       </Button>

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { UI_TRANSITION_DELAY } from '@/lib/constants/ui';
+import { formatDisplayDateTime } from '@/lib/dates';
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -123,7 +125,7 @@ export default function UserManagementPage() {
 
   const loadRoles = useCallback(async () => {
     try {
-      const rolesResponse = await adminService.getRoles({ page_size: 200 });
+      const rolesResponse = await adminService.getRoles({ page_size: MAX_LIST_PAGE_SIZE });
       // Include inactive roles too so a user's currently-assigned role always appears/selects correctly.
       // (If we filter to active-only, the Select will show empty even though the assignment exists.)
       setAccessRoles(rolesResponse.results || []);
@@ -152,7 +154,7 @@ export default function UserManagementPage() {
 
   const loadClinics = useCallback(async () => {
     try {
-      const res = await adminService.getClinics({ page_size: 200 });
+      const res = await adminService.getClinics({ page_size: MAX_LIST_PAGE_SIZE });
       setAllClinics(res.results || []);
     } catch (err: any) {
       console.error('Error loading clinics:', err);
@@ -161,7 +163,7 @@ export default function UserManagementPage() {
 
   const loadDepartments = useCallback(async () => {
     try {
-      const res = await adminService.getDepartments({ page_size: 200 });
+      const res = await adminService.getDepartments({ page_size: MAX_LIST_PAGE_SIZE });
       setAllDepartments(res.results || []);
     } catch (err: any) {
       console.error('Error loading departments:', err);
@@ -814,7 +816,7 @@ export default function UserManagementPage() {
                         <td className="p-4">
                           {s.lastLogin ? (
                             <p className="text-sm text-muted-foreground">
-                              {new Date(s.lastLogin).toLocaleDateString()} {new Date(s.lastLogin).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {formatDisplayDateTime(s.lastLogin)}
                             </p>
                           ) : (
                             <span className="text-muted-foreground text-sm">Never</span>

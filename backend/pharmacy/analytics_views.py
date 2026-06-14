@@ -7,12 +7,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.analytics_export import maybe_export_analytics
 from common.module_analytics import (
     npa_staff_vs_non_npa,
     parse_analytics_dates,
     patient_category_breakdown,
     patient_gender_breakdown,
 )
+from common.openapi import document_api_view
 from patients.models import Patient
 from pharmacy.models import Dispense, Prescription
 
@@ -25,6 +27,7 @@ def _dec_to_float(d) -> float:
     return float(d)
 
 
+@document_api_view(tag="Analytics", summary="Pharmacy analytics summary")
 class PharmacyAnalyticsSummaryView(APIView):
     """
     GET ?start=YYYY-MM-DD&end=YYYY-MM-DD
@@ -32,13 +35,11 @@ class PharmacyAnalyticsSummaryView(APIView):
     Prescribing volume uses Prescription.prescribed_at.
     """
 
-    permission_classes = [IsAuthenticated]
-
     def get(self, request):
         parsed = parse_analytics_dates(request)
         if isinstance(parsed, Response):
             return parsed
-        start_dt, end_dt = parsed
+        start_dt, end_dt, _all_time = parsed
 
         disp_qs = Dispense.objects.filter(
             dispensed_at__gte=start_dt, dispensed_at__lte=end_dt
@@ -217,8 +218,7 @@ class PharmacyAnalyticsSummaryView(APIView):
             for r in rx_written.values("status").annotate(c=Count("id")).order_by("-c")
         }
 
-        return Response(
-            {
+        report = {
                 "period": {
                     "start": start_dt.date().isoformat(),
                     "end": end_dt.date().isoformat(),
@@ -261,4 +261,7 @@ class PharmacyAnalyticsSummaryView(APIView):
                     for r in top_by_events
                 ],
             }
-        )
+        exported = maybe_export_analytics(request, report, module_key="pharmacy")
+        if exported is not None:
+            return exported
+        return Response(report)

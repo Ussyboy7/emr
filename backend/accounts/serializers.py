@@ -3,9 +3,12 @@ Serializers for the Accounts app.
 """
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from django.contrib.auth.password_validation import validate_password
 from .models import User, SystemRole
-from permissions.role_permissions import normalize_role_permissions_list
+from permissions.permission_actions import build_permission_action_counts
+from permissions.user_pages import get_user_allowed_pages_for_response
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -70,219 +73,36 @@ class UserSerializer(serializers.ModelSerializer):
             "password": {"write_only": True, "required": False},
         }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_full_name(self, obj):
         return obj.get_full_name()
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_multi_clinic_enabled(self, obj):
         from organization.models import SystemConfig
         return SystemConfig.is_enabled('multi_clinic_enabled')
 
+    @extend_schema_field({"type": "array", "items": {"type": "integer"}})
     def get_clinics_ids(self, obj):
         return list(obj.clinics.values_list('id', flat=True))
 
+    @extend_schema_field({"type": "integer", "nullable": True})
     def get_active_clinic_id(self, obj):
         return obj.active_clinic_id
 
+    @extend_schema_field({
+    "type": "object",
+    "properties": {
+        "pages": {"type": "array", "items": {"type": "string"}},
+        "actions": {"type": "object", "additionalProperties": {"type": "integer"}},
+    },
+})
     def get_permissions(self, obj):
         """Get user permissions from their roles, with optional per-user page overrides."""
-        allowed_pages = set()
-        permission_counts = {}
-
-        for user_role in obj.user_roles.all():
-            role_permissions = normalize_role_permissions_list(user_role.role.permissions)
-            if not role_permissions:
-                continue
-            # Add all allowed pages from this role
-            allowed_pages.update(role_permissions)
-
-            # Build permission counts for UI display
-            # Map page URLs to permission IDs that match the UI
-            page_to_permission_map = {
-                # Medical Records
-                "/medical-records": "patient_view",
-                "/medical-records/patients/new": "patient_create",
-                "/medical-records/patients": "patient_view",
-                "/medical-records/patient-records": "patient_view",
-                "/medical-records/visits/new": "visit_create",
-                "/medical-records/visits": "visit_view",
-                "/medical-records/appointments": "visit_view",
-                "/medical-records/referrals": "patient_view",
-                "/medical-records/reports": "reports_view",
-                "/medical-records/settings/referral-facilities": "patient_view",
-                # Nursing
-                "/nursing": "nursing_vitals",  # Just need one permission to count as having nursing access
-                "/nursing/analytics": "nursing_queue",
-                "/nursing/pool-queue": "nursing_queue",
-                "/nursing/room-queue": "nursing_queue",
-                "/nursing/patient-vitals": "nursing_vitals",
-                "/nursing/procedures": "nursing_procedures",
-                "/nursing/procedures/history": "nursing_procedures",
-                "/nursing/wards": "nursing_vitals",
-                "/nursing/inventory": "nursing_vitals",
-                "/nursing/requests": "nursing_vitals",
-                # Consultation
-                "/consultation": "consultation_view",
-                "/consultation/start": "consultation_start",
-                "/consultation/history": "consultation_view",
-                "/consultation/wards": "consultation_view",
-                "/consultation/referrals": "consultation_referral",
-                "/consultation/analytics": "consultation_view",
-                # Laboratory
-                "/laboratory": "lab_orders_view",
-                "/laboratory/orders": "lab_orders_view",
-                "/laboratory/verification": "lab_verify",
-                "/laboratory/completed": "lab_orders_view",
-                "/laboratory/templates": "lab_templates",
-                "/laboratory/analytics": "lab_orders_view",
-                # Pharmacy
-                "/pharmacy": "pharmacy_view",
-                "/pharmacy/prescriptions": "pharmacy_view",
-                "/pharmacy/history": "pharmacy_view",
-                "/pharmacy/inventory": "pharmacy_inventory",
-                "/pharmacy/requests": "pharmacy_inventory",
-                "/pharmacy/store": "pharmacy_inventory",
-                "/pharmacy/store/requests": "pharmacy_inventory",
-                "/pharmacy/generics": "pharmacy_inventory",
-                "/pharmacy/drugs": "pharmacy_inventory",
-                "/pharmacy/analytics": "pharmacy_inventory",
-                # Radiology
-                "/radiology": "radiology_view",
-                "/radiology/orders": "radiology_view",
-                "/radiology/verification": "radiology_verify",
-                "/radiology/completed": "radiology_view",
-                "/radiology/templates": "radiology_view",
-                "/radiology/analytics": "radiology_view",
-                "/radiology/viewer": "radiology_view",
-                "/radiology/studies": "radiology_view",
-                # Physiotherapy
-                "/physiotherapy": "physio_view",
-                "/physiotherapy/orders": "physio_view",
-                "/physiotherapy/completed": "physio_view",
-                "/physiotherapy/analytics": "physio_view",
-                # Eye Clinic
-                "/eyecare": "physio_view",
-                "/eyecare/orders": "physio_view",
-                "/eyecare/completed": "physio_view",
-                "/eyecare/analytics": "physio_view",
-                # Analytics
-                "/analytics": "analytics_view",
-                "/analytics/executive": "analytics_executive",
-                # Administration
-                "/admin": "admin_users",
-                "/admin/users": "admin_users",
-                "/admin/roles": "admin_roles",
-                "/admin/clinics": "admin_clinics",
-                "/admin/rooms": "admin_rooms",
-                "/admin/settings": "admin_settings",
-                "/admin/audit": "admin_audit",
-            }
-
-            # Collect all permission IDs from page mappings
-            collected_permissions = set()
-            for page_url in role_permissions:
-                if page_url in page_to_permission_map:
-                    permission_id = page_to_permission_map[page_url]
-                    collected_permissions.add(permission_id)
-
-            # Special handling: if user has any nursing permission, give them all nursing permissions
-            nursing_permissions = [
-                "nursing_vitals",
-                "nursing_triage",
-                "nursing_administer",
-                "nursing_procedures",
-                "nursing_notes",
-                "nursing_queue",
-            ]
-            if any(p in nursing_permissions for p in collected_permissions):
-                collected_permissions.update(nursing_permissions)
-
-            # Group permissions by module
-            permission_to_module_map = {
-                # Medical Records
-                "patient_view": "Medical Records",
-                "patient_create": "Medical Records",
-                "patient_edit": "Medical Records",
-                "patient_delete": "Medical Records",
-                "visit_view": "Medical Records",
-                "visit_create": "Medical Records",
-                "visit_edit": "Medical Records",
-                "reports_view": "Medical Records",
-                "reports_generate": "Medical Records",
-                # Consultation
-                "consultation_view": "Consultation",
-                "consultation_start": "Consultation",
-                "consultation_prescribe": "Consultation",
-                "consultation_diagnosis": "Consultation",
-                "consultation_lab_order": "Consultation",
-                "consultation_radiology_order": "Consultation",
-                "consultation_referral": "Consultation",
-                "consultation_nursing_order": "Consultation",
-                # Nursing
-                "nursing_vitals": "Nursing",
-                "nursing_triage": "Nursing",
-                "nursing_administer": "Nursing",
-                "nursing_procedures": "Nursing",
-                "nursing_notes": "Nursing",
-                "nursing_queue": "Nursing",
-                # Laboratory
-                "lab_orders_view": "Laboratory",
-                "lab_collect": "Laboratory",
-                "lab_process": "Laboratory",
-                "lab_results": "Laboratory",
-                "lab_verify": "Laboratory",
-                "lab_templates": "Laboratory",
-                # Pharmacy
-                "pharmacy_view": "Pharmacy",
-                "pharmacy_dispense": "Pharmacy",
-                "pharmacy_inventory": "Pharmacy",
-                "pharmacy_substitute": "Pharmacy",
-                # Radiology
-                "radiology_view": "Radiology",
-                "radiology_perform": "Radiology",
-                "radiology_report": "Radiology",
-                "radiology_verify": "Radiology",
-                # Administration
-                "admin_users": "Administration",
-                "admin_roles": "Administration",
-                "admin_rooms": "Administration",
-                "admin_clinics": "Administration",
-                "admin_settings": "Administration",
-                "admin_audit": "Administration",
-                # Other modules
-                "physio_view": "Physiotherapy",
-                "analytics_view": "Analytics",
-                "analytics_executive": "Analytics",
-            }
-
-            for permission_id in collected_permissions:
-                if permission_id in permission_to_module_map:
-                    module = permission_to_module_map[permission_id]
-                    if module not in permission_counts:
-                        permission_counts[module] = []
-                    if permission_id not in permission_counts[module]:
-                        permission_counts[module].append(permission_id)
-
-        # Always include global user features for authenticated users
-        global_pages = {"/notifications", "/settings", "/help"}
-        allowed_pages.update(global_pages)
-
         return {
-            "pages": list(self._apply_page_overrides(obj, allowed_pages)),
-            "actions": permission_counts,
+            "pages": get_user_allowed_pages_for_response(obj),
+            "actions": build_permission_action_counts(obj),
         }
-
-    def _apply_page_overrides(self, obj, role_pages: set[str]) -> set[str]:
-        mode = (getattr(obj, "custom_pages_mode", "") or "").strip()
-        custom = getattr(obj, "custom_pages", None)
-        custom_pages = set(custom) if isinstance(custom, list) else set()
-
-        if mode == "replace":
-            return set(custom_pages)
-        if mode == "add":
-            return set(role_pages) | set(custom_pages)
-        if mode == "restrict":
-            return set(role_pages) - set(custom_pages)
-        return set(role_pages)
 
 
 class UserDirectorySerializer(serializers.ModelSerializer):
@@ -320,6 +140,7 @@ class UserDirectorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_full_name(self, obj):
         return obj.get_full_name()
 

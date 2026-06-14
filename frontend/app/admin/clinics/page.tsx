@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { toApiDateFromInstant } from "@/lib/dates";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import {
   adminService,
@@ -39,6 +40,7 @@ import {
   type RoomsAdminManagerHandle,
 } from "@/components/admin/RoomsAdminManager";
 import { DepartmentStaffDialog } from "@/components/admin/DepartmentStaffDialog";
+import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 
 interface Clinic {
   id: string;
@@ -197,7 +199,7 @@ export default function ClinicDepartmentPage() {
         staffCount: clinic.staff_count ?? 0,
         roomCount: clinic.room_count || 0,
         isActive: clinic.is_active,
-        createdAt: clinic.created_at?.split('T')[0] || '',
+        createdAt: toApiDateFromInstant(clinic.created_at),
       }));
 
       // Transform departments — use the API's staff_count which counts all
@@ -371,7 +373,7 @@ export default function ClinicDepartmentPage() {
     setIsEditDialogOpen(true);
     try {
       const [all, offered] = await Promise.all([
-        adminService.getOutpatientClinicTypes({ is_active: true, page_size: 500 }),
+        adminService.getOutpatientClinicTypes({ is_active: true, page_size: MAX_LIST_PAGE_SIZE }),
         adminService.getFacilityVisitClinics(parseInt(c.id, 10)),
       ]);
       setAllOutpatientTypes(all.results || []);
@@ -391,7 +393,7 @@ export default function ClinicDepartmentPage() {
   const ensureAvailableUsersLoaded = async () => {
     if (availableUsers.length > 0) return;
     try {
-      const res = await adminService.getUsers({ is_active: true, page: 1, page_size: 200 });
+      const res = await adminService.getUsers({ is_active: true, page: 1, page_size: MAX_LIST_PAGE_SIZE });
       setAvailableUsers(res.results || []);
     } catch (e) {
       console.error('Failed to load users for head picker:', e);
@@ -451,7 +453,7 @@ export default function ClinicDepartmentPage() {
               system_role: roleName,
               is_active: true,
               page: 1,
-              page_size: 200,
+              page_size: MAX_LIST_PAGE_SIZE,
             })
             .catch(() => ({ results: [] as any[] })),
         ),
@@ -656,7 +658,7 @@ export default function ClinicDepartmentPage() {
     try {
       setLoadingVisitTypes(true);
       const res = await adminService.getOutpatientClinicTypes({
-        page_size: 500,
+        page_size: MAX_LIST_PAGE_SIZE,
         is_active: statusFilter !== 'all' ? statusFilter === 'Active' : undefined,
       });
       setVisitTypesList(res.results || []);

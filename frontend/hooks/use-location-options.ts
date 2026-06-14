@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { adminService } from "@/lib/services";
+import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 
 export interface LocationOption {
   /** Facility name (matches Visit/Patient `location` and organization.Clinic.name). */
@@ -26,7 +27,7 @@ export function useLocationOptions(options?: { includeAll?: boolean }) {
       setError(null);
       const response = await adminService.getClinics({
         is_active: true,
-        page_size: 500,
+        page_size: MAX_LIST_PAGE_SIZE,
       });
       const opts: LocationOption[] = (response.results || []).map((c) => ({
         value: c.name,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StandardPagination } from '@/components/shared/StandardPagination';
+import { getMediaUrl, openMediaInNewTab } from '@/lib/media-url';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,9 +27,10 @@ import {
 } from '@/lib/radiology/radiology-workflow-search';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority } from '@/lib/services/transformers';
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
-  Loader2, User, Calendar, FileText, Stethoscope, ScanLine, Download, RefreshCw
+  Loader2, User, Calendar, FileText, Stethoscope, ScanLine, Download
 } from 'lucide-react';
 
 interface ImagingStudy {
@@ -71,14 +72,8 @@ interface RadiologyReport {
   lmp?: string;
 }
 
-const getRadiologyReportFileUrl = (filePath?: string | null) => {
-  if (!filePath) return '';
-  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
-  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
-  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
-  if (filePath.startsWith('/media/')) return `${mediaBase}${filePath}`;
-  return `${mediaBase}/media/${filePath.replace(/^\/+/, '')}`;
-};
+const getRadiologyReportFileUrl = (filePath?: string | null) =>
+  getMediaUrl(filePath ?? '') ?? '';
 
 // Transform backend radiology report to frontend format
 const transformReport = (apiReport: any): RadiologyReport => {
@@ -436,9 +431,8 @@ export default function RadiologyVerificationPage() {
 
   const formatTime = (isoString: string) => {
     if (!isoString) return 'Unknown time';
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return 'Invalid date';
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const formatted = formatDisplayTime(isoString);
+    return formatted === '—' ? 'Invalid date' : formatted;
   };
   const getTimeSince = (isoString: string) => {
     const diff = Date.now() - new Date(isoString).getTime();
@@ -567,17 +561,12 @@ export default function RadiologyVerificationPage() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <ShieldCheck className="h-8 w-8 text-amber-500" />
-              Results Verification
-            </h1>
-            <p className="text-muted-foreground mt-1">Senior Admin / Radiologist - Verify radiology results before completion</p>
-          </div>
-          <Button variant="outline" onClick={loadReports} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-          </Button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
+            <ShieldCheck className="h-8 w-8 text-amber-500" />
+            Results Verification
+          </h1>
+          <p className="text-muted-foreground mt-1">Senior Admin / Radiologist - Verify radiology results before completion</p>
         </div>
 
         {/* Tabs & Filters */}
@@ -816,10 +805,7 @@ export default function RadiologyVerificationPage() {
                 <>
                   {verifiedPaginatedReports.map((report) => {
                     const verified = {
-                      date: report.study.verifiedAt ? new Date(report.study.verifiedAt).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric'
-                      }) : 'Unknown',
+                      date: report.study.verifiedAt ? formatDisplayDateMedium(report.study.verifiedAt) : 'Unknown',
                       time: report.study.verifiedAt ? formatTime(report.study.verifiedAt) : 'Unknown'
                     };
 
@@ -967,7 +953,11 @@ export default function RadiologyVerificationPage() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => window.open(row.attachment?.url, '_blank', 'noopener,noreferrer')}
+                                onClick={() => {
+                                  void openMediaInNewTab(row.attachment?.url).catch((err: any) =>
+                                    toast.error(err?.message || 'Failed to open file')
+                                  );
+                                }}
                               >
                                 <FileText className="h-3.5 w-3.5 mr-1" />
                                 View file

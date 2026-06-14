@@ -48,6 +48,7 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       ALLOWED_HOSTS: localhost,127.0.0.1,backend,frontend,172.19.0.0,172.19.0.1,172.19.0.2,172.19.0.3,172.19.0.4,172.19.0.5
       CSRF_TRUSTED_ORIGINS: http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001,http://frontend:3001
+      ENABLE_API_DOCS: "true"
     volumes:
       - ./backend:/app
       - media-data:/app/media

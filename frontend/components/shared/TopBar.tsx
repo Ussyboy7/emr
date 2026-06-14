@@ -9,6 +9,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useClinic } from "@/hooks/use-clinic";
 import { NPA_LOGO_URL, NPA_EMR_TITLE } from "@/lib/branding";
+import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 import { hasTokens, logout } from "@/lib/api-client";
 import { getHomeRouteForUser } from "@/lib/home-route";
 import {
@@ -96,22 +97,9 @@ export const TopBar = () => {
   };
 
   // Format time as HH:MM AM/PM
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: true 
-    });
-  };
+  const formatTime = (date: Date) => formatDisplayTime(date);
 
-  // Format date as "Day, Month Date"
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'long',
-      month: 'long', 
-      day: 'numeric'
-    });
-  };
+  const formatDate = (date: Date) => formatDisplayDateMedium(date);
 
   const getUserRoleDisplay = () => {
     if (!currentUser) return 'User';

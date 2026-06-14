@@ -2,6 +2,7 @@
  * Patient API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { getVisitTypeLabel } from '../utils/priority';
 
 /**
  * Normalize API gender to a display label.
@@ -41,9 +42,14 @@ export function sanitizePatientForRendering(patient: Record<string, unknown>): R
       : (patient.allergies ? String(patient.allergies).split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a) : []),
     waitTime: typeof patient.waitTime === 'number' ? patient.waitTime : 0,
     vitalsCompleted: Boolean(patient.vitalsCompleted),
-    priority: patient.priority || 'Normal',
+    priority:
+      patient.priority ||
+      (patient.visitType ? getVisitTypeLabel(String(patient.visitType)) : 'Consultation'),
     visitDate: String(patient.visitDate || ''),
     visitTime: String(patient.visitTime || ''),
+    visitType: patient.visitType ? String(patient.visitType) : undefined,
+    queueItemId:
+      typeof patient.queueItemId === 'number' ? patient.queueItemId : undefined,
     queuePosition: typeof patient.queuePosition === 'number' ? patient.queuePosition : 0,
     bloodGroup: patient.blood_group ? String(patient.blood_group) : undefined,
     genotype: patient.genotype ? String(patient.genotype) : undefined,
@@ -204,6 +210,95 @@ class PatientService {
   }
 
   /**
+   * Load full patient + visit for an active consultation session.
+   * Always returns sanitized camelCase fields (bloodGroup, employeeType, visitType, etc.).
+   */
+  async buildConsultationPatient(
+    patientId: number,
+    overlay: {
+      visitId?: string | number | null;
+      queueItemId?: number;
+      waitTime?: number;
+      priority?: string;
+      vitalsCompleted?: boolean;
+      queuePosition?: number;
+      visitDate?: string;
+      visitTime?: string;
+      visitType?: string;
+      clinics?: string[];
+      completedClinics?: string[];
+      visitClinic?: string;
+      vitals?: unknown;
+    } = {}
+  ): Promise<Record<string, unknown>> {
+    const visitIdNum = overlay.visitId ? Number(overlay.visitId) : NaN;
+    const [apiPatient, visitData] = await Promise.all([
+      this.getPatient(patientId),
+      Number.isFinite(visitIdNum) && visitIdNum > 0
+        ? apiFetch<Visit>(`/visits/${visitIdNum}/`).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+    const visitType = overlay.visitType || visitData?.visit_type || undefined;
+    const fullName =
+      apiPatient.full_name?.trim() ||
+      `${apiPatient.first_name || ''} ${apiPatient.surname || ''}`.trim();
+
+    const patientData: Record<string, unknown> = {
+      id: String(apiPatient.id),
+      visitId: overlay.visitId
+        ? String(overlay.visitId)
+        : visitData
+          ? String(visitData.id)
+          : '',
+      patient_id: apiPatient.patient_id,
+      patientId: apiPatient.patient_id,
+      full_name: fullName,
+      name: fullName,
+      age: apiPatient.age ?? 0,
+      age_display: apiPatient.age_display,
+      gender: apiPatient.gender,
+      personal_number: apiPatient.personal_number,
+      allergies: apiPatient.allergies,
+      waitTime: overlay.waitTime ?? 0,
+      vitalsCompleted: overlay.vitalsCompleted ?? false,
+      priority: overlay.priority ?? getVisitTypeLabel(visitType),
+      visitDate: overlay.visitDate || visitData?.date || '',
+      visitTime:
+        overlay.visitTime ||
+        (visitData?.time ? String(visitData.time).slice(0, 5) : ''),
+      visitType,
+      queueItemId: overlay.queueItemId,
+      queuePosition: overlay.queuePosition,
+      blood_group: apiPatient.blood_group,
+      genotype: apiPatient.genotype,
+      employee_type: apiPatient.employee_type,
+      division: apiPatient.division,
+      location: apiPatient.location,
+      phone: apiPatient.phone,
+      email: apiPatient.email,
+      occupation: apiPatient.occupation,
+      religion: apiPatient.religion,
+      tribe: apiPatient.tribe,
+      photo: apiPatient.photo,
+      vitals: overlay.vitals,
+      clinics: overlay.clinics ?? visitData?.clinics ?? [],
+      completedClinics: overlay.completedClinics ?? visitData?.completed_clinics ?? [],
+      visitClinic: overlay.visitClinic,
+    };
+
+    const sanitized = sanitizePatientForRendering(patientData);
+    return {
+      ...sanitized,
+      visitType,
+      queueItemId: overlay.queueItemId,
+      clinics: patientData.clinics,
+      completedClinics: patientData.completedClinics,
+      visitClinic: overlay.visitClinic,
+    };
+  }
+
+  /**
    * Create a new patient
    */
   async createPatient(data: Partial<Patient>): Promise<Patient> {
@@ -254,11 +349,76 @@ class PatientService {
     return response.results || [];
   }
 
+  /** Latest vital for a patient and/or visit (no paginated list hop). */
+  async resolveVital(params: {
+    patient?: number;
+    visit?: number;
+    ordering?: string;
+  }): Promise<VitalReading | null> {
+    try {
+      const query = buildQueryString(params as Record<string, string | number | undefined>);
+      return await apiFetch<VitalReading>(`/vitals/resolve/${query}`);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether a visit has at least one vital reading. */
+  async vitalsExistForVisit(visitId: number): Promise<boolean> {
+    try {
+      const res = await apiFetch<{ exists: boolean }>(`/vitals/exists/?visit=${visitId}`);
+      return res.exists;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Vitals history dashboard stat cards (replaces 4 parallel COUNT list calls). */
+  async getVitalsHistoryStats(params?: Record<string, string | undefined>): Promise<{
+    total: number;
+    today: number;
+    week: number;
+    patients: number;
+  }> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | undefined>);
+    const path = query ? `/vitals/history-stats/${query}` : '/vitals/history-stats/';
+    return apiFetch(path);
+  }
+
   /**
    * Get patient medical history
    */
   async getPatientHistory(patientId: number): Promise<any> {
     return apiFetch<any>(`/patients/${patientId}/history/`);
+  }
+
+  /** Full clinical overview for history tabs / consultation room sidebar. */
+  async getClinicalOverview(patientId: number): Promise<{
+    consultations: { results: unknown[]; count: number };
+    lab_results: { results: unknown[]; count: number };
+    radiology_reports: { results: unknown[]; count: number };
+    radiology_orders: { results: unknown[]; count: number };
+    prescriptions: { results: unknown[]; count: number };
+    vitals: { results: unknown[]; count: number };
+    physio_orders: { results: unknown[]; count: number };
+    eye_orders: { results: unknown[]; count: number };
+    ward_admissions: { results: unknown[]; count: number };
+    certificates: { results: unknown[]; count: number };
+    referrals: { results: unknown[]; count: number };
+    visits: unknown[];
+    annual_checkups: { results: unknown[]; count: number };
+    medical_history: unknown;
+  }> {
+    return apiFetch(`/patients/${patientId}/clinical-overview/`);
+  }
+
+  /** Batch dependent counts keyed by principal staff id. */
+  async getDependentsCounts(principalStaffIds: number[]): Promise<Record<string, number>> {
+    if (!principalStaffIds.length) return {};
+    const query = buildQueryString({
+      principal_staff: principalStaffIds.join(','),
+    });
+    return apiFetch<Record<string, number>>(`/patients/dependents-counts/${query}`);
   }
 
   /**

@@ -107,8 +107,9 @@ export default function MedicalRecordsReferralsPage() {
     }
   };
 
-  const handlePrintLetter = (r: ReferralWithPatient) => {
-    if (!printReferralLetterWindow(r)) toast.error("Allow popups to print.");
+  const handlePrintLetter = async (r: ReferralWithPatient) => {
+    const ok = await printReferralLetterWindow(r);
+    if (!ok) toast.error("Could not open the PDF — allow popups or check sign-in.");
   };
   const handlePrintForm = async (
     r: ReferralWithPatient,

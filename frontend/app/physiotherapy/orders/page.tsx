@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from 'sonner';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   findPhysioOrdersTabForOrders,
   isValidPhysioOrdersTab,
@@ -23,7 +24,7 @@ import {
   PHYSIO_ORDERS_TAB_LABELS,
   type PhysioOrdersTab,
 } from '@/lib/physiotherapy/physio-workflow-search';
-import { physioService, type PhysioOrder, type PhysioSession } from '@/lib/services';
+import { physioService, patientService, type PhysioOrder, type PhysioSession } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -33,6 +34,7 @@ import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDi
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { getOrganizationHeader } from '@/lib/constants/organization';
+import { formatDisplayDate, formatDisplayDateTime, toApiDateString } from '@/lib/dates';
 
 import {
   Users, Search, Stethoscope, Calendar, Clock, CheckCircle, CheckCircle2,
@@ -55,7 +57,7 @@ const formatRelativeTime = (dateString: string | null | undefined) => {
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    return formatDisplayDate(date) === '—' ? '' : formatDisplayDate(date);
   } catch {
     return '';
   }
@@ -193,8 +195,6 @@ export default function PhysioPoolQueuePage() {
     ordered_at_before?: string;
   } => {
     const result: { ordered_at_after?: string; ordered_at_before?: string } = {};
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     if (dateRange.from || dateRange.to) {
       if (dateRange.from) result.ordered_at_after = dateRange.from;
       if (dateRange.to) result.ordered_at_before = dateRange.to;
@@ -203,16 +203,16 @@ export default function PhysioPoolQueuePage() {
     if (dateFilter === 'all') return result;
     const today = new Date();
     if (dateFilter === 'today') {
-      result.ordered_at_after = fmt(today);
-      result.ordered_at_before = fmt(today);
+      result.ordered_at_after = toApiDateString(today);
+      result.ordered_at_before = toApiDateString(today);
     } else if (dateFilter === 'week') {
       const from = new Date(today);
       from.setDate(from.getDate() - 7);
-      result.ordered_at_after = fmt(from);
+      result.ordered_at_after = toApiDateString(from);
     } else if (dateFilter === 'month') {
       const from = new Date(today);
       from.setMonth(from.getMonth() - 1);
-      result.ordered_at_after = fmt(from);
+      result.ordered_at_after = toApiDateString(from);
     }
     return result;
   }, [dateFilter, dateRange]);
@@ -321,7 +321,7 @@ export default function PhysioPoolQueuePage() {
     let cancelled = false;
     (async () => {
       try {
-        const r = await physioService.getSessions({ order: selectedOrder.id, page_size: 100 });
+        const r = await physioService.getSessions({ order: selectedOrder.id, page_size: MAX_LIST_PAGE_SIZE });
         if (!cancelled) setOrderSessionsList(r?.results ?? []);
       } catch {
         if (!cancelled) setOrderSessionsList([]);
@@ -882,9 +882,8 @@ export default function PhysioPoolQueuePage() {
 
   const loadPatientVitals = async (patientId: number) => {
     try {
-      const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?patient=${patientId}&page_size=1`);
-      if (vitalsResult.results && vitalsResult.results.length > 0) {
-        const latestVitals = vitalsResult.results[0];
+      const latestVitals = await patientService.resolveVital({ patient: patientId });
+      if (latestVitals) {
         const formattedVitals = {
           temperature: latestVitals.temperature ? `${latestVitals.temperature}°C` : '',
           bloodPressure: latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
@@ -1201,7 +1200,7 @@ export default function PhysioPoolQueuePage() {
                   Manage Physio Order
                 </DialogTitle>
                 <DialogDescription>
-                  PHY-{selectedOrder?.id?.toString().padStart(6, '0')} • {selectedOrder?.ordered_at ? new Date(selectedOrder.ordered_at).toLocaleString() : 'N/A'}
+                  PHY-{selectedOrder?.id?.toString().padStart(6, '0')} • {selectedOrder?.ordered_at ? formatDisplayDateTime(selectedOrder.ordered_at) : 'N/A'}
                 </DialogDescription>
               </DialogHeader>
               {selectedOrder && (
@@ -1300,18 +1299,18 @@ export default function PhysioPoolQueuePage() {
                     <div className="flex items-center gap-4 text-xs">
                       <div className="flex items-center gap-1">
                         <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                        <span>Ordered: {selectedOrder.ordered_at ? new Date(selectedOrder.ordered_at).toLocaleString() : 'N/A'}</span>
+                        <span>Ordered: {selectedOrder.ordered_at ? formatDisplayDateTime(selectedOrder.ordered_at) : 'N/A'}</span>
                       </div>
                       {selectedOrder.scheduled_at && (
                         <div className="flex items-center gap-1">
                           <div className="h-2 w-2 rounded-full bg-amber-500"></div>
-                          <span>Session started: {new Date(selectedOrder.scheduled_at).toLocaleString()}</span>
+                          <span>Session started: {formatDisplayDateTime(selectedOrder.scheduled_at)}</span>
                         </div>
                       )}
                       {selectedOrder.completed_at && (
                         <div className="flex items-center gap-1">
                           <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                          <span>Completed: {new Date(selectedOrder.completed_at).toLocaleString()}</span>
+                          <span>Completed: {formatDisplayDateTime(selectedOrder.completed_at)}</span>
                         </div>
                       )}
                     </div>
@@ -1377,8 +1376,8 @@ export default function PhysioPoolQueuePage() {
                                 </Button>
                                 <span className="text-xs text-muted-foreground">
                                   {s.completed_at
-                                    ? new Date(s.completed_at).toLocaleString()
-                                    : (s.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : 'N/A')}
+                                    ? formatDisplayDateTime(s.completed_at)
+                                    : (s.scheduled_at ? formatDisplayDateTime(s.scheduled_at) : 'N/A')}
                                 </span>
                               </div>
                             </div>
@@ -1954,8 +1953,8 @@ export default function PhysioPoolQueuePage() {
                       {joinDisplayParts([
                         reportViewingSession?.id != null ? `Document ${reportViewingSession.id}` : '',
                         reportViewingSession?.completed_at
-                          ? new Date(reportViewingSession.completed_at).toLocaleString()
-                          : (reportViewingSession?.scheduled_at ? new Date(reportViewingSession.scheduled_at).toLocaleString() : ''),
+                          ? formatDisplayDateTime(reportViewingSession.completed_at)
+                          : (reportViewingSession?.scheduled_at ? formatDisplayDateTime(reportViewingSession.scheduled_at) : ''),
                       ])}
                     </DialogDescription>
                   </div>
@@ -2005,10 +2004,10 @@ export default function PhysioPoolQueuePage() {
                         <div className="space-y-1">
                           <p><span className="font-medium">Session:</span> {reportViewingSession.session_number ?? 'N/A'}</p>
                           {reportViewingSession.scheduled_at && (
-                            <p><span className="font-medium">Scheduled:</span> {new Date(reportViewingSession.scheduled_at).toLocaleString()}</p>
+                            <p><span className="font-medium">Scheduled:</span> {formatDisplayDateTime(reportViewingSession.scheduled_at)}</p>
                           )}
                           {reportViewingSession.completed_at && (
-                            <p><span className="font-medium">Completed:</span> {new Date(reportViewingSession.completed_at).toLocaleString()}</p>
+                            <p><span className="font-medium">Completed:</span> {formatDisplayDateTime(reportViewingSession.completed_at)}</p>
                           )}
                         </div>
                       </div>
@@ -2051,7 +2050,7 @@ export default function PhysioPoolQueuePage() {
                   )}
                   <div className="border-t pt-4 text-xs text-muted-foreground">
                     <div className="flex justify-between">
-                      <span>Generated: {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}</span>
+                      <span>Generated: {formatDisplayDateTime(new Date())}</span>
                       <span>Session ID: PHY-{String(reportViewingSession.id).padStart(6, '0')}</span>
                     </div>
                     <div className="mt-2 text-center">{getOrganizationHeader()}</div>

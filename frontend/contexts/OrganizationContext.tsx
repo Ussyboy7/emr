@@ -3,6 +3,8 @@ import React, { createContext, useContext, useEffect, useState, ReactNode, useCa
 import type { User } from '@/lib/npa-structure';
 import { updateOrganizationCache } from '@/lib/npa-structure';
 import { apiFetch, hasTokens } from '@/lib/api-client';
+import { fetchAllPaginated } from '@/lib/pagination-utils';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { usePathname } from 'next/navigation';
 
@@ -438,13 +440,27 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
         }
       };
 
+      const safeFetchAll = async (path: string) => {
+        try {
+          const results = await fetchAllPaginated<any>(path, MAX_LIST_PAGE_SIZE);
+          return { results };
+        } catch (error: any) {
+          if (error?.status === 404) {
+            logInfo(`Endpoint not found (skipping): ${path}`);
+            return { results: [] };
+          }
+          logError(`Failed to fetch ${path}:`, error);
+          return { results: [] };
+        }
+      };
+
       // EMR backend only has clinics, departments, and rooms (not directorates, divisions, roles, offices)
       const [
         usersDataRaw,
         departmentsRaw,
       ] = await Promise.all([
-        safeApiFetch('/accounts/users/directory/?page_size=500'),
-        safeApiFetch('/organization/departments/?ordering=name&page_size=500'),
+        safeFetchAll('/accounts/users/directory/'),
+        safeFetchAll('/organization/departments/?ordering=name'),
       ]);
 
       const unwrappedUsers = unwrapResults<any>(usersDataRaw);

@@ -49,6 +49,8 @@ from xml.sax.saxutils import escape
 
 from django.utils import timezone
 
+from common.date_display import format_display_datetime
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -239,7 +241,7 @@ def _draw_footer(canvas, doc, *, document_serial: str = ""):
     if document_serial:
         canvas.drawString(PAGE_MARGIN, FOOTER_HEIGHT - 9, f"Document: {document_serial}")
 
-    generated = timezone.localtime().strftime("%Y-%m-%d %H:%M")
+    generated = format_display_datetime()
     canvas.drawCentredString(page_width / 2, FOOTER_HEIGHT - 9, f"Generated: {generated}")
 
     page_num = canvas.getPageNumber()

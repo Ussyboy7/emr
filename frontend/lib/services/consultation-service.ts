@@ -1,4 +1,5 @@
 import { apiFetch, buildQueryString } from '../api-client';
+import { MAX_LIST_PAGE_SIZE } from '../pagination-constants';
 
 export interface ConsultationStats {
   today: {
@@ -107,6 +108,17 @@ export interface ConsultationQueueItem {
   queued_at: string;
   called_at?: string;
   is_active: boolean;
+}
+
+export interface SessionWorkspaceBundle {
+  diagnoses: { results: Diagnosis[]; count: number };
+  prescriptions: { results: unknown[]; count: number };
+  lab_orders: { results: unknown[]; count: number };
+  radiology_orders: { results: unknown[]; count: number };
+  nursing_orders: { results: unknown[]; count: number };
+  physio_orders: { results: unknown[]; count: number };
+  eye_orders: { results: unknown[]; count: number };
+  vitals: { results: unknown[]; count: number };
 }
 
 export interface PresentingComplaintCategory {
@@ -240,11 +252,64 @@ class ConsultationService {
     return apiFetch<{ results: ConsultationSession[]; count: number }>(`/consultation/sessions/${query}`);
   }
 
+  /** Best-matching session for a visit (e.g. latest completed for reports). */
+  async resolveSessionForVisit(params: {
+    visit: number;
+    status?: string;
+    patient?: number;
+    ordering?: string;
+  }): Promise<ConsultationSession | null> {
+    try {
+      const query = buildQueryString(params as Record<string, string | number | undefined>);
+      return await apiFetch<ConsultationSession>(`/consultation/sessions/resolve-for-visit/${query}`);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Consultation session counts per room for a calendar day. */
+  async getRoomDaySessionCounts(date: string): Promise<Record<string, number>> {
+    try {
+      const query = buildQueryString({ date });
+      const res = await apiFetch<{ counts: Record<string, number> }>(
+        `/consultation/sessions/room-day-counts/${query}`
+      );
+      return res.counts || {};
+    } catch {
+      return {};
+    }
+  }
+
   /**
    * Get a single consultation session
    */
   async getSession(id: number): Promise<ConsultationSession> {
     return apiFetch<ConsultationSession>(`/consultation/sessions/${id}/`);
+  }
+
+  /** Diagnoses, orders, prescriptions, and vitals for consultation room / edit modals. */
+  async getSessionWorkspaceBundle(sessionId: number): Promise<SessionWorkspaceBundle> {
+    return apiFetch<SessionWorkspaceBundle>(`/consultation/sessions/${sessionId}/workspace-bundle/`);
+  }
+
+  /** History page stat cards (replaces 4 parallel COUNT list calls). */
+  async getHistoryStats(params?: {
+    clinic?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+    search?: string;
+    calendar_today?: string;
+    week_start?: string;
+    week_end?: string;
+  }): Promise<{
+    today: number;
+    thisWeek: number;
+    inProgress: number;
+    completed: number;
+  }> {
+    const query = buildQueryString(params || {});
+    return apiFetch(`/consultation/sessions/history-stats/${query}`);
   }
 
   /**
@@ -344,6 +409,16 @@ class ConsultationService {
     return apiFetch<{ results: ICD10Code[]; count: number }>(`/consultation/icd10-codes/${query}`);
   }
 
+  /** Exact ICD-10 code lookup (no paginated search). */
+  async resolveICD10Code(code: string): Promise<ICD10Code | null> {
+    try {
+      const query = buildQueryString({ code: code.trim() });
+      return await apiFetch<ICD10Code>(`/consultation/icd10-codes/resolve/${query}`);
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Get diagnoses
    */
@@ -356,6 +431,13 @@ class ConsultationService {
   }): Promise<{ results: Diagnosis[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Diagnosis[]; count: number }>(`/consultation/diagnoses/${query}`);
+  }
+
+  async sessionHasDiagnosis(sessionId: number): Promise<boolean> {
+    const res = await apiFetch<{ exists: boolean }>(
+      `/consultation/diagnoses/exists/?session=${sessionId}`,
+    );
+    return Boolean(res.exists);
   }
 
   /**
@@ -476,7 +558,7 @@ class ConsultationService {
       include_complaints: true,
       active_only: params?.include_inactive ? false : true,
       page: 1,
-      page_size: 500,
+      page_size: MAX_LIST_PAGE_SIZE,
     });
     return (resp.results || []) as any;
   }

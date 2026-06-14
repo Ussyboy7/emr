@@ -1,27 +1,16 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  Download,
-  FileSpreadsheet,
-  RefreshCw,
-  ArrowLeft,
-  TrendingUp,
-  Printer,
-  Activity,
-  Users,
-  Calendar,
-} from "lucide-react";
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
+import { RefreshCw, ArrowLeft, TrendingUp, Activity, Users, Calendar, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
 
 interface DiseaseData {
   sn: number;
@@ -34,9 +23,23 @@ interface DiseaseData {
   female: number;
   gender_other: number;
   total: number;
+  percentage?: number;
 }
 
-const emptySummary = {
+interface DiseaseSummary {
+  total_diagnosis_lines: number;
+  distinct_icd10_codes: number;
+  total_employee: number;
+  total_non_employee: number;
+  grand_total: number;
+  total_male: number;
+  total_female: number;
+  total_gender_other: number;
+}
+
+const emptySummary: DiseaseSummary = {
+  total_diagnosis_lines: 0,
+  distinct_icd10_codes: 0,
   total_employee: 0,
   total_non_employee: 0,
   grand_total: 0,
@@ -45,40 +48,61 @@ const emptySummary = {
   total_gender_other: 0,
 };
 
-type SummaryState = typeof emptySummary;
+function normalizeSummary(raw?: Partial<DiseaseSummary> | null): DiseaseSummary {
+  const lines = raw?.total_diagnosis_lines ?? raw?.grand_total ?? 0;
+  return {
+    total_diagnosis_lines: lines,
+    distinct_icd10_codes: raw?.distinct_icd10_codes ?? 0,
+    total_employee: raw?.total_employee ?? 0,
+    total_non_employee: raw?.total_non_employee ?? 0,
+    grand_total: raw?.grand_total ?? lines,
+    total_male: raw?.total_male ?? 0,
+    total_female: raw?.total_female ?? 0,
+    total_gender_other: raw?.total_gender_other ?? 0,
+  };
+}
 
 export default function DiseasePatternReport() {
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<string>("monthly");
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    periodLabel,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    years,
+  } = useMrReportPeriod("all");
+
   const [data, setData] = useState<DiseaseData[]>([]);
-  const [summary, setSummary] = useState<SummaryState>(emptySummary);
+  const [summary, setSummary] = useState<DiseaseSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
 
-  const periodLabel = useMemo(() => {
-    if (viewMode === "year") return String(year);
-    if (startDate && endDate) return `${startDate} — ${endDate}`;
-    return "selected period";
-  }, [viewMode, year, startDate, endDate]);
+  const isAllTime = viewMode === "all";
+  const showCategoryCards = !isAllTime;
 
   const fetchReport = async () => {
+    const params = buildQuery();
+    if (!params) {
+      toast.error("Please select a valid date range");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-      if (!range) {
-        toast.error("Please select a valid date range");
-        setIsLoading(false);
-        return;
-      }
-      const url = `/reports/disease-pattern/?start_date=${range.start}&end_date=${range.end}`;
-
-      const response = await apiFetch<{ data: DiseaseData[]; summary: Partial<SummaryState> }>(url);
-      setData(response.data || []);
-      setSummary({ ...emptySummary, ...(response.summary || {}) });
-    } catch (error: any) {
+      const response = await apiFetch<{ data: DiseaseData[]; summary: DiseaseSummary }>(
+        `/reports/disease-pattern/?${params.toString()}`
+      );
+      setData(response.data ?? []);
+      setSummary(normalizeSummary(response.summary));
+    } catch (error: unknown) {
       console.error("Error fetching disease pattern:", error);
-      toast.error(error.message || "Failed to load disease pattern report");
+      toast.error(error instanceof Error ? error.message : "Failed to load disease pattern report");
       setData([]);
       setSummary(emptySummary);
     } finally {
@@ -87,66 +111,11 @@ export default function DiseasePatternReport() {
   };
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    if (range) fetchReport();
+    if (canFetch) fetchReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);
 
-  const exportToCSV = () => {
-    if (data.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-
-    const headers = [
-      "S/N",
-      "ICD-10 Diagnosis",
-      "Employee",
-      "Non-Employee",
-      "Male",
-      "Female",
-      "Other gender",
-      "Total",
-    ];
-    const rows = data.map((row) => [
-      row.sn,
-      `"${String(row.diagnosis).replace(/"/g, '""')}"`,
-      row.employee,
-      row.non_employee,
-      row.male ?? 0,
-      row.female ?? 0,
-      row.gender_other ?? 0,
-      row.total,
-    ]);
-
-    const csv = [
-      headers.join(","),
-      ...rows.map((row) => row.join(",")),
-      [
-        "TOTAL",
-        "",
-        summary.total_employee,
-        summary.total_non_employee,
-        summary.total_male,
-        summary.total_female,
-        summary.total_gender_other,
-        summary.grand_total,
-      ].join(","),
-    ].join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    const period = range ? `${range.start}_to_${range.end}` : 'unknown';
-    a.download = `disease_pattern_${period}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-
-    toast.success("Report exported successfully");
-  };
-
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
+  const hasData = (summary.grand_total ?? 0) > 0;
 
   return (
     <DashboardLayout>
@@ -167,22 +136,16 @@ export default function DiseasePatternReport() {
               Disease Pattern Report
             </h1>
             <p className="text-muted-foreground mt-1">
-              Top ICD-10 diagnoses with employee / non-employee and male / female / other gender counts
+              Top ICD-10 diagnoses by patient category and gender — {periodLabel}
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={data.length === 0}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={data.length === 0}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/disease-pattern/"
+              buildQuery={() => buildQuery()}
+              filenameBase={`disease_pattern_${filenameSuffix}`}
+              disabled={!hasData}
+            />
           </div>
         </div>
 
@@ -192,70 +155,23 @@ export default function DiseasePatternReport() {
               <Calendar className="h-5 w-5" />
               Filters
             </CardTitle>
-            <CardDescription>Adjust date range for detailed reporting</CardDescription>
+            <CardDescription>
+              Diagnosis lines from completed consultations with structured ICD-10 codes.
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={setViewMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {viewMode === 'year' ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map((y) => (
-                        <SelectItem key={y} value={y}>
-                          {y}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : viewMode === 'range' ? (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                  </div>
-                </>
-              ) : (
-                <div className="col-span-2">
-                  <Label>Period</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {viewMode === 'daily' && 'Today'}
-                    {viewMode === 'weekly' && 'This week'}
-                    {viewMode === 'monthly' && 'This month'}
-                    {viewMode === 'bimonthly' && 'Last 2 months'}
-                    {viewMode === 'quarterly' && 'This quarter'}
-                    {viewMode === 'half-yearly' && 'This half-year'}
-                    {viewMode === 'annually' && 'This year'}
-                  </p>
-                </div>
-              )}
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                   <TrendingUp className="h-4 w-4 mr-2" />
@@ -266,99 +182,65 @@ export default function DiseasePatternReport() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <Card className="border-l-4 border-l-blue-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Employee cases</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_employee.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0
-                      ? `${((summary.total_employee / summary.grand_total) * 100).toFixed(1)}%`
-                      : "0%"}{" "}
-                    of total (category)
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-green-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Non-employee cases</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_non_employee.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0
-                      ? `${((summary.total_non_employee / summary.grand_total) * 100).toFixed(1)}%`
-                      : "0%"}{" "}
-                    of total (category)
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-green-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+        <div className={`grid gap-4 ${showCategoryCards ? "md:grid-cols-4" : "md:grid-cols-2"}`}>
           <Card className="border-l-4 border-l-rose-500">
             <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total diagnosis lines</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.grand_total.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Sum of counts in selected period</p>
-                </div>
-                <Activity className="h-10 w-10 text-rose-500 opacity-50" />
-              </div>
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Activity className="h-4 w-4" />
+                Diagnosis lines
+              </p>
+              <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">
+                {(summary.total_diagnosis_lines ?? 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                One line per ICD-10 code recorded on a consultation
+              </p>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-sky-500">
+          <Card className="border-l-4 border-l-violet-500">
             <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Male (gender)</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0
-                      ? `${((summary.total_male / summary.grand_total) * 100).toFixed(1)}%`
-                      : "0%"}{" "}
-                    of total lines
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Distinct ICD-10 codes
+              </p>
+              <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">
+                {(summary.distinct_icd10_codes ?? 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Unique diagnoses in the table below</p>
+            </CardContent>
+          </Card>
+          {showCategoryCards && (
+            <>
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Employee lines
                   </p>
-                </div>
-                <Users className="h-10 w-10 text-sky-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-fuchsia-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Female (gender)</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0
-                      ? `${((summary.total_female / summary.grand_total) * 100).toFixed(1)}%`
-                      : "0%"}{" "}
-                    of total lines
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">
+                    {(summary.total_employee ?? 0).toLocaleString()}
                   </p>
-                </div>
-                <Users className="h-10 w-10 text-fuchsia-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Other / unknown gender</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_gender_other.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Residual vs male+female on same lines</p>
-                </div>
-                <Users className="h-10 w-10 text-amber-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Patient category = employee (officers and staff)
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Non-employee lines
+                  </p>
+                  <p className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">
+                    {(summary.total_non_employee ?? 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Dependents, retirees, non-NPA, and other categories
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
 
         <Card>
@@ -367,7 +249,10 @@ export default function DiseasePatternReport() {
               <TrendingUp className="h-5 w-5" />
               ICD-10 diagnoses — {periodLabel}
             </CardTitle>
-            <CardDescription>Diagnosis frequency from completed consultations (structured ICD-10)</CardDescription>
+            <CardDescription>
+              Diagnosis frequency from completed consultations (structured ICD-10). Gender &quot;Other&quot;
+              is residual where patient gender is not male or female.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -375,7 +260,7 @@ export default function DiseasePatternReport() {
                 <RefreshCw className="h-8 w-8 mx-auto mb-4 animate-spin text-muted-foreground" />
                 <p className="text-muted-foreground">Loading report data...</p>
               </div>
-            ) : data.length > 0 ? (
+            ) : hasData ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -403,9 +288,7 @@ export default function DiseasePatternReport() {
                         <td className="p-3 text-right text-foreground">{(row.gender_other ?? 0).toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">
-                          {summary.grand_total > 0
-                            ? `${((row.total / summary.grand_total) * 100).toFixed(1)}%`
-                            : "0.0%"}
+                          {(row.percentage ?? 0).toFixed(1)}%
                         </td>
                       </tr>
                     ))}
@@ -413,12 +296,24 @@ export default function DiseasePatternReport() {
                       <td colSpan={2} className="p-3 text-foreground">
                         TOTAL
                       </td>
-                      <td className="p-3 text-right text-foreground">{summary.total_employee.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_non_employee.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_gender_other.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.grand_total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">
+                        {(summary.total_employee ?? 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-foreground">
+                        {(summary.total_non_employee ?? 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-foreground">
+                        {(summary.total_male ?? 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-foreground">
+                        {(summary.total_female ?? 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-foreground">
+                        {(summary.total_gender_other ?? 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-foreground">
+                        {(summary.grand_total ?? 0).toLocaleString()}
+                      </td>
                       <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
@@ -428,7 +323,9 @@ export default function DiseasePatternReport() {
               <div className="text-center py-12">
                 <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-1">No data available</p>
-                <p className="text-sm text-muted-foreground">No diagnosis records found for this period</p>
+                <p className="text-sm text-muted-foreground">
+                  No diagnosis records found for {periodLabel}
+                </p>
               </div>
             )}
           </CardContent>

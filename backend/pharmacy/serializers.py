@@ -3,6 +3,8 @@ Serializers for the Pharmacy app.
 """
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from rest_framework.exceptions import ValidationError
 from django.db import models
 from .combo_utils import combo_component_names_from_display_name
@@ -177,8 +179,8 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
     """Serializer for MedicationInventory model."""
 
     medication_name = serializers.CharField(source="medication.name", read_only=True)
-    is_low_stock = serializers.ReadOnlyField()
-    is_expired = serializers.ReadOnlyField()
+    is_low_stock = serializers.BooleanField(read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
     medication = MedicationSerializer(read_only=True)
     # Accept medication id for writes (required for creating inventory rows).
     medication_id = serializers.PrimaryKeyRelatedField(
@@ -189,6 +191,7 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
     )
     source_from_central_store = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_source_from_central_store(self, obj):
         """When batch was received from Central Store, return request/issue info."""
         from .models import StockIssueLine
@@ -246,6 +249,7 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
     supplier = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
         clinic = getattr(obj, 'location_clinic', None)
         return clinic.name if clinic else None
@@ -258,6 +262,7 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
             return obj.issue.request.from_location
         return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_source_from_central_store(self, obj):
         if not obj.issue:
             return None
@@ -272,6 +277,7 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
             "from_location": from_location,
         }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_supplier(self, obj):
         source_location = self._resolve_source_location(obj)
         if source_location:
@@ -397,6 +403,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_medication_name(self, obj):
         """Get medication name safely (Brand or Generic)."""
         try:
@@ -408,6 +415,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_medication_code(self, obj):
         """Get medication code safely."""
         try:
@@ -420,6 +428,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_medication_details(self, obj):
         """Get medication details including current stock (from dispensary)."""
         try:
@@ -465,9 +474,11 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError, ValueError):
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_dosage(self, obj):
         return getattr(obj, "dose", "") or ""
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stock_dispensed_quantity(self, obj):
         try:
             total = 0.0
@@ -477,6 +488,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError, ValueError):
             return 0.0
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stock_dispensed_unit(self, obj):
         try:
             if obj.medication and getattr(obj.medication, "unit", None):
@@ -491,11 +503,13 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     def _combo_components_from_name(self, name: str):
         return combo_component_names_from_display_name(name)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_combo_components(self, obj):
         generic_name = getattr(getattr(obj, "generic", None), "name", "") or ""
         components = self._combo_components_from_name(generic_name)
         return components if len(components) > 1 else []
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_can_split_combo(self, obj):
         if getattr(obj, "superseded_at", None):
             return False
@@ -505,6 +519,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
             return False
         return len(self.get_combo_components(obj)) > 1
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_prescribing_record_only(self, obj):
         return bool(getattr(obj, "superseded_at", None))
 
@@ -559,20 +574,25 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     dispensed_by_name = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj, 'location_clinic', None)
-        return clinic.name if clinic else None
+        from common.order_location import order_location_clinic_name
 
+        return order_location_clinic_name(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_dispensed_by_name(self, obj):
         latest_dispense = obj.dispenses.order_by("-dispensed_at").first()
         if latest_dispense and latest_dispense.dispensed_by:
             return latest_dispense.dispensed_by.get_full_name()
         return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_name(self, obj):
         """Get patient full name."""
         return obj.patient.get_full_name() if obj.patient else "Unknown Patient"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_details(self, obj):
         """Get detailed patient information."""
         if not obj.patient:
@@ -608,6 +628,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             "allergies": allergies_list,
         }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_visit_details(self, obj):
         """Get visit details including clinic and location."""
         if not obj.visit:
@@ -622,10 +643,12 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             "visit_date": visit.created_at.date() if visit.created_at else None,
         }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_doctor_name(self, obj):
         """Get doctor full name."""
         return obj.doctor.get_full_name() if obj.doctor else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_icd10_diagnoses(self, obj):
         from common.diagnosis_serialization import serialize_icd10_diagnoses_for_order
 
@@ -676,6 +699,11 @@ class PrescriptionSerializer(serializers.ModelSerializer):
                         f"Insufficient inventory for medication {medication_id}. Available: {available_stock}, Requested: {quantity}"
                     )
 
+        from common.order_location import apply_order_location_clinic
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        validated_data = apply_order_location_clinic(validated_data, user=user)
         prescription = Prescription.objects.create(**validated_data)
 
         # Create prescription items
@@ -712,22 +740,33 @@ class DispenseSerializer(serializers.ModelSerializer):
     prescribed_unit = serializers.SerializerMethodField()
     dispense_context = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj, 'location_clinic', None) or getattr(obj.prescription, 'location_clinic', None) if obj.prescription_id else None
-        return clinic.name if clinic else None
+        from common.order_location import location_clinic_name, order_location_clinic_name
 
+        name = location_clinic_name(obj)
+        if name:
+            return name
+        if obj.prescription_id:
+            return order_location_clinic_name(obj.prescription)
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_prescribed_generic_name(self, obj):
         # No fallback: use immutable dispense-time snapshot only.
         return getattr(obj, "prescribed_generic_name_snapshot", "") or ""
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_prescribed_medication_name(self, obj):
         # No fallback: use immutable dispense-time snapshot only.
         return getattr(obj, "prescribed_medication_name_snapshot", "") or ""
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_prescribed_unit(self, obj):
         # No fallback: use immutable dispense-time snapshot only.
         return getattr(obj, "prescribed_unit_snapshot", "") or ""
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_dispense_context(self, obj):
         """
         as_selected_brand: dispensed brand equals prescribed brand on item
@@ -748,9 +787,11 @@ class StockRequestItemSerializer(serializers.ModelSerializer):
     medication_name = serializers.SerializerMethodField(read_only=True)
     medication_pack_size = serializers.SerializerMethodField(read_only=True)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_medication_name(self, obj):
         return obj.medication.name if obj.medication else ""
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_medication_pack_size(self, obj):
         return getattr(obj.medication, "pack_size", None) if obj.medication else None
 
@@ -775,12 +816,15 @@ class StockRequestSerializer(serializers.ModelSerializer):
     confirmed_by_name = serializers.SerializerMethodField(read_only=True)
     clinic_name = serializers.SerializerMethodField(read_only=True)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_requested_by_name(self, obj):
         return obj.requested_by.get_full_name() if obj.requested_by else ""
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_confirmed_by_name(self, obj):
         return obj.confirmed_by.get_full_name() if obj.confirmed_by else ""
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_clinic_name(self, obj):
         if hasattr(obj, 'clinic') and obj.clinic:
             return obj.clinic.name
@@ -807,6 +851,7 @@ class StockIssueLineSerializer(serializers.ModelSerializer):
     medication_name = serializers.CharField(source="medication.name", read_only=True)
     medication_pack_size = serializers.SerializerMethodField(read_only=True)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_medication_pack_size(self, obj):
         return getattr(obj.medication, "pack_size", None) if obj.medication else None
 
@@ -831,6 +876,7 @@ class StockIssueSerializer(serializers.ModelSerializer):
     )
     request_id = serializers.SerializerMethodField(read_only=True)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_request_id(self, obj):
         return obj.request.request_id if obj.request else None
 

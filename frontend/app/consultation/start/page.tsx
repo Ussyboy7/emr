@@ -1,4 +1,5 @@
 "use client";
+import { formatDisplayTime, todayApiDateString } from "@/lib/dates";
 
 import React, { useState, useEffect, useMemo } from "react";
 import { safeAsync } from '@/lib/utils/error-handling';
@@ -31,6 +32,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
+  compareConsultationQueueEntries,
+  getVisitTypeBadgeClass,
+  getVisitTypeLabel,
+} from "@/lib/utils/priority";
+import {
   roomService,
   patientService,
   consultationService,
@@ -38,6 +44,7 @@ import {
   type ConsultationStats,
 } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 
@@ -54,7 +61,7 @@ interface Patient {
   consultationRoom?: string;
   waitTime: number;
   vitalsCompleted: boolean;
-  priority: "Emergency" | "High" | "Medium" | "Low";
+  visitType?: string;
   visitDate: string;
   visitTime: string;
   // Enhanced bio data fields
@@ -89,11 +96,6 @@ interface ConsultationRoom {
 }
 
 type RoomFilter = "all" | "free" | "in_use";
-
-function localISODate(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function sessionRoomIdKey(session: ConsultationSession): string | null {
   const r = session.room as unknown;
@@ -228,21 +230,6 @@ const getStatusIcon = (status: RoomCardStatus): string => {
   }
 };
 
-const getPriorityColor = (priority: string) => {
-  switch (priority?.toLowerCase()) {
-    case "emergency":
-      return "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400";
-    case "high":
-      return "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400";
-    case "medium":
-      return "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400";
-    case "low":
-      return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400";
-    default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
-  }
-};
-
 const StartConsultation = () => {
   const router = useRouter();
   const [selectedRoom, setSelectedRoom] = useState<string>("");
@@ -282,7 +269,7 @@ const StartConsultation = () => {
         setLoadingRooms(true);
         setError(null);
 
-        const todayStr = localISODate();
+        const todayStr = todayApiDateString();
 
         const emptySessions = (): { results: ConsultationSession[]; count: number } => ({
           results: [],
@@ -291,13 +278,13 @@ const StartConsultation = () => {
 
         const [roomsResult, queueResult, statsRes, activeRes, pausedRes, todaySessionsRes] =
           await Promise.all([
-            roomService.getRooms({ page_size: 200 }),
-            apiFetch<{ results: any[] }>("/consultation/queue/?is_active=true&page_size=200"),
+            roomService.getRooms({ page_size: MAX_LIST_PAGE_SIZE }),
+            apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=${MAX_LIST_PAGE_SIZE}`),
             consultationService.getStats().catch((): ConsultationStats | null => null),
-            consultationService.getSessions({ status: "active", page_size: 500 }).catch(emptySessions),
-            consultationService.getSessions({ status: "paused", page_size: 500 }).catch(emptySessions),
+            consultationService.getSessions({ status: "active", page_size: MAX_LIST_PAGE_SIZE }).catch(emptySessions),
+            consultationService.getSessions({ status: "paused", page_size: MAX_LIST_PAGE_SIZE }).catch(emptySessions),
             consultationService
-              .getSessions({ date: todayStr, page_size: 500 })
+              .getSessions({ date: todayStr, page_size: MAX_LIST_PAGE_SIZE })
               .catch(emptySessions),
           ]);
 
@@ -332,12 +319,7 @@ const StartConsultation = () => {
         const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
           const roomId = String(room.id);
           const roomQueue = queueByRoom[roomId] || [];
-          const sortedQueue = roomQueue.sort((a: { priority: number; queued_at: string }, b: { priority: number; queued_at: string }) => {
-            if (a.priority !== b.priority) {
-              return a.priority - b.priority;
-            }
-            return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
-          });
+          const sortedQueue = [...roomQueue].sort(compareConsultationQueueEntries);
 
           const todayForRoom = roomTodayMap[roomId];
           const facilityStatus = (room.status?.toLowerCase() || "active") as ConsultationRoom["facilityStatus"];
@@ -456,7 +438,11 @@ const StartConsultation = () => {
         // Use numeric room ID for the filter
         let queueItem: any = null;
         try {
-          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=100`);
+          const queueResult = await consultationService.getQueue({
+            room: numericRoomId,
+            is_active: true,
+            page_size: MAX_LIST_PAGE_SIZE,
+          });
           // Find the queue item that matches our patient ID
           queueItem = queueResult.results?.find((item: any) => {
             const itemPatientId = typeof item.patient === 'number' ? item.patient : parseInt(String(item.patient || ''));
@@ -522,10 +508,10 @@ const StartConsultation = () => {
         // Security: Removed console.log to prevent patient ID exposure
         
         // Get visit details if available
-        let visitDate = new Date().toISOString().split('T')[0];
+        let visitDate = todayApiDateString();
         let visitTime = '';
         let visitId: string | number | null = null;
-        let priority: "Emergency" | "High" | "Medium" | "Low" = 'Medium';
+        let visitType = queueItem?.visit_type || 'consultation';
         let waitTime = 0;
         
         if (queueItem) {
@@ -535,35 +521,25 @@ const StartConsultation = () => {
               const visit = await apiFetch(`/visits/${visitId}/`) as {
                 date?: string;
                 time?: string;
+                visit_type?: string;
               };
               visitDate = visit.date || visitDate;
               visitTime = visit.time || visitTime;
+              visitType = visit.visit_type || visitType;
             } catch (visitErr) {
               console.warn('Could not load visit details:', visitErr);
             }
           }
           
-          // Calculate wait time
           if (queueItem.queued_at) {
             waitTime = Math.floor((Date.now() - new Date(queueItem.queued_at).getTime()) / (1000 * 60));
-          }
-          
-          // Determine priority
-          if (queueItem.priority === 0) {
-            priority = 'Emergency';
-          } else if (queueItem.priority === 1) {
-            priority = 'High';
-          } else if (queueItem.priority === 2) {
-            priority = 'Medium';
-          } else {
-            priority = 'Low';
           }
         }
         
         // Check if vitals exist for this visit
         const vitalsCompleted = visitId
           ? await safeAsync(
-              () => apiFetch<{ count: number }>(`/vitals/?visit=${visitId}&page_size=1`).then(result => result.count > 0),
+              () => patientService.vitalsExistForVisit(visitId),
               false,
               { operation: 'checkVitalsStatus', visitId: visitId ? String(visitId) : undefined, component: 'ConsultationStart' }
             )
@@ -581,7 +557,7 @@ const StartConsultation = () => {
           consultationRoom: selectedRoom,
           waitTime,
           vitalsCompleted,
-          priority,
+          visitType,
           visitDate,
           visitTime,
           // Enhanced bio data fields
@@ -1038,10 +1014,7 @@ const StartConsultation = () => {
                         >
                           <Clock className="h-3 w-3" />
                           Started:{" "}
-                          {new Date(room.openSession.startedAt).toLocaleTimeString("en-US", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {formatDisplayTime(room.openSession.startedAt)}
                         </div>
                       </>
                     ) : (
@@ -1197,8 +1170,8 @@ const StartConsultation = () => {
                   <span className="font-medium text-emerald-600 dark:text-emerald-400">
                     {selectedPatient.name}
                   </span>
-                  <Badge className={`ml-2 ${getPriorityColor(selectedPatient.priority)}`}>
-                    {selectedPatient.priority}
+                  <Badge variant="outline" className={`ml-2 ${getVisitTypeBadgeClass(selectedPatient.visitType)}`}>
+                    {getVisitTypeLabel(selectedPatient.visitType)}
                   </Badge>
                 </>
               ) : (
@@ -1241,17 +1214,12 @@ const StartConsultation = () => {
                           </div>
                         </div>
 
-                        {/* Priority and Wait Time */}
+                        {/* Visit type and Wait Time */}
                         <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <strong className="text-sm text-muted-foreground">Priority</strong>
-                            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              selectedPatient.priority === 'Emergency' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' :
-                              selectedPatient.priority === 'High' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300' :
-                              selectedPatient.priority === 'Medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' :
-                              'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
-                            }`}>
-                              {selectedPatient.priority}
+                            <strong className="text-sm text-muted-foreground">Visit type</strong>
+                            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getVisitTypeBadgeClass(selectedPatient.visitType)}`}>
+                              {getVisitTypeLabel(selectedPatient.visitType)}
                             </div>
                           </div>
                           <div>

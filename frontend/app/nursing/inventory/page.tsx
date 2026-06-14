@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -15,8 +16,9 @@ import { pharmacyService } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import {
   Database, Search, Pill, Package, AlertTriangle, Eye,
-  Layers, XCircle, TrendingUp, Hash, Clock, Loader2, RefreshCw
+  Layers, XCircle, TrendingUp, Hash, Clock, Loader2
 } from 'lucide-react';
+import { toApiDateFromInstant } from '@/lib/dates';
 import { MEDICATION_CATEGORIES } from '@/lib/constants/pharmacy';
 
 interface MedicationBatch {
@@ -74,38 +76,6 @@ export default function NursingInventoryPage() {
   const [showBatchesModal, setShowBatchesModal] = useState(false);
   const [selectedMedication, setSelectedMedication] = useState<MedicationInventoryItem | null>(null);
 
-  const loadWardCareStats = async () => {
-    try {
-      const s = await pharmacyService.getInventoryStats({
-        location,
-        expiring_within_days: 90,
-      });
-      setStats({
-        total: s.total ?? 0,
-        outOfStock: s.out_of_stock ?? 0,
-        lowStock: s.low_stock ?? 0,
-        totalUnits: Number(s.total_units ?? 0),
-        expiringSoon: s.expiring_soon ?? 0,
-        expired: s.expired ?? 0,
-      });
-    } catch (err) {
-      console.error('Error loading ward care inventory stats:', err);
-      // Keep previous stats; don't block the inventory list.
-    }
-  };
-
-  useEffect(() => {
-    void loadWardCareStats();
-  }, []);
-
-  useEffect(() => {
-    loadInventory();
-  }, [currentPage, itemsPerPage, searchQuery, categoryFilter, stockFilter]);
-
-  useEffect(() => {
-    if (currentPage !== 1) setCurrentPage(1);
-  }, [searchQuery, categoryFilter, stockFilter]);
-
   const transformInventoryItems = (results: any[]): MedicationInventoryItem[] => {
     return results.map((item: any) => {
       const medication = item.medication || {};
@@ -130,14 +100,14 @@ export default function NursingInventoryPage() {
         manufacturer: medication.manufacturer || '',
         currentStock: Number(item.quantity),
         minimumStock: Number(item.min_stock_level),
-        lastRestocked: (item as any).created_at?.split('T')[0] || (item as any).updated_at?.split('T')[0] || '',
+        lastRestocked: toApiDateFromInstant((item as any).created_at) || toApiDateFromInstant((item as any).updated_at),
         expiryDate: item.expiry_date,
         batches: [{
           id: item.id.toString(),
           batchNumber: item.batch_number,
           quantity: Number(item.quantity),
           expiryDate: item.expiry_date,
-          receivedDate: (item.source_from_central_store?.issued_at?.split('T')[0]) || (item as any).created_at?.split('T')[0] || '',
+          receivedDate: toApiDateFromInstant(item.source_from_central_store?.issued_at) || toApiDateFromInstant((item as any).created_at),
           supplier: item.supplier || '',
           sourceFromCentralStore: item.source_from_central_store || null,
         }] as MedicationBatch[],
@@ -145,10 +115,31 @@ export default function NursingInventoryPage() {
     });
   };
 
-  const loadInventory = async () => {
+  const loadWardCareStats = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
+      const s = await pharmacyService.getInventoryStats({
+        location,
+        expiring_within_days: 90,
+      });
+      setStats({
+        total: s.total ?? 0,
+        outOfStock: s.out_of_stock ?? 0,
+        lowStock: s.low_stock ?? 0,
+        totalUnits: Number(s.total_units ?? 0),
+        expiringSoon: s.expiring_soon ?? 0,
+        expired: s.expired ?? 0,
+      });
+    } catch (err) {
+      console.error('Error loading ward care inventory stats:', err);
+    }
+  }, [location]);
+
+  const loadInventory = useCallback(async (opts: { silent?: boolean } = {}) => {
+    try {
+      if (!opts.silent) {
+        setLoading(true);
+        setError(null);
+      }
       const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
@@ -161,12 +152,33 @@ export default function NursingInventoryPage() {
       setTotalCount(response.count || response.results.length);
       setInventory(transformInventoryItems(response.results));
     } catch (err: any) {
-      setError(err.message || 'Failed to load inventory');
+      if (!opts.silent) {
+        setError(err.message || 'Failed to load inventory');
+      }
       console.error('Error loading ward care inventory:', err);
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
-  };
+  }, [currentPage, itemsPerPage, searchQuery, categoryFilter, stockFilter, location]);
+
+  const silentRefresh = useCallback(() => {
+    void loadWardCareStats();
+    void loadInventory({ silent: true });
+  }, [loadWardCareStats, loadInventory]);
+
+  useEffect(() => {
+    void loadWardCareStats();
+  }, [loadWardCareStats]);
+
+  useEffect(() => {
+    void loadInventory();
+  }, [loadInventory]);
+
+  useEffect(() => {
+    if (currentPage !== 1) setCurrentPage(1);
+  }, [searchQuery, categoryFilter, stockFilter]);
+
+  useReloadOnFocus(silentRefresh);
 
   // Stats are loaded from the server (cheap counts) instead of fetching all inventory.
 
@@ -218,10 +230,6 @@ export default function NursingInventoryPage() {
                 <p className="text-muted-foreground mt-1">Ward Care stock received from Central Store</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => { loadInventory(); void loadWardCareStats(); }}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
             <Button asChild className="bg-teal-600 hover:bg-teal-700">
               <Link href="/nursing/requests">Request from Central Store</Link>
             </Button>
@@ -527,7 +535,7 @@ export default function NursingInventoryPage() {
                     const sourceLabel =
                       batch.sourceFromCentralStore?.from_location || batch.supplier || '';
                     const requestId = batch.sourceFromCentralStore?.request_id || '';
-                    const issuedDate = batch.sourceFromCentralStore?.issued_at?.split('T')[0] || '';
+                    const issuedDate = toApiDateFromInstant(batch.sourceFromCentralStore?.issued_at);
                     return (
                       <Card key={batch.id} className={`border-l-4 ${
                         isExpired ? 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10' :

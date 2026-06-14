@@ -2,7 +2,16 @@
 Admin configuration for the Patients app.
 """
 from django.contrib import admin
-from .models import Patient, Visit, VitalReading, MedicalHistory
+from .models import (
+    Patient,
+    Visit,
+    VitalReading,
+    MedicalHistory,
+    AnnualCheckup,
+    AnnualCheckupComponentDefinition,
+    AnnualCheckupExemption,
+    AnnualCheckupProgrammeSettings,
+)
 
 
 @admin.register(Patient)
@@ -61,6 +70,52 @@ class VitalReadingAdmin(admin.ModelAdmin):
     list_filter = ['recorded_at']
     search_fields = ['patient__surname', 'patient__first_name']
     readonly_fields = ['recorded_at']
+
+
+@admin.register(AnnualCheckupComponentDefinition)
+class AnnualCheckupComponentDefinitionAdmin(admin.ModelAdmin):
+    list_display = ["code", "label", "tier", "captured_via", "sort_order", "is_active"]
+    list_filter = ["tier", "captured_via", "is_active"]
+    search_fields = ["code", "label"]
+    ordering = ["sort_order", "label"]
+
+
+@admin.register(AnnualCheckupProgrammeSettings)
+class AnnualCheckupProgrammeSettingsAdmin(admin.ModelAdmin):
+    list_display = ["programme_year", "updated_at", "updated_by"]
+    search_fields = ["programme_year"]
+
+
+@admin.register(AnnualCheckup)
+class AnnualCheckupAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "patient",
+        "programme_year",
+        "status",
+        "fitness_outcome",
+        "signed_off_at",
+    ]
+    list_filter = ["status", "programme_year", "fitness_outcome"]
+    search_fields = [
+        "patient__surname",
+        "patient__first_name",
+        "patient__patient_id",
+        "visit__visit_id",
+    ]
+    readonly_fields = ["created_at", "updated_at", "signed_off_at"]
+
+
+@admin.register(AnnualCheckupExemption)
+class AnnualCheckupExemptionAdmin(admin.ModelAdmin):
+    list_display = ["patient", "programme_year", "reason", "granted_at", "granted_by"]
+    list_filter = ["programme_year", "reason"]
+    search_fields = [
+        "patient__surname",
+        "patient__first_name",
+        "patient__patient_id",
+        "patient__personal_number",
+    ]
 
 
 @admin.register(MedicalHistory)

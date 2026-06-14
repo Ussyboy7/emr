@@ -10,6 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { toast } from "sonner";
 import { adminService, type User as ApiUser } from '@/lib/services';
 import { Loader2, Search, UserPlus, UserMinus, Star, UserCog, X } from 'lucide-react';
+import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 interface DepartmentStaffDialogProps {
   department: { id: number; name: string; clinicName?: string | null; headName?: string | null } | null;
@@ -32,7 +33,7 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
     try {
       const res = await adminService.getUsers({
         department: department.id,
-        page_size: 200,
+        page_size: MAX_LIST_PAGE_SIZE,
       });
       setStaff(res.results || []);
     } catch (err: any) {
@@ -60,7 +61,7 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
       const res = await adminService.getUsers({
         search: query.trim(),
         is_active: true,
-        page_size: 20,
+        page_size: DEFAULT_LIST_PAGE_SIZE,
       });
       const alreadyInDept = new Set(staff.map(s => s.id));
       setAvailableUsers((res.results || []).filter(u => !alreadyInDept.has(u.id)));

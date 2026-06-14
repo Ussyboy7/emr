@@ -2,6 +2,8 @@
 Serializers for the Laboratory app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 import re
 from .models import (
     LabTemplate,
@@ -80,6 +82,7 @@ class LabTemplateSerializer(serializers.ModelSerializer):
 class LabTestResultAttachmentSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_uploaded_by_name(self, obj):
         if not obj.uploaded_by:
             return None
@@ -112,16 +115,21 @@ class LabTestSerializer(serializers.ModelSerializer):
     result_attachments = LabTestResultAttachmentSerializer(many=True, read_only=True)
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj.order, 'location_clinic', None) if obj.order else None
-        return clinic.name if clinic else None
+        from common.order_location import order_location_clinic_name
 
+        order = getattr(obj, "order", None)
+        return order_location_clinic_name(order)
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_overall_status(self, obj):
         try:
             return obj.result_record.overall_status
         except Exception:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_lab_result_id(self, obj):
         """Verified result row id for PDF download (LabResult.pk)."""
         try:
@@ -129,6 +137,7 @@ class LabTestSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_template_normal_range(self, obj):
         """
         Return template normal ranges in a UI-friendly shape.
@@ -152,6 +161,7 @@ class LabTestSerializer(serializers.ModelSerializer):
 
         return normalized
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_collected_by_name(self, obj):
         """Get collected by user full name."""
         if not obj.collected_by:
@@ -161,6 +171,7 @@ class LabTestSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.collected_by) if obj.collected_by else None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_processed_by_name(self, obj):
         """Get processed by user full name."""
         if not obj.processed_by:
@@ -170,6 +181,7 @@ class LabTestSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.processed_by) if obj.processed_by else None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_verified_by_name(self, obj):
         """Get verified by user full name."""
         if not obj.verified_by:
@@ -179,6 +191,7 @@ class LabTestSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.verified_by) if obj.verified_by else None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_rejected_by_name(self, obj):
         """Get rejected by user full name."""
         if not obj.rejected_by:
@@ -188,6 +201,7 @@ class LabTestSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.rejected_by) if obj.rejected_by else None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_order_details(self, obj):
         """Get order details including patient and doctor information."""
         if not obj.order:
@@ -241,6 +255,7 @@ class LabTestSerializer(serializers.ModelSerializer):
             'clinical_notes': order.clinical_notes or '',
         }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_result_file_exists(self, obj):
         """
         Return whether the stored result file path resolves to an existing file.
@@ -295,6 +310,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
     tests_data = LabTestCreateSerializer(many=True, write_only=True, required=False)
     icd10_diagnoses = serializers.SerializerMethodField()
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_name(self, obj):
         """Get patient full name."""
         if not obj.patient:
@@ -304,6 +320,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.patient) if obj.patient else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_icd10_diagnoses(self, obj):
         from common.diagnosis_serialization import serialize_icd10_diagnoses_for_order
 
@@ -313,6 +330,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
             patient=obj.patient,
         )
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_doctor_name(self, obj):
         """Get doctor full name."""
         if not obj.doctor:
@@ -322,6 +340,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.doctor) if obj.doctor else None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_doctor_details(self, obj):
         """Get doctor details."""
         if not obj.doctor:
@@ -339,10 +358,13 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'specialty': '',
             }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj, 'location_clinic', None)
-        return clinic.name if clinic else None
+        from common.order_location import order_location_clinic_name
 
+        return order_location_clinic_name(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_external_clinic_details(self, obj):
         clinic = getattr(obj, 'external_clinic', None)
         if not clinic:
@@ -354,6 +376,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
             'location': clinic.location,
         }
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_details(self, obj):
         """Get patient details."""
         if not obj.patient:
@@ -413,6 +436,8 @@ class LabOrderSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create lab order with nested tests."""
+        from common.order_location import apply_order_location_clinic
+
         tests_data = validated_data.pop('tests_data', [])
         if (
             validated_data.get('source_type') != 'external_manual'
@@ -422,6 +447,9 @@ class LabOrderSerializer(serializers.ModelSerializer):
             consultation_session = validated_data['consultation_session']
             if consultation_session.doctor:
                 validated_data['doctor'] = consultation_session.doctor
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        validated_data = apply_order_location_clinic(validated_data, user=user)
         order = LabOrder.objects.create(**validated_data)
 
         # Create lab tests
@@ -516,14 +544,17 @@ class LabReferralDispatchSerializer(serializers.ModelSerializer):
     )
     tests = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_issued_by_name(self, obj):
         u = getattr(obj, 'issued_by', None)
         return u.get_full_name() if u else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_cancelled_by_name(self, obj):
         u = getattr(obj, 'cancelled_by', None)
         return u.get_full_name() if u else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_tests(self, obj):
         return [
             {
@@ -560,6 +591,7 @@ class LabResultSerializer(serializers.ModelSerializer):
     order = LabOrderSerializer(read_only=True)
     patient = serializers.SerializerMethodField()
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_name(self, obj):
         """Get patient full name."""
         if not obj.patient:
@@ -569,6 +601,7 @@ class LabResultSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.patient) if obj.patient else None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient(self, obj):
         """Get patient details."""
         if not obj.patient:

@@ -1041,6 +1041,22 @@ class Command(BaseCommand):
                 }
             },
             {
+                'name': 'Pap Smear (Cervical Cytology)',
+                'code': 'PAP-SMEAR',
+                'category': 'cytology',
+                'sample_type': 'Cervical smear',
+                'description': 'Cervical cytology screening (Pap smear).',
+                'turnaround_time': '3 days',
+                'normal_range': {
+                    'Result': {
+                        'unit': '',
+                        'range': 'Negative / report cytology findings',
+                        'dataType': 'text',
+                        'required': True,
+                    }
+                }
+            },
+            {
                 'name': 'CEA',
                 'code': 'CEA',
                 'category': 'tumor_markers',

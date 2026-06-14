@@ -11,6 +11,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema
 from django.utils import timezone
 from django.db.models import Count, Q
 from django.http import HttpResponse
@@ -18,6 +19,7 @@ from django.http import HttpResponse
 from laboratory.pagination import FlexiblePageNumberPagination
 
 from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
+from common.openapi import ORDER_DISPATCH_PK_PARAMS, document_viewset
 from .models import (
     RadiologyTemplate,
     RadiologyOrder,
@@ -77,10 +79,9 @@ def _summarize_custom_reports(rows):
     return '\n\n'.join(lines)
 
 
+@document_viewset(tag="Radiology", resource="imaging partners")
 class ImagingPartnerViewSet(viewsets.ModelViewSet):
     """CRUD for outsourced imaging partners (dropdown + Django admin)."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = ImagingPartnerSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["is_active"]
@@ -91,13 +92,15 @@ class ImagingPartnerViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ImagingPartner.objects.none()
+        
         return ImagingPartner.objects.all()
 
 
+@document_viewset(tag="Radiology", resource="radiology templates")
 class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet for managing radiology investigation templates."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = RadiologyTemplateSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -107,7 +110,38 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     ordering = ['category', 'name']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return RadiologyTemplate.objects.none()
+        
         return RadiologyTemplate.objects.all()
+
+    @extend_schema(tags=["Radiology"], summary="Resolve", description="Return a single template by exact code (no paginated list hop).")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_template(self, request):
+        """Return a single template by exact code (no paginated list hop)."""
+        code = (request.query_params.get('code') or '').strip()
+        if not code:
+            return Response({'detail': 'code is required'}, status=status.HTTP_400_BAD_REQUEST)
+        template = self.get_queryset().filter(code__iexact=code).first()
+        if not template:
+            return Response({'detail': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(RadiologyTemplateSerializer(template).data)
+
+    @extend_schema(tags=["Radiology"], summary="List stats", description="Template tab counts in one request.")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Template tab counts in one request."""
+        qs = RadiologyTemplate.objects.all()
+        categories = ['xray', 'ultrasound', 'mri', 'ct']
+        by_cat = {
+            row['category']: row['count']
+            for row in qs.values('category').annotate(count=Count('id'))
+        }
+        return Response({
+            'total': qs.count(),
+            'active': qs.filter(is_active=True).count(),
+            **{cat: by_cat.get(cat, 0) for cat in categories},
+        })
 
     def perform_create(self, serializer):
         template = serializer.save()
@@ -143,6 +177,7 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @extend_schema(tags=["Radiology"], summary="Toggle status", description="Toggle active/inactive status of a template.")
     @action(detail=True, methods=['post'])
     def toggle_status(self, request, pk=None):
         """Toggle active/inactive status of a template."""
@@ -172,10 +207,9 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
         })
 
 
+@document_viewset(tag="Radiology", resource="radiology orders")
 class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing radiology orders."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = RadiologyOrderSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -198,6 +232,9 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     ordering = ['-ordered_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return RadiologyOrder.objects.none()
+        
         qs = (
             RadiologyOrder.objects.all()
             .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
@@ -242,6 +279,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                 qs = qs.distinct()
         return self.scope_queryset(qs)
 
+    @extend_schema(tags=["Radiology"], summary="Stats", description="Server-side counts for radiology order dashboard cards/tabs.")
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
         """
@@ -451,6 +489,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             # Notifications must never break radiology order creation
             pass
 
+    @extend_schema(tags=["Radiology"], summary="Schedule", description="Schedule a study.")
     @action(detail=True, methods=['post'])
     def schedule(self, request, pk=None):
         """Schedule a study."""
@@ -486,6 +525,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         except RadiologyStudy.DoesNotExist:
             return Response({'error': 'Study not found'}, status=status.HTTP_404_NOT_FOUND)
     
+    @extend_schema(tags=["Radiology"], summary="Acquire", description="Complete acquisition of a study.")
     @action(detail=True, methods=['post'])
     def acquire(self, request, pk=None):
         """Complete acquisition of a study."""
@@ -531,6 +571,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             logger.exception("Error in acquire method")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @extend_schema(tags=["Radiology"], summary="Report", description="Create report for a study.")
     @action(detail=True, methods=['post'])
     def report(self, request, pk=None):
         """Create report for a study."""
@@ -611,6 +652,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     # Outsourced dispatch — mirrors `LabOrderViewSet` dispatch actions.
     # ------------------------------------------------------------------
 
+    @extend_schema(tags=["Radiology"], summary="Dispatches", description="List every RadiologyReferralDispatch ever issued for this order (most recent first).")
     @action(detail=True, methods=['get'], url_path='dispatches')
     def list_dispatches(self, request, pk=None):
         """List every RadiologyReferralDispatch ever issued for this order (most recent first)."""
@@ -618,6 +660,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         dispatches = order.dispatches.all().prefetch_related('studies')
         return Response(RadiologyReferralDispatchSerializer(dispatches, many=True).data)
 
+    @extend_schema(tags=["Radiology"], summary="Dispatch outsourced", description="Send a batch of studies in this order to one external imaging partner.")
     @action(detail=True, methods=['post'], url_path='dispatch_outsourced')
     def dispatch_outsourced(self, request, pk=None):
         """
@@ -754,6 +797,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @extend_schema(tags=["Radiology"], summary="Dispatches/(?P<dispatch pk>[^/.]+)/cancel", description="Cancel a still-issued dispatch (e.g. wrong partner, withdrew request).", parameters=ORDER_DISPATCH_PK_PARAMS)
     @action(detail=True, methods=['post'], url_path='dispatches/(?P<dispatch_pk>[^/.]+)/cancel')
     def cancel_dispatch(self, request, pk=None, dispatch_pk=None):
         """
@@ -826,6 +870,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
         return Response(RadiologyReferralDispatchSerializer(dispatch).data)
 
+    @extend_schema(tags=["Radiology"], summary="Dispatches/(?P<dispatch pk>[^/.]+)/referral letter", description="Download the referral letter PDF for a specific dispatch.", parameters=ORDER_DISPATCH_PK_PARAMS)
     @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_pk>[^/.]+)/referral_letter')
     def dispatch_referral_letter(self, request, pk=None, dispatch_pk=None):
         """Download the referral letter PDF for a specific dispatch."""
@@ -847,6 +892,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Radiology"], summary="Dispatches/(?P<dispatch pk>[^/.]+)/responsibility form", description="Download the financial-responsibility form PDF for a specific dispatch.", parameters=ORDER_DISPATCH_PK_PARAMS)
     @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_pk>[^/.]+)/responsibility_form')
     def dispatch_responsibility_form(self, request, pk=None, dispatch_pk=None):
         """Download the financial-responsibility form PDF for a specific dispatch."""
@@ -869,11 +915,11 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         return response
 
 
+@document_viewset(tag="Radiology", resource="radiology studies")
 class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing individual radiology studies (like lab tests)."""
 
     clinic_filter_field = 'order__processing_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = RadiologyStudySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'processing_method', 'modality']
@@ -882,6 +928,9 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return RadiologyStudy.objects.none()
+        
         return self.scope_queryset(
             RadiologyStudy.objects.all().select_related(
                 'order', 'order__patient', 'order__doctor', 'template',
@@ -889,6 +938,7 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             )
         )
 
+    @extend_schema(tags=["Radiology"], summary="Update status", description="Update study status (like lab test status).")
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
         """Update study status (like lab test status)."""
@@ -947,6 +997,7 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             logger.exception("Exception in update_study_status")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @extend_schema(tags=["Radiology"], summary="Update results", description="Update study results (like lab test results).")
     @action(detail=True, methods=['post'])
     def update_results(self, request, pk=None):
         """Update study results (like lab test results)."""
@@ -1082,6 +1133,7 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @extend_schema(tags=["Radiology"], summary="Reject", description="Reject a study and send back for revision.")
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         """Reject a study and send back for revision."""
@@ -1123,6 +1175,7 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             logger.exception("Error rejecting study")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @extend_schema(tags=["Radiology"], summary="Create reports for reported studies", description="Create RadiologyReport records for all studies with 'reported' status that don't have them.")
     @action(detail=False, methods=['post'])
     def create_reports_for_reported_studies(self, request):
         """Create RadiologyReport records for all studies with 'reported' status that don't have them."""
@@ -1160,11 +1213,11 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         })
 
 
+@document_viewset(tag="Radiology", resource="radiology reports", read_only=True)
 class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing radiology reports awaiting verification."""
 
     clinic_filter_field = 'order__processing_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = RadiologyReportSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
@@ -1184,6 +1237,9 @@ class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         # Filter by status if provided, default to 'reported' for pending verifications
+        if getattr(self, 'swagger_fake_view', False):
+            return RadiologyReport.objects.none()
+        
         status_filter = self.request.query_params.get('status', 'reported')
 
         queryset = RadiologyReport.objects.select_related('study', 'order', 'patient', 'order__doctor', 'study__reported_by')
@@ -1222,6 +1278,7 @@ class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
 
         return self.scope_queryset(queryset)
 
+    @extend_schema(tags=["Radiology"], summary="Stats")
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
         qs = self.filter_queryset(self.get_queryset())
@@ -1238,6 +1295,7 @@ class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
             'critical': summary.get('critical', 0) or 0,
         })
     
+    @extend_schema(tags=["Radiology"], summary="Verify", description="Verify a radiology report.")
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verify a radiology report."""
@@ -1271,6 +1329,7 @@ class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         
         return Response(RadiologyReportSerializer(report).data)
     
+    @extend_schema(tags=["Radiology"], summary="Reject", description="Reject a radiology report and send back for revision.")
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         """Reject a radiology report and send back for revision."""

@@ -1,4 +1,7 @@
 "use client";
+import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, formatDisplayTime, todayApiDateString, toApiDateFromInstant } from "@/lib/dates";
+import { getMediaUrl } from '@/lib/media-url';
+import { MAX_LIST_PAGE_SIZE, DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,8 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from "sonner";
-import { patientService, labService, pharmacyService, consultationService, radiologyService, physioService, wardService, medicalCertificateService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
-import { eyeCareService } from '@/lib/services/eye-care-service';
+import { patientService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
 import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
@@ -230,14 +232,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
 
   const formatDateTime = (iso: string) => {
     if (!iso) return null;
-    try {
-      const d = new Date(iso);
-      if (isNaN(d.getTime())) return null;
-      return d.toLocaleString('en-US', {
-        year: 'numeric', month: 'short', day: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-      });
-    } catch { return null; }
+    const formatted = formatDisplayDateTime(iso);
+    return formatted === '—' ? null : formatted;
   };
 
   const handleViewVisit = (visit: Visit) => {
@@ -296,7 +292,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         if (!isNaN(parsedId) && parsedId > 0) {
           numericId = parsedId;
         } else {
-          const searchResult = await patientService.getPatients({ search: patientIdStr });
+          const searchResult = await patientService.getPatients({ search: patientIdStr, page_size: DEFAULT_LIST_PAGE_SIZE });
           const matchedPatient = searchResult.results.find(
             p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
           );
@@ -310,32 +306,19 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         apiPatient = await patientService.getPatient(numericId);
       setOverviewPatientName(apiPatient.full_name ?? '');
 
-      // Load all patient data in parallel
-      const [
-        visitsData,
-        vitalsData,
-        labData,
-        historyData,
-        prescriptionsData,
-        consultationsData,
-        imagingData,
-        physioData,
-        eyeData,
-        wardAdmissionsData,
-        certificatesData,
-      ] = await Promise.allSettled([
-        patientService.getPatientVisits(numericId),
-        patientService.getPatientVitals(numericId),
-        labService.getOrders({ patient: numericId.toString() }),
-        patientService.getPatientHistory(numericId),
-        pharmacyService.getPrescriptions({ patient: numericId.toString() }),
-        consultationService.getSessions({ patient: numericId }).catch(() => ({ results: [] })),
-        radiologyService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
-        physioService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
-        eyeCareService.getOrders({ patient: numericId }).catch(() => ({ results: [] })),
-        wardService.getAdmissions({ patient: numericId }).catch(() => ({ results: [] })),
-        medicalCertificateService.getCertificates({ patient: numericId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
-      ]);
+      const overview = await patientService.getClinicalOverview(numericId);
+      const mapped = mapClinicalOverviewToPatientHistory(overview);
+      const visitsList = mapped.visits;
+      const vitalsList = mapped.vitals;
+      const labTestsList = mapped.labResults;
+      const historyRecord = mapped.medicalHistory;
+      const prescriptionsList = mapped.prescriptions;
+      const consultationsList = mapped.consultations;
+      const imagingOrdersList = overview.radiology_orders?.results || [];
+      const physioOrdersList = mapped.physioOrders;
+      const eyeOrdersList = mapped.eyeOrders;
+      const wardAdmissionsList = mapped.wardAdmissions;
+      const certificatesList = mapped.certificates;
 
       if (apiPatient.category === 'employee' || apiPatient.category === 'retiree') {
         setDependentsLoading(true);
@@ -343,7 +326,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           const dependentsResponse = await patientService.getPatients({
             category: 'dependent',
             principal_staff: numericId,
-            page_size: 100,
+            page_size: MAX_LIST_PAGE_SIZE,
           });
           setDependents(dependentsResponse.results || []);
         } catch {
@@ -357,14 +340,14 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       }
 
       // Process visits
-      if (visitsData.status === 'fulfilled') {
-        const transformedVisits = visitsData.value.map((visit: any) => ({
+      {
+        const transformedVisits = visitsList.map((visit: any) => ({
           id: visit.id.toString(),
           numericId: visit.id,
           visitId: visit.visit_id || visit.id.toString(),
           patientId: visit.patient?.toString() || numericId.toString(),
-          date: visit.date || visit.created_at?.split('T')[0] || '',
-          time: visit.created_at ? new Date(visit.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '',
+          date: visit.date || toApiDateFromInstant(visit.created_at) || '',
+          time: formatDisplayTime(visit.created_at),
           type: visit.visit_type || 'OPD',
           department: visit.department || '',
           doctor: visit.doctor_name || 'Unknown',
@@ -378,19 +361,19 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         // Combine with consultation sessions for unified display
         let combinedVisits = [...transformedVisits];
 
-        if (consultationsData.status === 'fulfilled' && consultationsData.value?.results) {
+        if (consultationsList.length) {
           const getSessionDateParts = (session: any) => {
             const rawDate = session.started_at || '';
             if (!rawDate) return { date: '', time: '' };
             const parsed = new Date(rawDate);
             if (Number.isNaN(parsed.getTime())) return { date: '', time: '' };
             return {
-              date: parsed.toLocaleDateString(),
-              time: parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              date: formatDisplayDate(rawDate),
+              time: formatDisplayTime(rawDate),
             };
           };
 
-          const transformedSessions = consultationsData.value.results.map((session: any) => ({
+          const transformedSessions = consultationsList.map((session: any) => ({
             ...getSessionDateParts(session),
             id: `session-${session.id}`,
             numericId: session.id,
@@ -415,11 +398,11 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       }
 
       // Process vitals
-      if (vitalsData.status === 'fulfilled' && Array.isArray(vitalsData.value)) {
-        const transformedVitals = vitalsData.value.map((vital: any) => ({
+      if (Array.isArray(vitalsList)) {
+        const transformedVitals = vitalsList.map((vital: any) => ({
           id: vital.id.toString(),
-          date: vital.recorded_at ? new Date(vital.recorded_at).toLocaleDateString() : '',
-          time: vital.recorded_at ? new Date(vital.recorded_at).toLocaleTimeString() : '',
+          date: formatDisplayDate(vital.recorded_at),
+          time: formatDisplayTime(vital.recorded_at),
           bp: vital.blood_pressure_systolic && vital.blood_pressure_diastolic 
             ? `${vital.blood_pressure_systolic}/${vital.blood_pressure_diastolic}`
             : '-',
@@ -446,10 +429,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       }
 
       // Process lab results
-      if (labData.status === 'fulfilled' && labData.value?.results) {
-        const transformedLabResults = labData.value.results.flatMap((order: any) => 
-          (order.tests || []).filter((test: any) => test.status === 'results_ready' || test.status === 'verified').map((test: any) => {
-            // Extract results with units and ranges
+      if (labTestsList.length) {
+        const transformedLabResults = labTestsList.map((test: any) => {
             const results = test.results || {};
             const nr = test.template_normal_range || test.normal_range;
             const orderedRows = buildOrderedLabResultViewRows(results as Record<string, any>, nr);
@@ -460,7 +441,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                   return `${r.parameter}: ${r.value}${r.unit ? ` ${r.unit}` : ''}${range ? ` (${range})` : ''}`;
                 })
                 .join(', ') || 'Pending';
-            
+
             const overallStatus = test.overall_status;
             let healthStatus = test.status === 'verified' ? 'Completed' : 'Pending';
             if (overallStatus) {
@@ -476,37 +457,37 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               test.status === 'results_ready' ? 'Results Ready' :
               'Pending';
 
+            const orderDetails = test.order_details || {};
             return {
-              id: `${order.id}-${test.id}`,
+              id: String(test.id),
               test: test.name || test.code || 'Unknown Test',
               category: test.sample_type || 'General',
-              date: order.ordered_at ? new Date(order.ordered_at).toLocaleDateString() : '',
+              date: formatDisplayDate(test.verified_at || orderDetails.ordered_at || test.created_at),
               result: formattedResults,
               unit: '',
               range: '',
             status: workflowStatus,
             overallStatus: healthStatus,
-              orderedBy: order.doctor?.name || 'Unknown',
-              verifiedBy: test.processed_by || 'Pending',
+              orderedBy: orderDetails.doctor_name || 'Unknown',
+              verifiedBy: test.processed_by_name || test.verified_by_name || 'Pending',
               notes: test.notes || '',
               _raw: test,
             };
-          })
-        );
+          });
         setLabResults(transformedLabResults);
       }
 
       // Consultation sessions are now processed within visits above
-      if (consultationsData.status === 'fulfilled' && consultationsData.value?.results) {
+      if (consultationsList.length) {
         const getSessionDate = (session: any) => {
           const rawDate = session.started_at || '';
           if (!rawDate) return '';
           const parsed = new Date(rawDate);
           if (Number.isNaN(parsed.getTime())) return '';
-          return parsed.toLocaleDateString();
+          return formatDisplayDate(rawDate) === '—' ? '' : formatDisplayDate(rawDate);
         };
         // Sessions are already combined with visits above, just store separately if needed elsewhere
-        const transformedSessions = consultationsData.value.results.map((session: any) => ({
+        const transformedSessions = consultationsList.map((session: any) => ({
           id: session.id?.toString() || String(session.id),
           date: getSessionDate(session),
           doctor: session.doctor?.name || session.doctor_name || 'Unknown',
@@ -519,38 +500,18 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         setConsultationSessions(transformedSessions);
       }
 
-      // Process physio orders
-      if (physioData.status === 'fulfilled') {
-        setPhysioOrders(physioData.value?.results || []);
-      } else {
-        setPhysioOrders([]);
-      }
+      setPhysioOrders(physioOrdersList);
 
-      // Process eye orders
-      if (eyeData.status === 'fulfilled') {
-        setEyeOrders(eyeData.value?.results || []);
-      } else {
-        setEyeOrders([]);
-      }
+      setEyeOrders(eyeOrdersList);
 
-      // Process ward admissions
-      if (wardAdmissionsData.status === 'fulfilled') {
-        setWardAdmissions(wardAdmissionsData.value?.results || []);
-      } else {
-        setWardAdmissions([]);
-      }
+      setWardAdmissions(wardAdmissionsList);
 
-      // Process persisted medical certificates
-      if (certificatesData.status === 'fulfilled') {
-        setMedicalCertificates(certificatesData.value?.results || []);
-      } else {
-        setMedicalCertificates([]);
-      }
+      setMedicalCertificates(certificatesList);
 
       // Process imaging results - extract studies from orders
-      if (imagingData.status === 'fulfilled' && imagingData.value?.results) {
+      if (imagingOrdersList.length) {
         const allStudies: any[] = [];
-        imagingData.value.results.forEach((order: any) => {
+        imagingOrdersList.forEach((order: any) => {
           if (order.studies && Array.isArray(order.studies)) {
             order.studies.forEach((study: any) => {
               allStudies.push({
@@ -558,7 +519,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 studyId: order.order_id ? `${order.order_id}-${study.id}` : `IMG-${study.id}`,
                 type: study.modality || study.procedure || 'Unknown',
                 description: study.body_part || study.procedure || '',
-                date: order.ordered_at ? new Date(order.ordered_at).toLocaleDateString() : study.created_at ? new Date(study.created_at).toLocaleDateString() : '',
+                date: formatDisplayDate(order.ordered_at || study.created_at),
                 status: study.status || 'pending',
                 orderedBy: order.doctor_name || order.doctor?.name || 'Unknown',
                 result: study.findings || study.report || 'Pending',
@@ -573,11 +534,11 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       }
 
       // Process prescriptions
-      if (prescriptionsData.status === 'fulfilled' && prescriptionsData.value?.results) {
-        const transformedPrescriptions = prescriptionsData.value.results.map((rx: any) => ({
+      if (prescriptionsList.length) {
+        const transformedPrescriptions = prescriptionsList.map((rx: any) => ({
           id: rx.id.toString(),
           prescriptionId: rx.prescription_id || `RX-${rx.id}`,
-          date: rx.prescribed_at ? new Date(rx.prescribed_at).toLocaleDateString() : '',
+          date: formatDisplayDate(rx.prescribed_at),
           doctor: rx.doctor_name || 'Unknown',
           status: rx.status || 'pending',
           diagnosis: rx.diagnosis || '',
@@ -602,8 +563,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       let medications: any[] = [];
       let socialHistory = { smoking: "", alcohol: "", exercise: "", occupation: "" };
 
-      if (historyData.status === "fulfilled" && historyData.value) {
-        const history = historyData.value;
+      if (historyRecord) {
+        const history = historyRecord;
         allergies = history.allergies || [];
         conditions = history.chronic_conditions || history.conditions || [];
         const sh = history.social_history;
@@ -621,28 +582,19 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           dosage: med.dosage || med.dose || '',
           frequency: med.frequency || med.schedule || '',
           prescribedBy: med.prescribed_by || med.prescribedBy || 'Unknown',
-          startDate: med.start_date || med.startDate || new Date().toISOString().split('T')[0],
+          startDate: med.start_date || med.startDate || todayApiDateString(),
         }));
       }
 
       // Format date of birth
       let formattedDateOfBirth = '';
       if (apiPatient.date_of_birth) {
-        try {
-          const date = new Date(apiPatient.date_of_birth);
-          if (!isNaN(date.getTime())) {
-            formattedDateOfBirth = date.toLocaleDateString('en-US', { 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            });
-          }
-        } catch (e) {
-          // If date parsing fails, use the original string
+        formattedDateOfBirth = formatDisplayDateMedium(apiPatient.date_of_birth);
+        if (formattedDateOfBirth === '—') {
           formattedDateOfBirth = apiPatient.date_of_birth;
         }
       }
-      
+
       // Format address - combine residential and permanent if both exist
       let formattedAddress = '';
       if (apiPatient.residential_address && apiPatient.permanent_address) {
@@ -686,25 +638,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         city: '',
         state: apiPatient.state_of_residence || '',
         status: 'active',
-        photoUrl: (() => {
-          const photoPath = apiPatient.photo;
-          if (!photoPath) return '';
-          // If it's already a full URL, return as is
-          if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
-            return photoPath;
-          }
-          // Construct full URL from API base URL
-          if (photoPath.startsWith('/media/')) {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-            if (!apiUrl) return photoPath;
-            const baseUrl = apiUrl.replace(/\/api\/?$/, '');
-            return `${baseUrl}${photoPath}`;
-          }
-          const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-          if (!apiUrl) return photoPath;
-          const baseUrl = apiUrl.replace(/\/api\/?$/, '');
-          return `${baseUrl}/media/${photoPath.startsWith('/') ? photoPath.slice(1) : photoPath}`;
-        })(),
+        photoUrl: getMediaUrl(apiPatient.photo) ?? '',
         category: apiPatient.category || '',
         personalNumber: apiPatient.personal_number || '',
         employeeType: apiPatient.employee_type || '',

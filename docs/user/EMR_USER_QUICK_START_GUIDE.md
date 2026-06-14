@@ -1,361 +1,99 @@
 # EMR User Quick Start Guide
-# Nigerian Ports Authority Healthcare System
 
-## Welcome to the EMR System!
+Getting started with the NPA Electronic Medical Records system. Your IT team will provide the **login URL** and **initial credentials** — do not use shared or default passwords from old documentation.
 
-This guide will help you get started with the Electronic Medical Records system quickly and efficiently.
+## Before you start
 
----
+- **Browser:** Chrome or Edge (recommended), Firefox supported.
+- **Login:** Use the URL provided by IT (e.g. `https://<your-emr-host>/login`).
+- **Help in app:** `/help` and the notification bell.
+- **Clinical workflow overview:** [workflows/VISIT_LIFECYCLE.md](../workflows/VISIT_LIFECYCLE.md)
 
-## 🚀 GETTING STARTED
+## Login
 
-### System Access
-- **URL:** http://172.16.0.32
-- **Login Page:** http://172.16.0.32/login
-- **Admin User:** emrprod / Changeme (change password after first login)
+1. Open your organisation's EMR login URL.
+2. Enter **username** and **password**.
+3. After sign-in you land on your **home module** (depends on your role).
+4. Use **Sign out** when leaving a shared workstation.
 
-### Browser Requirements
-- Google Chrome (recommended)
-- Mozilla Firefox
-- Microsoft Edge
-- Safari (limited support)
+If login fails repeatedly, contact your supervisor or IT — accounts may lock after too many attempts.
 
----
+## What you see depends on your role
 
-## 👤 USER ROLES & PERMISSIONS
+The sidebar only shows modules your role allows. Common patterns:
 
-### Healthcare Staff Roles
-- **Doctor:** Full patient management, consultations, prescriptions
-- **Nurse:** Vital signs, assessments, care planning
-- **Lab Technician:** Test orders, result entry
-- **Pharmacist:** Prescriptions, dispensing
-- **Radiology Tech:** Exam orders, result management
-- **Administrator:** System configuration, user management
+| Role type | Typical modules |
+|-----------|-----------------|
+| Medical records | Register patients, visits, appointments, reports |
+| Nursing | Queues, vitals, procedures, ward care |
+| Doctor / consultation | Start consultation, orders, prescriptions, referrals |
+| Laboratory | Lab orders, verification, completed tests |
+| Pharmacy | Prescriptions, dispensing, inventory |
+| Radiology | Imaging orders, verification, viewer |
+| Administration | Users, roles, clinics, system health, audit |
 
-### Permission Levels
-- **Read:** View patient data
-- **Write:** Create/edit records
-- **Admin:** System configuration
+If you need access to a module, ask your administrator to update your **role pages** — not your password.
 
----
+## Role-specific guides
 
-## 🏥 DAILY WORKFLOW
-
-### 1. Login Process
-```
-1. Open browser → http://172.16.0.32/login
-2. Enter username and password
-3. Click "Sign In"
-4. Dashboard loads with today's patients
-```
-
-### 2. Patient Registration (New Patients)
-```
-1. Click "Patient Management" → "Add Patient"
-2. Fill required fields: Name, DOB, Gender, Phone
-3. Add emergency contact information
-4. Upload patient photo (optional)
-5. Click "Save" → Patient ID generated
-```
-
-### 3. Daily Patient Workflow
-```
-Morning:
-├── Check patient queue/dashboard
-├── Review scheduled appointments
-└── Prepare for consultations
-
-Patient Visit:
-├── Patient check-in (vital signs)
-├── Doctor consultation
-├── Order tests (lab/radiology)
-├── Create prescriptions
-└── Schedule follow-ups
-```
+| Role | Guide |
+|------|--------|
+| Medical records | [ROLE_MEDICAL_RECORDS.md](ROLE_MEDICAL_RECORDS.md) |
+| Nursing | [ROLE_NURSING.md](ROLE_NURSING.md) |
+| Consultation / doctors | [ROLE_CONSULTATION.md](ROLE_CONSULTATION.md) |
+| Laboratory | [ROLE_LABORATORY.md](ROLE_LABORATORY.md) |
+| Pharmacy | [ROLE_PHARMACY.md](ROLE_PHARMACY.md) |
+| Administration | [ROLE_ADMINISTRATION.md](ROLE_ADMINISTRATION.md) |
 
 ---
 
-## 📋 CLINICAL MODULES GUIDE
+## Medical records
 
-### PATIENT MANAGEMENT
-**Purpose:** Central patient information hub
+| Task | Menu path |
+|------|-----------|
+| Register new patient | Medical Records → Register Patient |
+| Search / edit patients | Medical Records → Manage Patients |
+| Lookup records | Medical Records → Patient Records |
+| New visit | Medical Records → Create Visit |
+| Appointments | Medical Records → Appointments |
 
-**Key Features:**
-- Patient registration and demographics
-- Medical history and allergies
-- Emergency contacts
-- Photo identification
-- Multi-clinic support
+## Nursing
 
-**Quick Actions:**
-- Search: Name, ID, phone number
-- Edit: Update contact info
-- History: View all visits
-- Export: Patient summary reports
+| Task | Menu path |
+|------|-----------|
+| Queue | Nursing → Pool / Room Queue |
+| Record vitals | Nursing → Vitals / patient vitals flows |
+| Procedures | Nursing → Procedures |
 
-### APPOINTMENTS
-**Purpose:** Schedule and manage patient visits
+## Consultation (doctors)
 
-**Key Features:**
-- Calendar view with time slots
-- Appointment booking and rescheduling
-- Automated reminders
-- Waitlist management
-- Multi-clinic scheduling
+| Task | Menu path |
+|------|-----------|
+| Start visit | Consultation → Start Consultation |
+| Room workspace | Open patient from queue / room |
+| Orders | Lab, pharmacy, radiology, referrals from consultation screen |
 
-**Quick Actions:**
-- New: Schedule appointment
-- Edit: Change time/date
-- Cancel: Remove appointment
-- View: Daily schedule
+## Laboratory / pharmacy / radiology
 
-### CONSULTATION MODULE
-**Purpose:** Physician consultation workflow
-
-**Workflow:**
-```
-1. Select patient from queue
-2. Record chief complaints
-3. Physical examination notes
-4. Diagnosis and ICD-10 coding
-5. Treatment plan creation
-6. Order lab/radiology tests
-7. Write prescriptions
-8. Generate referral letters
-```
-
-### LABORATORY MODULE
-**Purpose:** Test ordering and result management
-
-**For Doctors:**
-- Order lab tests during consultation
-- View pending/completed results
-- Review abnormal values
-- Add clinical interpretations
-
-**For Lab Technicians:**
-- Process test orders
-- Record test results
-- Upload lab reports
-- Update test status
-
-### PHARMACY MODULE
-**Purpose:** Prescription management and dispensing
-
-**For Doctors:**
-- Create prescriptions
-- Check drug interactions
-- Set dosage and frequency
-- Add special instructions
-
-**For Pharmacists:**
-- Process prescriptions
-- Verify drug availability
-- Dispense medications
-- Track inventory levels
-
-### RADIOLOGY MODULE
-**Purpose:** Imaging exam management
-
-**For Doctors:**
-- Order radiology examinations
-- Specify clinical indications
-- View completed reports
-- Access imaging results
-
-**For Radiology Techs:**
-- Process examination orders
-- Record examination results
-- Upload radiology reports
-- Manage imaging workflow
-
-### NURSING MODULE
-**Purpose:** Patient care coordination
-
-**Key Features:**
-- Vital signs recording
-- Nursing assessments
-- Care plan development
-- Medication administration
-- Patient monitoring
-- Discharge planning
+Use your module's **Orders** queue for new work and **Verification** (or equivalent) to sign off results. Completed items appear under **Completed** lists.
 
 ---
 
-## ⌨️ KEYBOARD SHORTCUTS
+## Tips
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+S` | Save current form |
-| `Ctrl+F` | Search patients |
-| `F1` | Open help |
-| `Esc` | Close modal/cancel |
-| `Tab` | Next field |
-| `Shift+Tab` | Previous field |
+- **Search:** Patient search is available from medical records modules.
+- **Save:** Save forms before navigating away.
+- **Confidentiality:** Do not share login details; log out on shared PCs.
+- **Slow performance:** Try refresh; if persistent, report to IT with time and screen.
 
----
+## Getting help
 
-## 🔍 SEARCH & NAVIGATION
+1. In-app **Help** (`/help`)
+2. Department supervisor
+3. IT support (contact details from your organisation)
 
-### Patient Search
-- **Global Search:** Top navigation bar
-- **Advanced Filters:** Name, ID, date range, clinic
-- **Quick Access:** Recent patients sidebar
-
-### Navigation Tips
-- **Breadcrumb Trail:** Shows current location
-- **Back Button:** Browser back/forward works
-- **Bookmarks:** Save frequently used pages
-- **Dashboard:** Quick access to daily tasks
+Technical and security issues: see [EMR_SUPPORT_MAINTENANCE.md](../admin/EMR_SUPPORT_MAINTENANCE.md).
 
 ---
 
-## 📱 MOBILE ACCESS
-
-### Mobile Browser Support
-- Responsive design for tablets
-- Limited support for phones
-- Touch-friendly interface
-- Optimized for healthcare workflows
-
-### Mobile Best Practices
-- Use tablet devices for bedside care
-- Avoid small phone screens for data entry
-- Ensure stable WiFi connection
-- Use landscape orientation when possible
-
----
-
-## 🆘 COMMON ISSUES & SOLUTIONS
-
-### Login Issues
-**Problem:** "Invalid username or password"
-**Solution:** Check caps lock, verify credentials with admin
-
-**Problem:** "Account locked"
-**Solution:** Contact administrator to unlock account
-
-### Slow Performance
-**Problem:** System seems slow
-**Solutions:**
-- Check internet connection
-- Clear browser cache
-- Try different browser
-- Contact IT if persistent
-
-### Data Entry Issues
-**Problem:** Form won't save
-**Solutions:**
-- Check required fields (marked with *)
-- Verify data format (dates, phone numbers)
-- Ensure no duplicate entries
-- Contact supervisor for permissions
-
-### Connection Problems
-**Problem:** "Unable to connect to server"
-**Solutions:**
-- Check WiFi/network connection
-- Refresh page (F5)
-- Clear browser cache
-- Contact IT support
-
----
-
-## 📞 GETTING HELP
-
-### Support Resources
-- **User Manual:** This guide and detailed documentation
-- **Help Button:** Available on most pages (F1)
-- **Supervisor:** Department head or team lead
-- **IT Support:** Technical issues and system access
-
-### Escalation Process
-1. **Level 1:** Try solutions in this guide
-2. **Level 2:** Ask colleague or supervisor
-3. **Level 3:** Contact IT support
-4. **Level 4:** System administrator
-
-### Emergency Contacts
-- **System Issues:** IT Support (24/7)
-- **Medical Emergencies:** Hospital emergency protocols
-- **Data Issues:** Department supervisor + IT
-
----
-
-## 📈 BEST PRACTICES
-
-### Data Entry
-- Always verify patient information before saving
-- Use consistent naming conventions
-- Complete all required fields
-- Double-check medication dosages
-- Save frequently to avoid data loss
-
-### Patient Care
-- Review patient history before consultations
-- Document all findings and treatments
-- Communicate clearly with care team
-- Follow up on test results promptly
-- Maintain patient confidentiality
-
-### System Usage
-- Log out when finished (security)
-- Report system issues immediately
-- Keep training materials handy
-- Participate in system improvement feedback
-- Follow established workflows
-
----
-
-## 🎯 TRAINING CHECKLIST
-
-### Basic Training Completion
-- [ ] System login and navigation
-- [ ] Patient registration process
-- [ ] Basic consultation workflow
-- [ ] Test ordering procedures
-- [ ] Prescription creation
-- [ ] Report generation
-
-### Advanced Training
-- [ ] Complex case management
-- [ ] Multi-disciplinary coordination
-- [ ] Emergency procedures
-- [ ] System administration (admins only)
-- [ ] Troubleshooting common issues
-
-### Certification
-- [ ] Training completion confirmed
-- [ ] Competency assessment passed
-- [ ] Go-live readiness approved
-- [ ] Support contact information saved
-
----
-
-## 🚨 IMPORTANT REMINDERS
-
-### Security & Privacy
-- **Never share passwords** with anyone
-- **Log out** when leaving workstation
-- **Protect patient privacy** at all times
-- **Report suspicious activity** immediately
-- **Follow HIPAA/data protection guidelines**
-
-### System Reliability
-- **Regular backups** happen automatically
-- **Report issues** as soon as they occur
-- **Save work frequently** to prevent data loss
-- **Follow established procedures** for consistency
-- **Keep contact information** for technical support
-
-### Emergency Procedures
-- **System Down:** Use paper backup procedures
-- **Data Loss:** Contact IT immediately
-- **Medical Emergency:** Follow hospital protocols
-- **Security Incident:** Report to IT and supervisor
-
----
-
-*This guide will be updated as the system evolves. Check regularly for updates and additional training materials.*
-
-**Welcome to modern healthcare documentation!** 🏥✨
+*For trainers: pair this guide with a short demo using test patients in a training environment.*

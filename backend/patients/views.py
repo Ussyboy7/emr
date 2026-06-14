@@ -10,13 +10,28 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema, extend_schema_view
+from common.openapi import document_viewset
 from django.shortcuts import get_object_or_404
-from django.db.models import OuterRef, Subquery, Exists, Q
+from django.db.models import OuterRef, Subquery, Exists, Q, Count, Max
+from django.utils import timezone
+from datetime import timedelta
 
 from common.mixins import ClinicScopedMixin
 from accounts.utils import resolve_clinic, resolve_clinic_id
 from organization.models import SystemConfig
-from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate
+from django.http import HttpResponse
+from django.core.files.base import ContentFile
+
+from .models import (
+    Patient,
+    Visit,
+    VitalReading,
+    MedicalHistory,
+    MedicalCertificate,
+    AnnualCheckup,
+    AnnualCheckupProgrammeSettings,
+)
 from .serializers import (
     PatientSerializer,
     PatientListSerializer,
@@ -24,21 +39,42 @@ from .serializers import (
     VitalReadingSerializer,
     MedicalHistorySerializer,
     MedicalCertificateSerializer,
+    AnnualCheckupSerializer,
+    AnnualCheckupSignOffSerializer,
+    AnnualCheckupCreateSerializer,
+    AnnualCheckupProgrammeSerializer,
+    AnnualCheckupOrderInvestigationsSerializer,
 )
+from .annual_checkup_services import (
+    create_annual_checkup_for_visit,
+    order_investigations_for_checkup,
+    refresh_components_completed,
+    sign_off_annual_checkup,
+    validate_selected_component_codes,
+)
+from .annual_checkup_catalog import (
+    create_catalog_components,
+    get_active_catalog,
+    get_default_selected_codes,
+    get_full_catalog,
+    serialize_catalog_entry,
+    update_catalog_components,
+)
+from .annual_checkup_pdfs import build_annual_checkup_report_pdf
 from audit.services import AuditService
 from .workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
 
 
 class PatientPagination(PageNumberPagination):
-    page_size = 100
+    page_size = 50
     page_size_query_param = 'page_size'
-    max_page_size = 500
+    max_page_size = 100
 
 
 class MedicalCertificatePagination(PageNumberPagination):
-    page_size = 20
+    page_size = 50
     page_size_query_param = 'page_size'
-    max_page_size = 500
+    max_page_size = 100
 
 
 def annotate_visit_history_flags(queryset):
@@ -216,6 +252,14 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     return qs
 
 
+@extend_schema_view(
+    list=extend_schema(summary="List patients", tags=["Patients"]),
+    retrieve=extend_schema(summary="Retrieve patient", tags=["Patients"]),
+    create=extend_schema(summary="Register patient", tags=["Patients"]),
+    update=extend_schema(summary="Update patient", tags=["Patients"]),
+    partial_update=extend_schema(summary="Partially update patient", tags=["Patients"]),
+    destroy=extend_schema(summary="Deactivate patient", tags=["Patients"]),
+)
 class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing patients.
@@ -229,7 +273,6 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     
     clinic_filter_field = 'location_clinic'
-    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Support file uploads
     pagination_class = PatientPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -240,6 +283,9 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Patient.objects.none()
+        
         """Return queryset filtered by active patients by default.
 
         Tombstones (records folded into another patient via merge) are
@@ -259,7 +305,17 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(merged_into__isnull=False)
         elif not include_merged:
             queryset = queryset.filter(merged_into__isnull=True)
-        return self.scope_queryset(queryset).select_related('principal_staff', 'created_by', 'updated_by')
+        queryset = self.scope_queryset(queryset).select_related('principal_staff', 'created_by', 'updated_by')
+        if self.action == 'list':
+            latest_visit = Visit.objects.filter(patient=OuterRef('pk')).order_by(
+                '-date', '-time', '-created_at'
+            )
+            queryset = queryset.annotate(
+                _total_visits=Count('visits'),
+                _last_visit_date=Subquery(latest_visit.values('date')[:1]),
+                _last_visit_time=Subquery(latest_visit.values('time')[:1]),
+            )
+        return queryset
     
     def get_serializer_class(self):
         """Use lightweight serializer for list, full serializer for detail."""
@@ -350,6 +406,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             raise PermissionDenied('Only super admin or admin users can delete patients.')
         return super().destroy(request, *args, **kwargs)
     
+    @extend_schema(tags=["Patients"], summary="Counts", description="Return total and per-category patient counts (active only, not filtered by search/filters).")
     @action(detail=False, methods=['get'], url_path='counts')
     def counts(self, request):
         """Return total and per-category patient counts (active only, not filtered by search/filters)."""
@@ -362,6 +419,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'nonnpa': qs.filter(category='nonnpa').count(),
         })
 
+    @extend_schema(tags=["Patients"], summary="Visits", description="Get all visits for a patient.")
     @action(detail=True, methods=['get'])
     def visits(self, request, pk=None):
         """Get all visits for a patient."""
@@ -371,6 +429,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = VisitSerializer(qs, many=True)
         return Response(serializer.data)
     
+    @extend_schema(tags=["Patients"], summary="Vitals", description="Get all vital readings for a patient.")
     @action(detail=True, methods=['get'])
     def vitals(self, request, pk=None):
         """Get all vital readings for a patient."""
@@ -380,6 +439,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = VitalReadingSerializer(qs, many=True)
         return Response(serializer.data)
     
+    @extend_schema(tags=["Patients"], summary="History", description="Get medical history for a patient.")
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         """Get medical history for a patient."""
@@ -387,7 +447,44 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         history, created = MedicalHistory.objects.get_or_create(patient=patient)
         serializer = MedicalHistorySerializer(history)
         return Response(serializer.data)
-    
+
+    @extend_schema(tags=["Patients"], summary="Clinical overview", description="All clinical history slices for patient tabs / consultation room sidebar.")
+    @action(detail=True, methods=['get'], url_path='clinical-overview')
+    def clinical_overview(self, request, pk=None):
+        """All clinical history slices for patient tabs / consultation room sidebar."""
+        patient = self.get_object()
+        from .clinical_overview import build_patient_clinical_overview
+
+        return Response(build_patient_clinical_overview(patient))
+
+    @extend_schema(tags=["Patients"], summary="Dependents counts", description="Batch dependent counts for principal staff IDs (comma-separated).")
+    @action(detail=False, methods=['get'], url_path='dependents-counts')
+    def dependents_counts(self, request):
+        """Batch dependent counts for principal staff IDs (comma-separated)."""
+        ids_param = request.query_params.get('principal_staff', '')
+        ids: list[int] = []
+        for part in ids_param.split(','):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
+        if not ids:
+            return Response({})
+        rows = (
+            Patient.objects.filter(
+                category='dependent',
+                principal_staff_id__in=ids,
+                is_active=True,
+                merged_into__isnull=True,
+            )
+            .values('principal_staff_id')
+            .annotate(count=Count('id'))
+        )
+        result = {str(i): 0 for i in ids}
+        for row in rows:
+            result[str(row['principal_staff_id'])] = row['count']
+        return Response(result)
+
+    @extend_schema(tags=["Patients"], summary="Update history", description="Update medical history for a patient.")
     @action(detail=True, methods=['patch'])
     def update_history(self, request, pk=None):
         """Update medical history for a patient."""
@@ -403,6 +500,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         role = (getattr(user, 'system_role', '') or '').strip().lower()
         return user.is_superuser or role in {'system administrator', 'admin staff'}
 
+    @extend_schema(tags=["Patients"], summary="Promote", description="Promote a Staff employee to Officer with a new personal number.")
     @action(detail=True, methods=['patch'], url_path='promote')
     def promote(self, request, pk=None):
         """Promote a Staff employee to Officer with a new personal number."""
@@ -460,6 +558,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(patient)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Patients"], summary="Convert to csr", description="Convert a Retiree patient to NonNPA (CSR) along with their dependents.")
     @action(detail=True, methods=['patch'], url_path='convert-to-csr')
     def convert_to_csr(self, request, pk=None):
         """Convert a Retiree patient to NonNPA (CSR) along with their dependents."""
@@ -525,6 +624,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'dependents_converted': dependent_count,
         })
 
+    @extend_schema(tags=["Patients"], summary="Merge", description="Merge this patient INTO another patient (the loser is tombstoned).")
     @action(detail=True, methods=['post'], url_path='merge')
     def merge(self, request, pk=None):
         """Merge this patient INTO another patient (the loser is tombstoned).
@@ -604,6 +704,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'winner': self.get_serializer(winner).data,
         })
 
+    @extend_schema(tags=["Patients"], summary="Merge audit", description="Return the merge-audit rows where this patient is either winner or loser.")
     @action(detail=True, methods=['get'], url_path='merge-audit')
     def merge_audit(self, request, pk=None):
         """Return the merge-audit rows where this patient is either winner or loser."""
@@ -625,6 +726,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         } for r in rows]
         return Response(data)
 
+    @extend_schema(tags=["Patients"], summary="Unmerge", description="Reverse a previous merge. Admin-only emergency undo.")
     @action(detail=True, methods=['post'], url_path='unmerge')
     def unmerge(self, request, pk=None):
         """Reverse a previous merge. Admin-only emergency undo.
@@ -692,12 +794,18 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response(result)
 
 
+@extend_schema_view(
+    list=extend_schema(summary="List visits", tags=["Visits"]),
+    retrieve=extend_schema(summary="Retrieve visit", tags=["Visits"]),
+    create=extend_schema(summary="Create visit", tags=["Visits"]),
+    update=extend_schema(summary="Update visit", tags=["Visits"]),
+    partial_update=extend_schema(summary="Partially update visit", tags=["Visits"]),
+    destroy=extend_schema(summary="Cancel or remove visit", tags=["Visits"]),
+)
 class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing patient visits.
     """
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = VisitSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'status', 'visit_type', 'clinic']
@@ -706,6 +814,9 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-date', '-time']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Visit.objects.none()
+        
         queryset = Visit.objects.all().select_related('patient', 'doctor', 'created_by').prefetch_related('vital_readings')
         
         # Date filtering
@@ -737,6 +848,36 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return self.scope_queryset(queryset)
 
+    @extend_schema(tags=["Visits"], summary="Resolve", description="Return the best-matching visit for a patient (e.g. latest or in-progress).")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_visit(self, request):
+        """Return the best-matching visit for a patient (e.g. latest or in-progress)."""
+        patient_id = request.query_params.get('patient')
+        if not patient_id:
+            return Response({'detail': 'patient is required'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.filter_queryset(self.get_queryset()).filter(patient_id=patient_id)
+        status_param = request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        ordering = (request.query_params.get('ordering') or '-date,-time').strip()
+        order_fields = [f.strip() for f in ordering.split(',') if f.strip()]
+        if order_fields:
+            qs = qs.order_by(*order_fields)
+        visit = qs.first()
+        if not visit:
+            return Response({'detail': 'Visit not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(visit).data)
+
+    @extend_schema(tags=["Visits"], summary="Workspace bundle", description="Diagnoses, orders, prescriptions, and vitals for a visit in one request.")
+    @action(detail=True, methods=['get'], url_path='workspace-bundle')
+    def workspace_bundle(self, request, pk=None):
+        """Diagnoses, orders, prescriptions, and vitals for a visit in one request."""
+        visit = self.get_object()
+        from .visit_bundle import build_visit_workspace_bundle
+
+        return Response(build_visit_workspace_bundle(visit))
+
+    @extend_schema(tags=["Visits"], summary="Nursing pool metrics", description="Aggregate counts for nursing pool dashboard cards (same filters as list: date, search, clinic, type, nursing_pool).")
     @action(detail=False, methods=['get'], url_path='nursing-pool-metrics')
     def nursing_pool_metrics(self, request):
         """
@@ -786,6 +927,26 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             }
         )
 
+    @extend_schema(tags=["Visits"], summary="List stats", description="Tab counts for visits list (replaces 4 parallel COUNT requests).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Tab counts for visits list (replaces 4 parallel COUNT requests)."""
+        from common.list_stats import aggregate_status_counts, viewset_queryset_excluding_params
+
+        qs = viewset_queryset_excluding_params(self, frozenset({'status', 'page', 'page_size', 'ordering'}))
+        return Response(
+            aggregate_status_counts(
+                qs,
+                'status',
+                {
+                    'scheduled': 'scheduled',
+                    'inProgress': 'in_progress',
+                    'completed': 'completed',
+                },
+            )
+        )
+
+    @extend_schema(tags=["Visits"], summary="Nursing pool analytics", description="Rich nursing pool report: daily trends, vitals_incomplete, aligned vs queue-date sent_to_room,")
     @action(detail=False, methods=['get'], url_path='nursing-pool-analytics')
     def nursing_pool_analytics(self, request):
         """
@@ -806,6 +967,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             period = {'start': start_date or '', 'end': end_date or ''}
         return Response({**body, 'period': period})
 
+    @extend_schema(tags=["Visits"], summary="Nursing flow analytics", description="Patient flow efficiency analytics: processing times, throughput, bottlenecks.")
     @action(detail=False, methods=['get'], url_path='nursing-flow-analytics')
     def nursing_flow_analytics(self, request):
         """
@@ -817,7 +979,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if isinstance(dates, Response):
             return dates
 
-        start_date, end_date = dates
+        start_date, end_date, _all_time = dates
         base = _nursing_pool_base_queryset_for_metrics(self, request)
 
         from .nursing_analytics import build_patient_flow_analytics
@@ -825,6 +987,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(analytics)
 
+    @extend_schema(tags=["Visits"], summary="Nursing vitals analytics", description="Vitals quality analytics: completion rates, accuracy, error analysis.")
     @action(detail=False, methods=['get'], url_path='nursing-vitals-analytics')
     def nursing_vitals_analytics(self, request):
         """
@@ -836,7 +999,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if isinstance(dates, Response):
             return dates
 
-        start_date, end_date = dates
+        start_date, end_date, _all_time = dates
         base = _nursing_pool_base_queryset_for_metrics(self, request)
 
         from .nursing_analytics import build_vitals_quality_analytics
@@ -844,6 +1007,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(analytics)
 
+    @extend_schema(tags=["Visits"], summary="Nursing wait times", description="Wait time analytics: distribution, peak times, priority impact.")
     @action(detail=False, methods=['get'], url_path='nursing-wait-times')
     def nursing_wait_times(self, request):
         """
@@ -855,7 +1019,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if isinstance(dates, Response):
             return dates
 
-        start_date, end_date = dates
+        start_date, end_date, _all_time = dates
         base = _nursing_pool_base_queryset_for_metrics(self, request)
 
         from .nursing_analytics import build_wait_time_analytics
@@ -863,6 +1027,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(analytics)
 
+    @extend_schema(tags=["Visits"], summary="Nursing comprehensive analytics", description="Comprehensive nursing analytics combining all metrics.")
     @action(detail=False, methods=['get'], url_path='nursing-comprehensive-analytics')
     def nursing_comprehensive_analytics(self, request):
         """
@@ -874,7 +1039,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if isinstance(dates, Response):
             return dates
 
-        start_date, end_date = dates
+        start_date, end_date, _all_time = dates
         # Comprehensive report should be period-based (visit calendar date), not
         # constrained by pool snapshot rules from the queue page.
         base = (
@@ -958,6 +1123,8 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """Set created_by when creating a visit and log audit."""
         self.auto_set_clinic(serializer)
         visit = serializer.save(created_by=self.request.user)
+        if visit.visit_type == "annual_checkup":
+            create_annual_checkup_for_visit(visit)
         AuditService.log_activity(
             user=self.request.user,
             action='create',
@@ -970,6 +1137,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @extend_schema(tags=["Visits"], summary="Close workflow")
     @action(detail=True, methods=['post'], url_path='close-workflow')
     def close_workflow(self, request, pk=None):
         visit = self.get_object()
@@ -1003,24 +1171,157 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response({'detail': 'Visit workflow closed.', **result})
 
 
+@extend_schema_view(
+    list=extend_schema(summary="List vital readings", tags=["Vitals"]),
+    retrieve=extend_schema(summary="Retrieve vital reading", tags=["Vitals"]),
+    create=extend_schema(summary="Record vitals", tags=["Vitals"]),
+    update=extend_schema(summary="Update vitals", tags=["Vitals"]),
+    partial_update=extend_schema(summary="Partially update vitals", tags=["Vitals"]),
+    destroy=extend_schema(summary="Delete vital reading", tags=["Vitals"]),
+)
 class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing vital readings.
     """
     
     clinic_filter_field = 'visit__location_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = VitalReadingSerializer
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'visit']
+    search_fields = [
+        'patient__first_name',
+        'patient__surname',
+        'patient__patient_id',
+        'patient__personal_number',
+        'recorded_by__first_name',
+        'recorded_by__last_name',
+    ]
     ordering_fields = ['recorded_at']
     ordering = ['-recorded_at']
+
+    def _apply_history_filters(self, qs):
+        gender = (self.request.query_params.get('patient_gender') or '').strip().lower()
+        if gender in ('male', 'female'):
+            qs = qs.filter(patient__gender=gender)
+
+        from common.report_period import apply_date_preset
+
+        df = (self.request.query_params.get('date_filter') or '').strip().lower()
+        qs = apply_date_preset(qs, df, 'recorded_at')
+
+        after = (self.request.query_params.get('recorded_at_after') or '').strip()
+        before = (self.request.query_params.get('recorded_at_before') or '').strip()
+        if after:
+            qs = qs.filter(recorded_at__date__gte=after)
+        if before:
+            qs = qs.filter(recorded_at__date__lte=before)
+
+        return qs
     
     def get_queryset(self):
-        return self.scope_queryset(
-            VitalReading.objects.all().select_related('patient', 'visit', 'recorded_by')
+        if getattr(self, 'swagger_fake_view', False):
+            return VitalReading.objects.none()
+        
+        qs = self.scope_queryset(
+            VitalReading.objects.all().select_related(
+                'patient', 'visit', 'visit__location_clinic', 'recorded_by'
+            )
+        )
+        return self._apply_history_filters(qs)
+
+    @extend_schema(tags=["Vitals"], summary="History patients", description="Paginated patient summaries for vitals history (one row per patient).")
+    @action(detail=False, methods=['get'], url_path='history-patients')
+    def history_patients(self, request):
+        """Paginated patient summaries for vitals history (one row per patient)."""
+        qs = self.filter_queryset(self.get_queryset())
+        grouped = (
+            qs.values(
+                'patient',
+                'patient__patient_id',
+                'patient__first_name',
+                'patient__surname',
+                'patient__gender',
+                'patient__date_of_birth',
+            )
+            .annotate(
+                reading_count=Count('id'),
+                last_recorded_at=Max('recorded_at'),
+            )
+            .order_by('-last_recorded_at')
         )
 
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = min(max(1, int(request.query_params.get('page_size', 50))), 100)
+        except (TypeError, ValueError):
+            page_size = 50
+
+        total = grouped.count()
+        start = (page - 1) * page_size
+        rows = list(grouped[start:start + page_size])
+
+        patient_ids = [row['patient'] for row in rows]
+        latest_by_patient: dict[int, VitalReading] = {}
+        if patient_ids:
+            for vital in qs.filter(patient_id__in=patient_ids).order_by('patient_id', '-recorded_at'):
+                if vital.patient_id not in latest_by_patient:
+                    latest_by_patient[vital.patient_id] = vital
+
+        results = []
+        for row in rows:
+            pid = row['patient']
+            latest = latest_by_patient.get(pid)
+            name_parts = [
+                row.get('patient__first_name') or '',
+                row.get('patient__surname') or '',
+            ]
+            results.append({
+                'patient': pid,
+                'patient_id': row.get('patient__patient_id') or '',
+                'patient_name': ' '.join(part for part in name_parts if part).strip(),
+                'patient_gender': row.get('patient__gender') or '',
+                'patient_date_of_birth': row.get('patient__date_of_birth'),
+                'reading_count': row['reading_count'],
+                'last_recorded_at': row['last_recorded_at'],
+                'latest_bp_systolic': latest.blood_pressure_systolic if latest else None,
+                'latest_bp_diastolic': latest.blood_pressure_diastolic if latest else None,
+            })
+
+        return Response({'count': total, 'results': results})
+
+    @extend_schema(tags=["Vitals"], summary="History stats", description="Dashboard cards for vitals history (replaces 4 parallel COUNT list calls).")
+    @action(detail=False, methods=['get'], url_path='history-stats')
+    def history_stats(self, request):
+        """Dashboard cards for vitals history (replaces 4 parallel COUNT list calls)."""
+        from common.list_stats import viewset_queryset_excluding_params
+        from common.report_period import apply_date_preset
+
+        full_qs = self.filter_queryset(self.get_queryset())
+        without_date = viewset_queryset_excluding_params(
+            self,
+            frozenset({
+                'date_filter',
+                'recorded_at_after',
+                'recorded_at_before',
+                'page',
+                'page_size',
+                'ordering',
+            }),
+        )
+        today_qs = apply_date_preset(without_date, 'today', 'recorded_at')
+        week_qs = apply_date_preset(without_date, 'week', 'recorded_at')
+
+        return Response({
+            'total': full_qs.count(),
+            'today': today_qs.count(),
+            'week': week_qs.count(),
+            'patients': full_qs.values('patient').distinct().count(),
+        })
+
+    @extend_schema(tags=["Vitals"], summary="Latest by visits", description="Return latest vital reading per visit for a CSV list of visit IDs.")
     @action(detail=False, methods=['get'], url_path='latest-by-visits')
     def latest_by_visits(self, request):
         """
@@ -1078,6 +1379,38 @@ class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             by_visit_id[visit_key] = item
 
         return Response({'results': by_visit_id})
+
+    @extend_schema(tags=["Vitals"], summary="Resolve", description="Return the best-matching vital reading (latest by default).")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_vital(self, request):
+        """Return the best-matching vital reading (latest by default)."""
+        patient_id = request.query_params.get('patient')
+        visit_id = request.query_params.get('visit')
+        if not patient_id and not visit_id:
+            return Response({'detail': 'patient or visit is required'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.filter_queryset(self.get_queryset())
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        if visit_id:
+            qs = qs.filter(visit_id=visit_id)
+        ordering = (request.query_params.get('ordering') or '-recorded_at').strip()
+        order_fields = [f.strip() for f in ordering.split(',') if f.strip()]
+        if order_fields:
+            qs = qs.order_by(*order_fields)
+        vital = qs.first()
+        if not vital:
+            return Response({'detail': 'Vital reading not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(vital).data)
+
+    @extend_schema(tags=["Vitals"], summary="Exists", description="Whether a visit has at least one vital reading.")
+    @action(detail=False, methods=['get'], url_path='exists')
+    def exists_for_visit(self, request):
+        """Whether a visit has at least one vital reading."""
+        visit_id = request.query_params.get('visit')
+        if not visit_id:
+            return Response({'detail': 'visit is required'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.filter_queryset(self.get_queryset()).filter(visit_id=visit_id)
+        return Response({'exists': qs.exists()})
     
     def _assert_visit_open(self, visit, action: str):
         """Block mutation of vitals once a visit is in a terminal state.
@@ -1108,13 +1441,12 @@ class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         instance.delete()
 
 
+@document_viewset(tag="Patients", resource="medical certificates")
 class MedicalCertificateViewSet(viewsets.ModelViewSet):
     """
     Persisted medical certificates.
-    Created by frontend "Medical Certificate" generator and printed later via browser print.
+    Created from consultation or Medical Records; PDF via GET .../pdf/ (NPA house style).
     """
-
-    permission_classes = [IsAuthenticated]
     serializer_class = MedicalCertificateSerializer
     pagination_class = MedicalCertificatePagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -1122,6 +1454,9 @@ class MedicalCertificateViewSet(viewsets.ModelViewSet):
     ordering = ["-issued_at"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return MedicalCertificate.objects.none()
+        
         queryset = MedicalCertificate.objects.all().select_related("patient", "issued_by")
         patient_id = self.request.query_params.get("patient")
         if patient_id:
@@ -1131,3 +1466,351 @@ class MedicalCertificateViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # Stamp who issued the certificate (doctor) - DB snapshot fields are handled in the model.
         serializer.save(issued_by=self.request.user)
+
+    @extend_schema(tags=["Patients"], summary="Pdf", description="Download medical certificate as PDF (NPA house style).")
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def download_pdf(self, request, pk=None):
+        """Download medical certificate as PDF (NPA house style)."""
+        certificate = self.get_object()
+        from .medical_certificate_pdf import build_medical_certificate_pdf
+
+        return build_medical_certificate_pdf(certificate)
+
+
+@document_viewset(tag="HR", resource="annual checkups")
+class AnnualCheckupViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+    """
+    Annual employee check-up programme records.
+
+    Linked 1:1 to visits with visit_type=annual_checkup.
+    """
+
+    clinic_filter_field = "visit__location_clinic"
+    serializer_class = AnnualCheckupSerializer
+    http_method_names = ["get", "post", "patch", "head", "options"]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ["patient", "status", "programme_year", "visit"]
+    ordering_fields = ["programme_year", "created_at", "signed_off_at"]
+    ordering = ["-programme_year", "-created_at"]
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return AnnualCheckup.objects.none()
+        
+        qs = AnnualCheckup.objects.select_related(
+            "patient",
+            "visit",
+            "signed_off_by",
+        )
+        return self.scope_queryset(qs)
+
+    @extend_schema(tags=["HR"], summary="Resolve", description="Single annual check-up by visit and/or patient + programme year.")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_checkup(self, request):
+        """Single annual check-up by visit and/or patient + programme year."""
+        qs = self.filter_queryset(self.get_queryset())
+        visit_id = request.query_params.get('visit')
+        patient_id = request.query_params.get('patient')
+        programme_year = request.query_params.get('programme_year')
+        if visit_id:
+            qs = qs.filter(visit_id=visit_id)
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        if programme_year:
+            qs = qs.filter(programme_year=programme_year)
+        checkup = qs.first()
+        if not checkup:
+            return Response({'detail': 'Annual check-up not found'}, status=status.HTTP_404_NOT_FOUND)
+        if checkup.status != 'completed':
+            refresh_components_completed(checkup)
+        return Response(AnnualCheckupSerializer(checkup).data)
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return AnnualCheckupCreateSerializer
+        if self.action == "sign_off":
+            return AnnualCheckupSignOffSerializer
+        return AnnualCheckupSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = AnnualCheckupCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        visit = serializer.validated_data["visit"]
+        programme_year = serializer.validated_data.get("programme_year")
+        checkup = create_annual_checkup_for_visit(visit, programme_year=programme_year)
+        refresh_components_completed(checkup)
+        AuditService.log_activity(
+            user=request.user,
+            action="create",
+            object_type="annual_checkup",
+            object_id=str(checkup.id),
+            module="patients",
+            object_repr=f"Annual check-up {checkup.programme_year}",
+            description=f"Created annual check-up for {checkup.patient.get_full_name()}",
+            request=request,
+        )
+        return Response(
+            AnnualCheckupSerializer(checkup).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        checkup = self.get_object()
+        if checkup.status == "completed":
+            return Response(
+                {"detail": "Completed check-ups cannot be edited."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        allowed = {"fitness_outcome", "outcome_notes", "component_overrides", "components_required"}
+        data = {k: v for k, v in request.data.items() if k in allowed}
+        if "components_required" in data:
+            data["components_required"] = validate_selected_component_codes(
+                data["components_required"]
+            )
+        serializer = AnnualCheckupSerializer(checkup, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        checkup = serializer.save()
+        refresh_components_completed(checkup)
+        return Response(AnnualCheckupSerializer(checkup).data)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        if request.query_params.get("visit"):
+            for checkup in queryset:
+                if checkup.status != "completed":
+                    refresh_components_completed(checkup)
+                break
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        checkup = self.get_object()
+        if checkup.status != "completed":
+            refresh_components_completed(checkup)
+        return Response(AnnualCheckupSerializer(checkup).data)
+
+    @extend_schema(tags=["HR"], summary="Refresh components")
+    @action(detail=True, methods=["post"], url_path="refresh-components")
+    def refresh_components(self, request, pk=None):
+        checkup = self.get_object()
+        refresh_components_completed(checkup)
+        return Response(AnnualCheckupSerializer(checkup).data)
+
+    @extend_schema(tags=["HR"], summary="Order investigations")
+    @action(detail=True, methods=["post"], url_path="order-investigations")
+    def order_investigations(self, request, pk=None):
+        checkup = self.get_object()
+        if checkup.status == "completed":
+            return Response(
+                {"detail": "Cannot order investigations on a completed check-up."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = AnnualCheckupOrderInvestigationsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = order_investigations_for_checkup(
+            checkup,
+            user=request.user,
+            consultation_session_id=serializer.validated_data.get("consultation_session"),
+            component_codes=serializer.validated_data.get("component_codes"),
+            priority=serializer.validated_data.get("priority") or "routine",
+        )
+        checkup.refresh_from_db()
+        return Response(
+            {
+                **result,
+                "checkup": AnnualCheckupSerializer(checkup).data,
+            }
+        )
+
+    @extend_schema(tags=["HR"], summary="Programme")
+    @action(detail=False, methods=["get", "patch"], url_path="programme")
+    def programme(self, request):
+        from datetime import date
+
+        year = int(request.query_params.get("programme_year") or date.today().year)
+        if request.method == "GET":
+            role = getattr(request.user, "system_role", None)
+            is_admin = request.user.is_superuser or role == "System Administrator"
+            catalog_source = get_full_catalog() if is_admin else get_active_catalog()
+            catalog = [serialize_catalog_entry(d) for d in catalog_source]
+            return Response(
+                {
+                    "programme_year": year,
+                    "catalog": catalog,
+                    "default_selected_codes": get_default_selected_codes(year),
+                }
+            )
+
+        role = getattr(request.user, "system_role", None)
+        if not request.user.is_superuser and role != "System Administrator":
+            raise PermissionDenied("Only system administrators can edit programme settings.")
+
+        catalog_creates = request.data.get("catalog_creates")
+        catalog_updates = request.data.get("catalog_updates")
+        cleaned = get_default_selected_codes(year)
+
+        if catalog_creates is not None:
+            if not isinstance(catalog_creates, list):
+                return Response(
+                    {"catalog_creates": "Expected a list of catalog objects."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                create_catalog_components(catalog_creates)
+            except ValueError as exc:
+                return Response({"catalog_creates": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            AuditService.log_activity(
+                user=request.user,
+                action="create",
+                object_type="annual_checkup_catalog",
+                object_id=str(year),
+                module="patients",
+                object_repr=f"Annual check-up catalog (+{len(catalog_creates)} items)",
+                description="Created annual check-up catalog entries",
+                request=request,
+            )
+
+        if catalog_updates is not None:
+            if not isinstance(catalog_updates, list):
+                return Response(
+                    {"catalog_updates": "Expected a list of catalog objects."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                update_catalog_components(catalog_updates)
+            except ValueError as exc:
+                return Response({"catalog_updates": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            AuditService.log_activity(
+                user=request.user,
+                action="update",
+                object_type="annual_checkup_catalog",
+                object_id=str(year),
+                module="patients",
+                object_repr=f"Annual check-up catalog ({len(catalog_updates)} items)",
+                description="Updated annual check-up catalog entries",
+                request=request,
+            )
+
+        codes = request.data.get("default_selected_codes")
+        if codes is not None:
+            if not isinstance(codes, list):
+                return Response(
+                    {"default_selected_codes": "Expected a list of component codes."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            cleaned = validate_selected_component_codes(codes)
+            settings_obj, _ = AnnualCheckupProgrammeSettings.objects.get_or_create(
+                programme_year=year,
+                defaults={"default_selected_codes": cleaned},
+            )
+            settings_obj.default_selected_codes = cleaned
+            settings_obj.updated_by = request.user
+            settings_obj.save()
+            AuditService.log_activity(
+                user=request.user,
+                action="update",
+                object_type="annual_checkup_programme",
+                object_id=str(year),
+                module="patients",
+                object_repr=f"Annual check-up programme {year}",
+                description=f"Updated default pre-ticked components ({len(cleaned)} items)",
+                request=request,
+            )
+        elif catalog_updates is None and catalog_creates is None:
+            return Response(
+                {
+                    "detail": (
+                        "Provide default_selected_codes, catalog_updates, "
+                        "and/or catalog_creates."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        catalog_source = get_full_catalog()
+        catalog = [serialize_catalog_entry(d) for d in catalog_source]
+        return Response(
+            {
+                "programme_year": year,
+                "catalog": catalog,
+                "default_selected_codes": cleaned,
+            }
+        )
+
+    @extend_schema(tags=["HR"], summary="Ensure for visit", description="Create annual check-up record for an annual visit if missing.")
+    @action(detail=False, methods=["post"], url_path="ensure-for-visit")
+    def ensure_for_visit(self, request):
+        """Create annual check-up record for an annual visit if missing."""
+        visit_id = request.data.get("visit")
+        if not visit_id:
+            return Response({"visit": "Required."}, status=status.HTTP_400_BAD_REQUEST)
+        visit = get_object_or_404(Visit, pk=visit_id)
+        if visit.visit_type != "annual_checkup":
+            return Response(
+                {"detail": "Visit is not an annual check-up."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+
+        try:
+            checkup = create_annual_checkup_for_visit(visit)
+        except DRFValidationError as exc:
+            return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+        return Response(AnnualCheckupSerializer(checkup).data)
+
+    @extend_schema(tags=["HR"], summary="Sign off")
+    @action(detail=True, methods=["post"], url_path="sign-off")
+    def sign_off(self, request, pk=None):
+        checkup = self.get_object()
+        serializer = AnnualCheckupSignOffSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        checkup = sign_off_annual_checkup(
+            checkup,
+            user=request.user,
+            fitness_outcome=serializer.validated_data["fitness_outcome"],
+            outcome_notes=serializer.validated_data.get("outcome_notes", ""),
+            override_reason=serializer.validated_data.get("override_reason", ""),
+            request=request,
+        )
+        return Response(AnnualCheckupSerializer(checkup).data)
+
+    @extend_schema(tags=["HR"], summary="Report pdf")
+    @action(detail=True, methods=["get"], url_path="report-pdf")
+    def report_pdf(self, request, pk=None):
+        checkup = self.get_object()
+        force = (request.query_params.get("force") or "").lower() in ("1", "true", "yes")
+
+        if checkup.status == "completed" and checkup.report_pdf and not force:
+            try:
+                with checkup.report_pdf.open("rb") as fh:
+                    pdf_bytes = fh.read()
+            except Exception:
+                pdf_bytes = build_annual_checkup_report_pdf(checkup)
+        else:
+            pdf_bytes = build_annual_checkup_report_pdf(checkup)
+            if checkup.status == "completed":
+                fname = (
+                    f"annual_checkup_{checkup.visit.visit_id}_"
+                    f"{checkup.programme_year}.pdf"
+                )
+                if checkup.report_pdf:
+                    checkup.report_pdf.delete(save=False)
+                checkup.report_pdf.save(fname, ContentFile(pdf_bytes), save=False)
+                checkup.save(update_fields=["report_pdf", "updated_at"])
+
+        AuditService.log_activity(
+            user=request.user,
+            action="read",
+            object_type="annual_checkup",
+            object_id=str(checkup.id),
+            module="patients",
+            object_repr=f"Annual check-up {checkup.programme_year}",
+            description="Downloaded annual check-up clinical report PDF",
+            request=request,
+        )
+
+        filename = (
+            f"annual_checkup_{checkup.visit.visit_id}_{checkup.programme_year}.pdf"
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        return response

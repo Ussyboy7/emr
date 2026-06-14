@@ -1,13 +1,6 @@
 // UI-related constants for consistent behavior across the application
 
 // ==========================================
-// PAGINATION & DATA LOADING
-// ==========================================
-export const DEFAULT_PAGE_SIZE = 10;
-export const LARGE_PAGE_SIZE = 1000;
-export const EXTRA_LARGE_PAGE_SIZE = 5000;
-
-// ==========================================
 // TIMING CONSTANTS
 // ==========================================
 export const DEBOUNCE_DELAY = 300; // ms for search debouncing

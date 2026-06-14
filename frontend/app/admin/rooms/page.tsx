@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { toApiDateFromInstant } from "@/lib/dates";
 import { roomService, type Room as ApiRoom } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -126,17 +127,12 @@ export default function RoomManagementPage() {
   const loadStats = useCallback(async () => {
     try {
       const base = buildStatsBaseFilters();
-      const [t, a, i, m] = await Promise.all([
-        roomService.getRooms({ ...base, page: 1, page_size: 1 }),
-        roomService.getRooms({ ...base, status: 'active', page: 1, page_size: 1 }),
-        roomService.getRooms({ ...base, status: 'inactive', page: 1, page_size: 1 }),
-        roomService.getRooms({ ...base, status: 'maintenance', page: 1, page_size: 1 }),
-      ]);
+      const stats = await roomService.getListStats(base);
       setStats({
-        total: t.count ?? 0,
-        active: a.count ?? 0,
-        inactive: i.count ?? 0,
-        maintenance: m.count ?? 0,
+        total: stats.total ?? 0,
+        active: stats.active ?? 0,
+        inactive: stats.inactive ?? 0,
+        maintenance: stats.maintenance ?? 0,
       });
     } catch {
       // Non-fatal — list fetch will surface errors
@@ -171,8 +167,8 @@ export default function RoomManagementPage() {
           type: displayRoomType(room.room_type),
           capacity: room.capacity || 1,
           status: (room.status.charAt(0).toUpperCase() + room.status.slice(1)) as Room['status'],
-          createdAt: room.created_at?.split('T')[0] || '',
-          lastModified: room.updated_at?.split('T')[0] || '',
+          createdAt: toApiDateFromInstant(room.created_at),
+          lastModified: toApiDateFromInstant(room.updated_at),
         }));
 
         setRooms(transformedRooms);

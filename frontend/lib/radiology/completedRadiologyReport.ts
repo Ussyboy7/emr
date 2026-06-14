@@ -2,6 +2,8 @@
  * Shared shape for Radiology → Completed Studies list and report dialog.
  */
 
+import { getMediaUrl } from '@/lib/media-url';
+
 export interface CompletedRadiologyReport {
   id: string;
   orderId: string;
@@ -74,12 +76,7 @@ export function sanitizeRadiologyReportFileName(name: string): string {
 }
 
 function toAbsoluteMediaUrl(url: string): string {
-  if (!url) return url;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
-  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
-  if (url.startsWith('/media/')) return `${mediaBase}${url}`;
-  return `${mediaBase}/media/${url.replace(/^\/+/, '')}`;
+  return getMediaUrl(url) ?? url;
 }
 
 /**

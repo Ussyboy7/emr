@@ -1,5 +1,7 @@
 # URIT 5160 Middleware Service
 
+> **Documentation:** This README is the canonical URIT integration doc. Older copies under `docs/URIT5160_*` were removed; everything lives here and in `integration/urit5160/`.
+
 This directory contains the middleware service that integrates the URIT 5160 hematology analyzer with the EMR system.
 
 ## Overview

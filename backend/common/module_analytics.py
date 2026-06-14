@@ -10,31 +10,38 @@ from django.utils import timezone
 from rest_framework.response import Response
 
 
-def parse_analytics_dates(request) -> tuple[datetime, datetime] | Response:
+def parse_analytics_dates(request) -> tuple[datetime, datetime, bool] | Response:
     """
     Parse start/end query params as YYYY-MM-DD (inclusive end-of-day).
-    Returns Response with 400 on error.
+    Pass ``period=all`` for all-time (1970 → today). Returns (start_dt, end_dt, all_time).
     """
-    start_s = request.query_params.get("start")
-    end_s = request.query_params.get("end")
-    if not start_s or not end_s:
-        return Response(
-            {"error": "Query parameters 'start' and 'end' are required (YYYY-MM-DD)."},
-            status=400,
-        )
-    try:
-        start_d = datetime.strptime(start_s.strip(), "%Y-%m-%d").date()
-        end_d = datetime.strptime(end_s.strip(), "%Y-%m-%d").date()
-    except ValueError:
-        return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+    from .report_period import all_time_bounds, parse_report_period
 
-    if end_d < start_d:
-        return Response({"error": "end must be on or after start."}, status=400)
+    period = parse_report_period(request)
+    if period.all_time:
+        start_d, end_d = all_time_bounds()
+    else:
+        qp = getattr(request, "query_params", None) or request.GET
+        start_s = qp.get("start") or qp.get("start_date")
+        end_s = qp.get("end") or qp.get("end_date")
+        if not start_s or not end_s:
+            return Response(
+                {"error": "Query parameters 'start' and 'end' are required (YYYY-MM-DD), or use period=all."},
+                status=400,
+            )
+        try:
+            start_d = datetime.strptime(start_s.strip(), "%Y-%m-%d").date()
+            end_d = datetime.strptime(end_s.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+
+        if end_d < start_d:
+            return Response({"error": "end must be on or after start."}, status=400)
 
     tz = timezone.get_current_timezone()
     start_dt = timezone.make_aware(datetime.combine(start_d, time.min), tz)
     end_dt = timezone.make_aware(datetime.combine(end_d, time.max), tz)
-    return start_dt, end_dt
+    return start_dt, end_dt, period.all_time
 
 
 def patient_category_breakdown(patients_qs) -> dict[str, int]:

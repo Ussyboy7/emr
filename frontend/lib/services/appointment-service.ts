@@ -60,6 +60,27 @@ class AppointmentService {
     );
   }
 
+  /** Tab counts for appointments list page (replaces 4 parallel COUNT requests). */
+  async getListStats(params?: {
+    patient?: number;
+    doctor?: number;
+    clinic?: number;
+    appointment_type?: string;
+    appointment_date?: string;
+    start_date?: string;
+    end_date?: string;
+    search?: string;
+  }): Promise<{
+    total: number;
+    scheduled: number;
+    confirmed: number;
+    inProgress: number;
+  }> {
+    const query = buildQueryString(params || {});
+    const path = query ? `/appointments/list-stats/?${query.slice(1)}` : '/appointments/list-stats/';
+    return apiFetch(path);
+  }
+
   /**
    * Get appointment by ID
    */

@@ -3,9 +3,10 @@
  * Used by Patient Medical Records and Consultation History "View Report" modal.
  */
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
+import { formatDisplayDate, formatDisplayTime, formatDisplayDateTime } from '@/lib/dates';
 import { apiFetch } from '@/lib/api-client';
-import { consultationService, physioService, patientService } from '@/lib/services';
 import { logWarn } from './client-logger';
+import { patientService, consultationService } from '@/lib/services';
 import type { ApiResponse } from './types/common';
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 
@@ -80,6 +81,9 @@ export interface ConsultationReportSession {
   assessment?: string;
   plan?: string;
   visit?: number;
+  visit_type?: string;
+  /** When set, annual check-up PDF download uses this record id. */
+  annual_checkup_id?: number;
   vitals?: Record<string, unknown>;
   prescriptions?: Array<{ id?: string; medication?: string; medication_name?: string; dosage?: string; frequency?: string; duration?: string; quantity?: string }>;
   labOrders?: Array<{ test?: string; priority?: string; status?: string; result?: string }>;
@@ -92,22 +96,14 @@ export interface ConsultationReportSession {
 // ----- Formatters for HTML -----
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return '';
-  try {
-    const d = new Date(dateString);
-    return isNaN(d.getTime()) ? '' : d.toLocaleDateString();
-  } catch {
-    return '';
-  }
+  const formatted = formatDisplayDate(dateString);
+  return formatted === '—' ? '' : formatted;
 };
 
 const formatTime = (dateString: string | undefined): string => {
   if (!dateString) return '';
-  try {
-    const d = new Date(dateString);
-    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
+  const formatted = formatDisplayTime(dateString);
+  return formatted === '—' ? '' : formatted;
 };
 
 const formatPriority = (p: string | undefined): string => {
@@ -378,7 +374,7 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
 
   <div class="footer">
     <p>${escapeHtmlForHtml(getOrganizationServicesHeader())}</p>
-    <p>Generated: ${escapeHtmlForHtml(new Date().toLocaleString())} | Document ID: ${escapeHtmlForHtml(String(session.id))}</p>
+    <p>Generated: ${escapeHtmlForHtml(formatDisplayDateTime(new Date()))} | Document ID: ${escapeHtmlForHtml(String(session.id))}</p>
   </div>
 </body>
 </html>`;
@@ -386,34 +382,30 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
 
 // ----- Loader: fetch full session data for the report (used by both Medical Records and Consultation History) -----
 export async function loadConsultationReportSession(sessionId: number): Promise<ConsultationReportSession> {
-  const session = (await consultationService.getSession(sessionId)) as unknown as Record<string, unknown>;
+  const [session, bundle] = await Promise.all([
+    apiFetch<Record<string, unknown>>(`/consultation/sessions/${sessionId}/`),
+    consultationService.getSessionWorkspaceBundle(sessionId),
+  ]);
 
   const patientId = session.patient as number;
   const visitId = session.visit as number | undefined;
+  const visitType = session.visit_type ? String(session.visit_type) : undefined;
 
-  // Fire all enrichment calls in parallel — they only depend on session/patient/visit IDs
-  const [patient, prescriptionsResult, labOrders, radiologyOrders, vitals, physioOrders, eyeOrdersResult, diagnosesResult] = await Promise.all([
-    patientId
-      ? patientService.getPatient(patientId).catch(() => null)
-      : Promise.resolve(null),
-    sessionId && patientId
-      ? apiFetch<ApiResponse<PrescriptionApiResponse>>(`/pharmacy/prescriptions/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
-      : Promise.resolve({ results: [] }),
-    sessionId && patientId
-      ? apiFetch<{ results: any[] }>(`/laboratory/orders/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
-      : Promise.resolve({ results: [] }),
-    sessionId && patientId
-      ? apiFetch<{ results: any[] }>(`/radiology/orders/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
-      : Promise.resolve({ results: [] }),
-    visitId
-      ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`).catch(() => ({ results: [] }))
-      : Promise.resolve({ results: [] }),
-    physioService.getOrders({ consultation_session: sessionId, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
-    sessionId && patientId
-      ? apiFetch<{ results: any[] }>(`/eyecare/orders/?consultation_session=${sessionId}&patient=${patientId}&page_size=100`).catch(() => ({ results: [] }))
-      : Promise.resolve({ results: [] }),
-    consultationService.getDiagnoses({ session: sessionId, page_size: 100 }).catch(() => ({ results: [] })),
-  ]);
+  const prescriptionsResult = bundle.prescriptions;
+  const labOrders = bundle.lab_orders;
+  const radiologyOrders = bundle.radiology_orders;
+  const physioOrders = bundle.physio_orders;
+  const eyeOrdersResult = bundle.eye_orders;
+  const diagnosesResult = bundle.diagnoses;
+
+  const patient = patientId
+    ? await apiFetch<Record<string, unknown>>(`/patients/${patientId}/`).catch(() => null)
+    : null;
+  let vitals: { results: any[] } = { results: bundle.vitals.results || [] };
+  if (visitId && !vitals.results.length) {
+    const vital = await patientService.resolveVital({ visit: visitId }).catch(() => null);
+    vitals = { results: vital ? [vital] : [] };
+  }
 
   // Process patient data
   if (patient) {
@@ -436,24 +428,11 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
     }));
   });
 
-  // Process lab orders
+  // Process lab orders (tests are prefetched on each order from workspace bundle)
   const labOrderRows = (labOrders as any).results || [];
-  const testResponses = await Promise.all(
-    labOrderRows.map((order: any) =>
-      apiFetch<{ results: any[] }>(`/laboratory/tests/?order=${order.id}&page_size=200`).catch(() => ({ results: [] }))
-    )
-  );
-  session.labOrders = labOrderRows.flatMap((order: any, idx: number) => {
-    const tests = testResponses[idx]?.results || [];
-    if (!tests.length) {
-      const nestedTests = order.tests || [];
-      return nestedTests.map((t: any) => ({
-        test: (t.name || t.test_name || t.template_name || '').trim(),
-        priority: order.priority ?? '',
-        status: t.status ?? order.status ?? '',
-        result: summarizeLabTestForConsultationReport(t),
-      }));
-    }
+  session.labOrders = labOrderRows.flatMap((order: any) => {
+    const tests = order.tests || [];
+    if (!tests.length) return [];
     return tests.map((t: any) => ({
       test: (t.name || t.test_name || t.template_name || '').trim(),
       priority: order.priority ?? '',
@@ -525,7 +504,10 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
     notes: d.notes || d.diagnosis_text || '',
   }));
 
-  return session as unknown as ConsultationReportSession;
+  return {
+    ...(session as unknown as ConsultationReportSession),
+    visit_type: visitType,
+  };
 }
 
 // Re-export formatters for use by ConsultationReportModal

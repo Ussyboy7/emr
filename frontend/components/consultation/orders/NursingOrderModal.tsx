@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Activity, AlertTriangle, DoorOpen, Droplets, Loader2, Syringe, X } from "lucide-react";
+import { Activity, AlertTriangle, DoorOpen, Loader2, Syringe, X } from "lucide-react";
 import { toast } from "sonner";
 import { pharmacyService } from "@/lib/services";
 
@@ -82,15 +82,6 @@ const woundLocations = [
   "Multiple Sites",
 ];
 
-const ivFluids = [
-  { name: "Normal Saline 0.9%", category: "Crystalloid" },
-  { name: "Ringer's Lactate", category: "Crystalloid" },
-  { name: "Dextrose 5% (D5W)", category: "Crystalloid" },
-  { name: "Dextrose Saline", category: "Crystalloid" },
-  { name: "Half Normal Saline 0.45%", category: "Crystalloid" },
-  { name: "Hartmann's Solution", category: "Crystalloid" },
-];
-
 type MedConfig = {
   dose: string;
   doseUnit: string;
@@ -115,12 +106,26 @@ export function NursingOrderModal({
   onOpenChange,
   onSubmit,
   confirmLabel,
+  completeNowLabel,
+  allowedTypes,
+  initialPayload,
+  descriptionExtra,
+  onSubmitCompleteNow,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (payload: NursingOrderSubmitInput) => Promise<void>;
   confirmLabel?: string;
+  completeNowLabel?: string;
+  /** When set, only these procedure types appear in the picker (e.g. nurse repeat flow). */
+  allowedTypes?: Array<"Injection" | "Dressing">;
+  initialPayload?: Partial<NursingOrderSubmitInput>;
+  descriptionExtra?: React.ReactNode;
+  onSubmitCompleteNow?: (payload: NursingOrderSubmitInput) => Promise<void>;
 }) {
+  const procedureTypeOptions = allowedTypes?.length
+    ? allowedTypes
+    : (["Injection", "Dressing", "Observation Admission"] as const);
   const [generics, setGenerics] = useState<GenericResult[]>([]);
   const [loadingMedications, setLoadingMedications] = useState(false);
   const [medicationSearch, setMedicationSearch] = useState("");
@@ -145,18 +150,19 @@ export function NursingOrderModal({
   });
 
   const reset = useCallback(() => {
+    const defaultType = initialPayload?.type || procedureTypeOptions[0] || "Injection";
     setForm({
-      type: "Injection",
-      medication: "",
-      dosage: "",
-      route: "Intramuscular (IM)",
-      woundLocation: "",
-      woundType: "",
-      instructions: "",
-      priority: "Routine",
-      ward: "",
-      admissionDiagnosis: "",
-      presentingComplaint: "",
+      type: defaultType,
+      medication: initialPayload?.medication || "",
+      dosage: initialPayload?.dosage || "",
+      route: initialPayload?.route || "Intramuscular (IM)",
+      woundLocation: initialPayload?.woundLocation || "",
+      woundType: initialPayload?.woundType || "",
+      instructions: initialPayload?.instructions || "",
+      priority: initialPayload?.priority || "Routine",
+      ward: initialPayload?.ward || "",
+      admissionDiagnosis: initialPayload?.admissionDiagnosis || "",
+      presentingComplaint: initialPayload?.presentingComplaint || "",
     });
     setGenerics([]);
     setMedicationSearch("");
@@ -164,7 +170,17 @@ export function NursingOrderModal({
     setSelectedIds(new Set());
     setMedConfigs(new Map());
     setSubmitting(false);
-  }, []);
+  }, [initialPayload, procedureTypeOptions]);
+
+  useEffect(() => {
+    if (open && initialPayload) {
+      setForm((prev) => ({
+        ...prev,
+        ...initialPayload,
+        type: initialPayload.type || prev.type,
+      }));
+    }
+  }, [open, initialPayload]);
 
   useEffect(() => {
     if (!open || !showMedicationDropdown) return;
@@ -295,43 +311,50 @@ export function NursingOrderModal({
     };
   };
 
-  const handleConfirm = async (payloadOverride?: NursingOrderSubmitInput) => {
-    const payload = payloadOverride || form;
+  const normalizePayload = (payload: NursingOrderSubmitInput): NursingOrderSubmitInput => ({
+    ...payload,
+    medication: payload.medication?.trim() || undefined,
+    dosage: payload.dosage?.trim() || undefined,
+    instructions: payload.instructions.trim(),
+    ward: payload.ward?.trim() || undefined,
+    admissionDiagnosis: payload.admissionDiagnosis?.trim() || undefined,
+    presentingComplaint: payload.presentingComplaint?.trim() || undefined,
+  });
+
+  const validatePayload = (payload: NursingOrderSubmitInput): boolean => {
     if (!payload.type || !payload.instructions.trim()) {
       toast.error("Procedure type and instructions are required.");
-      return;
+      return false;
     }
     if (payload.type === "Injection" && !payload.medication?.trim()) {
       toast.error("Medication is required for Injection.");
-      return;
+      return false;
     }
     if (payload.type === "Dressing" && (!payload.woundLocation || !payload.woundType)) {
       toast.error("Wound type and location are required for Dressing.");
-      return;
-    }
-    if (payload.type === "IV Infusion" && !payload.medication?.trim()) {
-      toast.error("IV fluid is required for IV Infusion.");
-      return;
+      return false;
     }
     if (
       payload.type === "Observation Admission" &&
       (!payload.ward?.trim() || !payload.admissionDiagnosis?.trim() || !payload.presentingComplaint?.trim())
     ) {
       toast.error("Ward, diagnosis, and presenting complaint are required for Observation Admission.");
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const handleConfirm = async (
+    payloadOverride?: NursingOrderSubmitInput,
+    submitFn: (payload: NursingOrderSubmitInput) => Promise<void> = onSubmit
+  ) => {
+    const raw = payloadOverride || (form.type === "Injection" ? buildSubmitPayload() : form);
+    if (!raw) return;
+    if (!validatePayload(raw)) return;
 
     try {
       setSubmitting(true);
-      await onSubmit({
-        ...payload,
-        medication: payload.medication?.trim() || undefined,
-        dosage: payload.dosage?.trim() || undefined,
-        instructions: payload.instructions.trim(),
-        ward: payload.ward?.trim() || undefined,
-        admissionDiagnosis: payload.admissionDiagnosis?.trim() || undefined,
-        presentingComplaint: payload.presentingComplaint?.trim() || undefined,
-      });
+      await submitFn(normalizePayload(raw));
       onOpenChange(false);
       reset();
     } catch (err: any) {
@@ -362,6 +385,7 @@ export function NursingOrderModal({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {descriptionExtra}
           <div className="space-y-2">
             <Label>Procedure Type *</Label>
             <Select
@@ -388,10 +412,15 @@ export function NursingOrderModal({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Injection">Injection</SelectItem>
-                <SelectItem value="Dressing">Wound Dressing</SelectItem>
-                <SelectItem value="IV Infusion">IV Infusion</SelectItem>
-                <SelectItem value="Observation Admission">Observation Admission (Day Care)</SelectItem>
+                {procedureTypeOptions.includes("Injection") && (
+                  <SelectItem value="Injection">Injection</SelectItem>
+                )}
+                {procedureTypeOptions.includes("Dressing") && (
+                  <SelectItem value="Dressing">Wound Dressing</SelectItem>
+                )}
+                {!allowedTypes?.length && (
+                  <SelectItem value="Observation Admission">Observation Admission (Day Care)</SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -694,34 +723,6 @@ export function NursingOrderModal({
             </div>
           )}
 
-          {form.type === "IV Infusion" && (
-            <>
-              <div className="space-y-2">
-                <Label>IV Fluid *</Label>
-                <Select value={form.medication || ""} onValueChange={(v) => setForm((prev) => ({ ...prev, medication: v }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select IV fluid" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ivFluids.map((fluid) => (
-                      <SelectItem key={fluid.name} value={fluid.name}>
-                        {fluid.name} ({fluid.category})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Volume/Rate</Label>
-                <Input
-                  value={form.dosage || ""}
-                  onChange={(e) => setForm((prev) => ({ ...prev, dosage: e.target.value }))}
-                  placeholder="e.g., 500ml over 4 hours"
-                />
-              </div>
-            </>
-          )}
-
           <div className="space-y-2">
             <Label>Priority</Label>
             <Select value={form.priority} onValueChange={(v) => setForm((prev) => ({ ...prev, priority: v as NursingOrderSubmitInput["priority"] }))}>
@@ -756,19 +757,26 @@ export function NursingOrderModal({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={() => {
-            if (form.type === "Injection") {
-              const payload = buildSubmitPayload();
-              if (!payload) return;
-              handleConfirm(payload);
-            } else {
-              handleConfirm();
-            }
-          }} disabled={submitting || (form.type === "Injection" && selectedIds.size === 0)} className="bg-cyan-600 hover:bg-cyan-700">
+          {onSubmitCompleteNow ? (
+            <Button
+              variant="outline"
+              onClick={() => void handleConfirm(undefined, onSubmitCompleteNow)}
+              disabled={submitting || (form.type === "Injection" && selectedIds.size === 0)}
+              className="border-violet-500/50 text-violet-700 dark:text-violet-300"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              {completeNowLabel || "Add & complete now"}
+            </Button>
+          ) : null}
+          <Button
+            onClick={() => void handleConfirm()}
+            disabled={submitting || (form.type === "Injection" && selectedIds.size === 0)}
+            className="bg-cyan-600 hover:bg-cyan-700"
+          >
             {submitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

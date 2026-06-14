@@ -7,28 +7,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Loader2 } from 'lucide-react';
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import { toast } from 'sonner';
 import {
   Users, Stethoscope, TestTube, Pill, Calendar, Clock, Activity,
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, UserPlus,
   Play, ClipboardList, Bell, ArrowRight, Heart, Building2, Bed,
-  FileText, Syringe, ScanLine
+  FileText, Syringe, ScanLine, Loader2
 } from 'lucide-react';
-import { consultationService } from '@/lib/services/consultation-service';
-import labService from '@/lib/services/lab-service';
-import { pharmacyService } from '@/lib/services/pharmacy-service';
-import { patientService } from '@/lib/services/patient-service';
-import { visitService } from '@/lib/services/visit-service';
-import { nursingService } from '@/lib/services/nursing-service';
-import { analyticsService } from '@/lib/services/analytics-service';
-import { appointmentService } from '@/lib/services/appointment-service';
+import { getOperationalDashboard } from '@/lib/services/dashboard-service';
 import { useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
 import { getHomeRouteForUser } from '@/lib/home-route';
-import { getVisitServiceClinicsDisplay, joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { getServerToday } from '@/lib/utils/serverTime';
-import { formatLocalYmd } from '@/lib/laboratory/constants';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -72,127 +64,41 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Load dashboard data
-  const loadDashboardData = useCallback(async () => {
+  const loadDashboardData = useCallback(async (opts: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!opts.silent) {
+        setLoading(true);
+        setError(null);
+      }
 
-      // Load all stats in parallel
-      const [consultationStats, labStats, pharmacyStats, todayVisits, consultationQueue, labOrders, pharmacyPrescriptions, nursingPoolCount, clinicPerformanceData, upcomingAppointmentsData] = await Promise.all([
-        consultationService.getStats().catch(() => ({ total: 0, today: 0, completed: 0, in_progress: 0 })),
-        labService.getStats().catch(() => ({ pendingTests: 0, inProgress: 0, resultsReady: 0, critical: 0 })),
-        pharmacyService.getStats().catch(() => ({ pendingRx: 0, dispensedToday: 0, lowStock: 0, totalInventory: 0 })),
-        visitService.getVisits({ page: 1, page_size: 100 }).catch(() => ({ results: [], count: 0 })),
-        consultationService.getQueue({ is_active: true, page: 1 }).catch(() => ({ results: [], count: 0 })),
-        labService.getOrders({ page: 1 }).catch(() => ({ results: [], count: 0 })),
-        pharmacyService.getPrescriptions({ status: 'pending', page: 1 }).catch(() => ({ results: [], count: 0 })),
-        nursingService.getPoolQueueCount().catch(() => ({ count: 0 })),
-        analyticsService.getClinicDistribution().catch(() => []),
-        appointmentService.getUpcomingAppointments().catch(() => []),
-      ]);
-
-      // Calculate today's patients — anchor on the server's calendar so the
-      // dashboard's "today" matches the rest of the app regardless of the
-      // user's local timezone.
-      let today: string;
+      let today: string | undefined;
       try {
         today = await getServerToday();
       } catch {
-        today = formatLocalYmd(new Date());
+        today = undefined;
       }
-      const patientsToday = todayVisits.results.filter((v: any) => {
-        const visitDate = v.created_at?.split('T')[0] || v.visit_date;
-        return visitDate === today;
-      }).length;
 
-      // Get yesterday's count for comparison (simplified - would need actual API)
-      const todayAnchor = new Date(`${today}T00:00:00`);
-      const yesterday = new Date(todayAnchor);
-      yesterday.setDate(todayAnchor.getDate() - 1);
-      const yesterdayDate = formatLocalYmd(yesterday);
-      const patientsYesterday = todayVisits.results.filter((v: any) => {
-        const visitDate = v.created_at?.split('T')[0] || v.visit_date;
-        return visitDate === yesterdayDate;
-      }).length;
-      const patientsChange = patientsYesterday > 0 
-        ? Math.round(((patientsToday - patientsYesterday) / patientsYesterday) * 100)
-        : 0;
+      const data = await getOperationalDashboard(today ? { date: today } : undefined);
 
-      // Update stats
-      setTodayStats({
-        patientsToday,
-        patientsChange,
-        consultations: typeof consultationStats.today === 'object' ? (consultationStats.today?.sessions || 0) : (consultationStats.today || 0),
-        consultationsChange: 0, // Would need yesterday's data
-        labTests: labStats.pendingTests + labStats.inProgress + labStats.resultsReady,
-        labTestsChange: 0, // Would need yesterday's data
-        prescriptions: pharmacyStats.dispensedToday || 0,
-        prescriptionsChange: 0, // Would need yesterday's data
-      });
-
-      // Update queue status
-      setQueueStatus({
-        nursingPool: nursingPoolCount.count || 0,
-        consultationWaiting: consultationQueue.count || consultationQueue.results.length,
-        labPending: labStats.pendingTests || 0,
-        pharmacyQueue: pharmacyStats.pendingRx || pharmacyPrescriptions.count || 0,
-      });
-
-      // Get recent patients (from today's visits) — use visit id for key; same patient can have multiple visits
-      const recent = todayVisits.results
-        .slice(0, 5)
-        .map((visit: any) => ({
-          visitId: visit.id,
-          id: visit.patient?.patient_id || visit.patient_id || '',
-          name: visit.patient?.full_name ?? visit.patient_name ?? '',
-          clinic: getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
-          time: new Date(visit.created_at || visit.visit_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-          status: visit.status === 'completed' ? 'Completed' : visit.status === 'in_progress' ? 'In Consultation' : 'Pending',
-        }));
-      setRecentPatients(recent);
-
-      // Critical alerts (lab critical results, low stock, etc.)
-      const alerts: any[] = [];
-      if (labStats.critical > 0) {
-        alerts.push({
-          type: 'lab',
-          message: `${labStats.critical} critical lab result${labStats.critical > 1 ? 's' : ''} require attention`,
-          time: 'Just now',
-        });
-      }
-      if (pharmacyStats.lowStock > 0) {
-        alerts.push({
-          type: 'stock',
-          message: `${pharmacyStats.lowStock} medication${pharmacyStats.lowStock > 1 ? 's' : ''} running low on stock`,
-          time: 'Just now',
-        });
-      }
-      setCriticalAlerts(alerts);
-
-      // Clinic performance data from analytics service
-      const clinicPerformance = clinicPerformanceData.slice(0, 5).map(clinic => ({
-        name: clinic.name,
-        patients: clinic.value,
-        target: Math.round(clinic.value * 1.2), // Set target 20% higher than current
-        avgWait: Math.round(Math.random() * 15 + 5), // Would need real wait time data
-      }));
-      setClinicPerformance(clinicPerformance);
-
-      // Upcoming appointments from appointment service
-      const upcomingAppointments = upcomingAppointmentsData.slice(0, 3).map(apt => ({
-        patient: apt.patient_name || 'Unknown Patient',
-        type: apt.appointment_type,
-        time: `${apt.appointment_date} ${apt.appointment_time}`,
-        clinic: apt.clinic_name || 'General',
-      }));
-      setUpcomingAppointments(upcomingAppointments);
-
+      setTodayStats(data.todayStats);
+      setQueueStatus(data.queueStatus);
+      setRecentPatients(
+        data.recentPatients.map((patient) => ({
+          ...patient,
+          time: formatDisplayTime(patient.time),
+        })),
+      );
+      setCriticalAlerts(data.criticalAlerts);
+      setClinicPerformance(data.clinicPerformance);
+      setUpcomingAppointments(data.upcomingAppointments);
     } catch (err: any) {
-      setError(err.message || 'Failed to load dashboard data');
-      toast.error('Failed to load dashboard. Please try again.');
+      if (!opts.silent) {
+        setError(err.message || 'Failed to load dashboard data');
+        toast.error('Failed to load dashboard. Please try again.');
+      }
       console.error('Error loading dashboard:', err);
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, []);
 
@@ -204,6 +110,10 @@ export default function DashboardPage() {
     if (!currentUser) return;
     loadDashboardData();
   }, [loadDashboardData, hydrated, currentUser]);
+
+  useReloadOnFocus(() => loadDashboardData({ silent: true }), {
+    enabled: hydrated && !!currentUser,
+  });
 
   if (loading) {
     return (
@@ -244,7 +154,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">EMR Dashboard</h1>
             <p className="text-muted-foreground mt-1">
-              {new Date().toLocaleDateString('en-NG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              {formatDisplayDateMedium(new Date())}
             </p>
           </div>
           <div className="flex gap-2">
@@ -253,10 +163,6 @@ export default function DashboardPage() {
             </Button>
             <Button asChild className="bg-emerald-600 hover:bg-emerald-700">
               <Link href="/consultation/start"><Play className="h-4 w-4 mr-2" />Start Consultation</Link>
-            </Button>
-            <Button variant="outline" onClick={loadDashboardData} disabled={loading}>
-              <Loader2 className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
             </Button>
           </div>
         </div>

@@ -13,6 +13,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from "@/components/ui/textarea";
 import { CustomDateRangeButton } from "@/components/shared/CustomDateRangeButton";
 import { AdvancedDateRangeDialog } from "@/components/shared/AdvancedDateRangeDialog";
+import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
+import {
+  formatDisplayDate,
+  formatDisplayDateMedium,
+  formatDisplayDateTime,
+  localMonthBounds,
+  localWeekToTodayBounds,
+  todayApiDateString,
+} from "@/lib/dates";
 import {
   CalendarDays,
   Calendar as CalendarIcon,
@@ -27,7 +36,6 @@ import {
   ChevronRight,
   MoreHorizontal,
   Eye,
-  RefreshCw,
   CheckCircle2,
   Loader2,
   Calendar,
@@ -39,7 +47,6 @@ import { toast } from "sonner";
 import { appointmentService, type Appointment } from "@/lib/services/appointment-service";
 import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
 import { useOutpatientClinicTypes } from "@/hooks/use-outpatient-clinic-types";
-import { format } from "date-fns";
 import { useClinic } from "@/hooks/use-clinic";
 
 /** Deep link to New Visit with patient + appointment date/time/type prefilled */
@@ -91,7 +98,7 @@ export default function AppointmentsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [pageSize] = useState(10);
+  const [pageSize] = useState(DEFAULT_LIST_PAGE_SIZE);
   const [statsData, setStatsData] = useState({
     total: 0,
     scheduled: 0,
@@ -145,7 +152,7 @@ export default function AppointmentsPage() {
     createPatientSearchTimeoutRef.current = setTimeout(async () => {
       createPatientSearchTimeoutRef.current = null;
       try {
-        const res = await patientService.getPatients({ search: q, page_size: 50 });
+        const res = await patientService.getPatients({ search: q, page_size: DEFAULT_LIST_PAGE_SIZE });
         setCreatePatientResults(res.results || []);
       } catch (e: any) {
         toast.error(e?.message || "Patient search failed");
@@ -174,18 +181,15 @@ export default function AppointmentsPage() {
       start_date = dateRange.from || undefined;
       end_date = dateRange.to || undefined;
     } else if (datePreset === "today") {
-      appointment_date = new Date().toISOString().split("T")[0];
+      appointment_date = todayApiDateString();
     } else if (datePreset === "week") {
-      const today = new Date();
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay());
-      start_date = weekStart.toISOString().split("T")[0];
-      end_date = today.toISOString().split("T")[0];
+      const week = localWeekToTodayBounds();
+      start_date = week.start;
+      end_date = week.end;
     } else if (datePreset === "month") {
-      const today = new Date();
-      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      start_date = monthStart.toISOString().split("T")[0];
-      end_date = today.toISOString().split("T")[0];
+      const month = localMonthBounds();
+      start_date = month.start;
+      end_date = todayApiDateString();
     }
 
     return { appointment_date, start_date, end_date };
@@ -199,7 +203,7 @@ export default function AppointmentsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await adminService.getClinics({ page_size: 500, is_active: true });
+        const res = await adminService.getClinics({ page_size: MAX_LIST_PAGE_SIZE, is_active: true });
         if (cancelled) return;
         setClinicOptions((res.results || []).map((c) => ({ id: c.id, name: c.name })));
       } catch {
@@ -252,31 +256,22 @@ export default function AppointmentsPage() {
 
   const loadStats = useCallback(async () => {
     try {
-      const base: Record<string, string | number | undefined> = {
-        page: 1,
-        page_size: 1,
-      };
-      if (debouncedSearchQuery) base.search = debouncedSearchQuery;
-      if (typeFilter !== "all") base.appointment_type = typeFilter;
-      if (!isMultiClinic && clinicFilter !== "all") base.clinic = Number(clinicFilter);
-
       const { appointment_date, start_date, end_date } = buildAppointmentDateParams();
-      if (appointment_date) base.appointment_date = appointment_date;
-      if (start_date) base.start_date = start_date;
-      if (end_date) base.end_date = end_date;
 
-      const [totalResult, scheduledResult, confirmedResult, inProgressResult] = await Promise.all([
-        appointmentService.getAppointments({ ...base }),
-        appointmentService.getAppointments({ ...base, status: "scheduled" }),
-        appointmentService.getAppointments({ ...base, status: "confirmed" }),
-        appointmentService.getAppointments({ ...base, status: "in_progress" }),
-      ]);
+      const stats = await appointmentService.getListStats({
+        search: debouncedSearchQuery || undefined,
+        appointment_type: typeFilter !== "all" ? typeFilter : undefined,
+        clinic: !isMultiClinic && clinicFilter !== "all" ? Number(clinicFilter) : undefined,
+        appointment_date,
+        start_date,
+        end_date,
+      });
 
       setStatsData({
-        total: totalResult.count || 0,
-        scheduled: scheduledResult.count || 0,
-        confirmed: confirmedResult.count || 0,
-        inProgress: inProgressResult.count || 0,
+        total: stats.total,
+        scheduled: stats.scheduled,
+        confirmed: stats.confirmed,
+        inProgress: stats.inProgress,
       });
     } catch {
       /* list fetch will surface errors */
@@ -560,18 +555,6 @@ export default function AppointmentsPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
-              onClick={() => {
-                void loadStats();
-                void fetchAppointments();
-              }}
-              disabled={isLoading}
-              variant="outline"
-              className="shrink-0"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button
               className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white shrink-0"
               onClick={() => {
                 resetForm();
@@ -806,7 +789,7 @@ export default function AppointmentsPage() {
                             <span>•</span>
                             <span className="inline-flex items-center gap-1">
                               <CalendarIcon className="h-3 w-3" />
-                              {format(new Date(appointment.appointment_date), "MMM d, yyyy")}
+                              {formatDisplayDateMedium(appointment.appointment_date)}
                             </span>
                             <span>•</span>
                             <span className="inline-flex items-center gap-1">
@@ -1084,7 +1067,7 @@ export default function AppointmentsPage() {
                     type="date"
                     value={formData.appointment_date}
                     onChange={(e) => setFormData({ ...formData, appointment_date: e.target.value })}
-                    min={new Date().toISOString().split('T')[0]}
+                    min={todayApiDateString()}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1231,7 +1214,7 @@ export default function AppointmentsPage() {
                     type="date"
                     value={formData.appointment_date}
                     onChange={(e) => setFormData({ ...formData, appointment_date: e.target.value })}
-                    min={new Date().toISOString().split('T')[0]}
+                    min={todayApiDateString()}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1338,7 +1321,7 @@ export default function AppointmentsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Date</Label>
-                      <p>{format(new Date(selectedAppointment.appointment_date), "PPP")}</p>
+                      <p>{formatDisplayDate(selectedAppointment.appointment_date)}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Time</Label>
@@ -1370,11 +1353,11 @@ export default function AppointmentsPage() {
                   <div className="grid grid-cols-2 gap-4 pt-2 border-t">
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Created</Label>
-                      <p className="text-sm">{format(new Date(selectedAppointment.created_at), "PPp")}</p>
+                      <p className="text-sm">{formatDisplayDateTime(selectedAppointment.created_at)}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Last Updated</Label>
-                      <p className="text-sm">{format(new Date(selectedAppointment.updated_at), "PPp")}</p>
+                      <p className="text-sm">{formatDisplayDateTime(selectedAppointment.updated_at)}</p>
                     </div>
                   </div>
                 </div>

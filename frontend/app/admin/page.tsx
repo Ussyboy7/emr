@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { formatDisplayTime } from '@/lib/dates';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,6 @@ import {
   Database,
   Wifi,
   HardDrive,
-  RefreshCw,
   UserPlus,
   Key,
   Stethoscope,
@@ -50,7 +50,6 @@ export default function AdminDashboardPage() {
     hoursAgo?: number;
     filename?: string;
   };
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
@@ -121,7 +120,7 @@ export default function AdminDashboardPage() {
         icon: iconMap[s.icon as string] || Server,
       }));
       if (withIcons.length > 0) setSystemHealth(withIcons);
-      setLastUpdated(new Date().toLocaleTimeString());
+      setLastUpdated(formatDisplayTime(new Date()));
     } catch (err) {
       // Background tick — fail silently, the previous payload remains.
       console.debug('Live tick failed', err);
@@ -180,7 +179,7 @@ export default function AdminDashboardPage() {
       setClinicStatus(stats.clinicStatus);
       setExpiringLicenses(stats.expiringLicenses ?? []);
       if (isMountedRef.current) {
-        setLastUpdated(new Date().toLocaleTimeString());
+        setLastUpdated(formatDisplayTime(new Date()));
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard data');
@@ -235,12 +234,6 @@ export default function AdminDashboardPage() {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [loadDashboardData, loadLiveSlice]);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await loadDashboardData({ silent: true });
-    setIsRefreshing(false);
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -306,17 +299,11 @@ export default function AdminDashboardPage() {
             <h1 className="text-2xl font-bold text-foreground">Administration Dashboard</h1>
             <p className="text-muted-foreground">Enterprise healthcare system monitoring and user management</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            {lastUpdated && (
-              <span className="text-sm text-muted-foreground">
-                Last updated: {lastUpdated}
-              </span>
-            )}
-          </div>
+          {lastUpdated && (
+            <span className="text-sm text-muted-foreground">
+              Last updated: {lastUpdated}
+            </span>
+          )}
         </div>
 
         {error && (
@@ -619,7 +606,7 @@ export default function AdminDashboardPage() {
                     </div>
 
                     <Link
-                      href="/admin/settings"
+                      href="/admin/health#backup"
                       className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors"
                     >
                       <Activity className={`h-5 w-5 flex-shrink-0 ${getStatusColor(backupStatus.status || "unknown")}`} />
@@ -723,7 +710,7 @@ export default function AdminDashboardPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg">System Health</CardTitle>
-                  <Link href="/admin/settings">
+                  <Link href="/admin/health">
                     <Button variant="ghost" size="sm">View Details <ChevronRight className="h-4 w-4 ml-1" /></Button>
                   </Link>
                 </div>
@@ -744,7 +731,11 @@ export default function AdminDashboardPage() {
                       const uptimeText = (system as Record<string, unknown>).uptime as string | null | undefined;
                       const detailText = (system as Record<string, unknown>).detail as string | undefined;
                       return (
-                        <div key={system.name as string} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
+                        <Link
+                          key={system.name as string}
+                          href="/admin/health"
+                          className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/50 hover:bg-muted/50 transition-colors"
+                        >
                           <div className="flex items-start gap-3 min-w-0">
                             <IconComponent className={iconClass} />
                             <div className="min-w-0">
@@ -777,7 +768,7 @@ export default function AdminDashboardPage() {
                               </Badge>
                             )}
                           </div>
-                        </div>
+                        </Link>
                       );
                     })}
                   </div>

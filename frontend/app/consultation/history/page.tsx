@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { MAX_LIST_PAGE_SIZE, CATALOG_SEARCH_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   Search, Eye, Edit, Clock, CheckCircle2, Activity, Calendar, User, FileText, Pill, TestTube,
   Save, Loader2, Stethoscope, History, Filter, FlaskConical, Syringe, LayoutGrid, List,
@@ -29,6 +30,7 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
+import { toApiDateString, formatDisplayDate, formatDisplayTime, localWeekToTodayBounds } from '@/lib/dates';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import {
@@ -93,13 +95,6 @@ const cleanClinicalText = (text: string): string => {
   return cleaned;
 };
 
-const formatLocalYyyyMmDd = (d: Date) => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
 // Extended type for local use (includes patientGender for filtering)
 interface ConsultationRecordWithGender extends ConsultationRecord {
   patientGender?: string;
@@ -135,7 +130,7 @@ const generateTimeline = (
   // Session started
   if (session.started_at) {
     timeline.push({
-      time: new Date(session.started_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      time: formatDisplayTime(session.started_at),
       event: 'Consultation Started',
       description: `Session ${session.session_id} began`,
       type: 'consultation',
@@ -145,7 +140,7 @@ const generateTimeline = (
   // Vitals recorded
   vitals.forEach((v) => {
     timeline.push({
-      time: new Date(v.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      time: formatDisplayTime(v.date),
       event: 'Vitals Recorded',
       description: `BP: ${v.systolic}/${v.diastolic}, Temp: ${v.temperature}°C, HR: ${v.heartRate} bpm`,
       type: 'vitals',
@@ -155,7 +150,7 @@ const generateTimeline = (
   // Prescriptions added
   prescriptions.forEach((p) => {
     timeline.push({
-      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      time: formatDisplayTime(new Date()),
       event: 'Prescription Added',
       description: `${p.medication} ${p.strength} - ${p.dosage} ${p.frequency}`,
       type: 'prescription',
@@ -165,7 +160,7 @@ const generateTimeline = (
   // Lab orders added
   labOrders.forEach((l) => {
     timeline.push({
-      time: new Date(l.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      time: formatDisplayTime(l.createdAt),
       event: 'Lab Order Added',
       description: `${l.test} - ${l.priority} priority`,
       type: 'lab_order',
@@ -175,7 +170,7 @@ const generateTimeline = (
   // Nursing orders added
   nursingOrders.forEach((n) => {
     timeline.push({
-      time: new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      time: formatDisplayTime(n.createdAt),
       event: 'Nursing Order Added',
       description: `${n.type} - ${n.instructions}`,
       type: 'nursing_order',
@@ -185,7 +180,7 @@ const generateTimeline = (
   // Session ended
   if (session.ended_at) {
     timeline.push({
-      time: new Date(session.ended_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      time: formatDisplayTime(session.ended_at),
       event: 'Consultation Completed',
       description: `Session ${session.session_id} ended`,
       type: 'consultation',
@@ -300,7 +295,7 @@ export default function ConsultationHistoryPage() {
       setLoadingIcd10Search(true);
       const response = await consultationService.getICD10Codes({
         search: q,
-        page_size: 20,
+        page_size: CATALOG_SEARCH_PAGE_SIZE,
       });
       setIcd10SearchResults(response.results || []);
     } catch (err) {
@@ -328,16 +323,15 @@ export default function ConsultationHistoryPage() {
     today.setHours(0, 0, 0, 0);
 
     if (dateFilter === "today") {
-      date = formatLocalYyyyMmDd(today);
+      date = toApiDateString(today);
     } else if (dateFilter === "week") {
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
-      start_date = formatLocalYyyyMmDd(weekStart);
-      end_date = formatLocalYyyyMmDd(today);
+      const { start, end } = localWeekToTodayBounds();
+      start_date = start;
+      end_date = end;
     } else if (dateFilter === "month") {
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      start_date = formatLocalYyyyMmDd(monthStart);
-      end_date = formatLocalYyyyMmDd(today);
+      start_date = toApiDateString(monthStart);
+      end_date = toApiDateString(today);
     }
 
     return { date, start_date, end_date };
@@ -372,7 +366,7 @@ export default function ConsultationHistoryPage() {
             // IMPORTANT: keep this list page light.
             // Avoid N+1 requests (patients, visits, diagnoses, orders, vitals).
             const startedAt = session.started_at ? new Date(session.started_at) : new Date();
-            const visitDate = formatLocalYyyyMmDd(startedAt);
+            const visitDate = toApiDateString(startedAt);
             const visitTime = startedAt.toTimeString().slice(0, 5);
             const visitDisplayId: string | undefined = undefined;
 
@@ -404,6 +398,7 @@ export default function ConsultationHistoryPage() {
               patientId: session.patient_id || '',
               patientIdNumeric: session.patient,
               visitId: session.visit,
+              visitType: session.visit_type || undefined,
               visitDisplayId,
               patientGender: session.patient_gender || undefined, // Store gender for filtering
               doctor: doctorName,
@@ -464,44 +459,25 @@ export default function ConsultationHistoryPage() {
     const loadStats = async () => {
       try {
         const { date, start_date, end_date } = buildDateParams();
-        const baseParams = {
-          page: 1,
-          page_size: 1,
+        const todayDate = toApiDateString(new Date());
+        const thisWeekStart = localWeekToTodayBounds().start;
+
+        const stats = await consultationService.getHistoryStats({
           clinic: clinicFilter !== "all" ? clinicFilter : undefined,
           date,
           start_date,
           end_date,
-        };
-
-        const todayDate = formatLocalYyyyMmDd(new Date());
-        const weekStart = new Date();
-        weekStart.setHours(0, 0, 0, 0);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        const thisWeekStart = formatLocalYyyyMmDd(weekStart);
-
-        const [todayRes, thisWeekRes, inProgressRes, completedRes] = await Promise.all([
-          consultationService.getSessions({
-            page: 1,
-            page_size: 1,
-            clinic: clinicFilter !== "all" ? clinicFilter : undefined,
-            date: todayDate,
-          }),
-          consultationService.getSessions({
-            page: 1,
-            page_size: 1,
-            clinic: clinicFilter !== "all" ? clinicFilter : undefined,
-            start_date: thisWeekStart,
-            end_date: todayDate,
-          }),
-          consultationService.getSessions({ ...baseParams, status: "active" }),
-          consultationService.getSessions({ ...baseParams, status: "completed" }),
-        ]);
+          search: debouncedSearchQuery.trim() || undefined,
+          calendar_today: todayDate,
+          week_start: thisWeekStart,
+          week_end: todayDate,
+        });
 
         setStatsData({
-          today: todayRes.count || 0,
-          thisWeek: thisWeekRes.count || 0,
-          inProgress: inProgressRes.count || 0,
-          completed: completedRes.count || 0,
+          today: stats.today,
+          thisWeek: stats.thisWeek,
+          inProgress: stats.inProgress,
+          completed: stats.completed,
         });
       } catch (err) {
         console.error("Error loading consultation stats:", err);
@@ -592,15 +568,16 @@ export default function ConsultationHistoryPage() {
     const loadOrdersAndSession = async () => {
       setLoadingOrders(true);
       try {
-        const [rxRes, labRes, radRes, physioRes, nursingRes, session, diagnosesRes] = await Promise.all([
-          pharmacyService.getPrescriptions({ consultation_session: sessionId, page_size: 100 }),
-          labService.getOrders({ consultation_session: sessionId, page_size: 100 }),
-          radiologyService.getOrders({ consultation_session: sessionId, page_size: 100 }),
-          physioService.getOrders({ consultation_session: sessionId, page_size: 100 }),
-          apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${sessionId}&page_size=100`),
+        const [bundle, session] = await Promise.all([
+          consultationService.getSessionWorkspaceBundle(sessionId),
           consultationService.getSession(sessionId),
-          consultationService.getDiagnoses({ session: sessionId, page_size: 100 }),
         ]);
+        const rxRes = bundle.prescriptions;
+        const labRes = bundle.lab_orders;
+        const radRes = bundle.radiology_orders;
+        const physioRes = bundle.physio_orders;
+        const nursingRes = bundle.nursing_orders;
+        const diagnosesRes = bundle.diagnoses;
         setEditPrescriptions(rxRes.results || []);
         setEditLabOrders(labRes.results || []);
         setEditRadiologyOrders(radRes.results || []);
@@ -647,18 +624,12 @@ export default function ConsultationHistoryPage() {
     const sessionId = parseInt(selectedConsultation.id, 10);
     if (isNaN(sessionId)) return;
     try {
-      const [rxRes, labRes, radRes, physioRes, nursingRes] = await Promise.all([
-        pharmacyService.getPrescriptions({ consultation_session: sessionId, page_size: 100 }),
-        labService.getOrders({ consultation_session: sessionId, page_size: 100 }),
-        radiologyService.getOrders({ consultation_session: sessionId, page_size: 100 }),
-        physioService.getOrders({ consultation_session: sessionId, page_size: 100 }),
-        apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${sessionId}&page_size=100`),
-      ]);
-      setEditPrescriptions(rxRes.results || []);
-      setEditLabOrders(labRes.results || []);
-      setEditRadiologyOrders(radRes.results || []);
-      setEditPhysioOrders(physioRes.results || []);
-      setEditNursingOrders(nursingRes.results || []);
+      const bundle = await consultationService.getSessionWorkspaceBundle(sessionId);
+      setEditPrescriptions(bundle.prescriptions.results || []);
+      setEditLabOrders(bundle.lab_orders.results || []);
+      setEditRadiologyOrders(bundle.radiology_orders.results || []);
+      setEditPhysioOrders(bundle.physio_orders.results || []);
+      setEditNursingOrders(bundle.nursing_orders.results || []);
     } catch (err) {
       console.error('Error refetching orders:', err);
     }
@@ -735,8 +706,8 @@ export default function ConsultationHistoryPage() {
 
     const loadAllergies = async () => {
       try {
-        const history = await patientService.getPatientHistory(pid);
-        const raw = (history as any)?.allergies;
+        const overview = await patientService.getClinicalOverview(pid);
+        const raw = (overview.medical_history as { allergies?: unknown })?.allergies;
         let allergies: string[] = [];
         if (Array.isArray(raw)) allergies = raw;
         else if (typeof raw === "string") allergies = raw.split(/[,\n]/).map((a) => a.trim()).filter(Boolean);
@@ -899,7 +870,7 @@ export default function ConsultationHistoryPage() {
   const formatOrderDate = (value: unknown): string => {
     if (!value) return '';
     const date = new Date(String(value));
-    return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
+    return Number.isNaN(date.getTime()) ? '' : formatDisplayDate(date);
   };
 
   const formatOrderStatus = (status: unknown): string => {
@@ -1107,7 +1078,7 @@ export default function ConsultationHistoryPage() {
 
       // Handle diagnosis updates
       // Get existing diagnoses for this session
-      const existingDiagnosesRes = await consultationService.getDiagnoses({ session: sessionId, page_size: 100 });
+      const existingDiagnosesRes = await consultationService.getDiagnoses({ session: sessionId, page_size: MAX_LIST_PAGE_SIZE });
       const existingDiagnoses = existingDiagnosesRes.results || [];
 
       // Map existing diagnoses by ID for easy lookup
@@ -1116,11 +1087,7 @@ export default function ConsultationHistoryPage() {
       // Process each diagnosis in the edit form
       for (const dx of editForm.diagnosisCodes) {
         // Find matching ICD-10 code
-        const icd10Results = await consultationService.getICD10Codes({
-          search: dx.code,
-          page_size: 1
-        });
-        const icd10Code = icd10Results.results?.length > 0 ? icd10Results.results[0] : null;
+        const icd10Code = await consultationService.resolveICD10Code(dx.code);
 
         if (!icd10Code) {
           console.warn(`Could not find ICD-10 code ${dx.code} for diagnosis`);
@@ -1778,7 +1745,7 @@ export default function ConsultationHistoryPage() {
                               <ul className="space-y-2">
                                 {editPrescriptions.map((rx: any) => {
                                   const items = rx.medications || rx.items || [];
-                                  const prescribedDate = rx.prescribed_at ? new Date(rx.prescribed_at).toLocaleDateString() : '';
+                                  const prescribedDate = rx.prescribed_at ? formatDisplayDate(rx.prescribed_at) : '';
                                   return (
                                     <li key={rx.id} className="space-y-2">
                                       {items.length ? (

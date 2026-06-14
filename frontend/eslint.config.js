@@ -31,7 +31,26 @@ const patchedNextConfigs = nextCoreWebVitals.map((config) => {
 
 export default [
   {
-    ignores: [".next/**", "node_modules/**", "dist/**", "coverage/**"]
+    ignores: [".next/**", "node_modules/**", "dist/**", "coverage/**", "lib/dates.ts"]
   },
-  ...patchedNextConfigs
+  ...patchedNextConfigs,
+  {
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.object.type='CallExpression'][callee.object.callee.property.name='toISOString'][callee.property.name='split']",
+          message:
+            "Use toApiDateString(), toApiDateFromInstant(), or todayApiDateString() from @/lib/dates instead of toISOString().split('T') — UTC shift causes wrong calendar dates.",
+        },
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.object.name='Date'][callee.property.name='toISOString'] > MemberExpression[property.name='split']",
+          message:
+            "Use toApiDateString() or todayApiDateString() from @/lib/dates instead of new Date().toISOString().split('T').",
+        },
+      ],
+    },
+  },
 ];

@@ -24,6 +24,7 @@ from reportlab.platypus import HRFlowable, Paragraph, Spacer, Table, TableStyle
 
 from patients.models import Patient
 
+from common.date_display import format_display_date
 from common.pdf import (
     COLOR_BODY,
     COLOR_LINE,
@@ -81,12 +82,10 @@ def _fmt_short(value) -> str:
     if not value:
         return '—'
     try:
-        return timezone.localtime(value).strftime('%d.%m.%Y')
+        formatted = format_display_date(value)
+        return formatted or '—'
     except Exception:
-        try:
-            return value.strftime('%d.%m.%Y')
-        except Exception:
-            return '—'
+        return '—'
 
 
 def _patient_row_for_pdf(order) -> Patient:

@@ -2,6 +2,8 @@
 Physiotherapy serializers for the EMR system.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from .models import PhysioTemplate, PhysioOrder, PhysioSession
 
 
@@ -32,6 +34,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'ordered_at', 'patient_name', 'patient_id', 'ordered_by_name']
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_name(self, obj):
         try:
             if obj.patient:
@@ -40,6 +43,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
         except:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_ordered_by_name(self, obj):
         try:
             if obj.ordered_by:
@@ -50,10 +54,13 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
 
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj, 'location_clinic', None)
-        return clinic.name if clinic else None
+        from common.order_location import order_location_clinic_name
 
+        return order_location_clinic_name(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_id(self, obj):
         try:
             if obj.patient:
@@ -118,6 +125,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
             'session_notes', 'progress_notes', 'recommendations', 'follow_up_instructions', 'next_session_plan'
         ]
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_name(self, obj):
         try:
             if obj.order and obj.order.patient:
@@ -126,6 +134,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
         except:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_physiotherapist_name(self, obj):
         try:
             if obj.physiotherapist:
@@ -134,6 +143,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
         except:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_id(self, obj):
         try:
             if obj.order and obj.order.patient:

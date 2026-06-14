@@ -1,39 +1,56 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { formatDisplayDateTime } from "@/lib/dates";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import { Badge } from "@/components/ui/badge";
 import {
-  FileSpreadsheet,
   RefreshCw,
   ArrowLeft,
-  Printer,
   TrendingUp,
   Users,
   Calendar,
   Clock,
   AlertTriangle,
-  CheckCircle,
+  CheckCircle2,
   MapPin,
   Building2,
+  Timer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+
+interface BreakdownRow {
+  key: string;
+  label: string;
+  count: number;
+  percentage: number;
+}
+
+interface FacilityRow {
+  facility: string;
+  count: number;
+  percentage: number;
+}
 
 interface EscortSummary {
+  total_escorts: number;
+  distinct_patients: number;
+  pending_arrival: number;
+  arrival_confirmed: number;
+  overdue_pending: number;
+  avg_minutes_to_arrival: number | null;
   total: number;
   pending: number;
   confirmed: number;
-  overdue_pending: number;
-  avg_minutes_to_arrival: number | null;
-  outcome_counts: Record<string, number>;
 }
 
 interface EscortRow {
@@ -46,6 +63,7 @@ interface EscortRow {
   departure_at: string | null;
   facility: string;
   transport_mode: string;
+  transport_label?: string;
   primary_nurse: string;
   additional_nurses: string;
   referral_id: string;
@@ -54,41 +72,42 @@ interface EscortRow {
   handover_summary: string;
   arrival_confirmed_at: string | null;
   arrival_outcome: string;
+  arrival_outcome_label?: string;
   arrival_notes: string;
   arrival_confirmed_by: string;
 }
 
-interface TopFacility {
-  facility: string;
-  count: number;
-}
-
-interface EscortReportResponse {
-  summary: EscortSummary;
-  top_facilities: TopFacility[];
-  data: EscortRow[];
-}
-
-const initialSummary: EscortSummary = {
+const emptySummary: EscortSummary = {
+  total_escorts: 0,
+  distinct_patients: 0,
+  pending_arrival: 0,
+  arrival_confirmed: 0,
+  overdue_pending: 0,
+  avg_minutes_to_arrival: null,
   total: 0,
   pending: 0,
   confirmed: 0,
-  overdue_pending: 0,
-  avg_minutes_to_arrival: null,
-  outcome_counts: {},
 };
+
+function normalizeSummary(raw?: Partial<EscortSummary> | null): EscortSummary {
+  const total = raw?.total_escorts ?? raw?.total ?? 0;
+  return {
+    total_escorts: total,
+    distinct_patients: raw?.distinct_patients ?? 0,
+    pending_arrival: raw?.pending_arrival ?? raw?.pending ?? 0,
+    arrival_confirmed: raw?.arrival_confirmed ?? raw?.confirmed ?? 0,
+    overdue_pending: raw?.overdue_pending ?? 0,
+    avg_minutes_to_arrival: raw?.avg_minutes_to_arrival ?? null,
+    total,
+    pending: raw?.pending_arrival ?? raw?.pending ?? 0,
+    confirmed: raw?.arrival_confirmed ?? raw?.confirmed ?? 0,
+  };
+}
 
 function formatDateTime(iso: string | null) {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const formatted = formatDisplayDateTime(iso);
+  return formatted === "—" ? iso : formatted;
 }
 
 function formatDuration(minutes: number | null) {
@@ -100,142 +119,78 @@ function formatDuration(minutes: number | null) {
 }
 
 export default function EscortLogReport() {
-  const currentYear = new Date().getFullYear().toString();
-  const [year, setYear] = useState(currentYear);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<string>("monthly");
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    periodLabel,
+    years,
+  } = useMrReportPeriod("all");
+
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "confirmed">("all");
   const [outcomeFilter, setOutcomeFilter] = useState<string>("all");
-  const [summary, setSummary] = useState<EscortSummary>(initialSummary);
-  const [topFacilities, setTopFacilities] = useState<TopFacility[]>([]);
+  const [summary, setSummary] = useState<EscortSummary>(emptySummary);
+  const [outcomeBreakdown, setOutcomeBreakdown] = useState<BreakdownRow[]>([]);
+  const [facilityBreakdown, setFacilityBreakdown] = useState<FacilityRow[]>([]);
   const [rows, setRows] = useState<EscortRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const isAllTime = viewMode === "all";
+  const hasData = summary.total > 0;
+
+  const escortExtraFilters = (): Record<string, string> | undefined => {
+    const extra: Record<string, string> = {};
+    if (statusFilter !== "all") extra.status = statusFilter;
+    if (outcomeFilter !== "all") extra.outcome = outcomeFilter;
+    return Object.keys(extra).length ? extra : undefined;
+  };
+
   const fetchReport = async () => {
+    const params = buildQuery(escortExtraFilters());
+    if (!params) {
+      toast.error("Please select a valid date range");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-      if (!range) {
-        toast.error("Please select a valid date range");
-        setIsLoading(false);
-        return;
-      }
-      const params = new URLSearchParams();
-      params.set("start_date", range.start);
-      params.set("end_date", range.end);
-      if (statusFilter !== "all") params.set("status", statusFilter);
-      if (outcomeFilter !== "all") params.set("outcome", outcomeFilter);
+      const response = await apiFetch<{
+        summary: EscortSummary;
+        outcome_breakdown?: BreakdownRow[];
+        facility_breakdown?: FacilityRow[];
+        data: EscortRow[];
+      }>(`/reports/escort-log/?${params.toString()}`);
 
-      const response = await apiFetch<EscortReportResponse>(`/reports/escort-log/?${params.toString()}`);
-      setSummary(response.summary || initialSummary);
-      setTopFacilities(response.top_facilities || []);
-      setRows(response.data || []);
+      setSummary(normalizeSummary(response.summary));
+      setOutcomeBreakdown(response.outcome_breakdown ?? []);
+      setFacilityBreakdown(response.facility_breakdown ?? []);
+      setRows(response.data ?? []);
     } catch (error: unknown) {
       console.error("Error fetching escort log report:", error);
-      const msg = error instanceof Error ? error.message : "Failed to load escort log report";
-      toast.error(msg);
+      toast.error(error instanceof Error ? error.message : "Failed to load escort log report");
+      setSummary(emptySummary);
+      setOutcomeBreakdown([]);
+      setFacilityBreakdown([]);
+      setRows([]);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    if (range) fetchReport();
+    if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode, statusFilter, outcomeFilter]);
 
-  const exportToCSV = () => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    const period = range ? `${range.start}_to_${range.end}` : 'unknown';
-    const lines: string[] = [
-      "ESCORT LOG REPORT",
-      `Period: ${period}`,
-      `Status: ${statusFilter}`,
-      `Outcome: ${outcomeFilter}`,
-      "",
-      "Summary",
-      "Metric,Value",
-      `Total escorts,${summary.total}`,
-      `Pending arrival,${summary.pending}`,
-      `Arrival confirmed,${summary.confirmed}`,
-      `Pending > 24h (overdue),${summary.overdue_pending}`,
-      `Avg time to arrival,${formatDuration(summary.avg_minutes_to_arrival)}`,
-      "",
-      "Outcomes",
-      "Outcome,Count",
-      ...Object.entries(summary.outcome_counts).map(([k, v]) => `${k},${v}`),
-      "",
-      "Top facilities",
-      "Facility,Count",
-      ...topFacilities.map((f) => `"${f.facility.replace(/"/g, '""')}",${f.count}`),
-      "",
-      "Detail",
-      [
-        "S/N",
-        "Patient ID",
-        "Patient",
-        "Admission",
-        "Ward",
-        "Departure",
-        "Facility",
-        "Transport",
-        "Primary nurse",
-        "Additional escorts",
-        "Referral",
-        "Urgency",
-        "Handover summary",
-        "Arrival",
-        "Outcome",
-        "Arrival notes",
-        "Arrival confirmed by",
-      ].join(","),
-    ];
-
-    rows.forEach((r) => {
-      const csvCell = (s: unknown) => {
-        const str = String(s ?? "");
-        return str.includes(",") || str.includes('"') || str.includes("\n")
-          ? `"${str.replace(/"/g, '""')}"`
-          : str;
-      };
-      lines.push(
-        [
-          r.sn,
-          csvCell(r.patient_id),
-          csvCell(r.patient_name),
-          csvCell(r.admission_id),
-          csvCell(r.ward),
-          csvCell(r.departure_at ?? ""),
-          csvCell(r.facility),
-          csvCell(r.transport_mode),
-          csvCell(r.primary_nurse),
-          csvCell(r.additional_nurses),
-          csvCell(r.referral_id),
-          csvCell(r.urgency),
-          csvCell(r.handover_summary),
-          csvCell(r.arrival_confirmed_at ?? ""),
-          csvCell(r.arrival_outcome),
-          csvCell(r.arrival_notes),
-          csvCell(r.arrival_confirmed_by),
-        ].join(","),
-      );
-    });
-
-    const csv = lines.join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `escort_log_${period}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-
-    toast.success("Report exported successfully");
-  };
-
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
+  const buildExportQuery = () => buildQuery(escortExtraFilters());
 
   return (
     <DashboardLayout>
@@ -256,22 +211,16 @@ export default function EscortLogReport() {
               Escort Log Report
             </h1>
             <p className="text-muted-foreground mt-1">
-              Patients escorted off-site by ward nurses to external facilities, with arrival confirmation and handover trail.
+              Patients escorted to external facilities — {periodLabel}
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={!rows.length}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/escort-log/"
+              buildQuery={buildExportQuery}
+              filenameBase={`escort_log_${filenameSuffix}`}
+              disabled={!hasData}
+            />
           </div>
         </div>
 
@@ -283,68 +232,19 @@ export default function EscortLogReport() {
             </CardTitle>
             <CardDescription>Adjust period, escort status, and arrival outcome.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={setViewMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {viewMode === 'year' ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map((y) => (
-                        <SelectItem key={y} value={y}>
-                          {y}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : viewMode === 'range' ? (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                  </div>
-                </>
-              ) : (
-                <div className="col-span-2">
-                  <Label>Period</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {viewMode === 'daily' && 'Today'}
-                    {viewMode === 'weekly' && 'This week'}
-                    {viewMode === 'monthly' && 'This month'}
-                    {viewMode === 'bimonthly' && 'Last 2 months'}
-                    {viewMode === 'quarterly' && 'This quarter'}
-                    {viewMode === 'half-yearly' && 'This half-year'}
-                    {viewMode === 'annually' && 'This year'}
-                  </p>
-                </div>
-              )}
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
               <div>
                 <Label>Status</Label>
                 <Select value={statusFilter} onValueChange={(v: "all" | "pending" | "confirmed") => setStatusFilter(v)}>
@@ -367,8 +267,8 @@ export default function EscortLogReport() {
                   <SelectContent>
                     <SelectItem value="all">All outcomes</SelectItem>
                     <SelectItem value="answered">Answered</SelectItem>
-                    <SelectItem value="voicemail">Voicemail</SelectItem>
-                    <SelectItem value="in_person">In person</SelectItem>
+                    <SelectItem value="voicemail">Voicemail / no answer</SelectItem>
+                    <SelectItem value="handover_in_person">Handover in person</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -382,186 +282,291 @@ export default function EscortLogReport() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card className="border-l-4 border-l-rose-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total escorts</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">All escort entries in selected period</p>
-                </div>
-                <Users className="h-10 w-10 text-rose-500 opacity-50" />
-              </div>
+        {isLoading ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <RefreshCw className="h-8 w-8 mx-auto mb-4 animate-spin text-muted-foreground" />
+              <p className="text-muted-foreground">Loading report data...</p>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending arrival</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.pending.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Awaiting nurse callback</p>
-                </div>
-                <Clock className="h-10 w-10 text-amber-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Arrival confirmed</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.confirmed.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.total > 0 ? `${((summary.confirmed / summary.total) * 100).toFixed(1)}%` : "0%"} of total
+        ) : hasData ? (
+          <>
+            <div className={`grid gap-4 ${isAllTime ? "md:grid-cols-2" : "md:grid-cols-4"}`}>
+              <Card className="border-l-4 border-l-rose-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Total escorts
                   </p>
-                </div>
-                <CheckCircle className="h-10 w-10 text-emerald-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-red-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Overdue (&gt;24h)</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.overdue_pending.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Departed but no callback</p>
-                </div>
-                <AlertTriangle className="h-10 w-10 text-red-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Clock className="h-4 w-4" />
-                Average time to arrival
-              </CardTitle>
-              <CardDescription>Departure → confirmed arrival, across confirmed escorts.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold">{formatDuration(summary.avg_minutes_to_arrival)}</p>
-              {summary.avg_minutes_to_arrival == null && (
-                <p className="text-xs text-muted-foreground mt-2">No confirmed escorts in this period.</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">
+                    {summary.total.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">Escort log entries in period</p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-indigo-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <MapPin className="h-4 w-4" />
+                    Distinct patients
+                  </p>
+                  <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">
+                    {summary.distinct_patients.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {isAllTime
+                      ? `${summary.arrival_confirmed.toLocaleString()} confirmed · ${summary.pending_arrival.toLocaleString()} pending`
+                      : "Patients escorted in period"}
+                  </p>
+                </CardContent>
+              </Card>
+              {!isAllTime && (
+                <>
+                  <Card className="border-l-4 border-l-amber-500">
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        Pending arrival
+                      </p>
+                      <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">
+                        {summary.pending_arrival.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Awaiting nurse callback</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-l-4 border-l-red-500">
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" />
+                        Overdue (&gt;24h)
+                      </p>
+                      <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">
+                        {summary.overdue_pending.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Departed but no callback</p>
+                    </CardContent>
+                  </Card>
+                </>
               )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Building2 className="h-4 w-4" />
-                Top receiving facilities
-              </CardTitle>
-              <CardDescription>Where most escorted patients went.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {topFacilities.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No escort destinations recorded.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {topFacilities.slice(0, 5).map((f) => (
-                    <li key={f.facility} className="flex items-center justify-between text-sm">
-                      <span className="truncate">{f.facility}</span>
-                      <Badge variant="outline" className="text-xs">{f.count}</Badge>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+            </div>
 
-        <Card className="mt-2">
-          <CardHeader>
-            <CardTitle>Escort details</CardTitle>
-            <CardDescription>One row per escort log entry. Showing up to 200; CSV exports the same.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="text-center py-10">
-                <RefreshCw className="h-8 w-8 mx-auto mb-4 animate-spin text-muted-foreground" />
-                <p className="text-muted-foreground">Loading escort log...</p>
-              </div>
-            ) : rows.length === 0 ? (
-              <div className="text-center py-10">
-                <MapPin className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">No escort entries for this period / filter.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left p-2 font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Patient</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Admission</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Departure</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Facility</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Transport</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Primary nurse</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Additional</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Arrival</th>
-                      <th className="text-left p-2 font-medium text-muted-foreground">Outcome</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r) => (
-                      <tr key={r.escort_id} className="border-b border-border hover:bg-muted/30 transition-colors align-top">
-                        <td className="p-2">{r.sn}</td>
-                        <td className="p-2">
-                          <div className="font-medium">{r.patient_name || r.patient_id}</div>
-                          <div className="text-xs text-muted-foreground">{r.patient_id}</div>
-                        </td>
-                        <td className="p-2">
-                          <div>{r.admission_id}</div>
-                          <div className="text-xs text-muted-foreground">{r.ward}</div>
-                        </td>
-                        <td className="p-2 whitespace-nowrap">{formatDateTime(r.departure_at)}</td>
-                        <td className="p-2">
-                          <div>{r.facility || "—"}</div>
-                          {r.urgency && (
-                            <Badge variant="outline" className={`text-[10px] mt-1 ${
-                              r.urgency === "emergency"
-                                ? "border-red-500/50 text-red-600 dark:text-red-400 bg-red-500/10"
-                                : r.urgency === "urgent"
-                                ? "border-orange-500/50 text-orange-600 dark:text-orange-400 bg-orange-500/10"
-                                : "border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10"
-                            }`}>
-                              {r.urgency}
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="p-2 capitalize">{r.transport_mode.replace(/_/g, " ") || "—"}</td>
-                        <td className="p-2">{r.primary_nurse || "—"}</td>
-                        <td className="p-2 text-xs">{r.additional_nurses || "—"}</td>
-                        <td className="p-2 whitespace-nowrap">
-                          {r.arrival_confirmed_at ? (
-                            <div>
-                              <div>{formatDateTime(r.arrival_confirmed_at)}</div>
-                              {r.arrival_confirmed_by && (
-                                <div className="text-xs text-muted-foreground">by {r.arrival_confirmed_by}</div>
-                              )}
-                            </div>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
-                              Pending
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="p-2 capitalize">{r.arrival_outcome.replace(/_/g, " ") || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {!isAllTime && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card className="border-l-4 border-l-emerald-500">
+                  <CardContent className="p-4">
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Arrival confirmed
+                    </p>
+                    <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                      {summary.arrival_confirmed.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {summary.total > 0
+                        ? `${((summary.arrival_confirmed / summary.total) * 100).toFixed(1)}% of total`
+                        : "0% of total"}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-l-4 border-l-violet-500">
+                  <CardContent className="p-4">
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <Timer className="h-4 w-4" />
+                      Average time to arrival
+                    </p>
+                    <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">
+                      {formatDuration(summary.avg_minutes_to_arrival)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Departure → confirmed arrival</p>
+                  </CardContent>
+                </Card>
               </div>
             )}
-          </CardContent>
-        </Card>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-orange-500" />
+                    Receiving facilities
+                  </CardTitle>
+                  <CardDescription>Where escorted patients were sent — {periodLabel}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {facilityBreakdown.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No escort destinations recorded.</p>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left p-2 font-medium text-muted-foreground">Facility</th>
+                          <th className="text-right p-2 font-medium text-muted-foreground">Escorts</th>
+                          <th className="text-right p-2 font-medium text-muted-foreground">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {facilityBreakdown.map((row) => (
+                          <tr key={row.facility} className="border-b border-border">
+                            <td className="p-2">{row.facility}</td>
+                            <td className="p-2 text-right">{row.count.toLocaleString()}</td>
+                            <td className="p-2 text-right">{row.percentage.toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-border bg-muted/50 font-bold">
+                          <td className="p-2">Total</td>
+                          <td className="p-2 text-right">{summary.total.toLocaleString()}</td>
+                          <td className="p-2 text-right">100.0%</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    Arrival outcomes
+                  </CardTitle>
+                  <CardDescription>Callback / handover result for confirmed escorts — {periodLabel}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {outcomeBreakdown.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No confirmed escorts with outcomes in this period.</p>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left p-2 font-medium text-muted-foreground">Outcome</th>
+                          <th className="text-right p-2 font-medium text-muted-foreground">Escorts</th>
+                          <th className="text-right p-2 font-medium text-muted-foreground">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {outcomeBreakdown.map((row) => (
+                          <tr key={row.key} className="border-b border-border">
+                            <td className="p-2">{row.label}</td>
+                            <td className="p-2 text-right">{row.count.toLocaleString()}</td>
+                            <td className="p-2 text-right">{row.percentage.toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {isAllTime && (
+                    <div className="mt-4 pt-4 border-t border-border">
+                      <p className="text-sm text-muted-foreground flex items-center gap-2">
+                        <Timer className="h-4 w-4" />
+                        Average time to arrival
+                      </p>
+                      <p className="text-xl font-bold mt-1">{formatDuration(summary.avg_minutes_to_arrival)}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {summary.avg_minutes_to_arrival == null
+                          ? "No confirmed escorts with departure times."
+                          : "Across confirmed escorts with departure logged"}
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Escort details — {periodLabel}</CardTitle>
+                <CardDescription>
+                  One row per escort log entry. Showing up to 200; CSV exports the same.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left p-2 font-medium text-muted-foreground">S/N</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Patient</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Admission</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Departure</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Facility</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Transport</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Primary nurse</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Arrival</th>
+                        <th className="text-left p-2 font-medium text-muted-foreground">Outcome</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => (
+                        <tr key={r.escort_id} className="border-b border-border align-top">
+                          <td className="p-2">{r.sn}</td>
+                          <td className="p-2">
+                            <div className="font-medium">{r.patient_name || r.patient_id}</div>
+                            <div className="text-xs text-muted-foreground">{r.patient_id}</div>
+                          </td>
+                          <td className="p-2">
+                            <div>{r.admission_id}</div>
+                            <div className="text-xs text-muted-foreground">{r.ward}</div>
+                          </td>
+                          <td className="p-2 whitespace-nowrap">{formatDateTime(r.departure_at)}</td>
+                          <td className="p-2">
+                            <div>{r.facility || "—"}</div>
+                            {r.urgency && (
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] mt-1 ${
+                                  r.urgency === "emergency"
+                                    ? "border-red-500/50 text-red-600 dark:text-red-400 bg-red-500/10"
+                                    : r.urgency === "urgent"
+                                      ? "border-orange-500/50 text-orange-600 dark:text-orange-400 bg-orange-500/10"
+                                      : "border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10"
+                                }`}
+                              >
+                                {r.urgency}
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="p-2">{r.transport_label || r.transport_mode.replace(/_/g, " ") || "—"}</td>
+                          <td className="p-2">{r.primary_nurse || "—"}</td>
+                          <td className="p-2 whitespace-nowrap">
+                            {r.arrival_confirmed_at ? (
+                              <div>
+                                <div>{formatDateTime(r.arrival_confirmed_at)}</div>
+                                {r.arrival_confirmed_by && (
+                                  <div className="text-xs text-muted-foreground">by {r.arrival_confirmed_by}</div>
+                                )}
+                              </div>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                              >
+                                Pending
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="p-2">
+                            {r.arrival_outcome_label || r.arrival_outcome.replace(/_/g, " ") || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <MapPin className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+              <p className="text-lg font-medium mb-1">No data available</p>
+              <p className="text-sm text-muted-foreground">
+                No escort entries for {periodLabel}
+                {statusFilter !== "all" || outcomeFilter !== "all" ? " with the selected filters" : ""}.
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </DashboardLayout>
   );

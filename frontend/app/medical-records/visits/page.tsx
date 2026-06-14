@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { consultationService, visitService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -44,6 +44,7 @@ import {
 } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/hooks/use-location-options';
 import { useServerToday } from '@/hooks/use-server-today';
+import { localWeekToTodayBounds } from '@/lib/dates';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
@@ -51,6 +52,7 @@ import { loadConsultationReportSession, type ConsultationReportSession } from '@
 
 export default function VisitsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const serverToday = useServerToday();
   const { locations: locationOptions } = useLocationOptions();
   const { names: opdClinicNames } = useOutpatientClinicTypes();
@@ -63,8 +65,8 @@ export default function VisitsPage() {
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(() => searchParams.get('search') || '');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
@@ -155,10 +157,9 @@ export default function VisitsPage() {
     } else if (dateFilter === 'today') {
       dateParam = anchorYmd;
     } else if (dateFilter === 'week') {
-      const weekStart = new Date(anchor);
-      weekStart.setDate(anchor.getDate() - anchor.getDay()); // Start of week (Sunday)
-      startDate = formatLocalYmd(weekStart);
-      endDate = anchorYmd;
+      const weekBounds = localWeekToTodayBounds(serverToday || undefined);
+      startDate = weekBounds.start;
+      endDate = weekBounds.end;
     } else if (dateFilter === 'month') {
       const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
       startDate = formatLocalYmd(monthStart);
@@ -173,32 +174,21 @@ export default function VisitsPage() {
   const loadStats = useCallback(async () => {
     try {
       const { dateParam, startDate, endDate } = buildDateParams();
-      
-      // Build base params for stats (without pagination, without status filter)
-      const baseParams = {
-        page: 1,
-        page_size: 1, // We only need the count, not the data
+
+      const stats = await visitService.getListStats({
         search: debouncedSearchQuery || undefined,
         visit_type: typeFilter !== 'all' ? typeFilter : undefined,
         clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         date: dateParam,
         start_date: startDate,
         end_date: endDate,
-      };
-
-      // Fetch counts for each status in parallel
-      const [totalResult, scheduledResult, inProgressResult, completedResult] = await Promise.all([
-        visitService.getVisits({ ...baseParams }),
-        visitService.getVisits({ ...baseParams, status: 'scheduled' }),
-        visitService.getVisits({ ...baseParams, status: 'in_progress' }),
-        visitService.getVisits({ ...baseParams, status: 'completed' }),
-      ]);
+      });
 
       setStatsData({
-        total: totalResult.count || 0,
-        scheduled: scheduledResult.count || 0,
-        inProgress: inProgressResult.count || 0,
-        completed: completedResult.count || 0,
+        total: stats.total,
+        scheduled: stats.scheduled,
+        inProgress: stats.inProgress,
+        completed: stats.completed,
       });
     } catch (err) {
       console.error('Error loading stats:', err);
@@ -492,15 +482,11 @@ export default function VisitsPage() {
       setReportSession(null);
       setIsReportModalOpen(true);
 
-      const sessions = await consultationService.getSessions({
+      const session = await consultationService.resolveSessionForVisit({
         visit: visit.numericId,
         status: 'completed',
         ordering: '-ended_at',
-        page: 1,
-        page_size: 1,
       });
-
-      const session = sessions.results?.[0];
       if (!session?.id) {
         toast.error('No completed consultation report found for this visit.');
         setIsReportModalOpen(false);
@@ -560,7 +546,10 @@ export default function VisitsPage() {
       'follow_up': 'Follow-up',
       'emergency': 'Emergency',
       'routine': 'Routine Checkup',
+      'annual_checkup': 'Annual Check-up',
+      'nursing_procedure': 'Nursing Procedure',
       'responsility_form': 'Responsility Form',
+      'responsibility_form': 'Responsibility Form',
     };
     return typeMap[type] || type;
   };
@@ -571,7 +560,10 @@ export default function VisitsPage() {
       'follow_up': 'border-blue-500/50 text-blue-600 dark:text-blue-400',
       'emergency': 'border-rose-500/50 text-rose-600 dark:text-rose-400',
       'routine': 'border-violet-500/50 text-violet-600 dark:text-violet-400',
+      'annual_checkup': 'border-amber-500/50 text-amber-600 dark:text-amber-400',
+      'nursing_procedure': 'border-rose-500/50 text-rose-600 dark:text-rose-400',
       'responsility_form': 'border-yellow-500/50 text-yellow-600 dark:text-yellow-400',
+      'responsibility_form': 'border-yellow-500/50 text-yellow-600 dark:text-yellow-400',
     };
     return styles[type] || 'border-muted-foreground/50 text-muted-foreground';
   };
@@ -581,7 +573,10 @@ export default function VisitsPage() {
       case 'emergency': return 'border-l-rose-500';
       case 'follow_up': return 'border-l-blue-500';
       case 'routine': return 'border-l-violet-500';
-      case 'responsility_form': return 'border-l-yellow-500';
+      case 'annual_checkup': return 'border-l-amber-500';
+      case 'nursing_procedure': return 'border-l-rose-500';
+      case 'responsility_form':
+      case 'responsibility_form': return 'border-l-yellow-500';
       default: return 'border-l-teal-500';
     }
   };
@@ -698,6 +693,8 @@ export default function VisitsPage() {
                     <SelectItem value="follow_up">Follow-up</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                     <SelectItem value="routine">Routine Checkup</SelectItem>
+                    <SelectItem value="annual_checkup">Annual Check-up</SelectItem>
+                    <SelectItem value="nursing_procedure">Nursing Procedure</SelectItem>
                     <SelectItem value="responsility_form">Responsility Form</SelectItem>
                   </SelectContent>
                 </Select>
@@ -896,7 +893,7 @@ export default function VisitsPage() {
                 setCurrentPage(1);
               }}
               itemName="visits"
-              pageSizeOptions={[50, 75, 100]}
+              pageSizeOptions={[25, 50, 100]}
             />
           )}
         </>
@@ -949,6 +946,8 @@ export default function VisitsPage() {
                     <SelectItem value="follow_up">Follow-up</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                     <SelectItem value="routine">Routine Checkup</SelectItem>
+                    <SelectItem value="annual_checkup">Annual Check-up</SelectItem>
+                    <SelectItem value="nursing_procedure">Nursing Procedure</SelectItem>
                     <SelectItem value="responsility_form">Responsility Form</SelectItem>
                     </SelectContent>
                   </Select>

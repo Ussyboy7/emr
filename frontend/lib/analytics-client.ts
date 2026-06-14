@@ -299,12 +299,17 @@ export const deleteReportTemplate = async (id: string) => {
 
 export interface AnalyticsExportOptions {
   type: 'performance' | 'executive' | 'reports';
-  format: 'csv' | 'pdf';
-  range?: string | number;
-  divisionId?: string;
+  exportFormat: 'csv' | 'pdf';
+  startDate: string;
+  endDate: string;
 }
 
-export const downloadAnalyticsExport = async ({ type, format, range = '30', divisionId }: AnalyticsExportOptions) => {
-  const query = buildQuery({ type, format, range, divisionId: divisionId && divisionId !== 'all' ? divisionId : undefined });
-  return apiFetch<Blob>(`/analytics/export/?${query}`, { responseType: 'blob' });
+/** Download clinical dashboard export (use `export` not `format` — DRF reserves `format`). */
+export const downloadAnalyticsExport = async ({
+  exportFormat,
+  startDate,
+  endDate,
+}: AnalyticsExportOptions) => {
+  const query = buildQuery({ start_date: startDate, end_date: endDate, export: exportFormat });
+  return apiFetch<Blob>(`/analytics/dashboard/?${query}`, { responseType: 'blob' });
 };

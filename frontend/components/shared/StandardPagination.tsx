@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LIST_PAGE_SIZE_OPTIONS } from "@/lib/pagination-constants";
 
 interface StandardPaginationProps {
   currentPage: number;
@@ -21,7 +22,7 @@ export function StandardPagination({
   onPageChange,
   onItemsPerPageChange,
   itemName = "items",
-  pageSizeOptions = [50, 100, 250, 500],
+  pageSizeOptions = [...LIST_PAGE_SIZE_OPTIONS],
 }: StandardPaginationProps) {
   const totalPages = Math.ceil(totalItems / itemsPerPage);
   const startItem = totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;

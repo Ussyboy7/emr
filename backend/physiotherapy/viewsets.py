@@ -3,7 +3,10 @@ DRF viewsets for physiotherapy templates, orders, and sessions.
 """
 from __future__ import annotations
 
+from datetime import date as date_type, datetime, timedelta
+
 from django.http import HttpResponse
+from drf_spectacular.utils import extend_schema
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.db.models import Count
@@ -11,13 +14,16 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from common.pagination import StandardPageNumberPagination
+
 from common.session_report_pdf import build_physio_session_pdf_bytes
 from accounts.utils import resolve_clinic, resolve_clinic_id
+from common.cache_helpers import cache_get_or_set
 from common.mixins import ClinicScopedMixin
+from common.openapi import document_destroy_viewset, document_viewset
 from organization.models import SystemConfig
 from patients.models import Visit
 
@@ -32,19 +38,13 @@ from .serializers import (
 )
 
 
-class StandardResultsPagination(PageNumberPagination):
-    page_size = 50
-    page_size_query_param = "page_size"
-    max_page_size = 200
-
-
 ACTIVE_ORDER_STATUSES = ("pending", "scheduled", "in_progress")
 
 
+@document_viewset(tag="Physiotherapy", resource="physio templates")
 class PhysioTemplateViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
     serializer_class = PhysioTemplateSerializer
-    pagination_class = StandardResultsPagination
+    pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
     filterset_fields = ["category", "is_active"]
     search_fields = ["name", "code", "description"]
@@ -52,12 +52,15 @@ class PhysioTemplateViewSet(viewsets.ModelViewSet):
     ordering = ["name"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return PhysioTemplate.objects.none()
+        
         return PhysioTemplate.objects.all()
 
 
+@document_viewset(tag="Physiotherapy", resource="physio orders")
 class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
-    pagination_class = StandardResultsPagination
+    pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
     filterset_class = PhysioOrderFilter
     search_fields = ["patient__surname", "patient__first_name", "patient__middle_name", "patient__patient_id"]
@@ -65,8 +68,20 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ["-ordered_at"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return PhysioOrder.objects.none()
+        
         return self.scope_queryset(
-            PhysioOrder.objects.select_related("patient", "ordered_by", "visit", "consultation_session").all()
+            PhysioOrder.objects.select_related(
+                "patient",
+                "ordered_by",
+                "visit",
+                "visit__location_clinic",
+                "consultation_session",
+                "consultation_session__location_clinic",
+                "consultation_session__room__clinic",
+                "location_clinic",
+            ).all()
         )
 
     def get_serializer_class(self):
@@ -75,18 +90,18 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return PhysioOrderSerializer
 
     def perform_create(self, serializer):
+        from common.order_location import apply_order_location_clinic
+
         self.auto_set_clinic(serializer)
-        # Prefer the patient's visit clinic as the order's location_clinic
-        # so the physio in that clinic can see it, regardless of the
-        # creator's active clinic (admin context, multi-clinic switching, etc.).
-        if SystemConfig.is_enabled('multi_clinic_enabled'):
-            existing = serializer.validated_data.get('location_clinic')
-            if existing is None:
-                visit = serializer.validated_data.get('visit')
-                if visit is not None and getattr(visit, 'location_clinic_id', None) is not None:
-                    serializer.validated_data['location_clinic_id'] = visit.location_clinic_id
+        validated = apply_order_location_clinic(
+            dict(serializer.validated_data),
+            user=self.request.user,
+        )
+        for key, value in validated.items():
+            serializer.validated_data[key] = value
         serializer.save(ordered_by=self.request.user)
 
+    @extend_schema(tags=["Physiotherapy"], summary="Schedule")
     @action(detail=True, methods=["post"])
     def schedule(self, request, pk=None):
         order = self.get_object()
@@ -101,6 +116,63 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         order.save(update_fields=["status", "scheduled_at"])
         return Response(PhysioOrderSerializer(order).data)
 
+    @extend_schema(tags=["Physiotherapy"], summary="Home dashboard", description="Single-request payload for the physiotherapy home page.")
+    @action(detail=False, methods=["get"], url_path="home-dashboard")
+    def home_dashboard(self, request):
+        """Single-request payload for the physiotherapy home page."""
+        day_str = (request.query_params.get("date") or "").strip()
+        if day_str:
+            try:
+                today = date_type.fromisoformat(day_str[:10])
+            except ValueError:
+                today = timezone.localdate()
+        else:
+            today = timezone.localdate()
+        tomorrow = today + timedelta(days=1)
+
+        scope_key = getattr(request.user, "pk", "anon")
+        cache_key = f"physio_home:{scope_key}:{today.isoformat()}"
+
+        def build() -> dict:
+            orders_qs = self.get_queryset()
+            sessions_qs = self.scope_queryset(
+                PhysioSession.objects.select_related(
+                    "order",
+                    "order__patient",
+                    "physiotherapist",
+                )
+            )
+            day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
+            day_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+
+            scheduled_tomorrow = orders_qs.filter(
+                status="scheduled",
+                scheduled_at__date=tomorrow,
+            ).count()
+            completed_today = sessions_qs.filter(
+                status="completed",
+                completed_at__gte=day_start,
+                completed_at__lte=day_end,
+            ).count()
+
+            return {
+                "date": today.isoformat(),
+                "stats": {
+                    "pending": orders_qs.filter(status="pending").count(),
+                    "scheduled": orders_qs.filter(status="scheduled").count(),
+                    "inProgress": orders_qs.filter(status="in_progress").count(),
+                    "completedToday": completed_today,
+                    "scheduledTomorrow": scheduled_tomorrow,
+                },
+                "recentOrders": PhysioOrderSerializer(
+                    orders_qs.filter(ordered_at__date=today).order_by("-ordered_at")[:5],
+                    many=True,
+                ).data,
+            }
+
+        return Response(cache_get_or_set(cache_key, build))
+
+    @extend_schema(tags=["Physiotherapy"], summary="Stats", description="Per-status counts for the current user/clinic scope.")
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
         """Per-status counts for the current user/clinic scope.
@@ -128,6 +200,7 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             "completed": counts.get("completed", 0),
         })
 
+    @extend_schema(tags=["Physiotherapy"], summary="Checkins for visits")
     @action(detail=False, methods=["get"], url_path="checkins-for-visits")
     def checkins_for_visits(self, request):
         raw = (request.query_params.get("visit_ids") or "").strip()
@@ -167,6 +240,7 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 out[str(vid)] = {"checked_in": False}
         return Response({"results": out})
 
+    @extend_schema(tags=["Physiotherapy"], summary="Checkin from visit")
     @action(detail=False, methods=["post"], url_path="checkin-from-visit")
     def checkin_from_visit(self, request):
         try:
@@ -256,17 +330,19 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response({"detail": f"Failed to serialize physiotherapy order: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@document_viewset(tag="Physiotherapy", resource="physio sessions")
 class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
-    pagination_class = StandardResultsPagination
-    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
+    pagination_class = StandardPageNumberPagination
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = PhysioSessionFilter
-    search_fields = ["order__patient__surname", "order__patient__first_name", "order__patient__patient_id"]
-    ordering_fields = ["scheduled_at", "created_at", "status", "session_number"]
-    ordering = ["-scheduled_at", "session_number"]
+    ordering_fields = ["scheduled_at", "created_at", "completed_at", "status", "session_number"]
+    ordering = ["-completed_at", "-scheduled_at"]
     clinic_filter_field = 'order__location_clinic'
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return PhysioSession.objects.none()
+        
         return self.scope_queryset(
             PhysioSession.objects.select_related("order", "order__patient", "physiotherapist", "template").all()
         )
@@ -276,6 +352,16 @@ class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return PhysioSessionCreateSerializer
         return PhysioSessionSerializer
 
+    @extend_schema(tags=["Physiotherapy"], summary="Completed stats", description="Aggregate completed-session card counts in one query.")
+    @action(detail=False, methods=["get"], url_path="completed-stats")
+    def completed_stats(self, request):
+        """Aggregate completed-session card counts in one query."""
+        from common.session_stats import aggregate_completed_session_stats
+
+        qs = self.filter_queryset(self.get_queryset()).filter(status="completed")
+        return Response(aggregate_completed_session_stats(qs, mode="physio"))
+
+    @extend_schema(tags=["Physiotherapy"], summary="Start session")
     @action(detail=True, methods=["post"])
     def start_session(self, request, pk=None):
         session = self.get_object()
@@ -291,6 +377,7 @@ class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             session.order.save(update_fields=["status"])
         return Response(PhysioSessionSerializer(session).data)
 
+    @extend_schema(tags=["Physiotherapy"], summary="Complete session")
     @action(detail=True, methods=["post"])
     def complete_session(self, request, pk=None):
         session = self.get_object()
@@ -318,6 +405,7 @@ class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return Response(PhysioSessionSerializer(session).data)
 
+    @extend_schema(tags=["Physiotherapy"], summary="Session report pdf")
     @action(detail=True, methods=["get"], url_path="session_report_pdf")
     def session_report_pdf(self, request, pk=None):
         session = self.get_object()
@@ -329,6 +417,7 @@ class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    @extend_schema(tags=["Physiotherapy"], summary="Create next session")
     @action(detail=False, methods=["post"], url_path="create_next_session")
     def create_next_session(self, request):
         order_raw = request.data.get("order_id")
@@ -361,6 +450,7 @@ class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
         return Response(PhysioSessionSerializer(session).data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(tags=["Physiotherapy"], summary="Add recommendation")
     @action(detail=True, methods=["post"], url_path="add_recommendation")
     def add_recommendation(self, request, pk=None):
         session = self.get_object()

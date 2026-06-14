@@ -1,4 +1,5 @@
 "use client";
+import { formatDisplayDateTime } from '@/lib/dates';
 
 import React, { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -8,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, FlaskConical, TestTube, FileSearch, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, ClipboardList, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { labService } from '@/lib/services';
+import { PREVIEW_PAGE_SIZE } from '@/lib/pagination-constants';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { getServerToday } from '@/lib/utils/serverTime';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
@@ -43,7 +45,7 @@ export default function LaboratoryPage() {
       }
 
       const [orders, orderStats, verifiedStats] = await Promise.all([
-        labService.getOrders({ page: 1, page_size: 5 }),
+        labService.getOrders({ page: 1, page_size: PREVIEW_PAGE_SIZE }),
         labService.getOrderStats({ date }),
         labService.getVerificationStats({ status: 'verified', date }),
       ]);
@@ -54,7 +56,7 @@ export default function LaboratoryPage() {
         resultsReady: orderStats.results_ready || 0,
         verified: verifiedStats.total || 0,
       });
-      setRecentOrders(orders.results.slice(0, 5));
+      setRecentOrders(orders.results.slice(0, PREVIEW_PAGE_SIZE));
     } catch (error) {
       console.error('Failed to load lab stats:', error);
     } finally {
@@ -306,10 +308,7 @@ export default function LaboratoryPage() {
                         <p className="text-sm font-medium">{order.patient?.name || 'Unknown'}</p>
                         <p className="text-xs text-muted-foreground">
                           {order.ordered_at
-                            ? new Date(order.ordered_at).toLocaleString(undefined, {
-                                dateStyle: 'medium',
-                                timeStyle: 'short',
-                              })
+                            ? formatDisplayDateTime(order.ordered_at)
                             : ''}
                         </p>
                       </div>

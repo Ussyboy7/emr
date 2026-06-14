@@ -1,7 +1,7 @@
 "use client";
+import { formatDisplayDate, formatDisplayTime, todayApiDateString, toApiDateFromInstant, formatDisplayDateTime } from "@/lib/dates";
 
 import { useCallback, useEffect, useMemo, useRef, useState, use } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,10 +18,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, Droplets, FileText, History, Loader2, MapPin, Pill, Play, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, Edit, DoorOpen, UserX, Wind, Zap, Scale, Search, Lightbulb, Target } from "lucide-react";
 import { toast } from "sonner";
-import { roomService, patientService, pharmacyService, labService, radiologyService, physioService, eyeCareService, referralService, consultationService, appointmentService, wardService, type ConsultationSession, type ICD10Code, type Diagnosis, type RadiologyReport as ServiceRadiologyReport, type VitalReading, type Prescription, type LabTemplate as ServiceLabTemplate, type Medication, type PhysioSession } from '@/lib/services';
-import { sanitizePatientForRendering } from '@/lib/services/patient-service';
-import { ViewEyeOrderModal } from '@/components/eyecare/ViewEyeOrderModal';
+import { roomService, patientService, pharmacyService, labService, radiologyService, physioService, eyeCareService, referralService, consultationService, appointmentService, wardService, visitService, type ConsultationSession, type ICD10Code, type Diagnosis, type RadiologyReport as ServiceRadiologyReport, type VitalReading, type Prescription, type LabTemplate as ServiceLabTemplate, type Medication, type PhysioSession, type Visit } from '@/lib/services';
+import { sanitizePatientForRendering, type Patient as ApiPatient } from '@/lib/services/patient-service';
+import { EyeSessionReportDialog } from '@/components/eyecare/EyeSessionReportDialog';
 import { PatientHistoryTabs } from '@/components/patient-history/PatientHistoryTabs';
+import { MedicalCertificateCreateDialog } from '@/components/medical-records/MedicalCertificateCreateDialog';
 
 // Extended interface for local usage
 interface ExtendedConsultationSession extends ConsultationSession {
@@ -47,7 +48,12 @@ interface ExtendedConsultationSession extends ConsultationSession {
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { getPriorityLabel, getPriorityColor } from '@/lib/utils/priority';
+import {
+  compareConsultationQueueEntries,
+  getVisitTypeBadgeClass,
+  getVisitTypeLabel,
+  isEmergencyVisitType,
+} from '@/lib/utils/priority';
 import {
   getVisitServiceClinicsDisplay,
   getVisitServiceClinicsList,
@@ -57,6 +63,7 @@ import {
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { AnnualCheckupPanel } from '@/components/consultation/AnnualCheckupPanel';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { NPA_BRAND_NAME } from '@/lib/branding';
 import {
@@ -64,14 +71,13 @@ import {
   INJECTION_ROUTES,
   WOUND_TYPES,
   WOUND_LOCATIONS,
-  IV_FLUIDS,
   RADIOLOGY_PROCEDURES,
   REFERRAL_SPECIALTIES,
   REFERRAL_REASONS
 } from '@/lib/constants/medical-data';
 import { getOrganizationHeader, getOrganizationServicesHeader } from '@/lib/constants/organization';
-import { LARGE_PAGE_SIZE } from '@/lib/constants/ui';
 import { safeAsync, logError } from '@/lib/utils/error-handling';
+import { MAX_LIST_PAGE_SIZE, DEFAULT_LIST_PAGE_SIZE, CATALOG_SEARCH_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   LAB_OTHER_TEMPLATE_CODE,
   RAD_OTHER_TEMPLATE_CODE,
@@ -82,6 +88,16 @@ import {
 } from '@/lib/constants/presenting-complaints';
 import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
 import { FacilityPartnerSelect } from '@/components/referrals/FacilityPartnerSelect';
+import { PatientHistoryReferralViewDialog } from '@/components/patient-history/PatientHistoryReferralViewDialog';
+import {
+  type ReferralWithPatient,
+  referralStatusLabel,
+  getStatusBadgeClass,
+  getFacilityTypeBadgeClass,
+  getUrgencyBadgeClass,
+  referralFormsSummary,
+  toLabel,
+} from '@/lib/referrals/referral-helpers';
 import {
   transformApiRowToCompletedTest,
   type CompletedTest as CompletedLabReportTest,
@@ -112,6 +128,7 @@ import {
   type ConsultationReportSession,
 } from '@/lib/consultation-report';
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
+import { medicalHistoryFormFromRecord } from '@/lib/clinical-overview-utils';
 
 const { formatLabResult, formatResultWithPending } = reportFormatters;
 
@@ -149,24 +166,14 @@ function initialsFromQueueDisplayName(fullName: string): string {
 
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Date';
-    return date.toLocaleDateString();
-  } catch {
-    return 'Invalid Date';
-  }
+  const formatted = formatDisplayDate(dateString);
+  return formatted === '—' ? 'Invalid Date' : formatted;
 };
 
 const formatTime = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Time';
-    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-  } catch {
-    return 'Invalid Time';
-  }
+  const formatted = formatDisplayTime(dateString);
+  return formatted === '—' ? 'Invalid Time' : formatted;
 };
 
 const formatPriority = (p: string | undefined): string => {
@@ -334,9 +341,9 @@ interface Patient {
   allergies: string[];
   waitTime: number;
   vitalsCompleted: boolean;
-  priority: "Emergency" | "High" | "Medium" | "Low";
   visitDate: string;
   visitTime: string;
+  visitType?: string;
   queuePosition?: number;
   bloodGroup?: string;
   genotype?: string;
@@ -391,7 +398,6 @@ interface ConsultationRoom {
 const injectionRoutes = INJECTION_ROUTES;
 const woundTypes = WOUND_TYPES;
 const woundLocations = WOUND_LOCATIONS;
-const ivFluids = IV_FLUIDS;
 
 // Referral data
 // `referralFacilities` (REFERRAL_FACILITIES) is no longer used — the in-room
@@ -749,12 +755,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  // Function to open eye order view modal
-  const openEyeOrderDialog = (order: any) => {
-    setSelectedEyeOrderId(order.id);
-    setShowEyeOrderModal(true);
-  };
-
   // Load injection medications from API
   useEffect(() => {
     if (!showAddNursingOrder || newNursingOrder.type !== 'Injection' || !showInjectionMedicationDropdown) {
@@ -800,21 +800,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
   }, [showAddNursingOrder, newNursingOrder.type, showInjectionMedicationDropdown]);
 
-  // Referral state
-  const [referrals, setReferrals] = useState<{
-    id: string;
-    /** Server PK when this row was created via API (required to submit or delete on server). */
-    backendId?: number;
-    specialty: string;
-    facility: string;
-    facilityType: string;
-    reason: string;
-    urgency: 'Routine' | 'Urgent' | 'Emergency';
-    clinicalSummary: string;
-    contactPerson?: string;
-    contactPhone?: string;
-    status: 'Draft' | 'Sent' | 'Accepted' | 'Scheduled' | 'Completed';
-  }[]>([]);
   const [showAddReferral, setShowAddReferral] = useState(false);
   const [newReferral, setNewReferral] = useState({
     specialty: "",
@@ -888,6 +873,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     diagnosis: string;
     treatmentPlan: string;
     specialInstructions?: string;
+    visualAcuityOd?: string;
+    visualAcuityOs?: string;
+    visualAcuityOu?: string;
     priority: 'low' | 'normal' | 'high' | 'urgent';
     status: 'Draft' | 'Sent to Eye Care' | 'Scheduled' | 'In Progress' | 'Completed';
   }[]>([]);
@@ -899,6 +887,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     diagnosis: "",
     treatmentPlan: "",
     specialInstructions: "",
+    visualAcuityOd: "",
+    visualAcuityOs: "",
+    visualAcuityOu: "",
     priority: "normal" as 'low' | 'normal' | 'high' | 'urgent'
   });
 
@@ -946,68 +937,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     };
   }, []);
 
-  // Session state persistence
-  useEffect(() => {
-    const roomSessionKey = `consultation_room_${roomId}_session`;
-
-    // Save session state to localStorage
-    const sessionState = {
-      sessionActive,
-      sessionId,
-      currentPatient,
-      sessionStartTime: sessionStartTime?.toISOString(),
-      sessionBaseActiveSeconds,
-      sessionDuration,
-    };
-
-    if (sessionActive || sessionId || currentPatient) {
-      localStorage.setItem(roomSessionKey, JSON.stringify(sessionState));
-    } else {
-      localStorage.removeItem(roomSessionKey);
-    }
-  }, [sessionActive, sessionId, currentPatient, sessionStartTime, sessionBaseActiveSeconds, sessionDuration, roomId]);
-
-  // Restore session state from localStorage on mount
-  useEffect(() => {
-    const roomSessionKey = `consultation_room_${roomId}_session`;
-    const savedSession = localStorage.getItem(roomSessionKey);
-
-    if (savedSession) {
-      try {
-        const sessionState = JSON.parse(savedSession);
-
-        if (sessionState.sessionId && sessionState.currentPatient) {
-          // Restore session state
-          setSessionActive(sessionState.sessionActive || false);
-          setSessionId(sessionState.sessionId);
-          setCurrentPatient(sessionState.currentPatient);
-          setSessionStartTime(sessionState.sessionStartTime ? new Date(sessionState.sessionStartTime) : null);
-          setSessionBaseActiveSeconds(sessionState.sessionBaseActiveSeconds || 0);
-          setSessionDuration(sessionState.sessionDuration || 0);
-
-          // Try to restore the active session from backend (async)
-          if (sessionState.sessionId) {
-            restoreActiveSession(sessionState.sessionId, { silent: true }).then((restored) => {
-              if (!restored) {
-                console.warn('Failed to restore session from localStorage, clearing state');
-                // Clear invalid session state
-                localStorage.removeItem(roomSessionKey);
-                clearSessionState();
-              }
-            }).catch((error) => {
-              console.warn('Failed to restore session from localStorage:', error);
-              localStorage.removeItem(roomSessionKey);
-              clearSessionState();
-            });
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to parse saved session state:', error);
-        localStorage.removeItem(roomSessionKey);
-      }
-    }
-  }, [roomId]); // Only run on roomId change
-
   // Clear session state utility
   const clearSessionState = useCallback(() => {
     setSessionActive(false);
@@ -1016,10 +945,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setSessionStartTime(null);
     setSessionBaseActiveSeconds(0);
     setSessionDuration(0);
-
-    // Clear localStorage
-    const roomSessionKey = `consultation_room_${roomId}_session`;
-    localStorage.removeItem(roomSessionKey);
 
     // Reset form states
     setMedicalNotes({ presentationComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
@@ -1030,7 +955,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setRadiologyOrders([]);
     setPhysioOrders([]);
     setEyeOrders([]);
-    setReferrals([]);
     setFollowUpRequired(false);
     setFollowUpDate("");
     setFollowUpReason("");
@@ -1061,27 +985,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     if (!patientId) return;
 
     try {
-      // Load all patient history data in parallel
-      const [consultationsResponse, labResults, imagingResults, prescriptions, vitals, physioOrders, eyeOrdersResult, admissions] = await Promise.all([
-        consultationService.getSessions({ patient: patientId }),
-        labService.getCompletedTests({ patient: patientId.toString() }),
-        radiologyService.getVerifiedReports({ patient: patientId.toString() }),
-        pharmacyService.getPrescriptions({ patient: patientId.toString(), page_size: 500 }),
-        patientService.getPatientVitals(patientId),
-        physioService.getOrders({ patient: patientId.toString() }).catch(() => ({ results: [] })),
-        eyeCareService.getOrders({ patient: patientId }).catch(() => ({ results: [] })),
-        wardService.getAdmissions({ patient: patientId }),
-      ]);
+      const overview = await patientService.getClinicalOverview(patientId);
+      const consultations = overview.consultations?.results || [];
+      const vitals = overview.vitals?.results || [];
 
-      const consultations = consultationsResponse.results || [];
-      setRawConsultations(consultations || []);
-      setRawLabResults(labResults?.results || []);
-      setRawImagingResults(imagingResults?.results || []);
-      setRawPrescriptions(prescriptions?.results || []);
-      setRawVitals(vitals);
-      setRawPhysioResults(physioOrders?.results || []);
-      setRawEyeResults(eyeOrdersResult?.results || []);
-      setWardAdmissions(admissions?.results || []);
+      setRawConsultations(consultations);
+      setRawLabResults(overview.lab_results?.results || []);
+      setRawImagingResults(overview.radiology_reports?.results || []);
+      setRawPrescriptions((overview.prescriptions?.results || []) as Prescription[]);
+      setRawVitals(vitals as VitalReading[]);
+      setRawPhysioResults(overview.physio_orders?.results || []);
+      setRawEyeResults(overview.eye_orders?.results || []);
+      setWardAdmissions((overview.ward_admissions?.results || []) as WardAdmission[]);
 
       // Set the most recent vitals on the current patient for display
       if (vitals?.length > 0) {
@@ -1115,8 +1030,48 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
 
   // Eye dialog state
-  const [selectedEyeOrderId, setSelectedEyeOrderId] = useState<number | undefined>(undefined);
-  const [showEyeOrderModal, setShowEyeOrderModal] = useState(false);
+  const [certDialogOpen, setCertDialogOpen] = useState(false);
+  const [certificatePatient, setCertificatePatient] = useState<ApiPatient | null>(null);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
+  const [sessionReferrals, setSessionReferrals] = useState<ReferralWithPatient[]>([]);
+  const [sessionReferralsLoading, setSessionReferralsLoading] = useState(false);
+  const [referralViewOpen, setReferralViewOpen] = useState(false);
+  const [referralViewId, setReferralViewId] = useState<number | undefined>();
+  const [referralViewRefreshKey, setReferralViewRefreshKey] = useState(0);
+
+  const openReferralView = useCallback((id: number) => {
+    setReferralViewId(id);
+    setReferralViewRefreshKey((k) => k + 1);
+    setReferralViewOpen(true);
+  }, []);
+
+  const loadSessionReferrals = useCallback(async () => {
+    if (!currentPatient?.id) {
+      setSessionReferrals([]);
+      return;
+    }
+    const pid = parseInt(String(currentPatient.id), 10);
+    if (!Number.isFinite(pid)) return;
+    setSessionReferralsLoading(true);
+    try {
+      const res = await referralService.getReferrals({ patient: String(pid), page_size: 50 });
+      setSessionReferrals((res.results || []) as ReferralWithPatient[]);
+    } catch {
+      setSessionReferrals([]);
+    } finally {
+      setSessionReferralsLoading(false);
+    }
+  }, [currentPatient?.id]);
+
+  useEffect(() => {
+    void loadSessionReferrals();
+  }, [loadSessionReferrals, historyReloadToken]);
+
+  const bumpReferralHistory = useCallback(() => {
+    setHistoryReloadToken((n) => n + 1);
+  }, []);
+  const [eyeSessionReportOpen, setEyeSessionReportOpen] = useState(false);
+  const [eyeSessionReportOrderId, setEyeSessionReportOrderId] = useState<number | undefined>(undefined);
 
   const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
   const [isMarkingLeft, setIsMarkingLeft] = useState(false);
@@ -1208,26 +1163,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
       
       // Load queue items for this room - single optimized API call
-      const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=100`);
+      const queueResult = await consultationService.getQueue({
+        room: numericRoomId,
+        is_active: true,
+        page_size: MAX_LIST_PAGE_SIZE,
+      });
       const queueItems = queueResult.results || [];
       
-      // Sort queue by priority
-      const sortedQueue = queueItems.sort((a, b) => {
-        if (a.priority !== b.priority) {
-          return a.priority - b.priority;
-        }
-        return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
-      });
+      const sortedQueue = [...queueItems].sort(compareConsultationQueueEntries);
       
       // Transform queue items to Patient objects - NO nested API calls needed
       const transformedPatients = sortedQueue.map((item: any, index: number) => {
         // Backend already provides visit_date, visit_time, patient_age, patient_gender, latest_vitals
         const queuedAt = new Date(item.queued_at);
         const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
-        
-        const getPriority = (priorityNum: number): Patient['priority'] => {
-          return getPriorityLabel(priorityNum);
-        };
         
         // Create the patient object with data from backend
         const patientDetails = item.patient_details;
@@ -1248,19 +1197,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           allergies: [],
           waitTime: waitTime > 0 ? waitTime : 0,
           vitalsCompleted: !!item.latest_vitals,
-          priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
-          visitDate: item.visit_date || new Date().toISOString().split('T')[0],
+          visitDate: item.visit_date || todayApiDateString(),
           visitTime: item.visit_time ? String(item.visit_time).slice(0, 5) : new Date().toTimeString().slice(0, 5),
+          visitType: item.visit_type || 'consultation',
           queuePosition: index + 1,
           blood_group: patientDetails?.blood_group,
-          employee_type: undefined,
-          division: undefined,
-          location: undefined,
+          genotype: patientDetails?.genotype,
+          employee_type: patientDetails?.employee_type,
+          division: patientDetails?.division,
+          location: patientDetails?.location,
           phone: patientDetails?.phone,
           email: patientDetails?.email,
-          occupation: undefined,
-          religion: undefined,
-          tribe: undefined,
+          occupation: patientDetails?.occupation,
+          religion: patientDetails?.religion,
+          tribe: patientDetails?.tribe,
           photo: patientDetails?.photo || null,
           vitals: processVitals(item.latest_vitals),
           // Multi-clinic support
@@ -1316,29 +1266,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const roomData = await roomService.getRoom(numericRoomId);
       
       // Load queue items for this room - single optimized API call
-      const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=100`);
+      const queueResult = await consultationService.getQueue({
+        room: numericRoomId,
+        is_active: true,
+        page_size: MAX_LIST_PAGE_SIZE,
+      });
       const queueItems = queueResult.results || [];
       
         
-        // Sort queue by priority (lower number = higher priority), then by queued_at
-        const sortedQueue = queueItems.sort((a, b) => {
-          if (a.priority !== b.priority) {
-            return a.priority - b.priority;
-          }
-          return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
-        });
-        
+        const sortedQueue = [...queueItems].sort(compareConsultationQueueEntries);
+
         // Transform queue items to Patient objects - NO nested API calls needed
-        const transformedPatients = queueItems.map((item: any, index: number) => {
+        const transformedPatients = sortedQueue.map((item: any, index: number) => {
           // Backend already provides visit_date, visit_time, patient_age, patient_gender, latest_vitals
           const queuedAt = new Date(item.queued_at);
           const now = Date.now();
           const waitTimeMs = now - queuedAt.getTime();
           const waitTime = (!isNaN(waitTimeMs) && waitTimeMs >= 0) ? Math.floor(waitTimeMs / (1000 * 60)) : 0;
-          
-          const getPriority = (priorityNum: number): Patient['priority'] => {
-            return getPriorityLabel(priorityNum);
-          };
           
           // Create the patient object with data from backend
           const patientDetails = item.patient_details;
@@ -1359,19 +1303,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             allergies: [],
             waitTime: waitTime > 0 ? waitTime : 0,
             vitalsCompleted: !!item.latest_vitals,
-            priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
-            visitDate: item.visit_date || new Date().toISOString().split('T')[0],
+            visitDate: item.visit_date || todayApiDateString(),
             visitTime: item.visit_time ? String(item.visit_time).slice(0, 5) : new Date().toTimeString().slice(0, 5),
+            visitType: item.visit_type || 'consultation',
             queuePosition: index + 1,
             blood_group: patientDetails?.blood_group,
-            employee_type: undefined,
-            division: undefined,
-            location: undefined,
+            genotype: patientDetails?.genotype,
+            employee_type: patientDetails?.employee_type,
+            division: patientDetails?.division,
+            location: patientDetails?.location,
             phone: patientDetails?.phone,
             email: patientDetails?.email,
-            occupation: undefined,
-            religion: undefined,
-            tribe: undefined,
+            occupation: patientDetails?.occupation,
+            religion: patientDetails?.religion,
+            tribe: patientDetails?.tribe,
             photo: patientDetails?.photo || null,
             vitals: processVitals(item.latest_vitals),
             // Multi-clinic support
@@ -1386,13 +1331,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         setPatients(validPatients);
         
         // Fetch today's completed sessions for this room to compute stats
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = todayApiDateString();
         const todaySessionsResult = await consultationService.getSessions({
           room: numericRoomId,
           status: 'completed',
           start_date: todayStr,
           end_date: todayStr,
-          page_size: 100,
+          page_size: MAX_LIST_PAGE_SIZE,
         }).catch(() => ({ results: [] }));
         const completedSessions = todaySessionsResult.results || [];
         const completedCount = completedSessions.length;
@@ -1470,76 +1415,58 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return false;
       }
 
-      // Load patient data
-      const patient = await patientService.getPatient(session.patient);
+      const sessionPatientId =
+        typeof session.patient === 'number'
+          ? session.patient
+          : parseInt(String(session.patient), 10);
 
-      // Load visit data if available
-      let visitData: any = null;
-      let visitId: string | number | null = null;
+      let visitData: Visit | null = null;
       if (session.visit) {
-        visitId = session.visit;
         try {
-          visitData = await apiFetch(`/visits/${visitId}/`);
-          // Security: Removed console.log to prevent visit data exposure
-
-          // Populate session medical notes from visit data if not already set
-          if (visitData.clinical_notes && !session.presentation_complaint) {
+          visitData = await apiFetch<Visit>(`/visits/${session.visit}/`);
+          if (visitData?.clinical_notes && !session.presentation_complaint) {
             session.presentation_complaint = visitData.clinical_notes;
           }
         } catch (visitErr) {
           console.warn('Could not load visit data:', visitErr);
         }
       }
-      
-      // Restore patient state - create sanitized patient object
-      const patientData = {
-        id: String(patient.id),
-        visitId: visitId ? String(visitId) : '',
-        patient_id: patient.patient_id,
-        patientId: patient.patient_id || '',
-        full_name: patient.full_name,
-        first_name: patient.first_name,
-        surname: patient.surname,
-        name: patient.full_name ?? '',
-        age: patient.age || 0,
-        gender: patient.gender || '',
-        mrn: patient.patient_id || '',
-        personal_number: (patient as any).personal_number,
-        allergies: patient.allergies ? String(patient.allergies).split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
-        waitTime: 0,
-        vitalsCompleted: false,
-        priority: 'Medium' as const,
-        visitDate: visitData?.date || new Date().toISOString().split('T')[0],
-        visitTime: visitData?.time || '',
-        blood_group: (patient as any).blood_group,
-        genotype: (patient as any).genotype,
-        employee_type: (patient as any).employee_type,
-        division: (patient as any).division,
-        location: (patient as any).location,
-        phone: (patient as any).phone,
-        email: (patient as any).email,
-        occupation: (patient as any).occupation,
-        religion: (patient as any).religion,
-        tribe: (patient as any).tribe,
-        photo: (patient as any).photo || null,
-      };
-      
-      const restoredPatient = sanitizePatientForRendering(patientData) as unknown as Patient;
-      
-      // Load vitals if available (use patient-wide vitals like other functions)
+
+      const built = await patientService.buildConsultationPatient(sessionPatientId, {
+        visitId: session.visit,
+        visitType:
+          visitData?.visit_type ||
+          (session as { visit_type?: string }).visit_type ||
+          undefined,
+        clinics: visitData?.clinics,
+        completedClinics: visitData?.completed_clinics,
+        visitClinic: visitData?.clinic,
+        visitDate: visitData?.date,
+        visitTime: visitData?.time ? String(visitData.time).slice(0, 5) : undefined,
+      });
+
       const vitalsData = await safeAsync(
-        () => apiFetch<{ results: any[] }>(`/vitals/?patient=${patient.id}&ordering=-recorded_at&page_size=1`).then(result => result.results?.[0] || null),
+        () => patientService.resolveVital({ patient: sessionPatientId, ordering: '-recorded_at' }),
         null,
-        { operation: 'restorePatientVitals', patientId: patient.id.toString(), component: 'ConsultationRoom' }
+        {
+          operation: 'restorePatientVitals',
+          patientId: String(sessionPatientId),
+          component: 'ConsultationRoom',
+        }
       );
 
       if (vitalsData) {
-        restoredPatient.vitals = processVitals(vitalsData);
-            restoredPatient.vitalsCompleted = true;
+        built.vitals = processVitals(vitalsData);
+        built.vitalsCompleted = true;
       }
+
+      const restoredPatient = built as unknown as Patient;
       
       // Restore session state
       setCurrentPatient(restoredPatient);
+      if (restoredPatient.visitType === 'annual_checkup') {
+        setActiveTab('annual_checkup');
+      }
       setSessionActive(true);
       setSessionId(session.id);
       const baseSeconds = Number((session as any).active_seconds ?? 0);
@@ -1580,25 +1507,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return true;
       }
 
-      // Fire all enrichment API calls in parallel
-      const [diagnosesResult, prescriptionsResp, labResp, radiologyResp, nursingResp, physioResp, eyeResp, vitalsResp, historyResp] = await Promise.all([
-        consultationService.getDiagnoses({ session: session.id, page_size: 100 }).catch(() => ({ results: [] })),
-        session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/laboratory/orders/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/radiology/orders/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        session.id && session.patient != null ? apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${session.id}&patient=${session.patient}&page_size=100`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        physioService.getOrders({ consultation_session: session.id, patient: session.patient != null ? String(session.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
-        eyeCareService.getOrders({ consultation_session: session.id, patient: session.patient != null ? session.patient : undefined, page_size: 100 }).catch(() => ({ results: [] })),
-        visitId ? apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }),
-        (async () => {
-          const numericPatientId = typeof patient.id === 'number' ? patient.id : parseInt(patient.id, 10);
-          try {
-            return await patientService.getPatientHistory(numericPatientId);
-          } catch {
-            return null;
-          }
-        })(),
+      // Session workspace bundle + patient clinical overview (medical history)
+      const [bundle, overview] = await Promise.all([
+        consultationService.getSessionWorkspaceBundle(session.id),
+        patientService.getClinicalOverview(sessionPatientId).catch(() => null),
       ]);
+      const historyResp = overview?.medical_history ?? null;
+      const diagnosesResult = bundle.diagnoses;
+      const prescriptionsResp = bundle.prescriptions;
+      const labResp = bundle.lab_orders;
+      const radiologyResp = bundle.radiology_orders;
+      const nursingResp = bundle.nursing_orders;
+      const physioResp = bundle.physio_orders;
+      const eyeResp = bundle.eye_orders;
+      const vitalsResp = bundle.vitals;
 
       // Enrich session with related data
       const enrichedSession: any = { ...session };
@@ -1722,28 +1644,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       });
 
       // Set medical history
-      if (historyResp) {
-        setMedicalHistory({
-          allergies: Array.isArray(historyResp.allergies) ? historyResp.allergies : [],
-          diagnoses: Array.isArray(historyResp.diagnoses) ? historyResp.diagnoses : [],
-          surgicalHistory: Array.isArray(historyResp.surgical_history) ? historyResp.surgical_history : [],
-          familyHistory: Array.isArray(historyResp.family_history) ? historyResp.family_history : [],
-          socialHistory: {
-            smoking: historyResp.social_history?.smoking || '',
-            alcohol: historyResp.social_history?.alcohol || '',
-            exercise: historyResp.social_history?.exercise || '',
-            occupation: historyResp.social_history?.occupation || '',
-          },
-        });
-      } else {
-        setMedicalHistory({
-          allergies: [], diagnoses: [], surgicalHistory: [],
-          familyHistory: [], socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
-        });
-      }
+      setMedicalHistory(medicalHistoryFormFromRecord(historyResp));
 
       // Set state-level orders for the UI (reuse the parallel results)
-      if (visitId) {
+      if (session.visit) {
         // Prescriptions
         const transformedPrescriptions = (prescriptionsResp.results || []).flatMap((rx: any) =>
           (rx.medications || []).map((item: any) => ({
@@ -1858,7 +1762,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setIsSearchingICD10(true);
       const response = await consultationService.getICD10Codes({
         search: searchTerm,
-        page_size: 20  // Limit results for performance
+        page_size: CATALOG_SEARCH_PAGE_SIZE,
       });
       setIcd10SearchResults(response.results || []);
       debugConsultationRoom(`[ICD-10 API Search] "${searchTerm}" found ${response.results?.length || 0} matches`);
@@ -1879,7 +1783,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     const loadICD10Codes = async () => {
       try {
-        const response = await consultationService.getICD10Codes({ page_size: 100 });
+        const response = await consultationService.getICD10Codes({ page_size: MAX_LIST_PAGE_SIZE });
         setIcd10Codes(response.results || []);
       } catch (err: any) {
         debugConsultationRoom('Failed to load ICD-10 codes:', err);
@@ -1895,7 +1799,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const loadLabTemplates = async () => {
       try {
         setLoadingLabTemplates(true);
-        const response = await labService.getTemplates({ page_size: 200 });
+        const response = await labService.getTemplates();
         setLabTemplates(response.results || []);
         debugConsultationRoom(`[Consultation] Loaded ${response.results?.length || 0} lab templates from API`);
       } catch (err) {
@@ -1914,8 +1818,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     let cancelled = false;
     (async () => {
       try {
-        const res = await labService.getTemplates({ code: LAB_OTHER_TEMPLATE_CODE, page_size: 1 });
-        const row = res.results?.[0];
+        const row = await labService.resolveTemplateByCode(LAB_OTHER_TEMPLATE_CODE);
         if (!cancelled) setOtherLabPinnedTemplate(row ?? null);
       } catch {
         if (!cancelled) setOtherLabPinnedTemplate(null);
@@ -1931,8 +1834,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     let cancelled = false;
     (async () => {
       try {
-        const res = await radiologyService.getTemplates({ code: RAD_OTHER_TEMPLATE_CODE, page_size: 1 });
-        const row = res.results?.[0];
+        const row = await radiologyService.resolveTemplateByCode(RAD_OTHER_TEMPLATE_CODE);
         if (!cancelled) setOtherRadiologyPinnedTemplate(row ?? null);
       } catch {
         if (!cancelled) setOtherRadiologyPinnedTemplate(null);
@@ -1950,7 +1852,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       try {
         setLoadingRadiologyTemplates(true);
         setRadiologyTemplatesError(null);
-        const templates = await radiologyService.getTemplates({ page_size: 200 });
+        const templates = await radiologyService.getTemplates();
         setRadiologyTemplates(templates.results || []);
       } catch (err: any) {
         debugConsultationRoom('Failed to load radiology templates:', err);
@@ -2030,7 +1932,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     let cancelled = false;
     (async () => {
       try {
-        const r = await physioService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        const r = await physioService.getOrders({ consultation_session: sessionId, page_size: MAX_LIST_PAGE_SIZE });
         if (!cancelled) setPhysioOrdersFromApi(r?.results ?? []);
       } catch {
         if (!cancelled) setPhysioOrdersFromApi([]);
@@ -2048,7 +1950,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     let cancelled = false;
     (async () => {
       try {
-        const r = await eyeCareService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        const r = await eyeCareService.getOrders({ consultation_session: sessionId, page_size: MAX_LIST_PAGE_SIZE });
         if (!cancelled) setEyeOrdersFromApi(r?.results ?? []);
       } catch {
         if (!cancelled) setEyeOrdersFromApi([]);
@@ -2232,18 +2134,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       if (!startOpts?.skipPausedDuplicateCheck) {
         try {
-          const pausedResp = await consultationService.getSessions({
-            room: numericRoomId,
-            patient: numericPatientId,
-            ...(numericVisitId ? { visit: numericVisitId } : {}),
-            status: 'paused',
-            ordering: '-started_at',
-            page_size: 20,
-          });
-          const pausedForRoom = (pausedResp.results || []).filter((s) => {
-            const rid = typeof s.room === 'object' ? Number((s.room as { id?: number }).id) : Number(s.room);
-            return Number.isFinite(rid) && rid === numericRoomId;
-          });
+          let pausedForRoom: ConsultationSession[] = [];
+          if (numericVisitId) {
+            const resolvedPaused = await consultationService.resolveSessionForVisit({
+              visit: numericVisitId,
+              patient: numericPatientId,
+              status: 'paused',
+              ordering: '-started_at',
+            });
+            if (resolvedPaused) {
+              const rid =
+                typeof resolvedPaused.room === 'object'
+                  ? Number((resolvedPaused.room as { id?: number }).id)
+                  : Number(resolvedPaused.room);
+              if (Number.isFinite(rid) && rid === numericRoomId) {
+                pausedForRoom = [resolvedPaused];
+              }
+            }
+          }
+          if (pausedForRoom.length === 0) {
+            const pausedResp = await consultationService.getSessions({
+              room: numericRoomId,
+              patient: numericPatientId,
+              ...(numericVisitId ? { visit: numericVisitId } : {}),
+              status: 'paused',
+              ordering: '-started_at',
+              page_size: MAX_LIST_PAGE_SIZE,
+            });
+            pausedForRoom = (pausedResp.results || []).filter((s) => {
+              const rid = typeof s.room === 'object' ? Number((s.room as { id?: number }).id) : Number(s.room);
+              return Number.isFinite(rid) && rid === numericRoomId;
+            });
+          }
           if (pausedForRoom.length > 0) {
             // One paused row: continue that session immediately (avoids a hidden modal blocking "Start Session").
             if (pausedForRoom.length === 1) {
@@ -2289,7 +2211,29 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      setCurrentPatient(patient);
+      const enrichedPatient = (await patientService.buildConsultationPatient(
+        numericPatientId,
+        {
+          visitId: numericVisitId,
+          queueItemId: patient.queueItemId,
+          waitTime: patient.waitTime,
+          priority: getVisitTypeLabel(patient.visitType),
+          vitalsCompleted: patient.vitalsCompleted,
+          queuePosition: patient.queuePosition,
+          visitDate: patient.visitDate,
+          visitTime: patient.visitTime,
+          visitType: patient.visitType,
+          clinics: patient.clinics,
+          completedClinics: patient.completedClinics,
+          visitClinic: patient.visitClinic,
+          vitals: patient.vitals,
+        }
+      )) as unknown as Patient;
+
+      setCurrentPatient(enrichedPatient);
+      if (enrichedPatient.visitType === 'annual_checkup') {
+        setActiveTab('annual_checkup');
+      }
       setSessionActive(true);
       setSessionId(sessionData.id);
       setSessionBaseActiveSeconds(0);
@@ -2308,7 +2252,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setPrescriptions([]);
       setLabOrders([]); // Reset lab orders when starting new session
       setNursingOrders([]);
-      setReferrals([]);
       setRadiologyOrders([]);
       setFollowUpRequired(false);
       setFollowUpDate("");
@@ -2317,19 +2260,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Load allergies / structured history in background — must not block session open or "Starting..."
       void (async () => {
         try {
-          const history = await patientService.getPatientHistory(numericPatientId);
-          setMedicalHistory({
-            allergies: Array.isArray(history.allergies) ? history.allergies : [],
-            diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
-            surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
-            familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
-            socialHistory: {
-              smoking: history.social_history?.smoking || '',
-              alcohol: history.social_history?.alcohol || '',
-              exercise: history.social_history?.exercise || '',
-              occupation: history.social_history?.occupation || '',
-            },
-          });
+          const overview = await patientService.getClinicalOverview(numericPatientId);
+          setMedicalHistory(medicalHistoryFormFromRecord(overview.medical_history));
         } catch (historyErr) {
           console.warn('Could not load medical history:', historyErr);
           setMedicalHistory({
@@ -2456,7 +2388,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     const sessionData = {
       id: freshSession.session_id || sessionId,
-      date: freshSession.started_at ? new Date(freshSession.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      date: freshSession.started_at ? toApiDateFromInstant(freshSession.started_at) : todayApiDateString(),
       time: freshSession.started_at ? `${formatTime(freshSession.started_at)} - ${freshSession.ended_at ? formatTime(freshSession.ended_at) : formatTime(new Date().toISOString())}` : '',
       duration: `${Math.round((Number((freshSession as any).active_duration_seconds ?? 0) || 0) / 60) || sessionDuration} min`,
       clinic: getVisitServiceClinicsDisplay({
@@ -2477,7 +2409,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       prescriptions: prescriptions,
       labOrders: labOrders,
       nursingOrders: nursingOrders,
-      referrals: referrals,
+      referrals: sessionReferrals,
       radiologyOrders: radiologyOrders,
       followUp: followUpRequired ? { date: followUpDate, reason: followUpReason } : null,
       pdfGenerated: true,
@@ -2490,41 +2422,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return sessionData;
     } catch (error) {
       console.error('Error generating session PDF:', error);
-      // Fallback to basic session data if API call fails
-      const fallbackSessionData = {
-        id: sessionId,
-        date: new Date().toISOString().split('T')[0],
-        time: sessionStartTime ? `${formatTime(sessionStartTime.toISOString())} - ${formatTime(new Date().toISOString())}` : '',
-        duration: `${sessionDuration} min`,
-        clinic: currentPatient
-          ? getVisitServiceClinicsDisplay({
-              clinic: currentPatient.visitClinic,
-              clinics: currentPatient.clinics,
-            })
-          : '',
-        room: room?.name || '',
-        doctor: currentUser?.name || '',
-        doctorSpecialty: room?.specialtyFocus || '',
-        patient: {
-          name: currentPatient.name,
-          patientId: currentPatient.patientId,
-          age: currentPatient.age,
-          gender: currentPatient.gender
-        },
-        vitals: currentPatient.vitals,
-        medicalNotes: medicalNotes,
-        prescriptions: prescriptions,
-        labOrders: labOrders,
-        nursingOrders: nursingOrders,
-        referrals: referrals,
-        radiologyOrders: radiologyOrders,
-        followUp: followUpRequired ? { date: followUpDate, reason: followUpReason } : null,
-        pdfGenerated: true,
-        pdfUrl: `/documents/consultation-${sessionId}.pdf`
-      };
-      return fallbackSessionData;
+      return null;
     }
   };
+
+  const handleIssueCertificate = useCallback(async () => {
+    if (!currentPatient?.id) {
+      toast.error('No patient in session.');
+      return;
+    }
+    const patientPk = Number(currentPatient.id);
+    if (!Number.isFinite(patientPk) || patientPk <= 0) {
+      toast.error('Patient record is not available.');
+      return;
+    }
+    try {
+      const apiPatient = await patientService.getPatient(patientPk);
+      setCertificatePatient(apiPatient);
+      setCertDialogOpen(true);
+    } catch {
+      toast.error('Failed to load patient for certificate.');
+    }
+  }, [currentPatient?.id]);
 
   // View session details
   const viewSessionDetails = async (session: any) => {
@@ -2549,16 +2468,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
 
     // Load all enrichment data in parallel — all only depend on fullSession.id
-    const [diagnosesResult, prescriptionsResult, labOrdersResult, radiologyOrdersResult, nursingOrdersResult, physioOrdersResult, eyeOrdersResult, vitalsResult] = await Promise.all([
-      consultationService.getDiagnoses({ session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
-      pharmacyService.getPrescriptions({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
-      labService.getOrders({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
-      radiologyService.getOrders({ consultation_session: fullSession.id, page_size: 100 }).catch(() => ({ results: [] })),
-      apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${fullSession.id}&page_size=100`).catch(() => ({ results: [] })),
-      physioService.getOrders({ consultation_session: fullSession.id, patient: fullSession.patient != null ? String(fullSession.patient) : undefined, page_size: 100 }).catch(() => ({ results: [] })),
-      eyeCareService.getOrders({ consultation_session: fullSession.id, patient: fullSession.patient != null ? fullSession.patient : undefined, page_size: 100 }).catch(() => ({ results: [] })),
-      patientService.getPatientVitals(fullSession.patient, fullSession.visit).catch(() => []),
-    ]);
+    const bundle = await consultationService.getSessionWorkspaceBundle(fullSession.id);
+    const diagnosesResult = bundle.diagnoses;
+    const prescriptionsResult = bundle.prescriptions;
+    const labOrdersResult = bundle.lab_orders;
+    const radiologyOrdersResult = bundle.radiology_orders;
+    const nursingOrdersResult = bundle.nursing_orders;
+    const physioOrdersResult = bundle.physio_orders;
+    const eyeOrdersResult = bundle.eye_orders;
+    const vitalsResult = (bundle.vitals.results?.length
+      ? bundle.vitals.results
+      : await patientService.getPatientVitals(fullSession.patient, fullSession.visit).catch(() => [])) as any[];
 
     // Process diagnoses
     enrichedSession.diagnoses = (diagnosesResult.results || []).map((d: any) => ({
@@ -2805,12 +2725,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Step 2: Ensure at least one diagnosis is present before ending session
       try {
         if (!sessionId) throw new Error('Session ID is required');
-        const diagnosisResult = await consultationService.getDiagnoses({
-          session: sessionId,
-          page: 1,
-          page_size: 1,
-        });
-        const hasDiagnosis = (diagnosisResult?.count || 0) > 0;
+        const hasDiagnosis = await consultationService.sessionHasDiagnosis(sessionId);
         if (!hasDiagnosis) {
           throw new Error('Please add at least one ICD-10 diagnosis before ending the session.');
         }
@@ -2926,7 +2841,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setPrescriptions([]);
       setLabOrders([]); // Reset lab orders when starting new session
       setNursingOrders([]);
-      setReferrals([]);
       setRadiologyOrders([]);
       setFollowUpRequired(false);
       setFollowUpDate("");
@@ -3026,10 +2940,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const numericPatientId = parseInt(currentPatient.id, 10);
     if (!Number.isFinite(numericPatientId)) return undefined;
     try {
-      const latestVisits = await apiFetch<{ results: any[] }>(
-        `/visits/?patient=${numericPatientId}&ordering=-date,-time&page_size=1`
-      );
-      const latestVisitId = latestVisits.results?.[0]?.id;
+      const latestVisit = await visitService.resolveVisit({
+        patient: numericPatientId,
+        ordering: '-date,-time',
+      });
+      const latestVisitId = latestVisit?.id;
       if (typeof latestVisitId === 'number' && Number.isFinite(latestVisitId) && latestVisitId > 0) {
         return latestVisitId;
       }
@@ -3519,10 +3434,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
     }
-    if (newNursingOrder.type === 'IV Infusion' && !newNursingOrder.medication) {
-      toast.error('Please select IV fluid for infusion');
-      return;
-    }
     if (newNursingOrder.type === 'Observation Admission') {
       if (!newNursingOrder.ward) {
         toast.error('Please select an observation ward');
@@ -3804,20 +3715,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      const urgencyMap: Record<string, 'routine' | 'urgent' | 'emergency'> = {
-        'Routine': 'routine',
-        'Urgent': 'urgent',
-        'Emergency': 'emergency',
-      };
-      
       const apiFacilityType: 'internal' | 'external' | 'specialist' =
         newReferral.facilityType || 'internal';
 
-      // Display label only — local UI rows kept the original Title-case for badges.
-      const displayFacilityType =
-        apiFacilityType.charAt(0).toUpperCase() + apiFacilityType.slice(1);
-
-      const createdReferral = await referralService.createReferral({
+      await referralService.createReferral({
         patient: numericPatientId,
         visit: numericVisitId || undefined,
         session: sessionId,
@@ -3831,24 +3732,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         contact_person: newReferral.contactPerson || undefined,
         contact_phone: newReferral.contactPhone || undefined,
       });
-
-      setReferrals([...referrals, {
-        id: createdReferral.referral_id || String(createdReferral.id),
-        backendId: createdReferral.id,
-        specialty: newReferral.specialty,
-        facility: newReferral.facility,
-        facilityType: displayFacilityType,
-        reason: newReferral.reason,
-        urgency: (newReferral.priority === 'STAT' ? 'Emergency' : newReferral.priority) as 'Routine' | 'Urgent' | 'Emergency',
-        clinicalSummary: newReferral.clinicalSummary,
-        contactPerson: newReferral.contactPerson || undefined,
-        contactPhone: newReferral.contactPhone || undefined,
-        status: 'Draft'
-      }]);
       setNewReferral({ specialty: "", facility: "", facilityType: "", facility_partner: null, reason: "", priority: "Routine", clinicalSummary: "", contactPerson: "", contactPhone: "" });
       setShowAddReferral(false);
+      bumpReferralHistory();
       toast.success(
-        "Referral created as draft. Open Referrals & forms to print, issue a responsibility form, then submit to Medical Records for acknowledgement."
+        "Referral created as draft."
       );
     } catch (err: any) {
       console.error('Error creating referral:', err);
@@ -4118,7 +4006,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Remove sent drafts from local state and refetch from API so doctor sees real status (pending, scheduled, etc.)
       setPhysioOrders(prev => prev.filter(o => !draftOrders.some(d => d.id === o.id)));
       try {
-        const updated = await physioService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        const updated = await physioService.getOrders({ consultation_session: sessionId, page_size: MAX_LIST_PAGE_SIZE });
         setPhysioOrdersFromApi(updated?.results ?? []);
       } catch {
         // non-fatal: orders were created
@@ -4147,6 +4035,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               diagnosis: newEye.diagnosis.trim(),
               treatmentPlan: newEye.treatmentPlan.trim(),
               specialInstructions: newEye.specialInstructions.trim() || undefined,
+              visualAcuityOd: newEye.visualAcuityOd.trim(),
+              visualAcuityOs: newEye.visualAcuityOs.trim(),
+              visualAcuityOu: newEye.visualAcuityOu.trim(),
               priority: newEye.priority,
             }
           : order
@@ -4159,6 +4050,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         diagnosis: newEye.diagnosis.trim(),
         treatmentPlan: newEye.treatmentPlan?.trim() || '',
         specialInstructions: newEye.specialInstructions?.trim() || undefined,
+        visualAcuityOd: newEye.visualAcuityOd?.trim() || '',
+        visualAcuityOs: newEye.visualAcuityOs?.trim() || '',
+        visualAcuityOu: newEye.visualAcuityOu?.trim() || '',
         priority: newEye.priority,
         status: 'Draft' as const
       };
@@ -4171,10 +4065,30 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       diagnosis: "",
       treatmentPlan: "",
       specialInstructions: "",
+      visualAcuityOd: "",
+      visualAcuityOs: "",
+      visualAcuityOu: "",
       priority: "normal"
     });
     setEditingEyeIndex(null);
     setShowAddEye(false);
+  };
+
+  const defaultEyeOrderForm = (annual = false) => ({
+    chiefComplaint: annual ? "Annual vision screening" : "",
+    diagnosis: annual ? "Annual visual acuity screening" : "",
+    treatmentPlan: "",
+    specialInstructions: "",
+    visualAcuityOd: "",
+    visualAcuityOs: "",
+    visualAcuityOu: "",
+    priority: "normal" as const,
+  });
+
+  const openAddEyeOrder = () => {
+    setEditingEyeIndex(null);
+    setNewEye(defaultEyeOrderForm(currentPatient?.visitType === "annual_checkup"));
+    setShowAddEye(true);
   };
 
   const editEyeOrder = (index: number) => {
@@ -4184,6 +4098,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       diagnosis: orderToEdit.diagnosis,
       treatmentPlan: orderToEdit.treatmentPlan || "",
       specialInstructions: orderToEdit.specialInstructions || "",
+      visualAcuityOd: orderToEdit.visualAcuityOd || "",
+      visualAcuityOs: orderToEdit.visualAcuityOs || "",
+      visualAcuityOu: orderToEdit.visualAcuityOu || "",
       priority: orderToEdit.priority
     });
     setEditingEyeIndex(index);
@@ -4227,6 +4144,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           diagnosis: order.diagnosis,
           treatment_plan: order.treatmentPlan,
           special_instructions: order.specialInstructions || undefined,
+          visual_acuity_od: order.visualAcuityOd || undefined,
+          visual_acuity_os: order.visualAcuityOs || undefined,
+          visual_acuity_ou: order.visualAcuityOu || undefined,
           priority: orderPriority,
           consultation_session: sessionId,
         } as any);
@@ -4234,7 +4154,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       setEyeOrders(prev => prev.filter(o => !draftOrders.some(d => d.id === o.id)));
       try {
-        const updated = await eyeCareService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        const updated = await eyeCareService.getOrders({ consultation_session: sessionId, page_size: MAX_LIST_PAGE_SIZE });
         setEyeOrdersFromApi(updated?.results ?? []);
       } catch {
         // non-fatal: orders were created
@@ -4383,12 +4303,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               ) : (
                 <div className="space-y-1.5 max-h-[58vh] overflow-y-auto pr-1">
                   {roomQueueDialogEntries.map(({ patient, isInConsultation, waitingPosition }) => {
-                    const priorityColor =
-                      patient.priority === 'Emergency' ? 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20' :
-                      patient.priority === 'High' ? 'border-orange-500/50 text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20' :
-                      patient.priority === 'Medium' ? 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20' :
-                      'border-gray-500/50 text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20';
-
                     const waitLabel = isInConsultation
                       ? null
                       : patient.waitTime >= 60
@@ -4428,8 +4342,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   In consult
                                 </Badge>
                               )}
-                              <Badge variant="outline" className={`h-4 px-1 text-[10px] ${priorityColor}`}>
-                                {patient.priority}
+                              <Badge variant="outline" className={`h-4 px-1 text-[10px] ${getVisitTypeBadgeClass(patient.visitType)}`}>
+                                {getVisitTypeLabel(patient.visitType)}
                               </Badge>
                               {patient.clinics?.map((clinic: string, idx: number) => {
                                 const isCompleted = patient.completedClinics?.includes(clinic);
@@ -4657,10 +4571,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   );
 
   if (!sessionActive || !currentPatient) {
-    const emergencyPatients = patients.filter((p) => p.priority === "Emergency");
-    const highPriorityPatients = patients.filter((p) => p.priority === "High");
-    const mediumPriorityPatients = patients.filter((p) => p.priority === "Medium");
-    const lowPriorityPatients = patients.filter((p) => p.priority === "Low");
+    const emergencyPatients = patients.filter((p) => isEmergencyVisitType(p.visitType));
+    const followUpPatients = patients.filter((p) => (p.visitType || '').replace(/-/g, '_') === 'follow_up');
     const avgWaitTime = patients.length > 0 ? Math.round(patients.reduce((sum, p) => sum + p.waitTime, 0) / patients.length) : 0;
 
     return (
@@ -4705,7 +4617,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <div className="grid gap-4 md:grid-cols-4">
             <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Patients in Queue</p><p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{patients.length}</p></div><Users className="h-8 w-8 text-blue-500" /></div></CardContent></Card>
             <Card className="border-l-4 border-l-red-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Emergency</p><p className="text-2xl font-bold text-red-600 dark:text-red-400">{emergencyPatients.length}</p></div><AlertTriangle className="h-8 w-8 text-red-500" /></div></CardContent></Card>
-            <Card className="border-l-4 border-l-orange-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">High Priority</p><p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{highPriorityPatients.length}</p></div><Clock className="h-8 w-8 text-orange-500" /></div></CardContent></Card>
+            <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Follow-ups</p><p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{followUpPatients.length}</p></div><Clock className="h-8 w-8 text-blue-500" /></div></CardContent></Card>
             <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Avg Wait Time</p><p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{avgWaitTime} min</p></div><Activity className="h-8 w-8 text-purple-500" /></div></CardContent></Card>
           </div>
 
@@ -4736,7 +4648,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {patients.length > 0 ? (
                 <div className="space-y-3">
                   {patients.map((patient, index) => (
-                    <Card key={patient.id} className={`hover:shadow-lg transition-all cursor-pointer ${patient.priority === "Emergency" ? "border-l-4 border-l-red-500 bg-red-50 dark:bg-red-900/10" : patient.priority === "High" ? "border-l-4 border-l-orange-500" : ""}`}>
+                    <Card key={patient.id} className={`hover:shadow-lg transition-all cursor-pointer ${isEmergencyVisitType(patient.visitType) ? "border-l-4 border-l-red-500 bg-red-50 dark:bg-red-900/10" : ""}`}>
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex items-start gap-3 flex-1">
@@ -4744,7 +4656,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">
                                 <div className="font-semibold text-lg">{patient.name}</div>
-                                <Badge className={getPriorityColor(patient.priority)}>{patient.priority}</Badge>
+                                <Badge variant="outline" className={getVisitTypeBadgeClass(patient.visitType)}>
+                                  {getVisitTypeLabel(patient.visitType)}
+                                </Badge>
                                 {patient.vitalsCompleted && <Badge className="bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400" variant="outline">✓ Vitals Done</Badge>}
                               </div>
                               <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -4805,177 +4719,218 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Consultation Session</h1>
-            <p className="text-muted-foreground mt-1">Room: {room.name}{room.clinic ? ` • ${room.clinic}` : ''}{room.doctor ? ` • ${room.doctor}` : ''}</p>
-            <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span>Session Duration: {sessionDuration} min</span>
+        {/* Session + patient header */}
+        {currentPatient && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-col gap-4 border-b bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <div className="min-w-0 space-y-2">
+              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Consultation Session</h1>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {room.name}
+                    {room.clinic ? ` • ${room.clinic}` : ''}
+                    {room.doctor ? ` • ${room.doctor}` : ''}
+                  </span>
+                </span>
+                <span className="hidden text-border sm:inline" aria-hidden>|</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                  <span>{sessionDuration} min</span>
+                </span>
+                <Badge
+                  variant="outline"
+                  className="h-6 border-emerald-500/30 bg-emerald-500/10 px-2 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+                >
+                  Session active
+                </Badge>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openRoomPatientsDialog('waiting')}
+                title={`Waiting: ${roomQueueWaitingCount}, paused: ${pausedSessions.length}`}
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Queue
+                {(roomQueueWaitingCount > 0 || pausedSessions.length > 0) && (
+                  <span className="ml-1.5 tabular-nums text-xs font-normal text-muted-foreground">
+                    {roomQueueWaitingCount > 0 && `W${roomQueueWaitingCount}`}
+                    {roomQueueWaitingCount > 0 && pausedSessions.length > 0 && '·'}
+                    {pausedSessions.length > 0 && `P${pausedSessions.length}`}
+                  </span>
+                )}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleEndSessionNotSeen} disabled={isMarkingLeft}>
+                {isMarkingLeft ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserX className="mr-2 h-4 w-4" />}
+                Not seen
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setShowEndDialog(true)}>
+                End session
+              </Button>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => openRoomPatientsDialog('waiting')}
-              title={`Waiting: ${roomQueueWaitingCount}, paused: ${pausedSessions.length}`}
-            >
-              <Users className="mr-2 h-4 w-4" />
-              Queue
-              {(roomQueueWaitingCount > 0 || pausedSessions.length > 0) && (
-                <span className="ml-1.5 tabular-nums text-muted-foreground font-normal text-xs">
-                  {roomQueueWaitingCount > 0 && `W${roomQueueWaitingCount}`}
-                  {roomQueueWaitingCount > 0 && pausedSessions.length > 0 && '·'}
-                  {pausedSessions.length > 0 && `P${pausedSessions.length}`}
-                </span>
-              )}
-            </Button>
-            <Button variant="secondary" onClick={handleEndSessionNotSeen} disabled={isMarkingLeft}>
-              {isMarkingLeft ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserX className="mr-2 h-4 w-4" />}
-              Not seen
-            </Button>
-            <Button variant="destructive" onClick={() => setShowEndDialog(true)}>
-              End session
-            </Button>
-          </div>
-        </div>
 
-        {/* Patient Info Card */}
-        {currentPatient && (
-        <Card>
-          <CardHeader className="pb-4">
-            <div className="flex items-start gap-6">
-              <PatientAvatar 
-                name={currentPatient.name} 
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <PatientAvatar
+                name={currentPatient.name}
                 photoUrl={currentPatient.photo || null}
                 size="lg"
+                className="shrink-0"
               />
-              <div className="flex-1">
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <CardTitle className="text-2xl mb-1">{currentPatient.name}</CardTitle>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <span><strong>Patient ID:</strong> {currentPatient.patientId}</span>
-                      <span><strong>Age:</strong> {(currentPatient as any).ageDisplay || (currentPatient as any).age_display || `${currentPatient.age} years`}</span>
-                      <span><strong>Gender:</strong> {currentPatient.gender}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400">
-                    Session Active
-                  </Badge>
-                    {wardAdmissions.some(admission => admission.status === 'admitted') && (
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">
-                          <Building2 className="h-3 w-3 mr-1" />
-                          Admitted
-                        </Badge>
-                        <Button
-                          size="sm"
+              <div className="min-w-0 flex-1 space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-semibold leading-tight">{currentPatient.name}</h2>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {currentPatient.visitType && (
+                        <Badge
                           variant="outline"
-                          className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
-                          onClick={() => setShowDischargeDialog(true)}
+                          className={`h-6 px-2 text-xs font-medium ${getVisitTypeBadgeClass(currentPatient.visitType)}`}
                         >
-                          <UserX className="h-3 w-3 mr-1" />
-                          Discharge
-                        </Button>
-                      </div>
-                    )}
+                          {getVisitTypeLabel(currentPatient.visitType)}
+                        </Badge>
+                      )}
+                      {getVisitServiceClinicsList({
+                        clinic: currentPatient.visitClinic,
+                        clinics: currentPatient.clinics,
+                      }).map((clinic) => {
+                        const isCompleted = currentPatient.completedClinics?.includes(clinic);
+                        return (
+                          <Badge
+                            key={clinic}
+                            variant="outline"
+                            className={`h-6 px-2 text-xs font-medium ${
+                              isCompleted
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                                : 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400'
+                            }`}
+                          >
+                            {clinic}{isCompleted ? ' ✓' : ''}
+                          </Badge>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-3">
-                  {/* Medical Information */}
-                  {(currentPatient.bloodGroup || currentPatient.genotype) && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      {currentPatient.bloodGroup && (
-                        <div>
-                          <span className="text-muted-foreground">Blood Group:</span>
-                          <span className="ml-2 font-semibold text-red-600">{currentPatient.bloodGroup}</span>
-                        </div>
-                      )}
-                      {currentPatient.genotype && (
-                        <div>
-                          <span className="text-muted-foreground">Genotype:</span>
-                          <span className="ml-2 font-semibold text-green-600">{currentPatient.genotype}</span>
-                        </div>
-                      )}
-                      {currentPatient.religion && (
-                        <div>
-                          <span className="text-muted-foreground">Religion:</span>
-                          <span className="ml-2 font-semibold">{currentPatient.religion}</span>
-                        </div>
-                      )}
-                      {currentPatient.tribe && (
-                        <div>
-                          <span className="text-muted-foreground">Tribe:</span>
-                          <span className="ml-2 font-semibold">{currentPatient.tribe}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  {/* Employment/Organization Information */}
-                  {(currentPatient.division || currentPatient.location || currentPatient.employeeType || currentPatient.occupation) && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      {currentPatient.division && (
-                        <div>
-                          <span className="text-muted-foreground">Division:</span>
-                          <span className="ml-2 font-semibold">{currentPatient.division}</span>
-                        </div>
-                      )}
-                      {currentPatient.location && (
-                        <div>
-                          <span className="text-muted-foreground">Location:</span>
-                          <span className="ml-2 font-semibold">{currentPatient.location}</span>
-                        </div>
-                      )}
-                      {currentPatient.employeeType && (
-                        <div>
-                          <span className="text-muted-foreground">Employee Type:</span>
-                          <span className="ml-2 font-semibold">{currentPatient.employeeType}</span>
-                        </div>
-                      )}
-                      {currentPatient.occupation && (
-                        <div>
-                          <span className="text-muted-foreground">Occupation:</span>
-                          <span className="ml-2 font-semibold">{currentPatient.occupation}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  {/* Contact Information */}
-                  {(currentPatient.phone || currentPatient.email) && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      {currentPatient.phone && (
-                        <div className="flex items-center gap-2">
-                          <Phone className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">Phone:</span>
-                          <span className="font-semibold">{currentPatient.phone}</span>
-                        </div>
-                      )}
-                      {currentPatient.email && (
-                        <div className="flex items-center gap-2">
-                          <Mail className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">Email:</span>
-                          <span className="font-semibold">{currentPatient.email}</span>
-                        </div>
-                      )}
+                  {wardAdmissions.some((admission) => admission.status === 'admitted') && (
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <Badge
+                        variant="outline"
+                        className="h-6 border-blue-500/30 bg-blue-500/10 px-2 text-xs font-medium text-blue-700 dark:text-blue-400"
+                      >
+                        <Building2 className="mr-1 h-3 w-3" />
+                        Admitted
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        onClick={() => setShowDischargeDialog(true)}
+                      >
+                        <UserX className="mr-1 h-3 w-3" />
+                        Discharge
+                      </Button>
                     </div>
                   )}
                 </div>
+
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg bg-muted/50 p-4 sm:grid-cols-3 lg:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Patient ID</p>
+                    <p className="text-sm font-medium">{currentPatient.patientId || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Age</p>
+                    <p className="text-sm font-medium">
+                      {(currentPatient as any).ageDisplay ||
+                        (currentPatient as any).age_display ||
+                        (currentPatient.age != null ? `${currentPatient.age} years` : '—')}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Gender</p>
+                    <p className="text-sm font-medium">{currentPatient.gender || '—'}</p>
+                  </div>
+                  {currentPatient.bloodGroup ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Blood group</p>
+                      <p className="text-sm font-medium">{currentPatient.bloodGroup}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.genotype ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Genotype</p>
+                      <p className="text-sm font-medium">{currentPatient.genotype}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.division ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Division</p>
+                      <p className="text-sm font-medium">{currentPatient.division}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.location ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Location</p>
+                      <p className="text-sm font-medium">{currentPatient.location}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.employeeType ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Employee type</p>
+                      <p className="text-sm font-medium">{currentPatient.employeeType}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.occupation ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Occupation</p>
+                      <p className="text-sm font-medium">{currentPatient.occupation}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.religion ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Religion</p>
+                      <p className="text-sm font-medium">{currentPatient.religion}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.tribe ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Tribe</p>
+                      <p className="text-sm font-medium">{currentPatient.tribe}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.phone ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Phone</p>
+                      <p className="text-sm font-medium break-all">{currentPatient.phone}</p>
+                    </div>
+                  ) : null}
+                  {currentPatient.email ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Email</p>
+                      <p className="text-sm font-medium break-all">{currentPatient.email}</p>
+                    </div>
+                  ) : null}
+                </div>
+
                 {currentPatient.allergies.length > 0 && (
-                  <div className="mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                    <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                      <AlertTriangle className="h-4 w-4" />
-                      <span className="font-medium">Allergies: {currentPatient.allergies.join(", ")}</span>
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                    <div className="flex items-start gap-2 text-sm text-red-700 dark:text-red-400">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide opacity-80">Allergies</p>
+                        <p className="font-medium">{currentPatient.allergies.join(', ')}</p>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
             </div>
-          </CardHeader>
+          </CardContent>
         </Card>
         )}
 
@@ -5062,7 +5017,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Tabs Section */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-9">
+          <TabsList
+            className={`grid w-full ${currentPatient?.visitType === 'annual_checkup' ? 'grid-cols-10' : 'grid-cols-9'}`}
+          >
+            {currentPatient?.visitType === 'annual_checkup' ? (
+              <TabsTrigger value="annual_checkup" className="flex items-center gap-1">
+                <ClipboardList className="h-4 w-4" />
+                <span className="hidden lg:inline">Annual</span>
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger value="notes" className="flex items-center gap-1">
               <FileText className="h-4 w-4" />
               <span className="hidden lg:inline">Notes</span>
@@ -5100,6 +5063,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <span className="hidden lg:inline">History</span>
             </TabsTrigger>
           </TabsList>
+
+          {currentPatient?.visitType === 'annual_checkup' ? (
+            <TabsContent value="annual_checkup">
+              <AnnualCheckupPanel
+                visitId={currentPatient.visitId}
+                patientDbId={currentPatient.id}
+                patientBloodGroup={currentPatient.bloodGroup}
+                patientGenotype={currentPatient.genotype}
+                consultationSessionId={sessionId}
+                systemRole={currentUser?.systemRole}
+                isSuperuser={currentUser?.isSuperuser}
+                onNavigateTab={setActiveTab}
+                onPatientRecordUpdated={({ bloodGroup, genotype }) => {
+                  setCurrentPatient((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          bloodGroup: bloodGroup ?? prev.bloodGroup,
+                          genotype: genotype ?? prev.genotype,
+                        }
+                      : prev
+                  );
+                }}
+              />
+            </TabsContent>
+          ) : null}
 
           <TabsContent value="notes">
             <Card>
@@ -6209,121 +6198,77 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <Send className="h-5 w-5 text-teal-500" />
                       Referrals
                     </CardTitle>
-                    <CardDescription>Refer patient to specialists or other facilities</CardDescription>
+                    <CardDescription>
+                      Create a referral, then use Manage to print, issue forms, and send to Medical Records.
+                    </CardDescription>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" asChild>
-                      <Link href="/consultation/referrals">
-                        <ClipboardList className="mr-2 h-4 w-4" />
-                        Referrals &amp; forms
-                      </Link>
-                    </Button>
-                    <Button variant="outline" onClick={() => setShowAddReferral(true)}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Create referral
-                    </Button>
-                    {referrals.some((r) => r.status === "Draft") && (
-                      <Button variant="default" className="bg-teal-600 hover:bg-teal-700" asChild>
-                        <Link href="/consultation/referrals">
-                          <ClipboardList className="mr-2 h-4 w-4" />
-                          Continue in Referrals &amp; forms (
-                          {referrals.filter((r) => r.status === "Draft").length})
-                        </Link>
-                      </Button>
-                    )}
-                  </div>
+                  <Button variant="outline" onClick={() => setShowAddReferral(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create referral
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {referrals.length > 0 ? (
+                {sessionReferralsLoading ? (
+                  <div className="flex justify-center py-10 text-muted-foreground">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : sessionReferrals.length > 0 ? (
                   <div className="space-y-3">
-                    {referrals.map((referral, index) => {
-                      const getStatusBadge = (status: string) => {
-                        switch (status) {
-                          case 'Draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
-                          case 'Sent': return 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400';
-                          case 'Accepted': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
-                          case 'Scheduled': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400';
-                          case 'Completed': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
-                          default: return 'bg-gray-100 text-gray-800';
-                        }
-                      };
-                      
-                      return (
-                        <Card key={referral.id} className={`border-l-4 ${referral.status === 'Draft' ? 'border-l-gray-400' : referral.status === 'Sent' ? 'border-l-teal-500' : 'border-l-emerald-500'} ${referral.urgency === 'Emergency' ? 'bg-red-50 dark:bg-red-900/10' : ''}`}>
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex items-start gap-3 flex-1">
-                                <div className={`p-2 rounded-full ${referral.facilityType === 'External' ? 'bg-orange-100 dark:bg-orange-900/30' : 'bg-teal-100 dark:bg-teal-900/30'}`}>
-                                  {referral.facilityType === 'External' ? <Building2 className="h-4 w-4 text-orange-600" /> : <UserPlus className="h-4 w-4 text-teal-600" />}
-                                </div>
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                                    <span className="font-semibold">{referral.specialty}</span>
-                                    <Badge variant="outline" className={getStatusBadge(referral.status)}>{referral.status}</Badge>
-                                    <Badge variant="outline" className={referral.facilityType === 'External' ? 'bg-orange-100 text-orange-800' : 'bg-teal-100 text-teal-800'}>
-                                      {referral.facilityType}
-                                    </Badge>
-                                    {referral.urgency !== 'Routine' && (
-                                      <Badge variant="outline" className={referral.urgency === 'Emergency' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}>
-                                        {referral.urgency === 'Emergency' && <AlertTriangle className="h-3 w-3 mr-1" />}
-                                        {referral.urgency}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="text-sm text-muted-foreground">
-                                    <strong>Facility:</strong> {referral.facility}
-                                  </div>
-                                  <div className="text-sm text-muted-foreground mt-1">
-                                    <strong>Reason:</strong> {referral.reason}
-                                  </div>
-                                  {referral.clinicalSummary && (
-                                    <div className="text-sm text-muted-foreground mt-2 p-2 bg-muted/50 rounded">
-                                      <strong>Clinical Summary:</strong> {referral.clinicalSummary}
-                                    </div>
-                                  )}
-                                  {(referral.contactPerson || referral.contactPhone) && (
-                                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                                      {referral.contactPerson && <span className="flex items-center gap-1"><User className="h-3 w-3" />{referral.contactPerson}</span>}
-                                      {referral.contactPhone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{referral.contactPhone}</span>}
-                                    </div>
-                                  )}
-                                </div>
+                    {sessionReferrals.map((referral) => (
+                      <Card key={referral.id} className="border-l-4 border-l-teal-500">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold">{referral.specialty}</span>
+                                <Badge variant="outline" className={getStatusBadgeClass(referral.status)}>
+                                  {referralStatusLabel(referral.status)}
+                                </Badge>
+                                <Badge variant="outline" className={getFacilityTypeBadgeClass(referral.facility_type)}>
+                                  {toLabel(referral.facility_type)}
+                                </Badge>
+                                <Badge variant="outline" className={getUrgencyBadgeClass(referral.urgency)}>
+                                  {toLabel(referral.urgency)}
+                                </Badge>
                               </div>
-                              {referral.status === 'Draft' && (
+                              <p className="text-sm text-muted-foreground">
+                                <span className="font-medium text-foreground">{referral.facility}</span>
+                                {' · '}
+                                {referralFormsSummary(referral)}
+                              </p>
+                              <p className="text-sm text-muted-foreground line-clamp-2">{referral.reason}</p>
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openReferralView(referral.id)}>
+                                <Eye className="h-4 w-4 mr-1" />
+                                Manage
+                              </Button>
+                              {referral.status === 'draft' && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  className="text-red-500 hover:text-red-600"
                                   onClick={() => {
                                     void (async () => {
-                                      const row = referrals[index];
-                                      if (row?.backendId != null) {
-                                        try {
-                                          await referralService.deleteReferral(row.backendId);
-                                        } catch (err: unknown) {
-                                          const msg = err instanceof Error ? err.message : "Failed to remove referral";
-                                          toast.error(msg);
-                                          return;
-                                        }
+                                      try {
+                                        await referralService.deleteReferral(referral.id);
+                                        bumpReferralHistory();
+                                        toast.success('Referral removed');
+                                      } catch (err: unknown) {
+                                        toast.error(err instanceof Error ? err.message : 'Failed to remove referral');
                                       }
-                                      setReferrals((prev) => prev.filter((_, i) => i !== index));
                                     })();
                                   }}
-                                  className="text-red-500 hover:text-red-600"
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
                               )}
-                              {referral.status === 'Sent' && (
-                                <Badge className="bg-teal-500 text-white">
-                                  <CheckCircle className="h-3 w-3 mr-1" />Sent
-                                </Badge>
-                              )}
                             </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
                 ) : (
                   <div className="text-center py-12 bg-gradient-to-b from-teal-50 to-teal-100/50 dark:from-teal-900/10 dark:to-teal-900/5 rounded-lg border-2 border-dashed border-teal-200 dark:border-teal-800">
@@ -6337,20 +6282,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   </div>
                 )}
 
-                {/* Referral workflow — full management lives on Consultation → Referrals & forms */}
-                <div className="p-4 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 space-y-2">
-                  <h4 className="font-medium text-teal-900 dark:text-teal-100 flex items-center gap-2">
-                    <Activity className="h-4 w-4" />
-                    After you add a referral
-                  </h4>
-                  <p className="text-sm text-teal-800 dark:text-teal-200">
-                    After creating a referral here, use{" "}
-                    <Link href="/consultation/referrals" className="font-semibold underline-offset-4 hover:underline">
-                      Referrals &amp; forms
-                    </Link>{" "}
-                    to print the letter, issue at least one responsibility form, then submit to Medical Records for acknowledgement, and track status. Optional stamping, close, and extra records workflow stay in the Medical Records queue.
-                  </p>
-                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -6371,8 +6302,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     return;
                   }
                   try {
-                    const sessionsResp = await consultationService.getSessions({ visit: visitId, page_size: 1 });
-                    const session = sessionsResp.results?.[0];
+                    const session = await consultationService.resolveSessionForVisit({ visit: visitId });
                     if (session?.id) {
                       viewSessionDetails({ id: session.id });
                     } else {
@@ -6388,8 +6318,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 onViewPrescription={viewPrescriptionDetails}
                 onViewVital={viewVitalsDetails}
                 onViewPhysio={openPhysioOrderDialog}
-                onViewEyeOrder={openEyeOrderDialog}
+                onViewEyeOrder={(o) => {
+                  setEyeSessionReportOrderId(o.id);
+                  setEyeSessionReportOpen(true);
+                }}
                 onViewWard={(a) => { setSelectedWardAdmission(a); setShowWardAdmissionDetail(true); }}
+                onIssueCertificate={currentPatient ? () => { void handleIssueCertificate(); } : undefined}
+                historyReloadToken={historyReloadToken}
+                onViewReferral={(r) => r?.id != null && openReferralView(Number(r.id))}
+                onReferralUpdated={bumpReferralHistory}
                 backgroundExtra={
                   <div className="flex justify-end mb-4">
                     <Button
@@ -6856,12 +6793,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         Wound Dressing
                       </div>
                     </SelectItem>
-                    <SelectItem value="IV Infusion">
-                      <div className="flex items-center gap-2">
-                        <Droplets className="h-4 w-4 text-sky-500" />
-                        IV Infusion
-                      </div>
-                    </SelectItem>
                     <SelectItem value="Observation Admission">
                       <div className="flex items-center gap-2">
                         <DoorOpen className="h-4 w-4 text-blue-500" />
@@ -7237,36 +7168,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </>
               )}
 
-              {/* IV Infusion-specific fields */}
-              {newNursingOrder.type === 'IV Infusion' && (
-                <>
-                  <div className="space-y-2">
-                    <Label>IV Fluid *</Label>
-                    <Select value={newNursingOrder.medication} onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, medication: v })}>
-                      <SelectTrigger><SelectValue placeholder="Select IV fluid" /></SelectTrigger>
-                      <SelectContent>
-                        {ivFluids.map(fluid => (
-                          <SelectItem key={fluid.name} value={fluid.name}>
-                            <div className="flex items-center justify-between w-full">
-                              <span>{fluid.name}</span>
-                              <span className="text-xs text-muted-foreground ml-2">{fluid.category}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Volume/Rate</Label>
-                    <Input 
-                      value={newNursingOrder.dosage} 
-                      onChange={(e) => setNewNursingOrder({ ...newNursingOrder, dosage: e.target.value })}
-                      placeholder="e.g., 500ml over 4 hours, 1L at 20 drops/min"
-                    />
-                  </div>
-                </>
-              )}
-
               {/* Priority */}
               <div className="space-y-2">
                 <Label>Priority</Label>
@@ -7331,7 +7232,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   !newNursingOrder.instructions ||
                   (newNursingOrder.type === 'Injection' && !newNursingOrder.medication && injectionSelectedIds.size === 0) ||
                   (newNursingOrder.type === 'Dressing' && (!newNursingOrder.woundLocation || !newNursingOrder.woundType)) ||
-                  (newNursingOrder.type === 'IV Infusion' && !newNursingOrder.medication) ||
                   (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionDiagnosis || !newNursingOrder.presentingComplaint))
                 }
                 className="bg-cyan-600 hover:bg-cyan-700"
@@ -7651,7 +7551,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           setShowAddEye(open);
           if (!open) {
             setEditingEyeIndex(null);
-            setNewEye({ chiefComplaint: "", diagnosis: "", treatmentPlan: "", specialInstructions: "", priority: "normal" });
+            setNewEye({
+              chiefComplaint: "",
+              diagnosis: "",
+              treatmentPlan: "",
+              specialInstructions: "",
+              visualAcuityOd: "",
+              visualAcuityOs: "",
+              visualAcuityOu: "",
+              priority: "normal",
+            });
           }
         }}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -7677,6 +7586,41 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   rows={3}
                 />
               </div>
+
+              {currentPatient?.visitType === 'annual_checkup' ? (
+                <div className="space-y-2 rounded-md border border-cyan-200 bg-cyan-50/50 dark:border-cyan-900 dark:bg-cyan-950/20 p-3">
+                  <Label>Snellen visual acuity (annual screening)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Annual check-up only — enter at least one value to complete the vision checklist item.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">VA OD (right)</Label>
+                      <Input
+                        value={newEye.visualAcuityOd}
+                        onChange={(e) => setNewEye({ ...newEye, visualAcuityOd: e.target.value })}
+                        placeholder="e.g. 6/6"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">VA OS (left)</Label>
+                      <Input
+                        value={newEye.visualAcuityOs}
+                        onChange={(e) => setNewEye({ ...newEye, visualAcuityOs: e.target.value })}
+                        placeholder="e.g. 6/6"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">VA OU (both)</Label>
+                      <Input
+                        value={newEye.visualAcuityOu}
+                        onChange={(e) => setNewEye({ ...newEye, visualAcuityOu: e.target.value })}
+                        placeholder="e.g. 6/6"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <Label>Diagnosis *</Label>
@@ -7932,7 +7876,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           type="date"
                           value={followUpDate}
                           onChange={(e) => setFollowUpDate(e.target.value)}
-                          min={new Date().toISOString().split("T")[0]}
+                          min={todayApiDateString()}
                           className="w-full"
                         />
             </div>
@@ -8015,8 +7959,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-muted-foreground">Referrals:</span>
-                      <Badge variant={referrals.length > 0 ? "default" : "secondary"} className="text-xs">
-                        {referrals.length}
+                      <Badge variant={sessionReferrals.length > 0 ? "default" : "secondary"} className="text-xs">
+                        {sessionReferrals.length}
                       </Badge>
                     </div>
                   </div>
@@ -8134,7 +8078,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         <li key={s.id}>
                           <span className="font-mono text-xs">{s.session_id}</span>
                           {s.started_at && (
-                            <span className="text-xs"> — started {new Date(s.started_at).toLocaleString()}</span>
+                            <span className="text-xs"> — started {formatDisplayDateTime(s.started_at)}</span>
                           )}
                         </li>
                       ))}
@@ -8873,7 +8817,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     if (!isNaN(parsedId) && parsedId > 0) {
                       numericPatientId = parsedId;
                     } else {
-                      const searchResult = await patientService.getPatients({ search: patientIdStr });
+                      const searchResult = await patientService.getPatients({ search: patientIdStr, page_size: DEFAULT_LIST_PAGE_SIZE });
                       const matchedPatient = searchResult.results.find(
                         p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
                       );
@@ -9072,7 +9016,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               Physiotherapy Order Details
             </DialogTitle>
             <DialogDescription>
-              PHY-{selectedPhysioOrder?.id?.toString().padStart(6, '0')} • Ordered {selectedPhysioOrder?.ordered_at ? new Date(selectedPhysioOrder.ordered_at).toLocaleString() : 'N/A'}
+              PHY-{selectedPhysioOrder?.id?.toString().padStart(6, '0')} • Ordered {selectedPhysioOrder?.ordered_at ? formatDisplayDateTime(selectedPhysioOrder.ordered_at) : 'N/A'}
             </DialogDescription>
           </DialogHeader>
 
@@ -9137,18 +9081,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <div className="flex items-center gap-4 text-xs">
                   <div className="flex items-center gap-1">
                     <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                    <span>Ordered: {selectedPhysioOrder.ordered_at ? new Date(selectedPhysioOrder.ordered_at).toLocaleString() : 'N/A'}</span>
+                    <span>Ordered: {selectedPhysioOrder.ordered_at ? formatDisplayDateTime(selectedPhysioOrder.ordered_at) : 'N/A'}</span>
                   </div>
                   {selectedPhysioOrder.scheduled_at && (
                     <div className="flex items-center gap-1">
                       <div className="h-2 w-2 rounded-full bg-amber-500"></div>
-                      <span>Scheduled: {new Date(selectedPhysioOrder.scheduled_at).toLocaleString()}</span>
+                      <span>Scheduled: {formatDisplayDateTime(selectedPhysioOrder.scheduled_at)}</span>
                     </div>
                   )}
                   {selectedPhysioOrder.completed_at && (
                     <div className="flex items-center gap-1">
                       <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                      <span>Completed: {new Date(selectedPhysioOrder.completed_at).toLocaleString()}</span>
+                      <span>Completed: {formatDisplayDateTime(selectedPhysioOrder.completed_at)}</span>
                     </div>
                   )}
                 </div>
@@ -9191,7 +9135,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </Badge>
                             {session.completed_at && (
                               <span className="text-xs text-muted-foreground">
-                                {new Date(session.completed_at).toLocaleString()}
+                                {formatDisplayDateTime(session.completed_at)}
                               </span>
                             )}
                           </div>
@@ -9516,10 +9460,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <ViewEyeOrderModal
-        open={showEyeOrderModal}
-        onOpenChange={setShowEyeOrderModal}
-        orderId={selectedEyeOrderId}
+      <EyeSessionReportDialog
+        open={eyeSessionReportOpen}
+        onOpenChange={setEyeSessionReportOpen}
+        orderId={eyeSessionReportOrderId}
+      />
+      <PatientHistoryReferralViewDialog
+        open={referralViewOpen}
+        onOpenChange={setReferralViewOpen}
+        referralId={referralViewId ?? null}
+        refreshKey={referralViewRefreshKey}
+        onReferralUpdated={bumpReferralHistory}
+      />
+      <MedicalCertificateCreateDialog
+        open={certDialogOpen}
+        onOpenChange={(open) => {
+          setCertDialogOpen(open);
+          if (!open) setCertificatePatient(null);
+        }}
+        patient={certificatePatient}
+        onCreated={() => setHistoryReloadToken((n) => n + 1)}
       />
     </DashboardLayout>
   );

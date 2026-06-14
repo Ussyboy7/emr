@@ -30,6 +30,7 @@ import {
   type ResponsibilityFormIssuance,
 } from "@/lib/services/referral-service";
 import { patientService, type Patient } from "@/lib/services/patient-service";
+import { DEFAULT_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -199,44 +200,72 @@ export default function ConsultationReferralsPage() {
     }
   };
 
-  const issueResponsibilityForm = async () => {
-    if (!selectedReferral) return;
+  const issueFormPayload = async (): Promise<boolean> => {
+    if (!selectedReferral) return false;
     if (!formPayload.valid_from || !formPayload.valid_to) {
       toast.error("Set valid from/to dates");
-      return;
+      return false;
     }
     const blocking = hasOverlappingActiveResponsibilityForm(
       selectedForms,
       formPayload.valid_from,
-      formPayload.valid_to
+      formPayload.valid_to,
     );
     if (blocking && !formOverrideReason.trim()) {
       toast.error("Enter an override reason — these dates overlap a current active form.");
-      return;
+      return false;
     }
+    await referralService.issueForm(selectedReferral.id, {
+      ...formPayload,
+      ...(blocking
+        ? { override_active: true, override_reason: formOverrideReason.trim() }
+        : {}),
+    });
+    const updatedForms = await referralService.getForms(selectedReferral.id);
+    setSelectedForms(updatedForms || []);
+    setFormPayload({ valid_from: "", valid_to: "", notes: "" });
+    setFormOverrideReason("");
+    return true;
+  };
+
+  const issueResponsibilityForm = async () => {
     try {
       setIssuingForm(true);
-      await referralService.issueForm(selectedReferral.id, {
-        ...formPayload,
-        ...(blocking
-          ? { override_active: true, override_reason: formOverrideReason.trim() }
-          : {}),
-      });
-      const updatedForms = await referralService.getForms(selectedReferral.id);
-      setSelectedForms(updatedForms || []);
-      setFormPayload({ valid_from: "", valid_to: "", notes: "" });
-      setFormOverrideReason("");
-      toast.success("Responsibility form recorded");
-      void refetch();
+      const ok = await issueFormPayload();
+      if (ok) {
+        toast.success("Responsibility form recorded");
+        void refetch();
+      }
     } catch (error: unknown) {
+      if (isAuthenticationError(error)) return;
       toast.error((error as Error)?.message || "Failed to issue form");
     } finally {
       setIssuingForm(false);
     }
   };
 
-  const handlePrintLetter = (r: ReferralWithPatient) => {
-    if (!printReferralLetterWindow(r)) toast.error("Allow popups to print.");
+  const issueResponsibilityFormAndSend = async () => {
+    if (!selectedReferral) return;
+    try {
+      setIssuingForm(true);
+      const ok = await issueFormPayload();
+      if (!ok) return;
+      const updated = await referralService.submitToRecords(selectedReferral.id);
+      setSelectedReferral({ ...selectedReferral, ...updated } as ReferralWithPatient);
+      toast.success("Form issued and sent to Medical Records");
+      void refetch();
+      void refetchStats();
+    } catch (error: unknown) {
+      if (isAuthenticationError(error)) return;
+      toast.error((error as Error)?.message || "Failed to issue form and send to Records");
+    } finally {
+      setIssuingForm(false);
+    }
+  };
+
+  const handlePrintLetter = async (r: ReferralWithPatient) => {
+    const ok = await printReferralLetterWindow(r);
+    if (!ok) toast.error("Could not open the PDF — allow popups or check sign-in.");
   };
   const handlePrintForm = async (
     r: ReferralWithPatient,
@@ -282,7 +311,7 @@ export default function ConsultationReferralsPage() {
       }
       setPatientLoading(true);
       try {
-        const res = await patientService.getPatients({ search: q, page_size: 8 });
+        const res = await patientService.getPatients({ search: q, page_size: DEFAULT_LIST_PAGE_SIZE });
         if (!cancelled) setPatientResults(res.results || []);
       } catch {
         if (!cancelled) setPatientResults([]);
@@ -649,6 +678,7 @@ export default function ConsultationReferralsPage() {
           onPrintLetter={handlePrintLetter}
           onPrintForm={handlePrintForm}
           onIssueForm={() => void issueResponsibilityForm()}
+          onIssueFormAndSend={() => void issueResponsibilityFormAndSend()}
           onEdit={openEdit}
           onSubmitToRecords={() => void submitToRecords()}
           blockingActiveResponsibilityForm={hasOverlappingActiveResponsibilityForm(

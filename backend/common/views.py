@@ -11,16 +11,29 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
+from drf_spectacular.utils import OpenApiResponse
 from rest_framework import views
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.permissions import AllowAny
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.authentication import JWTCookieAuthentication, JWTAuthenticationWithActivity
+
+from .media_utils import MediaPathError, guess_media_content_type, resolve_media_absolute_path
 from .middleware import read_api_timing_window
 from .services import FileUploadService, EmailService, SMSService, BackupService
+from .upload_validation import UploadValidationError
+from common.openapi import (
+    HEALTH_CHECK_RESPONSE,
+    JSON_MUTATION_RESPONSES,
+    JSON_OBJECT_RESPONSE,
+    SERVER_TIME_RESPONSE,
+    document_api_view,
+)
 
 
 # Wall-clock seconds at which this Django process first imported this
@@ -74,6 +87,9 @@ def _collect_system_health() -> list[dict]:
         'uptime_seconds': int(api_uptime_s),
         'uptime': _format_uptime(api_uptime_s),
         'detail': 'Process uptime since last restart.',
+        'started_at': datetime.fromtimestamp(
+            API_PROCESS_STARTED_AT, tz=dt_timezone.utc
+        ).isoformat(),
     })
 
     # Database — Postgres-aware, falls back to a simple ping otherwise.
@@ -84,6 +100,7 @@ def _collect_system_health() -> list[dict]:
             cursor.fetchone()
         db_entry['status'] = 'healthy'
         vendor = connection.vendor
+        db_entry['engine'] = vendor
         if vendor == 'postgresql':
             try:
                 with connection.cursor() as cursor:
@@ -129,6 +146,9 @@ def _collect_system_health() -> list[dict]:
                 )
                 storage_entry['free_gb'] = round(free_gb, 2)
                 storage_entry['total_gb'] = round(total_gb, 2)
+                storage_entry['used_gb'] = round(total_gb - free_gb, 2)
+                storage_entry['used_pct'] = round(used_pct, 1)
+                storage_entry['path'] = media_path
                 # Degrade the badge if the disk is uncomfortably full.
                 if used_pct >= 95:
                     storage_entry['status'] = 'error'
@@ -140,9 +160,11 @@ def _collect_system_health() -> list[dict]:
         elif media_path and os.path.exists(media_path):
             storage_entry['status'] = 'error'
             storage_entry['detail'] = 'MEDIA_ROOT exists but is not writable by the API process.'
+            storage_entry['path'] = media_path
         else:
             storage_entry['status'] = 'warning'
             storage_entry['detail'] = 'MEDIA_ROOT path does not exist.'
+            storage_entry['path'] = media_path or None
     except Exception as exc:
         storage_entry['status'] = 'error'
         storage_entry['detail'] = f'Check failed: {exc}'
@@ -154,6 +176,83 @@ def _collect_system_health() -> list[dict]:
 
 
 @require_http_methods(["GET"])
+def _build_server_time_payload() -> dict:
+    now = timezone.localtime()
+    return {
+        "date": now.date().isoformat(),
+        "datetime": now.isoformat(),
+        "timezone": settings.TIME_ZONE,
+    }
+
+
+def _build_health_payload() -> tuple[dict, int]:
+    status = {
+        "status": "healthy",
+        "services": {},
+    }
+    overall_healthy = True
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        status["services"]["database"] = "healthy"
+    except Exception as e:
+        status["services"]["database"] = f"unhealthy: {str(e)}"
+        overall_healthy = False
+
+    try:
+        cache.set("health_check", "ok", 10)
+        cache.get("health_check")
+        status["services"]["cache"] = "healthy"
+    except Exception as e:
+        status["services"]["cache"] = f"unhealthy: {str(e)}"
+        overall_healthy = False
+
+    http_status = 200 if overall_healthy else 503
+    if not overall_healthy:
+        status["status"] = "unhealthy"
+    return status, http_status
+
+
+@document_api_view(tag="Common", summary="Server date and time", responses=SERVER_TIME_RESPONSE)
+class ServerTimeView(views.APIView):
+    """Return the server's current date and time in the configured timezone."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response(_build_server_time_payload())
+
+
+@document_api_view(
+    tag="Common",
+    summary="Liveness probe",
+    responses={200: OpenApiResponse(response={"type": "object", "properties": {"status": {"type": "string"}}})},
+)
+class HealthLiveView(views.APIView):
+    """Minimal liveness for Docker/K8s: no DB or cache checks."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({"status": "ok"})
+
+
+@document_api_view(tag="Common", summary="Full health check (database and cache)", responses=HEALTH_CHECK_RESPONSE)
+class HealthCheckView(views.APIView):
+    """Health check endpoint for monitoring and load balancers."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        payload, http_status = _build_health_payload()
+        return Response(payload, status=http_status)
+
+
 def server_time(request):
     """
     Return the server's current date and time in the configured timezone.
@@ -164,14 +263,7 @@ def server_time(request):
     example, a lab result created "just now" reliably shows up under the
     "Today" tab regardless of the user's device clock.
     """
-    now = timezone.localtime()
-    return JsonResponse(
-        {
-            "date": now.date().isoformat(),
-            "datetime": now.isoformat(),
-            "timezone": settings.TIME_ZONE,
-        }
-    )
+    return JsonResponse(_build_server_time_payload())
 
 
 @require_http_methods(["GET"])
@@ -187,44 +279,16 @@ def health_live(request):
 def health_check(request):
     """
     Health check endpoint for monitoring and load balancers.
-    
+
     Returns:
         - 200 OK: All services are healthy
         - 503 Service Unavailable: One or more services are unhealthy
     """
-    status = {
-        "status": "healthy",
-        "services": {},
-    }
-    overall_healthy = True
-
-    # Check database connectivity
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-        status["services"]["database"] = "healthy"
-    except Exception as e:
-        status["services"]["database"] = f"unhealthy: {str(e)}"
-        overall_healthy = False
-
-    # Check cache (Redis) connectivity
-    try:
-        cache.set("health_check", "ok", 10)
-        cache.get("health_check")
-        status["services"]["cache"] = "healthy"
-    except Exception as e:
-        status["services"]["cache"] = f"unhealthy: {str(e)}"
-        overall_healthy = False
-
-    # Determine HTTP status code
-    http_status = 200 if overall_healthy else 503
-    if not overall_healthy:
-        status["status"] = "unhealthy"
-
-    return JsonResponse(status, status=http_status)
+    payload, http_status = _build_health_payload()
+    return JsonResponse(payload, status=http_status)
 
 
+@document_api_view(tag="Common", summary="System metrics for admin dashboard")
 class SystemMetricsView(views.APIView):
     """System monitoring metrics for dashboard.
 
@@ -245,8 +309,6 @@ class SystemMetricsView(views.APIView):
     Each key returned also has an entry in the ``sources`` map describing
     whether it is ``"live"`` (real measurement) or ``"sample"`` (placeholder).
     """
-    
-    permission_classes = [IsAuthenticated]
     
     def get(self, request):
         """Return current system metrics."""
@@ -430,6 +492,38 @@ class SystemMetricsView(views.APIView):
         return candidates
 
 
+@document_api_view(tag="Dashboard", summary="Operational dashboard aggregates")
+class OperationalDashboardView(views.APIView):
+    """Single-request aggregates for the global EMR home dashboard."""
+
+    def get(self, request):
+        from .operational_dashboard import _parse_api_date, build_operational_dashboard
+
+        target = _parse_api_date(request.query_params.get("date"))
+        return Response(build_operational_dashboard(target))
+
+
+@document_api_view(tag="Dashboard", summary="Admin dashboard statistics")
+class AdminDashboardStatsView(views.APIView):
+    """Server-side admin dashboard stats (replaces client fan-out)."""
+
+    def get(self, request):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({"error": "Permission denied"}, status=403)
+
+        from .admin_dashboard_stats import build_admin_dashboard_stats
+
+        metrics: dict = {}
+        try:
+            metrics_resp = SystemMetricsView().get(request)
+            if hasattr(metrics_resp, "data") and isinstance(metrics_resp.data, dict):
+                metrics = metrics_resp.data
+        except Exception:
+            pass
+        return Response(build_admin_dashboard_stats(metrics))
+
+
+@document_api_view(tag="Dashboard", summary="Live admin dashboard poll payload")
 class LiveDashboardView(views.APIView):
     """Lightweight payload for the admin dashboard's 30 s auto-poll.
 
@@ -438,8 +532,6 @@ class LiveDashboardView(views.APIView):
     * ``systemHealth`` — process uptime, DB ping, MEDIA_ROOT check.
     * ``serverTime`` — server clock for refresh labels.
   """
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from accounts.presence import count_online_users, presence_window_seconds
@@ -457,10 +549,9 @@ class LiveDashboardView(views.APIView):
         })
 
 
+@document_api_view(tag="Dashboard", summary="Online users list")
 class OnlineUsersView(views.APIView):
     """Return list of currently online users."""
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from accounts.presence import list_online_users, presence_window_seconds
@@ -471,11 +562,28 @@ class OnlineUsersView(views.APIView):
         })
 
 
+FILE_UPLOAD_REQUEST = {
+    "multipart/form-data": {
+        "type": "object",
+        "properties": {
+            "file": {"type": "string", "format": "binary"},
+            "folder": {"type": "string"},
+        },
+    }
+}
+
+
+@document_api_view(
+    tag="Common",
+    summary="Upload file to media storage",
+    methods=("post",),
+    responses=JSON_MUTATION_RESPONSES,
+    request=FILE_UPLOAD_REQUEST,
+)
 class FileUploadView(views.APIView):
-    """Handle file uploads."""
-    
-    permission_classes = [IsAuthenticated]
+    """Handle file uploads (PDF and images only)."""
     parser_classes = [MultiPartParser, FormParser]
+    throttle_scope = "file_upload"
     
     def post(self, request):
         file = request.FILES.get('file')
@@ -487,14 +595,38 @@ class FileUploadView(views.APIView):
         try:
             file_path = FileUploadService.upload_file(file, folder)
             return Response({'file_path': file_path, 'message': 'File uploaded successfully'})
+        except UploadValidationError as exc:
+            return Response({'error': str(exc)}, status=400)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 
 
+@document_api_view(tag="Common", summary="Serve protected media file")
+class ProtectedMediaView(views.APIView):
+    """
+    Serve files from MEDIA_ROOT after authentication.
+
+    Accepts JWT via Authorization header or access-token cookie so images
+    and PDFs work in the browser without public ``/media/`` URLs.
+    """
+
+    authentication_classes = [JWTAuthenticationWithActivity, JWTCookieAuthentication]
+
+    def get(self, request, relative_path: str):
+        try:
+            abs_path = resolve_media_absolute_path(relative_path)
+        except MediaPathError:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        content_type = guess_media_content_type(abs_path)
+        response = FileResponse(open(abs_path, 'rb'), content_type=content_type)
+        response['Cache-Control'] = 'private, max-age=300'
+        return response
+
+
+@document_api_view(tag="Common", summary="Send email (admin)", methods=("post",), responses=JSON_MUTATION_RESPONSES)
 class SendEmailView(views.APIView):
     """Send email (admin only)."""
-    
-    permission_classes = [IsAuthenticated]
     
     def post(self, request):
         if not request.user.is_staff:
@@ -513,10 +645,9 @@ class SendEmailView(views.APIView):
         return Response({'error': 'Failed to send email'}, status=500)
 
 
+@document_api_view(tag="Common", summary="Export backup data snapshot")
 class ExportDataView(views.APIView):
     """Export data."""
-    
-    permission_classes = [IsAuthenticated]
     
     def get(self, request):
         data_type = request.query_params.get('type', 'patients')

@@ -1,4 +1,5 @@
 "use client";
+import { todayApiDateString, formatDisplayDateMedium } from "@/lib/dates";
 
 import { useState, useEffect, useMemo, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -26,7 +27,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/hooks/use-location-options';
-import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
+import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useClinic } from '@/hooks/use-clinic';
 
 // Visit Types (matching backend choices)
@@ -35,8 +36,14 @@ const visitTypes = [
   { value: 'follow_up', label: 'Follow-up', description: 'Follow-up visit for existing condition' },
   { value: 'emergency', label: 'Emergency', description: 'Urgent medical attention required' },
   { value: 'routine', label: 'Routine Checkup', description: 'Routine health checkup' },
+  { value: 'annual_checkup', label: 'Annual Check-up', description: 'Employee annual occupational health check-up' },
   { value: 'responsibility_form', label: 'Responsibility Form', description: 'Responsibility form for patients' },
 ];
+
+function isAnnualCheckupEligible(patient: { category?: string; is_active?: boolean } | null) {
+  if (!patient) return false;
+  return patient.category === 'employee' && patient.is_active !== false;
+}
 
 function NewVisitPageContent() {
   const router = useRouter();
@@ -121,13 +128,13 @@ function NewVisitPageContent() {
 
   // Set date/time on client only to avoid hydration mismatch (new Date() differs server vs client)
   useEffect(() => {
-    // Validate visit type is one of the allowed values
-    const validVisitTypes = visitTypes.map(v => v.value);
-    const visitType = prefVisitType && validVisitTypes.includes(prefVisitType) ? prefVisitType : '';
+    const validVisitTypes = visitTypes.map((v) => v.value);
+    const visitType =
+      prefVisitType && validVisitTypes.includes(prefVisitType) ? prefVisitType : '';
 
     setFormData(prev => ({
       ...prev,
-      visitDate: prev.visitDate || prefDate || new Date().toISOString().split('T')[0],
+      visitDate: prev.visitDate || prefDate || todayApiDateString(),
       visitTime: prev.visitTime || (prefTime && prefTime.length >= 5 ? prefTime.slice(0, 5) : prefTime) || new Date().toTimeString().slice(0, 5),
       visitType: prev.visitType || visitType,
     }));
@@ -140,8 +147,26 @@ function NewVisitPageContent() {
     age: p.age || 0,
     gender: formatPatientGenderLabel(p.gender),
     bloodGroup: p.blood_group || '',
+    category: p.category || '',
+    is_active: p.is_active !== false,
     allergies: p.allergies ? String(p.allergies).split(/[,\n]/).map((a: string) => a.trim()).filter(Boolean) : [],
   }), []);
+
+  const annualCheckupEligible = isAnnualCheckupEligible(selectedPatient);
+
+  const visibleVisitTypes = useMemo(
+    () =>
+      visitTypes.filter(
+        (type) => type.value !== 'annual_checkup' || annualCheckupEligible
+      ),
+    [annualCheckupEligible]
+  );
+
+  useEffect(() => {
+    if (formData.visitType === 'annual_checkup' && !annualCheckupEligible) {
+      setFormData((prev) => ({ ...prev, visitType: '' }));
+    }
+  }, [annualCheckupEligible, formData.visitType]);
 
   // Preselect patient from ?patient= URL (patient_id string or numeric PK)
   useEffect(() => {
@@ -163,7 +188,7 @@ function NewVisitPageContent() {
           }
         }
         if (!p) {
-          const result = await patientService.getPatients({ search: patientIdParam, page_size: 10 });
+          const result = await patientService.getPatients({ search: patientIdParam, page_size: DEFAULT_LIST_PAGE_SIZE });
           if (cancelled) return;
           p = result.results.find((r: any) => r.patient_id === patientIdParam) ?? null;
         }
@@ -201,7 +226,7 @@ function NewVisitPageContent() {
     searchTimeoutRef.current = setTimeout(async () => {
       searchTimeoutRef.current = null;
       try {
-        const result = await patientService.getPatients({ search: q, page_size: 50 });
+        const result = await patientService.getPatients({ search: q, page_size: DEFAULT_LIST_PAGE_SIZE });
         setPatients((result.results || []).map(mapPatient));
       } catch (err) {
         if (isAuthenticationError(err)) setAuthError(err);
@@ -267,9 +292,14 @@ function NewVisitPageContent() {
 
 
     // Validate visit type is one of the allowed values
-    const validVisitTypes = visitTypes.map(v => v.value);
+    const validVisitTypes = visibleVisitTypes.map((v) => v.value);
     if (!validVisitTypes.includes(formData.visitType)) {
       toast.error(`Invalid visit type: ${formData.visitType}`);
+      return;
+    }
+
+    if (formData.visitType === 'annual_checkup' && !annualCheckupEligible) {
+      toast.error('Annual check-ups are only for active employee patients.');
       return;
     }
 
@@ -304,11 +334,7 @@ function NewVisitPageContent() {
       const visitId = createdVisit.visit_id || String(createdVisit.id);
       
       // Format date for display
-      const formattedDate = new Date(formData.visitDate).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-      });
+      const formattedDate = formatDisplayDateMedium(formData.visitDate);
       
       // Store created visit data for success dialog
       setCreatedVisitData({
@@ -354,7 +380,7 @@ function NewVisitPageContent() {
     }
   };
 
-  const selectedVisitType = visitTypes.find(v => v.value === formData.visitType);
+  const selectedVisitType = visibleVisitTypes.find((v) => v.value === formData.visitType);
 
   // Loading state
   if (loading) {
@@ -507,7 +533,7 @@ function NewVisitPageContent() {
                 <div className="space-y-3">
                   <Label className="text-base font-medium">Visit Type *</Label>
                   <div className="grid grid-cols-3 gap-3">
-                    {visitTypes.map((type) => (
+                    {visibleVisitTypes.map((type) => (
                       <div
                         key={type.value}
                         onClick={() => handleInputChange('visitType', type.value)}
@@ -524,6 +550,15 @@ function NewVisitPageContent() {
                       </div>
                     ))}
                   </div>
+                  {formData.visitType === 'annual_checkup' ? (
+                    <p className="text-xs text-teal-700 dark:text-teal-300 border border-teal-500/30 rounded-lg p-3">
+                      Creates an employee annual check-up for {new Date().getFullYear()}. The visit runs through nursing and consultation as usual; the doctor signs off from the Annual Check-up panel.
+                    </p>
+                  ) : selectedPatient && !annualCheckupEligible ? (
+                    <p className="text-xs text-muted-foreground border rounded-lg p-3">
+                      Annual check-up is only available for active employee patients.
+                    </p>
+                  ) : null}
                 </div>
 
                 <Separator />
@@ -842,7 +877,7 @@ function NewVisitPageContent() {
                     clinics: [],
                     location: '',
                     locationClinic: activeClinicId ?? null,
-                    visitDate: new Date().toISOString().split('T')[0],
+                    visitDate: todayApiDateString(),
                     visitTime: new Date().toTimeString().slice(0, 5),
                     notes: '',
                   });

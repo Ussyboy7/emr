@@ -2,6 +2,8 @@
 Serializers for the Radiology app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 import re
 from .models import (
     RadiologyTemplate,
@@ -73,14 +75,17 @@ class RadiologyReferralDispatchSerializer(serializers.ModelSerializer):
     )
     studies = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_issued_by_name(self, obj):
         u = getattr(obj, 'issued_by', None)
         return u.get_full_name() if u else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_cancelled_by_name(self, obj):
         u = getattr(obj, 'cancelled_by', None)
         return u.get_full_name() if u else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_studies(self, obj):
         return [
             {
@@ -120,6 +125,7 @@ class RadiologyTemplateSerializer(serializers.ModelSerializer):
 class RadiologyStudyReportAttachmentSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_uploaded_by_name(self, obj):
         if not obj.uploaded_by:
             return None
@@ -148,10 +154,14 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
 
     location_clinic_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj.order, 'location_clinic', None) if obj.order else None
-        return clinic.name if clinic else None
+        from common.order_location import order_location_clinic_name
 
+        order = getattr(obj, "order", None)
+        return order_location_clinic_name(order)
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_report_file_url(self, obj):
         """Get the URL for the uploaded report file."""
         if obj.report_file:
@@ -186,6 +196,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
         help_text="List of studies to create with the order"
     )
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_details(self, obj):
         """Get patient details including age and gender."""
         if obj.patient:
@@ -198,6 +209,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             }
         return None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_doctor_name(self, obj):
         if obj.doctor:
             return obj.doctor.get_full_name()
@@ -205,6 +217,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             return obj.external_requesting_doctor_name
         return None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_doctor_details(self, obj):
         """Get doctor details including specialty."""
         if obj.doctor:
@@ -219,10 +232,13 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             }
         return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
-        clinic = getattr(obj, 'location_clinic', None)
-        return clinic.name if clinic else None
+        from common.order_location import order_location_clinic_name
 
+        return order_location_clinic_name(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_external_clinic_details(self, obj):
         clinic = getattr(obj, 'external_clinic', None)
         if not clinic:
@@ -234,6 +250,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             'location': clinic.location,
         }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_icd10_diagnoses(self, obj):
         from common.diagnosis_serialization import serialize_icd10_diagnoses_for_order
 
@@ -266,6 +283,8 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create radiology order with associated studies."""
+        from common.order_location import apply_order_location_clinic
+
         studies_data = validated_data.pop('studies_data', [])
 
         # If no doctor is specified, try to get it from consultation session
@@ -278,6 +297,9 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             if consultation_session.doctor:
                 validated_data['doctor'] = consultation_session.doctor
 
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        validated_data = apply_order_location_clinic(validated_data, user=user)
         order = RadiologyOrder.objects.create(**validated_data)
 
         # Create studies if provided
@@ -379,6 +401,7 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
     order_id = serializers.CharField(source='order.order_id', read_only=True)
     order_details = serializers.SerializerMethodField()
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_details(self, obj):
         """Get patient details including age and gender."""
         if obj.patient:
@@ -391,9 +414,12 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
             }
         return None
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_order_details(self, obj):
         """Get order details including doctor information."""
         if obj.order:
+            from common.order_location import order_location_clinic_name
+
             return {
                 'id': obj.order.id,
                 'order_id': obj.order.order_id,
@@ -401,7 +427,7 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
                 'doctor_name': obj.order.doctor.get_full_name() if obj.order.doctor else obj.order.external_requesting_doctor_name or None,
                 'doctor_specialty': getattr(obj.order.doctor, 'specialty', None) if obj.order.doctor else None,
                 'clinic': obj.order.clinic,
-                'location_clinic_name': obj.order.location_clinic.name if obj.order.location_clinic else None,
+                'location_clinic_name': order_location_clinic_name(obj.order),
                 'clinical_notes': obj.order.clinical_notes,
                 'provisional_diagnosis': obj.order.provisional_diagnosis,
                 'lmp': str(obj.order.lmp) if obj.order.lmp else None,

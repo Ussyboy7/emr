@@ -1,10 +1,8 @@
 import type { Prescription, PrescriptionItem } from "@/lib/services/pharmacy-service";
 import type { PrescriptionOrderItemInput } from "@/components/consultation/orders/PrescriptionOrderModal";
 
-export const REFILLABLE_PRESCRIPTION_STATUSES = new Set([
-  "dispensed",
-  "partially_dispensed",
-]);
+/** Cancelled orders are excluded; all other statuses may be copied into a new draft. */
+export const NON_REFILLABLE_PRESCRIPTION_STATUSES = new Set(["cancelled"]);
 
 export type RefillLineKey = `${number}:${number}`;
 
@@ -27,10 +25,10 @@ export function parseDosageNumber(dose?: string | null): string {
 }
 
 export function isRefillablePrescription(rx: Prescription): boolean {
-  return REFILLABLE_PRESCRIPTION_STATUSES.has(rx.status);
+  return !NON_REFILLABLE_PRESCRIPTION_STATUSES.has(rx.status);
 }
 
-export function isRefillableLine(rx: Prescription, item: PrescriptionItem): boolean {
+export function isRefillableLine(_rx: Prescription, item: PrescriptionItem): boolean {
   if (item.prescribing_record_only) return false;
   if (item.superseded_at) return false;
   const genericId =
@@ -39,9 +37,7 @@ export function isRefillableLine(rx: Prescription, item: PrescriptionItem): bool
       : typeof (item as { generic_id?: number }).generic_id === "number"
         ? (item as { generic_id?: number }).generic_id!
         : null;
-  if (!genericId) return false;
-  if (rx.status === "dispensed") return true;
-  return Boolean(item.is_dispensed);
+  return Boolean(genericId);
 }
 
 export function prescriptionItemToOrderInput(item: PrescriptionItem): PrescriptionOrderItemInput | null {

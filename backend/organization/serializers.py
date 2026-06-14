@@ -2,6 +2,8 @@
 Serializers for the Organization app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from .models import Clinic, Department, Room, OutpatientClinicType, WorkLocation, SystemConfig
 
 
@@ -43,10 +45,12 @@ class ClinicSerializer(serializers.ModelSerializer):
             "doctor_count",
         ]
     
+    @extend_schema_field(OpenApiTypes.INT)
     def get_staff_count(self, obj):
         """Get count of staff assigned to this clinic (via M2M)."""
         return obj.assigned_staff.filter(is_active=True).count()
     
+    @extend_schema_field(OpenApiTypes.INT)
     def get_room_count(self, obj):
         """Get count of rooms assigned to this clinic.
         Includes both organization.Room and consultation.ConsultationRoom.
@@ -56,17 +60,20 @@ class ClinicSerializer(serializers.ModelSerializer):
         consult_rooms_count = ConsultationRoom.objects.filter(clinic=obj, is_active=True).count()
         return org_rooms_count + consult_rooms_count
     
+    @extend_schema_field(OpenApiTypes.STR)
     def get_head_name(self, obj):
         """Get the name of the clinic head (if any department head exists)."""
         # For now, return None as Clinic doesn't have a direct head field
         # Could be implemented if needed
         return None
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_patient_count(self, obj):
         """Patients with default clinic (location_clinic); from annotate when listing."""
         v = getattr(obj, "patient_count", None)
         return v if v is not None else 0
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_doctor_count(self, obj):
         """Active doctors assigned to this clinic; from annotate when listing."""
         v = getattr(obj, "doctor_count", None)
@@ -85,6 +92,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at', 'staff_count']
     
+    @extend_schema_field(OpenApiTypes.INT)
     def get_staff_count(self, obj):
         """Get count of staff assigned to this department."""
         return obj.staff.filter(is_active=True).count()

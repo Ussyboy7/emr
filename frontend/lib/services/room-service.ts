@@ -49,6 +49,19 @@ class RoomService {
     return apiFetch<RoomListResponse>(`${this.basePath}/${query}`);
   }
 
+  async getListStats(filters: Omit<RoomFilters, 'page' | 'page_size' | 'status' | 'ordering'> = {}): Promise<{
+    total: number;
+    active: number;
+    inactive: number;
+    maintenance: number;
+  }> {
+    const query = buildQueryString(filters as Record<string, string | number | boolean | undefined>);
+    const path = query
+      ? `${this.basePath}/list-stats/?${query.slice(1)}`
+      : `${this.basePath}/list-stats/`;
+    return apiFetch(path);
+  }
+
   /**
    * Get a single room by ID
    */

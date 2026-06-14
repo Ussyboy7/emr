@@ -30,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2, GitMerge, AlertTriangle } from "lucide-react";
 import { patientService, type Patient as ApiPatient } from "@/lib/services";
+import { DEFAULT_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 
 /** Local frontend patient shape (matches the list-page Patient type). */
 export interface LocalPatient {
@@ -142,7 +143,7 @@ export function MergePatientDialog({
       try {
         // The list endpoint already filters out tombstones by default, so
         // search results won't include merged-away records.
-        const r = await patientService.getPatients({ search: query.trim(), page_size: 10 });
+        const r = await patientService.getPatients({ search: query.trim(), page_size: DEFAULT_LIST_PAGE_SIZE });
         setResults(r.results || []);
       } catch {
         setResults([]);

@@ -1,103 +1,151 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import {
-  Download,
-  FileSpreadsheet,
   RefreshCw,
   ArrowLeft,
-  Printer,
   Users,
   Activity,
+  TrendingUp,
+  Droplets,
+  Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
 
-interface Demographics {
-  total_patients: number;
-  by_category: Record<string, number>;
-  by_gender: Record<string, number>;
-  by_age_group: Record<string, number>;
-  by_blood_group: Record<string, number>;
+interface BreakdownRow {
+  label?: string;
+  category?: string;
+  key?: string;
+  count: number;
+  percentage?: number;
+  sn?: number;
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  employee: "Employee",
-  retiree: "Retiree",
-  dependent: "Dependent",
-  nonnpa: "Non-NPA",
+interface DemographicsSummary {
+  total_patients: number;
+  total_employees: number;
+  total_non_employees: number;
+  total_male: number;
+  total_female: number;
+  blood_group_recorded: number;
+}
+
+interface Demographics {
+  cohort_mode?: "active_register" | "registered_in_period";
+  summary: DemographicsSummary;
+  category_breakdown: BreakdownRow[];
+  gender_breakdown: BreakdownRow[];
+  age_breakdown: BreakdownRow[];
+  blood_group_breakdown: BreakdownRow[];
+  total_patients?: number;
+}
+
+const emptySummary: DemographicsSummary = {
+  total_patients: 0,
+  total_employees: 0,
+  total_non_employees: 0,
+  total_male: 0,
+  total_female: 0,
+  blood_group_recorded: 0,
 };
 
-const GENDER_LABELS: Record<string, string> = {
-  male: "Male",
-  female: "Female",
-  other: "Other",
-};
-
-const AGE_LABELS: Record<string, string> = {
-  "0-18": "0–18",
-  "19-35": "19–35",
-  "36-50": "36–50",
-  "51-65": "51–65",
-  "65+": "65+",
-};
+function normalizeReport(raw: Demographics | null): {
+  summary: DemographicsSummary;
+  category_breakdown: BreakdownRow[];
+  gender_breakdown: BreakdownRow[];
+  age_breakdown: BreakdownRow[];
+  blood_group_breakdown: BreakdownRow[];
+} {
+  if (!raw) {
+    return {
+      summary: emptySummary,
+      category_breakdown: [],
+      gender_breakdown: [],
+      age_breakdown: [],
+      blood_group_breakdown: [],
+    };
+  }
+  const total = raw.summary?.total_patients ?? raw.total_patients ?? 0;
+  return {
+    summary: {
+      total_patients: total,
+      total_employees: raw.summary?.total_employees ?? 0,
+      total_non_employees: raw.summary?.total_non_employees ?? 0,
+      total_male: raw.summary?.total_male ?? 0,
+      total_female: raw.summary?.total_female ?? 0,
+      blood_group_recorded: raw.summary?.blood_group_recorded ?? 0,
+    },
+    category_breakdown: raw.category_breakdown ?? [],
+    gender_breakdown: raw.gender_breakdown ?? [],
+    age_breakdown: raw.age_breakdown ?? [],
+    blood_group_breakdown: raw.blood_group_breakdown ?? [],
+  };
+}
 
 export default function PatientDemographicsReport() {
-  const [data, setData] = useState<Demographics | null>(null);
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    periodLabel,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    years,
+  } = useMrReportPeriod("all");
+
+  const [report, setReport] = useState<ReturnType<typeof normalizeReport> | null>(null);
+  const [cohortMode, setCohortMode] = useState<Demographics["cohort_mode"]>("active_register");
   const [isLoading, setIsLoading] = useState(true);
 
+  const cohortDescription =
+    cohortMode === "registered_in_period"
+      ? `New registrations in ${periodLabel}`
+      : `Full active register — ${periodLabel}`;
+
   const fetchReport = async () => {
+    const params = buildQuery();
+    if (!params) {
+      toast.error("Please select a valid date range");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const response = await apiFetch<Demographics>("/reports/patient-demographics/");
-      setData(response);
-    } catch (error: any) {
+      const response = await apiFetch<Demographics>(
+        `/reports/patient-demographics/?${params.toString()}`
+      );
+      setReport(normalizeReport(response));
+      setCohortMode(response.cohort_mode ?? "active_register");
+    } catch (error: unknown) {
       console.error("Error fetching patient demographics:", error);
-      toast.error(error.message || "Failed to load patient demographics");
-      setData(null);
+      toast.error(error instanceof Error ? error.message : "Failed to load patient demographics");
+      setReport(null);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchReport();
-  }, []);
+    if (canFetch) void fetchReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, startDate, endDate, viewMode]);
 
-  const exportToCSV = () => {
-    if (!data) {
-      toast.error("No data to export");
-      return;
-    }
-    const lines: string[] = [];
-    lines.push("Section,Key,Count");
-    lines.push(`Summary,Total patients,${data.total_patients}`);
-    Object.entries(data.by_category || {}).forEach(([k, v]) => {
-      lines.push(`Category,${CATEGORY_LABELS[k] || k},${v}`);
-    });
-    Object.entries(data.by_gender || {}).forEach(([k, v]) => {
-      lines.push(`Gender,${GENDER_LABELS[k] || k},${v}`);
-    });
-    Object.entries(data.by_age_group || {}).forEach(([k, v]) => {
-      lines.push(`Age Group,${AGE_LABELS[k] || k},${v}`);
-    });
-    Object.entries(data.by_blood_group || {}).forEach(([k, v]) => {
-      lines.push(`Blood Group,${k || "Unknown"},${v}`);
-    });
-
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `patient_demographics_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
-  };
+  const summary = report?.summary ?? emptySummary;
+  const hasData = (summary.total_patients ?? 0) > 0;
 
   return (
     <DashboardLayout>
@@ -117,25 +165,51 @@ export default function PatientDemographicsReport() {
               <Users className="h-8 w-8 text-blue-500" />
               Patient Demographics
             </h1>
-            <p className="text-muted-foreground mt-1">
-              Active patient register distribution by category, gender, age, and blood group
-            </p>
+            <p className="text-muted-foreground mt-1">{cohortDescription}</p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={!data}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={!data}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/patient-demographics/"
+              buildQuery={() => buildQuery()}
+              filenameBase={`patient_demographics_${filenameSuffix}`}
+              disabled={!hasData}
+            />
           </div>
         </div>
+
+        <Card className="print:hidden">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Filters
+            </CardTitle>
+            <CardDescription>
+              All Time shows every active patient. Monthly or custom ranges show patients registered
+              in that period.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {isLoading ? (
           <Card>
@@ -144,45 +218,101 @@ export default function PatientDemographicsReport() {
               <p className="text-muted-foreground">Loading report data...</p>
             </CardContent>
           </Card>
-        ) : data ? (
+        ) : hasData && report ? (
           <>
-            <Card className="border-l-4 border-l-blue-500">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Total active patients</p>
-                    <p className="text-3xl sm:text-4xl font-bold">{data.total_patients.toLocaleString()}</p>
-                  </div>
-                  <Users className="h-12 w-12 text-blue-500 opacity-50" />
-                </div>
-              </CardContent>
-            </Card>
+            <div className="grid gap-4 md:grid-cols-4">
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Active patients
+                  </p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">
+                    {summary.total_patients.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {cohortMode === "registered_in_period"
+                      ? "Registered in selected period"
+                      : "All active patients"}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-indigo-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Employees</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">
+                    {summary.total_employees.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total_patients > 0
+                      ? `${((summary.total_employees / summary.total_patients) * 100).toFixed(1)}%`
+                      : "0%"}{" "}
+                    of register
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-cyan-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Male</p>
+                  <p className="text-2xl sm:text-3xl font-bold">
+                    {summary.total_male.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total_patients > 0
+                      ? `${((summary.total_male / summary.total_patients) * 100).toFixed(1)}%`
+                      : "0%"}{" "}
+                    of register
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-pink-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Female</p>
+                  <p className="text-2xl sm:text-3xl font-bold">
+                    {summary.total_female.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total_patients > 0
+                      ? `${((summary.total_female / summary.total_patients) * 100).toFixed(1)}%`
+                      : "0%"}{" "}
+                    of register
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">By category</CardTitle>
-                  <CardDescription>Patient register mix</CardDescription>
+                  <CardDescription>MR category mix (officers, staff, dependents, …)</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
+                        <th className="text-left p-2 font-medium text-muted-foreground">S/N</th>
                         <th className="text-left p-2 font-medium text-muted-foreground">Category</th>
                         <th className="text-right p-2 font-medium text-muted-foreground">Count</th>
                         <th className="text-right p-2 font-medium text-muted-foreground">%</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(data.by_category || {}).map(([k, v]) => (
-                        <tr key={k} className="border-b border-border">
-                          <td className="p-2">{CATEGORY_LABELS[k] || k}</td>
-                          <td className="p-2 text-right">{v.toLocaleString()}</td>
-                          <td className="p-2 text-right">
-                            {data.total_patients > 0 ? ((v / data.total_patients) * 100).toFixed(1) : "0.0"}%
-                          </td>
+                      {report.category_breakdown.map((row) => (
+                        <tr key={row.sn ?? row.category} className="border-b border-border">
+                          <td className="p-2">{row.sn}</td>
+                          <td className="p-2">{row.category}</td>
+                          <td className="p-2 text-right">{row.count.toLocaleString()}</td>
+                          <td className="p-2 text-right">{(row.percentage ?? 0).toFixed(1)}%</td>
                         </tr>
                       ))}
+                      <tr className="border-t-2 border-border bg-muted/50 font-bold">
+                        <td colSpan={2} className="p-2">
+                          Total
+                        </td>
+                        <td className="p-2 text-right">{summary.total_patients.toLocaleString()}</td>
+                        <td className="p-2 text-right">100.0%</td>
+                      </tr>
                     </tbody>
                   </table>
                 </CardContent>
@@ -203,15 +333,18 @@ export default function PatientDemographicsReport() {
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(data.by_gender || {}).map(([k, v]) => (
-                        <tr key={k} className="border-b border-border">
-                          <td className="p-2">{GENDER_LABELS[k] || k}</td>
-                          <td className="p-2 text-right">{v.toLocaleString()}</td>
-                          <td className="p-2 text-right">
-                            {data.total_patients > 0 ? ((v / data.total_patients) * 100).toFixed(1) : "0.0"}%
-                          </td>
+                      {report.gender_breakdown.map((row) => (
+                        <tr key={row.key ?? row.label} className="border-b border-border">
+                          <td className="p-2">{row.label}</td>
+                          <td className="p-2 text-right">{row.count.toLocaleString()}</td>
+                          <td className="p-2 text-right">{(row.percentage ?? 0).toFixed(1)}%</td>
                         </tr>
                       ))}
+                      <tr className="border-t-2 border-border bg-muted/50 font-bold">
+                        <td className="p-2">Total</td>
+                        <td className="p-2 text-right">{summary.total_patients.toLocaleString()}</td>
+                        <td className="p-2 text-right">100.0%</td>
+                      </tr>
                     </tbody>
                   </table>
                 </CardContent>
@@ -220,7 +353,7 @@ export default function PatientDemographicsReport() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">By age group</CardTitle>
-                  <CardDescription>Age bands (years)</CardDescription>
+                  <CardDescription>Age bands in years (from date of birth)</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <table className="w-full text-sm">
@@ -232,15 +365,18 @@ export default function PatientDemographicsReport() {
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(data.by_age_group || {}).map(([k, v]) => (
-                        <tr key={k} className="border-b border-border">
-                          <td className="p-2">{AGE_LABELS[k] || k}</td>
-                          <td className="p-2 text-right">{v.toLocaleString()}</td>
-                          <td className="p-2 text-right">
-                            {data.total_patients > 0 ? ((v / data.total_patients) * 100).toFixed(1) : "0.0"}%
-                          </td>
+                      {report.age_breakdown.map((row) => (
+                        <tr key={row.key ?? row.label} className="border-b border-border">
+                          <td className="p-2">{row.label}</td>
+                          <td className="p-2 text-right">{row.count.toLocaleString()}</td>
+                          <td className="p-2 text-right">{(row.percentage ?? 0).toFixed(1)}%</td>
                         </tr>
                       ))}
+                      <tr className="border-t-2 border-border bg-muted/50 font-bold">
+                        <td className="p-2">Total</td>
+                        <td className="p-2 text-right">{summary.total_patients.toLocaleString()}</td>
+                        <td className="p-2 text-right">100.0%</td>
+                      </tr>
                     </tbody>
                   </table>
                 </CardContent>
@@ -248,8 +384,13 @@ export default function PatientDemographicsReport() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">By blood group</CardTitle>
-                  <CardDescription>Recorded blood groups</CardDescription>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Droplets className="h-4 w-4" />
+                    By blood group
+                  </CardTitle>
+                  <CardDescription>
+                    Recorded blood groups ({summary.blood_group_recorded.toLocaleString()} on file)
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <table className="w-full text-sm">
@@ -257,15 +398,22 @@ export default function PatientDemographicsReport() {
                       <tr className="border-b border-border">
                         <th className="text-left p-2 font-medium text-muted-foreground">Blood group</th>
                         <th className="text-right p-2 font-medium text-muted-foreground">Count</th>
+                        <th className="text-right p-2 font-medium text-muted-foreground">%</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(data.by_blood_group || {}).map(([k, v]) => (
-                        <tr key={k || "unknown"} className="border-b border-border">
-                          <td className="p-2">{k || "Not recorded"}</td>
-                          <td className="p-2 text-right">{v.toLocaleString()}</td>
+                      {report.blood_group_breakdown.map((row) => (
+                        <tr key={row.label} className="border-b border-border">
+                          <td className="p-2">{row.label}</td>
+                          <td className="p-2 text-right">{row.count.toLocaleString()}</td>
+                          <td className="p-2 text-right">{(row.percentage ?? 0).toFixed(1)}%</td>
                         </tr>
                       ))}
+                      <tr className="border-t-2 border-border bg-muted/50 font-bold">
+                        <td className="p-2">Total</td>
+                        <td className="p-2 text-right">{summary.total_patients.toLocaleString()}</td>
+                        <td className="p-2 text-right">100.0%</td>
+                      </tr>
                     </tbody>
                   </table>
                 </CardContent>

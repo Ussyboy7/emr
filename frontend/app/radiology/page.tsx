@@ -16,11 +16,15 @@ import {
   AlertTriangle,
   Activity,
   ClipboardList,
-  RefreshCw,
   Notebook,
 } from "lucide-react";
 import { radiologyService, type RadiologyOrder } from "@/lib/services";
+import { PREVIEW_PAGE_SIZE } from "@/lib/pagination-constants";
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
+import {
+  DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+  useReloadOnFocus,
+} from "@/hooks/use-reload-on-focus";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { useServerToday } from "@/hooks/use-server-today";
 import { joinDisplayParts } from "@/lib/utils/clinic-utils";
@@ -66,9 +70,9 @@ export default function RadiologyPage() {
   });
   const [recentOrders, setRecentOrders] = useState<RadiologyOrder[]>([]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
+      if (!opts.silent) setLoading(true);
       const [orderStats, verificationStats, ordersRes] = await Promise.all([
         radiologyService.getOrderStats({ date: serverToday }),
         radiologyService.getVerificationStats({ date: serverToday }).catch(() => ({
@@ -77,7 +81,7 @@ export default function RadiologyPage() {
           abnormal: 0,
           critical: 0,
         })),
-        radiologyService.getOrders({ date: serverToday, page: 1, page_size: 5 }),
+        radiologyService.getOrders({ date: serverToday, page: 1, page_size: PREVIEW_PAGE_SIZE }),
       ]);
 
       setStats({
@@ -92,17 +96,21 @@ export default function RadiologyPage() {
       console.error("Failed to load radiology dashboard:", error);
       if (isAuthenticationError(error)) {
         setAuthError(error);
-      } else {
+      } else if (!opts.silent) {
         toast.error("Failed to load radiology dashboard. Please try again.");
       }
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, [serverToday]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useReloadOnFocus(() => loadData({ silent: true }), {
+    pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+  });
 
   const activeWorkCount = useMemo(
     () => stats.pending + stats.inProgress + stats.awaitingReport + stats.stat,
@@ -136,15 +144,6 @@ export default function RadiologyPage() {
                 >
                   <ClipboardList className="h-4 w-4 mr-2" />
                   Study Orders
-                </Button>
-                <Button
-                  variant="outline"
-                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => void loadData()}
-                  disabled={loading}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-                  Refresh
                 </Button>
               </div>
             </div>

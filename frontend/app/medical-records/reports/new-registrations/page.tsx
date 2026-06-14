@@ -4,24 +4,20 @@ import React, { useState, useEffect, useMemo } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import {
-  Download,
-  FileSpreadsheet,
   RefreshCw,
   ArrowLeft,
-  Printer,
   UserPlus,
   Calendar,
   TrendingUp,
   Users,
-} from "lucide-react";
-import { toast } from "sonner";
-import { apiFetch } from "@/lib/api-client";
-import Link from "next/link";
-import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
+  } from "lucide-react";
+  import { toast } from "sonner";
+  import { apiFetch } from "@/lib/api-client";
+  import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
+  import Link from "next/link";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
 
 interface DailyRow {
   date: string;
@@ -45,23 +41,34 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export default function NewRegistrationsReport() {
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<string>("monthly");
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    periodLabel,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    years,
+  } = useMrReportPeriod("all");
   const [data, setData] = useState<NewRegs | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-      if (!range) {
+      const params = buildQuery();
+      if (!params) {
         toast.error("Please select a valid date range");
         setIsLoading(false);
         return;
       }
-      const url = `/reports/new-registrations/?start_date=${range.start}&end_date=${range.end}`;
+      const url = `/reports/new-registrations/?${params.toString()}`;
       const response = await apiFetch<NewRegs>(url);
       setData(response);
     } catch (error: any) {
@@ -74,18 +81,9 @@ export default function NewRegistrationsReport() {
   };
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    if (range) fetchReport();
+    if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);
-
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
-
-  const periodLabel = useMemo(() => {
-    if (viewMode === "year") return String(year);
-    if (startDate && endDate) return `${startDate} — ${endDate}`;
-    return "selected period";
-  }, [viewMode, year, startDate, endDate]);
 
   // Group daily_data by date for table view
   const dailyTotals = useMemo(() => {
@@ -103,35 +101,6 @@ export default function NewRegistrationsReport() {
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [data]);
 
-  const exportToCSV = () => {
-    if (!data) {
-      toast.error("No data to export");
-      return;
-    }
-    const lines: string[] = [];
-    lines.push("Section,Key,Count");
-    lines.push(`Summary,Total new registrations,${data.total}`);
-    Object.entries(data.by_category || {}).forEach(([k, v]) => {
-      lines.push(`By Category,${CATEGORY_LABELS[k] || k},${v}`);
-    });
-    lines.push("");
-    lines.push("Date,Total,Employee,Retiree,Dependent,Non-NPA");
-    dailyTotals.forEach((d) => {
-      lines.push(
-        `${d.date},${d.total},${d.by_cat.employee || 0},${d.by_cat.retiree || 0},${d.by_cat.dependent || 0},${d.by_cat.nonnpa || 0}`,
-      );
-    });
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    const period = range ? `${range.start}_to_${range.end}` : "unknown";
-    a.download = `new_registrations_${period}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
-  };
 
   return (
     <DashboardLayout>
@@ -156,18 +125,12 @@ export default function NewRegistrationsReport() {
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={!data}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={!data}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/new-registrations/"
+              buildQuery={() => buildQuery()}
+              filenameBase={`new_registrations_${filenameSuffix}`}
+              disabled={!data}
+            />
           </div>
         </div>
 
@@ -181,60 +144,23 @@ export default function NewRegistrationsReport() {
           </CardHeader>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={setViewMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
               </div>
-              {viewMode === "year" ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map((y) => (
-                        <SelectItem key={y} value={y}>
-                          {y}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : viewMode === "range" ? (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                  </div>
-                </>
-              ) : (
-                <div className="col-span-2">
-                  <Label>Period</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {viewMode === "monthly" && "This month"}
-                    {viewMode === "quarterly" && "This quarter"}
-                    {viewMode === "half-yearly" && "This half-year"}
-                    {viewMode === "annually" && "This year"}
-                  </p>
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>

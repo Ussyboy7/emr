@@ -1,5 +1,7 @@
 'use client';
+import { CATALOG_SEARCH_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
+import { formatDisplayDateTime } from '@/lib/dates';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -290,11 +292,11 @@ export function WardDoctorOrdersSection({
       // doctor sees everything they've ordered for this admission.
       const [nursingRes, rxRes] = await Promise.all([
         apiFetch<{ results: WardNursingOrderRow[] }>(
-          `/nursing/orders/?admission=${admission.id}&ordering=-ordered_at&page_size=200`,
+          `/nursing/orders/?admission=${admission.id}&ordering=-ordered_at&page_size=${MAX_LIST_PAGE_SIZE}`,
         ),
         admission.visit
           ? apiFetch<{ results: any[] }>(
-              `/v1/pharmacy/prescriptions/?visit=${admission.visit}&page_size=200&ordering=-prescribed_at`,
+              `/v1/pharmacy/prescriptions/?visit=${admission.visit}&page_size=${MAX_LIST_PAGE_SIZE}&ordering=-prescribed_at`,
             ).catch(() => ({ results: [] as any[] }))
           : Promise.resolve({ results: [] as any[] }),
       ]);
@@ -427,7 +429,7 @@ export function WardDoctorOrdersSection({
     const t = setTimeout(async () => {
       try {
         setMedSearchLoading(true);
-        const res = await pharmacyService.getGenericsForPrescription({ search: term, page_size: 30 });
+        const res = await pharmacyService.getGenericsForPrescription({ search: term, page_size: CATALOG_SEARCH_PAGE_SIZE });
         if (reqId === medSearchReqRef.current) {
           setMedGenerics(res.results || []);
         }
@@ -814,14 +816,8 @@ export function WardDoctorOrdersSection({
           <p className="text-[11px] text-muted-foreground">
             {o.ordered_by_name || '—'}
             {' · '}
-            <span title={orderedAt.toLocaleString('en-GB')}>
-              {orderedAt.toLocaleString('en-GB', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
+            <span title={formatDisplayDateTime(orderedAt)}>
+              {formatDisplayDateTime(orderedAt)}
               {rel && <span className="text-muted-foreground/70"> · {rel}</span>}
             </span>
           </p>

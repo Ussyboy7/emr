@@ -1,7 +1,13 @@
 """
 Custom authentication views with audit logging.
 """
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenBlacklistView
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiResponse
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import (
+    TokenBlacklistView,
+    TokenObtainPairView,
+    TokenRefreshView,
+)
 from rest_framework import status
 from audit.services import AuditService
 
@@ -26,7 +32,22 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     """Custom token obtain view with audit logging."""
 
     serializer_class = EmailOrUsernameTokenObtainPairSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_login"
 
+    @extend_schema(
+        summary="Obtain JWT token pair",
+        description=(
+            "Authenticate with username or email and password. "
+            "Returns access and refresh tokens; also updates last login and audit log."
+        ),
+        tags=["Authentication"],
+        responses={
+            200: OpenApiResponse(description="Token pair issued"),
+            401: OpenApiResponse(description="Invalid credentials"),
+            429: OpenApiResponse(description="Rate limit exceeded"),
+        },
+    )
     def post(self, request, *args, **kwargs):
         raw_login = (request.data.get("username") or "")
         response = super().post(request, *args, **kwargs)
@@ -94,6 +115,27 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         return response
 
 
+@extend_schema_view(
+    post=extend_schema(
+        summary="Refresh access token",
+        tags=["Authentication"],
+        responses={200: OpenApiResponse(description="New access token")},
+    )
+)
+class CustomTokenRefreshView(TokenRefreshView):
+    """Token refresh with scoped rate limiting."""
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_refresh"
+
+
+@extend_schema_view(
+    post=extend_schema(
+        summary="Logout (blacklist refresh token)",
+        tags=["Authentication"],
+        responses={200: OpenApiResponse(description="Token blacklisted")},
+    )
+)
 class CustomTokenBlacklistView(TokenBlacklistView):
     """Custom token blacklist view with audit logging for logout."""
     

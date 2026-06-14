@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getServerToday, peekServerNow, peekServerTimezone } from "@/lib/utils/serverTime";
-import { formatLocalYmd } from "@/lib/laboratory/constants";
+import { peekServerTodayApi, todayApiDateString } from "@/lib/dates";
 
 /**
  * Returns the server's current date (`YYYY-MM-DD` in the server timezone),
@@ -19,7 +19,7 @@ export function useServerToday(): string {
     if (peeked && tz) {
       return peeked.toLocaleDateString("en-CA", { timeZone: tz });
     }
-    return formatLocalYmd(new Date());
+    return todayApiDateString();
   });
 
   useEffect(() => {

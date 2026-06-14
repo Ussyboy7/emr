@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,11 +13,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api-client';
-import { roomService, patientService } from '@/lib/services';
+import { roomService, consultationService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { getServerToday } from '@/lib/utils/serverTime';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
+import {
+  compareConsultationQueueEntries,
+  getVisitTypeBadgeClass,
+  getVisitTypeLabel,
+  isEmergencyVisitType,
+  normalizeVisitTypeKey,
+} from '@/lib/utils/priority';
 import { 
   DoorOpen, Search, Users, Clock, CheckCircle2, AlertTriangle,
   ArrowRight, Stethoscope, Activity, Loader2, Eye,
@@ -29,7 +37,6 @@ interface QueuedPatient {
   name: string;
   patientId: string;
   personalNumber: string;
-  priority: 'Emergency' | 'High' | 'Medium' | 'Low';
   waitTime: number;
   sentAt: string;
   sentBy: string;
@@ -66,7 +73,7 @@ export default function RoomQueuePage() {
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [roomFilter, setRoomFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [visitTypeFilter, setVisitTypeFilter] = useState('all');
   
   // Load rooms and queue from API
   useEffect(() => {
@@ -76,15 +83,9 @@ export default function RoomQueuePage() {
         setError(null);
         
         // Load rooms, sessions, today, and queue in parallel
-        const [roomsResult, sessionsResult, today, queueResult] = await Promise.all([
-          roomService.getRooms({ page_size: 200 }),
-          (async () => {
-            try {
-              return await apiFetch<{ results: any[] }>('/consultation/sessions/?status=active&page_size=200');
-            } catch {
-              return { results: [] };
-            }
-          })(),
+        const [roomsResult, sessionsResult, today, queueResult, todayCountByRoom] = await Promise.all([
+          roomService.getRooms({ page_size: MAX_LIST_PAGE_SIZE }),
+          consultationService.getSessions({ status: 'active', page_size: MAX_LIST_PAGE_SIZE }).catch(() => ({ results: [], count: 0 })),
           (async () => {
             try {
               return await getServerToday();
@@ -92,23 +93,16 @@ export default function RoomQueuePage() {
               return formatLocalYmd(new Date());
             }
           })(),
+          consultationService.getQueue({ is_active: true, page_size: MAX_LIST_PAGE_SIZE }).catch(() => ({ results: [], count: 0 })),
           (async () => {
             try {
-              return await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
+              const day = await getServerToday();
+              return await consultationService.getRoomDaySessionCounts(day);
             } catch {
-              return { results: [] };
+              return {} as Record<string, number>;
             }
           })(),
         ]);
-        
-        // Load today's sessions (depends on `today`)
-        let todaySessions: any[] = [];
-        try {
-          const todaySessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?started_at__date=${today}&page_size=1000`);
-          todaySessions = todaySessionsResult.results || [];
-        } catch (todayErr) {
-          console.warn('Could not load today sessions:', todayErr);
-        }
         
         const activeSessions = sessionsResult.results || [];
         const queueItems = queueResult.results || [];
@@ -123,12 +117,8 @@ export default function RoomQueuePage() {
           sessionsByRoom[roomId].push(session);
         });
         
-        // Count today's sessions per room
-        const todayCountByRoom: Record<string, number> = {};
-        todaySessions.forEach((session: any) => {
-          const roomId = String(session.room);
-          todayCountByRoom[roomId] = (todayCountByRoom[roomId] || 0) + 1;
-        });
+        // Count today's sessions per room (aggregate from backend)
+        const todayCountByRoomResolved = todayCountByRoom;
         
         const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
           const roomId = String(room.id);
@@ -146,7 +136,6 @@ export default function RoomQueuePage() {
               name: activeSession.patient_name || '',
               patientId: String(activeSession.patient),
               personalNumber: '',
-              priority: 'Medium' as const,
               waitTime: 0,
               sentAt: activeSession.started_at,
               sentBy: 'System',
@@ -164,98 +153,50 @@ export default function RoomQueuePage() {
         // Create a map of rooms by ID for quick lookup
         const roomsMap = new Map(roomsResult.results.map((room: any) => [String(room.id), room]));
         
-        // Transform queue items to patients
-        const transformedPatients = await Promise.all(queueItems.map(async (item: any) => {
+        // Transform queue items using embedded patient/visit/vitals from queue serializer
+        const transformedPatients = queueItems.map((item: any) => {
           try {
-            // Extract patient ID from queue item
-            const patientId = typeof item.patient === 'number' ? item.patient : parseInt(String(item.patient || ''));
-            
-            if (isNaN(patientId) || patientId <= 0) {
-              console.warn(`Invalid patient ID in queue item ${item.id}:`, item.patient);
-              return null;
-            }
-            
-            // Fetch patient details
-            let patient;
-            try {
-              patient = await patientService.getPatient(patientId);
-            } catch (patientErr) {
-              console.error(`Error fetching patient ${patientId} for queue item ${item.id}:`, patientErr);
-              // Continue with basic info from queue item
-              patient = null;
-            }
-            
             const queuedAt = new Date(item.queued_at);
             const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
-            
-            // Map backend priority (integer) to frontend priority
-            // Backend uses: 0 = highest, 1 = high, 2 = medium, 3 = low
-            const getPriority = (priorityNum: number): QueuedPatient['priority'] => {
-              if (priorityNum === 0) return 'Emergency';
-              if (priorityNum === 1) return 'High';
-              if (priorityNum === 2) return 'Medium';
-              return 'Low';
-            };
-            
-            // Get visit type and vitals if available
-            let visitType = 'Consultation';
+            const details = item.patient_details;
+            const latestVitals = item.latest_vitals;
+            const visitType = item.visit_type || 'consultation';
+
             let vitals: QueuedPatient['vitals'] = undefined;
-            if (item.visit) {
-              try {
-                const visitId = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit));
-                const visit = await apiFetch(`/visits/${visitId}/`) as {
-                  visit_type?: string;
-                };
-                visitType = visit.visit_type || 'Consultation';
-                
-                // Fetch vitals for this visit
-                try {
-                  const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`);
-                  const latestVitals = vitalsResult.results?.[0];
-                  if (latestVitals) {
-                    vitals = {
-                      bp: latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
-                        ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}` 
-                        : 'N/A',
-                      pulse: latestVitals.heart_rate ? String(latestVitals.heart_rate) : 'N/A',
-                      temp: latestVitals.temperature ? `${latestVitals.temperature}°C` : 'N/A',
-                    };
-                  }
-                } catch (vitalsErr) {
-                  console.warn(`Could not load vitals for visit ${visitId}:`, vitalsErr);
-                }
-              } catch (visitErr) {
-                console.warn(`Could not load visit ${item.visit} for queue item ${item.id}:`, visitErr);
-              }
+            if (latestVitals) {
+              vitals = {
+                bp:
+                  latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
+                    ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}`
+                    : 'N/A',
+                pulse: latestVitals.heart_rate ? String(latestVitals.heart_rate) : 'N/A',
+                temp: latestVitals.temperature ? `${latestVitals.temperature}°C` : 'N/A',
+              };
             }
-            
-            // Get room specialty for clinic
+
             const room = roomsMap.get(String(item.room));
             const clinic = room?.specialty || '';
-            
+
             return {
               id: String(item.id),
-              name: patient 
-                ? (patient.full_name ?? '')
-                : (item.patient_name ?? ''),
-              patientId: patient?.patient_id || '',
-              personalNumber: patient?.personal_number || '',
-              priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),
+              name: item.patient_name ?? details?.full_name ?? '',
+              patientId: item.patient_id || details?.patient_id || '',
+              personalNumber: details?.personal_number || '',
               waitTime: waitTime > 0 ? waitTime : 0,
               sentAt: item.queued_at,
               sentBy: 'Nursing',
               clinic,
               visitType,
               roomId: String(item.room),
-              age: patient?.age,
-              gender: patient?.gender,
+              age: item.patient_age ?? details?.age,
+              gender: item.patient_gender || details?.gender,
               vitals,
             } as QueuedPatient;
           } catch (err) {
             console.error(`Error transforming queue item ${item.id}:`, err);
             return null;
           }
-        }));
+        });
         
         const validPatients = transformedPatients.filter((p): p is QueuedPatient => p !== null);
         setPatients(validPatients);
@@ -289,22 +230,26 @@ export default function RoomQueuePage() {
                            p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            p.personalNumber.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesRoom = roomFilter === 'all' || p.roomId === roomFilter;
-      const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
-      return matchesSearch && matchesRoom && matchesPriority;
+      const matchesVisitType =
+        visitTypeFilter === 'all' || normalizeVisitTypeKey(p.visitType) === visitTypeFilter;
+      return matchesSearch && matchesRoom && matchesVisitType;
     });
-  }, [patients, searchQuery, roomFilter, priorityFilter]);
+  }, [patients, searchQuery, roomFilter, visitTypeFilter]);
 
   // Group patients by room
   const patientsByRoom = useMemo(() => {
     const grouped: Record<string, QueuedPatient[]> = {};
     rooms.forEach(room => {
       grouped[room.id] = filteredPatients.filter(p => p.roomId === room.id)
-        .sort((a, b) => {
-          const priorityOrder = { 'Emergency': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
-          const prioDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-          if (prioDiff !== 0) return prioDiff;
-          return a.waitTime - b.waitTime;
-        });
+        .sort((a, b) =>
+          compareConsultationQueueEntries({
+            queued_at: a.sentAt,
+            visit_type: a.visitType,
+          }, {
+            queued_at: b.sentAt,
+            visit_type: b.visitType,
+          })
+        );
     });
     return grouped;
   }, [filteredPatients, rooms]);
@@ -312,7 +257,7 @@ export default function RoomQueuePage() {
   // Stats
   const stats = useMemo(() => ({
     totalInQueues: patients.length,
-    emergencyCount: patients.filter(p => p.priority === 'Emergency').length,
+    emergencyCount: patients.filter(p => isEmergencyVisitType(p.visitType)).length,
     avgWaitTime: patients.length > 0 ? Math.round(patients.reduce((sum, p) => sum + p.waitTime, 0) / patients.length) : 0,
     roomsWithPatients: new Set(patients.map(p => p.roomId)).size,
   }), [patients]);
@@ -432,16 +377,6 @@ export default function RoomQueuePage() {
 
 
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'Emergency': return 'bg-rose-500 text-white border-rose-500';
-      case 'High': return 'bg-amber-500 text-white border-amber-500';
-      case 'Medium': return 'bg-blue-500 text-white border-blue-500';
-      case 'Low': return 'bg-emerald-500 text-white border-emerald-500';
-      default: return 'bg-gray-500 text-white';
-    }
-  };
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'available': return 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
@@ -544,14 +479,14 @@ export default function RoomQueuePage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                <Select value={visitTypeFilter} onValueChange={setVisitTypeFilter}>
+                  <SelectTrigger className="w-[170px]"><SelectValue placeholder="Visit type" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Priorities</SelectItem>
-                    <SelectItem value="Emergency">Emergency</SelectItem>
-                    <SelectItem value="High">High</SelectItem>
-                    <SelectItem value="Medium">Medium</SelectItem>
-                    <SelectItem value="Low">Low</SelectItem>
+                    <SelectItem value="all">All visit types</SelectItem>
+                    <SelectItem value="emergency">Emergency</SelectItem>
+                    <SelectItem value="follow_up">Follow-up</SelectItem>
+                    <SelectItem value="consultation">Consultation</SelectItem>
+                    <SelectItem value="routine">Routine checkup</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -607,15 +542,15 @@ export default function RoomQueuePage() {
                         <div 
                           key={patient.id} 
                           className={`p-3 rounded-lg border transition-colors hover:bg-muted/50 ${
-                            patient.priority === 'Emergency' ? 'border-rose-500/50 bg-rose-500/5' : 'border-border'
+                            isEmergencyVisitType(patient.visitType) ? 'border-rose-500/50 bg-rose-500/5' : 'border-border'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-medium text-sm truncate">{patient.name}</span>
-                                <Badge className={`${getPriorityColor(patient.priority)} text-xs`}>
-                                  {patient.priority}
+                                <Badge variant="outline" className={`text-xs ${getVisitTypeBadgeClass(patient.visitType)}`}>
+                                  {getVisitTypeLabel(patient.visitType)}
                                 </Badge>
                               </div>
                               <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
@@ -737,7 +672,9 @@ export default function RoomQueuePage() {
                     <h3 className="font-semibold text-lg">{selectedPatient.name}</h3>
                     <p className="text-sm text-muted-foreground">{selectedPatient.age}y {selectedPatient.gender} • {selectedPatient.clinic}</p>
                   </div>
-                  <Badge className={getPriorityColor(selectedPatient.priority)}>{selectedPatient.priority}</Badge>
+                  <Badge variant="outline" className={getVisitTypeBadgeClass(selectedPatient.visitType)}>
+                    {getVisitTypeLabel(selectedPatient.visitType)}
+                  </Badge>
                 </div>
 
                 {/* Visit Info */}

@@ -1,196 +1,229 @@
 'use client';
 
+import { Eye, FileText, Stethoscope, ClipboardList } from 'lucide-react';
 import type { EyeSession } from '@/lib/services/eye-care-service';
 import {
   diagnosticAttachmentsForCategory,
   examinationRows,
   visualAcuityRows,
 } from '@/lib/eyecare/eye-session-helpers';
+import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 
 type Props = {
   reportSession: EyeSession;
 };
 
+function NoteField({ label, value }: { label: string; value: string }) {
+  if (!value || value === '—') return null;
+  return (
+    <div>
+      <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+      <p className="p-3 bg-muted/50 rounded-lg text-sm whitespace-pre-wrap">{value}</p>
+    </div>
+  );
+}
+
 /**
- * Read-only SOAP-style eye session report (same content as Orders → Session Report).
+ * Clinical body of the eye session report (SOAP). Shell/header lives in EyeSessionReportDialog.
  */
 export function EyeSessionReportView({ reportSession }: Props) {
+  const subjective = reportSession.soap_note?.subjective;
+  const objective = reportSession.soap_note?.objective;
+  const assessment = reportSession.soap_note?.assessment?.diagnosis || '';
+  const plan = reportSession.soap_note?.plan;
+
   return (
     <div className="space-y-6">
-      <div className="border-b pb-4">
-        <div className="grid grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
-            <div className="space-y-1">
-              <p><span className="font-medium">Name:</span> {reportSession.order_details?.patient_name || reportSession.patient_name || 'N/A'}</p>
-              <p><span className="font-medium">ID:</span> {reportSession.order_details?.patient_id || reportSession.patient_id || 'N/A'}</p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
-            <div className="space-y-1">
-              <p><span className="font-medium">Session:</span> {reportSession.session_number ?? 'N/A'}</p>
-              <p><span className="font-medium">Location:</span> {reportSession.order_details?.location_clinic_name || 'N/A'}</p>
-              {reportSession.scheduled_at && (
-                <p><span className="font-medium">Scheduled:</span> {new Date(reportSession.scheduled_at).toLocaleString()}</p>
-              )}
-              {reportSession.completed_at && (
-                <p><span className="font-medium">Completed:</span> {new Date(reportSession.completed_at).toLocaleString()}</p>
-              )}
-            </div>
-          </div>
-        </div>
-        {reportSession.order_details?.diagnosis && (
-          <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-            <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Diagnosis</p>
-            <p className="text-sm mt-1">{reportSession.order_details.diagnosis}</p>
-          </div>
-        )}
+      <div className="space-y-4">
+        <h3 className="font-semibold flex items-center gap-2 text-amber-600 dark:text-amber-400">
+          <FileText className="h-4 w-4" />
+          SUBJECTIVE
+        </h3>
+        <NoteField label="Chief Complaint" value={subjective?.chiefComplaint || ''} />
+        <NoteField label="Past Ocular History" value={subjective?.ocularHistory || ''} />
+        <NoteField label="Past Medical History" value={subjective?.medicalHistory || ''} />
+        <NoteField label="Drug History" value={subjective?.drugHistory || ''} />
+        <NoteField label="Allergies" value={subjective?.allergyHistory || ''} />
+        <NoteField label="Social History" value={subjective?.socialHistory || ''} />
+        <NoteField label="Family Ocular History" value={subjective?.familyOcularHistory || ''} />
+        <NoteField label="Family Medical History" value={subjective?.familyMedicalHistory || ''} />
       </div>
 
-      <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">SUBJECTIVE (S)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">CC:</span> {reportSession.soap_note?.subjective?.chiefComplaint || reportSession.order_details?.chief_complaint || 'Not documented'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">POHx:</span> {reportSession.soap_note?.subjective?.ocularHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">PMHx:</span> {reportSession.soap_note?.subjective?.medicalHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Drug History:</span> {reportSession.soap_note?.subjective?.drugHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Allergies:</span> {reportSession.soap_note?.subjective?.allergyHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Social History:</span> {reportSession.soap_note?.subjective?.socialHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">FOHx:</span> {reportSession.soap_note?.subjective?.familyOcularHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">FMHx:</span> {reportSession.soap_note?.subjective?.familyMedicalHistory || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Special Instructions:</span> {reportSession.order_details?.special_instructions || '—'}</p>
-        </div>
-      </div>
+      <div className="space-y-4">
+        <h3 className="font-semibold flex items-center gap-2 text-cyan-600 dark:text-cyan-400">
+          <Eye className="h-4 w-4" />
+          OBJECTIVE
+        </h3>
 
-      <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b pb-2">OBJECTIVE (O)</h3>
-        <div className="space-y-4 text-sm">
-          <div className="overflow-x-auto rounded-md border">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-2">Visual Acuity</p>
+          <div className="border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50">
+              <thead className="bg-cyan-50 dark:bg-cyan-950/30">
                 <tr>
-                  <th className="p-2 text-left">Visual Acuity</th>
-                  <th className="p-2 text-left">OD</th>
-                  <th className="p-2 text-left">OS</th>
-                  <th className="p-2 text-left">OU</th>
+                  <th className="text-left p-3 font-medium">Test</th>
+                  <th className="text-left p-3 font-medium">OD</th>
+                  <th className="text-left p-3 font-medium">OS</th>
+                  <th className="text-left p-3 font-medium">OU</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y">
                 {visualAcuityRows.map((row) => (
-                  <tr key={row.key} className="border-t">
-                    <td className="p-2 font-medium">{row.label}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective?.visualAcuity?.[row.key]?.od || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_od : '') || '—'}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective?.visualAcuity?.[row.key]?.os || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_os : '') || '—'}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective?.visualAcuity?.[row.key]?.ou || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_ou : '') || '—'}</td>
+                  <tr key={row.key}>
+                    <td className="p-3 font-medium">{row.label}</td>
+                    <td className="p-3">{objective?.visualAcuity?.[row.key]?.od || '—'}</td>
+                    <td className="p-3">{objective?.visualAcuity?.[row.key]?.os || '—'}</td>
+                    <td className="p-3">{objective?.visualAcuity?.[row.key]?.ou || '—'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="overflow-x-auto rounded-md border">
+        </div>
+
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-2">Ocular Examination</p>
+          <div className="border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50">
+              <thead className="bg-cyan-50 dark:bg-cyan-950/30">
                 <tr>
-                  <th className="p-2 text-left">Structure</th>
-                  <th className="p-2 text-left">OD</th>
-                  <th className="p-2 text-left">OS</th>
+                  <th className="text-left p-3 font-medium">Structure</th>
+                  <th className="text-left p-3 font-medium">OD</th>
+                  <th className="text-left p-3 font-medium">OS</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y">
                 {examinationRows.map((row) => (
-                  <tr key={row.key} className="border-t">
-                    <td className="p-2 font-medium">{row.label}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective?.examination?.[row.key]?.od || '—'}</td>
-                    <td className="p-2">{reportSession.soap_note?.objective?.examination?.[row.key]?.os || '—'}</td>
+                  <tr key={row.key}>
+                    <td className="p-3 font-medium">{row.label}</td>
+                    <td className="p-3">{objective?.examination?.[row.key]?.od || '—'}</td>
+                    <td className="p-3">{objective?.examination?.[row.key]?.os || '—'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <p className="bg-muted/50 p-3 rounded border">
-              <span className="font-medium">IOP:</span> OD {reportSession.soap_note?.objective?.diagnostics?.iopOd || reportSession.order_details?.iop_od || '—'} | OS {reportSession.soap_note?.objective?.diagnostics?.iopOs || reportSession.order_details?.iop_os || '—'}<br />
-              <span className="font-medium">Method:</span> {reportSession.soap_note?.objective?.diagnostics?.method || '—'} | <span className="font-medium">Time:</span> {reportSession.soap_note?.objective?.diagnostics?.time || '—'}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">Intraocular Pressure</p>
+            <p className="p-3 bg-muted/50 rounded-lg text-sm">
+              OD {objective?.diagnostics?.iopOd || '—'} | OS {objective?.diagnostics?.iopOs || '—'}
+              <br />
+              Method: {objective?.diagnostics?.method || '—'} | Time:{' '}
+              {objective?.diagnostics?.time || '—'}
             </p>
-            <div className="bg-muted/50 p-3 rounded border space-y-2">
-              {([
-                ['pachymetry', 'Pachymetry', reportSession.soap_note?.objective?.diagnostics?.pachymetry],
-                ['oct', 'OCT', reportSession.soap_note?.objective?.diagnostics?.oct],
-                ['visual_field', 'Visual Field', reportSession.soap_note?.objective?.diagnostics?.visualField],
-              ] as const).map(([cat, title, noteText]) => {
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">Diagnostics</p>
+            <div className="p-3 bg-muted/50 rounded-lg text-sm space-y-1">
+              {(
+                [
+                  ['pachymetry', 'Pachymetry', objective?.diagnostics?.pachymetry],
+                  ['oct', 'OCT', objective?.diagnostics?.oct],
+                  ['visual_field', 'Visual Field', objective?.diagnostics?.visualField],
+                ] as const
+              ).map(([cat, title, noteText]) => {
                 const items = diagnosticAttachmentsForCategory(reportSession, cat);
                 return (
                   <p key={cat}>
                     <span className="font-medium">{title}:</span> {noteText || '—'}{' '}
                     {items.map((a, idx) => (
-                      <span key={a.id != null ? `id-${a.id}` : `u-${idx}`} className="inline-block mr-2">
-                        <a
-                          href={a.file}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {items.length > 1 ? `View file ${idx + 1}` : 'View file'}
-                        </a>
-                      </span>
+                      <a
+                        key={a.id != null ? `id-${a.id}` : `u-${idx}`}
+                        href={a.file}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:underline mr-2"
+                      >
+                        {items.length > 1 ? `File ${idx + 1}` : 'View file'}
+                      </a>
                     ))}
                   </p>
                 );
               })}
             </div>
           </div>
-          <div className="overflow-x-auto rounded-md border">
+        </div>
+
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-2">Refraction</p>
+          <div className="border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50">
+              <thead className="bg-cyan-50 dark:bg-cyan-950/30">
                 <tr>
-                  <th className="p-2 text-left">Refraction</th>
-                  <th className="p-2 text-left">Eye</th>
-                  <th className="p-2 text-left">Sphere</th>
-                  <th className="p-2 text-left">Cylinder</th>
-                  <th className="p-2 text-left">Axis</th>
-                  <th className="p-2 text-left">VA</th>
+                  <th className="text-left p-3 font-medium">Type</th>
+                  <th className="text-left p-3 font-medium">Eye</th>
+                  <th className="text-left p-3 font-medium">Sphere</th>
+                  <th className="text-left p-3 font-medium">Cylinder</th>
+                  <th className="text-left p-3 font-medium">Axis</th>
+                  <th className="text-left p-3 font-medium">VA</th>
                 </tr>
               </thead>
-              <tbody>
-                {[
-                  ['lensometry', 'Lensometry'],
-                  ['autorefraction', 'Autorefraction'],
-                  ['retinoscopy', 'Retinoscopy'],
-                  ['subjective', 'Subjective'],
-                ].flatMap(([group, label]) => (['od', 'os'] as const).map((eye) => (
-                  <tr key={`${group}-${eye}`} className="border-t">
-                    <td className="p-2 font-medium">{label}</td>
-                    <td className="p-2 uppercase">{eye}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.sphere || (group === 'subjective' && eye === 'od' ? reportSession.order_details?.refraction_od : '') || (group === 'subjective' && eye === 'os' ? reportSession.order_details?.refraction_os : '') || '—'}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.cylinder || '—'}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.axis || '—'}</td>
-                    <td className="p-2">{(reportSession.soap_note?.objective?.refraction as any)?.[group]?.[eye]?.va || '—'}</td>
-                  </tr>
-                )))}
+              <tbody className="divide-y">
+                {(
+                  [
+                    ['lensometry', 'Lensometry'],
+                    ['autorefraction', 'Autorefraction'],
+                    ['retinoscopy', 'Retinoscopy'],
+                    ['subjective', 'Subjective'],
+                  ] as const
+                ).flatMap(([group, label]) =>
+                  (['od', 'os'] as const).map((eye) => (
+                    <tr key={`${group}-${eye}`}>
+                      <td className="p-3 font-medium">{label}</td>
+                      <td className="p-3 uppercase">{eye}</td>
+                      <td className="p-3">
+                        {(objective?.refraction as any)?.[group]?.[eye]?.sphere || '—'}
+                      </td>
+                      <td className="p-3">
+                        {(objective?.refraction as any)?.[group]?.[eye]?.cylinder || '—'}
+                      </td>
+                      <td className="p-3">{(objective?.refraction as any)?.[group]?.[eye]?.axis || '—'}</td>
+                      <td className="p-3">{(objective?.refraction as any)?.[group]?.[eye]?.va || '—'}</td>
+                    </tr>
+                  )),
+                )}
               </tbody>
             </table>
           </div>
-          <div className="bg-muted/50 p-3 rounded border grid grid-cols-2 gap-3 text-sm">
-            <p><span className="font-medium">Near Addition (ADD):</span> {(reportSession.soap_note?.objective?.refraction as any)?.nearAddition?.add || '—'}</p>
-            <p><span className="font-medium">Near VA:</span> {(reportSession.soap_note?.objective?.refraction as any)?.nearAddition?.va || '—'}</p>
-          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <NoteField
+            label="Near Addition (ADD)"
+            value={(objective?.refraction as any)?.nearAddition?.add || ''}
+          />
+          <NoteField label="Near VA" value={(objective?.refraction as any)?.nearAddition?.va || ''} />
         </div>
       </div>
 
-      <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b pb-2">ASSESSMENT (A)</h3>
-        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.soap_note?.assessment?.diagnosis || reportSession.order_details?.diagnosis || reportSession.findings || 'Not documented'}</p>
+      {assessment ? (
+        <div className="space-y-4">
+          <h3 className="font-semibold flex items-center gap-2 text-red-600 dark:text-red-400">
+            <Stethoscope className="h-4 w-4" />
+            ASSESSMENT
+          </h3>
+          <p className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800 whitespace-pre-wrap">
+            {assessment}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="space-y-4">
+        <h3 className="font-semibold flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+          <ClipboardList className="h-4 w-4" />
+          PLAN
+        </h3>
+        <NoteField label="Optical Correction" value={plan?.opticalCorrection || ''} />
+        <NoteField label="Medications" value={plan?.medications || ''} />
+        <NoteField label="Management Plan" value={plan?.managementPlan || ''} />
+        <NoteField label="Follow-up Date" value={plan?.followUpDate || ''} />
       </div>
 
-      <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">PLAN (P)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Optical Correction:</span> {reportSession.soap_note?.plan?.opticalCorrection || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Medications:</span> {reportSession.soap_note?.plan?.medications || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Management Plan:</span> {reportSession.soap_note?.plan?.managementPlan || reportSession.order_details?.treatment_plan || reportSession.procedures_performed || '—'}</p>
-          <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Follow-up Date:</span> {reportSession.soap_note?.plan?.followUpDate || '—'}</p>
-        </div>
+      <div className="border-t pt-4 text-xs text-muted-foreground text-center">
+        {getOrganizationServicesHeader()}
       </div>
     </div>
   );

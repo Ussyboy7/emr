@@ -4,6 +4,7 @@
  * Laboratory API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { DEFAULT_CATALOG_PAGE_SIZE } from '../pagination-constants';
 
 export interface LabOrder {
   id: number;
@@ -538,7 +539,7 @@ class LabService {
   }): Promise<{ results: LabPartner[]; count: number }> {
     const query = buildQueryString({
       is_active: true,
-      page_size: 200,
+      page_size: DEFAULT_CATALOG_PAGE_SIZE,
       ...params,
     });
     const path = `/laboratory/lab-partners/${query}`;
@@ -579,9 +580,31 @@ class LabService {
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabTemplate[]; count: number }> {
-    const query = buildQueryString(params || { page_size: 100 });
+    const query = buildQueryString(params || { page_size: MAX_LIST_PAGE_SIZE });
     const response = await apiFetch<{ results: LabTemplate[]; count: number }>(`/laboratory/templates/${query}`);
     return response;
+  }
+
+  async getTemplateListStats(): Promise<{
+    total: number;
+    active: number;
+    chemistry: number;
+    hematology: number;
+    microbiology: number;
+    serology: number;
+    toxicology: number;
+  }> {
+    return apiFetch('/laboratory/templates/list-stats/');
+  }
+
+  /** Exact template lookup by code (e.g. OTHER). */
+  async resolveTemplateByCode(code: string): Promise<LabTemplate | null> {
+    try {
+      const query = buildQueryString({ code });
+      return await apiFetch<LabTemplate>(`/laboratory/templates/resolve/${query}`);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -756,38 +779,6 @@ class LabService {
   /**
    * Stats for verified results / completed tests (counts across filters)
    */
-  async getVerifiedResultsStats(params?: {
-    patient?: string;
-    overall_status?: string;
-    priority?: string;
-    clinic?: string;
-    gender?: string;
-    search?: string;
-    processing_method?: 'in_house' | 'outsourced';
-    date?: string;
-    start_date?: string;
-    end_date?: string;
-    status?: string;
-  }): Promise<{ total: number; normal: number; abnormal: number; critical: number }> {
-    // Some deployments do not expose a dedicated stats endpoint.
-    // Derive stats via lightweight filtered list calls (page_size=1) and read `count`.
-    const base = { ...(params || {}), status: params?.status || 'verified' };
-
-    const [allRes, normalRes, abnormalRes, criticalRes] = await Promise.all([
-      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: base.overall_status || undefined }),
-      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: 'normal' }),
-      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: 'abnormal' }),
-      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: 'critical' }),
-    ]);
-
-    return {
-      total: allRes.count || 0,
-      normal: normalRes.count || 0,
-      abnormal: abnormalRes.count || 0,
-      critical: criticalRes.count || 0,
-    };
-  }
-
   async getVerificationStats(params?: {
     status?: 'results_ready' | 'verified' | 'all';
     overall_status?: string;
@@ -810,10 +801,14 @@ class LabService {
   async getCompletedTests(params?: {
     patient?: string;
     status?: string;
+    results_only?: boolean;
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabTest[]; count: number }> {
-    const query = buildQueryString(params || {});
+    const query = buildQueryString({
+      ...params,
+      results_only: params?.results_only === false ? undefined : true,
+    } as Record<string, string | number | boolean | undefined>);
     return apiFetch<{ results: LabTest[]; count: number }>(`/laboratory/tests/${query}`);
   }
 
@@ -858,8 +853,11 @@ class LabService {
     return apiFetch(`/laboratory/patient-tracker/${query}`);
   }
 
-  async getAnalyticsSummary(start: string, end: string): Promise<LabAnalyticsSummary> {
-    const query = buildQueryString({ start, end });
+  async getAnalyticsSummary(period: URLSearchParams | { start: string; end: string }): Promise<LabAnalyticsSummary> {
+    const query =
+      period instanceof URLSearchParams
+        ? `?${period.toString()}`
+        : buildQueryString({ start: period.start, end: period.end });
     return apiFetch<LabAnalyticsSummary>(`/laboratory/analytics/summary/${query}`);
   }
 
@@ -872,15 +870,12 @@ class LabService {
     resultsReady: number;
     critical: number;
   }> {
-    // Get all orders and calculate stats
-    const orders = await this.getOrders({ page: 1 });
-    const allTests = orders.results.flatMap(order => order.tests || []);
-    
+    const stats = await this.getOrderStats();
     return {
-      pendingTests: allTests.filter(t => t.status === 'pending').length,
-      inProgress: allTests.filter(t => t.status === 'sample_collected' || t.status === 'processing').length,
-      resultsReady: allTests.filter(t => t.status === 'results_ready').length,
-      critical: orders.results.filter(o => o.priority === 'stat' && o.tests.some(t => t.status !== 'verified')).length,
+      pendingTests: stats.pending,
+      inProgress: stats.processing,
+      resultsReady: stats.results_ready,
+      critical: stats.stat,
     };
   }
 }

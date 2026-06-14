@@ -31,7 +31,7 @@ function consultationHeaderDescription(status: ReferralWithPatient["status"]): s
   switch (status) {
     case "draft":
     case "returned_for_correction":
-      return "Edit while draft, print the letter, issue at least one responsibility form, then send to Medical Records for acknowledgement.";
+      return "Edit while draft, print the letter, then issue a responsibility form — use “Issue form & send to Records” when ready for Medical Records.";
     case "submitted_to_records":
     case "records_review":
       return "With Medical Records for review. You can still print the letter and issue responsibility forms; workflow updates may also happen in the records queue.";
@@ -63,6 +63,7 @@ export function ConsultationReferralDetailModal(props: {
   onPrintLetter: (r: ReferralWithPatient) => void;
   onPrintForm: (r: ReferralWithPatient, form?: ResponsibilityFormIssuance) => void;
   onIssueForm: () => void;
+  onIssueFormAndSend: () => void;
   onEdit: (r: ReferralWithPatient) => void;
   onSubmitToRecords: () => void;
   blockingActiveResponsibilityForm: boolean;
@@ -85,6 +86,7 @@ export function ConsultationReferralDetailModal(props: {
     onPrintLetter,
     onPrintForm,
     onIssueForm,
+    onIssueFormAndSend,
     onEdit,
     onSubmitToRecords,
     blockingActiveResponsibilityForm,
@@ -220,21 +222,33 @@ export function ConsultationReferralDetailModal(props: {
                   />
                 </div>
               </div>
-              {canClinicianIssueForm(referral) && (
-                <ResponsibilityFormReissuePanel
-                  title={forms.length > 0 ? "Issue another responsibility form" : "Issue responsibility form"}
-                  description="Set validity dates for this issuance. Reissues add another row in the history above."
-                  formPayload={formPayload}
-                  onFormPayloadChange={onFormPayloadChange}
-                  onSubmit={onIssueForm}
-                  issuing={issuingForm}
-                  submitLabel="Issue form"
-                  submittingLabel="Saving…"
-                  blockingActiveForm={blockingActiveResponsibilityForm}
-                  overrideReason={formOverrideReason}
-                  onOverrideReasonChange={onFormOverrideReasonChange}
-                />
-              )}
+              {canClinicianIssueForm(referral) && (() => {
+                const showCombinedIssueAndSend =
+                  canSubmitToRecords(referral) && forms.length === 0;
+                return (
+                  <ResponsibilityFormReissuePanel
+                    title={forms.length > 0 ? "Issue another responsibility form" : "Issue responsibility form"}
+                    description={
+                      showCombinedIssueAndSend
+                        ? "Use the primary button to issue and send to Medical Records in one step, or issue only if you still need to print or review first."
+                        : "Set validity dates for this issuance. Reissues add another row in the history above."
+                    }
+                    formPayload={formPayload}
+                    onFormPayloadChange={onFormPayloadChange}
+                    onSubmit={showCombinedIssueAndSend ? onIssueFormAndSend : onIssueForm}
+                    issuing={issuingForm}
+                    submitLabel={
+                      showCombinedIssueAndSend ? "Issue form & send to Records" : "Issue form"
+                    }
+                    submittingLabel={showCombinedIssueAndSend ? "Sending…" : "Saving…"}
+                    secondarySubmitLabel={showCombinedIssueAndSend ? "Issue form only" : undefined}
+                    onSecondarySubmit={showCombinedIssueAndSend ? onIssueForm : undefined}
+                    blockingActiveForm={blockingActiveResponsibilityForm}
+                    overrideReason={formOverrideReason}
+                    onOverrideReasonChange={onFormOverrideReasonChange}
+                  />
+                );
+              })()}
             </div>
 
           </div>

@@ -28,6 +28,15 @@ const nextConfig = {
    * Docker note: 127.0.0.1 points to the frontend container itself, so default
    * to the backend container DNS name unless API_PROXY_TARGET is explicitly set.
    */
+  async redirects() {
+    return [
+      {
+        source: "/nursing/patient-vitals",
+        destination: "/nursing/vitals-history",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     if (process.env.NODE_ENV !== "development") {
       return [];

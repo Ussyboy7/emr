@@ -127,21 +127,16 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
 
   const fetchStats = useCallback(async () => {
     try {
-      const params: Record<string, string | number> = { page: 1, page_size: 1 };
-      if (searchQuery.trim()) params.search = searchQuery.trim();
-      if (typeFilter !== 'all') params.room_type = typeFilter;
-      if (locationFilter !== 'all') params.clinic = locationFilter;
-      const [allRes, activeRes, inactiveRes, maintRes] = await Promise.all([
-        roomService.getRooms(params),
-        roomService.getRooms({ ...params, status: 'active' }),
-        roomService.getRooms({ ...params, status: 'inactive' }),
-        roomService.getRooms({ ...params, status: 'maintenance' }),
-      ]);
+      const filters: Record<string, string | number> = {};
+      if (searchQuery.trim()) filters.search = searchQuery.trim();
+      if (typeFilter !== 'all') filters.room_type = typeFilter;
+      if (locationFilter !== 'all') filters.clinic = locationFilter;
+      const stats = await roomService.getListStats(filters);
       setStats({
-        total: allRes.count ?? 0,
-        active: activeRes.count ?? 0,
-        inactive: inactiveRes.count ?? 0,
-        maintenance: maintRes.count ?? 0,
+        total: stats.total ?? 0,
+        active: stats.active ?? 0,
+        inactive: stats.inactive ?? 0,
+        maintenance: stats.maintenance ?? 0,
       });
     } catch { /* ignore */ }
   }, [searchQuery, typeFilter, locationFilter]);
@@ -364,7 +359,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
         <Card className="p-4">
           <StandardPagination currentPage={currentPage} totalItems={totalCount} itemsPerPage={itemsPerPage}
             onPageChange={setCurrentPage} onItemsPerPageChange={s => { setItemsPerPage(s); setCurrentPage(1); }}
-            itemName="rooms" pageSizeOptions={[25, 50, 75, 100]} />
+            itemName="rooms" pageSizeOptions={[25, 50, 100]} />
         </Card>
       )}
 

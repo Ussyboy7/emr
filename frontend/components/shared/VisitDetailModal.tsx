@@ -1,4 +1,6 @@
 "use client";
+import { formatDisplayDateTime, formatDisplayTime, toApiDateFromInstant } from "@/lib/dates";
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,7 +13,7 @@ import { visitService, patientService, consultationService, pharmacyService, lab
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import {
-  Calendar, Clock, CheckCircle2, Loader2, RefreshCw, AlertTriangle,
+  Calendar, Clock, CheckCircle2, Loader2, AlertTriangle,
   ClipboardList, Heart, Stethoscope, Pill, TestTube, User, Building2, ScanLine
 } from 'lucide-react';
 
@@ -83,8 +85,8 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
             id: sessionData.id,
             visit_id: `session-${sessionData.id}`,
             patient: sessionData.patient,
-            date: sessionData.started_at?.split('T')[0] || '',
-            time: sessionData.started_at?.split('T')[1]?.substring(0, 5) || '',
+            date: toApiDateFromInstant(sessionData.started_at),
+            time: formatDisplayTime(sessionData.started_at),
             visit_type: 'Consultation',
             clinic: getVisitServiceClinicsDisplay({
               clinic: (sessionData as any).clinic_name,
@@ -109,7 +111,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
         if (!isNaN(numericId) && numericId > 0) {
           rawVisitData = await visitService.getVisit(numericId);
         } else {
-          const visitsResult = await visitService.getVisits({ search: String(idToUse), page_size: 100 });
+          const visitsResult = await visitService.getVisits({ search: String(idToUse), page_size: MAX_LIST_PAGE_SIZE });
           const foundVisit = visitsResult.results.find((v: any) => (v.visit_id || String(v.id)) === idToUse);
           if (!foundVisit) {
             throw new Error(`Visit with ID "${idToUse}" not found`);
@@ -133,14 +135,15 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       });
 
       // Fire all enrichment API calls in parallel
-      const [patientDataResult, vitalsDataResult, sessionsResult, labOrdersResult, prescriptionsResult, radiologyOrdersResult] = await Promise.all([
+      const [patientDataResult, overview, sessionsResult] = await Promise.all([
         patientService.getPatient(rawVisitData.patient).catch(() => null),
-        patientService.getPatientVitals(rawVisitData.patient).catch(() => []),
+        patientService.getClinicalOverview(rawVisitData.patient).catch(() => null),
         consultationService.getSessions({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
-        labService.getOrders({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
-        pharmacyService.getPrescriptions({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
-        radiologyService.getOrders({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
       ]);
+      const labOrdersResult = { results: overview?.lab_results?.results || [] };
+      const prescriptionsResult = { results: overview?.prescriptions?.results || [] };
+      const radiologyOrdersResult = { results: overview?.radiology_orders?.results || [] };
+      const vitalsDataResult = overview?.vitals?.results || [];
 
       // Load patient
       try {
@@ -197,7 +200,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       try {
         const vitalsData = vitalsDataResult;
         const visitVitals = vitalsData.filter((v: any) => {
-          const vitalDate = v.date || (v.recorded_at ? new Date(v.recorded_at).toISOString().split('T')[0] : '');
+          const vitalDate = v.date || (v.recorded_at ? toApiDateFromInstant(v.recorded_at) : '');
           return vitalDate === rawVisitData.date;
         });
         if (visitVitals.length > 0) {
@@ -235,7 +238,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
               return s.id === rawVisitData.id;
             } else {
               // For regular visits, match by date or visit reference
-              const sessionDate = s.started_at ? new Date(s.started_at).toISOString().split('T')[0] : '';
+              const sessionDate = s.started_at ? toApiDateFromInstant(s.started_at) : '';
               return sessionDate === rawVisitData.date || s.visit === rawVisitData.id;
             }
           });
@@ -286,7 +289,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
           visitLabOrders = labOrders.results.filter((order: any) => {
             if (isConsultationSession) {
               // For consultation sessions, match by date
-              const orderDate = order.ordered_at ? new Date(order.ordered_at).toISOString().split('T')[0] : '';
+              const orderDate = order.ordered_at ? toApiDateFromInstant(order.ordered_at) : '';
               return orderDate === rawVisitData.date;
             } else {
               // For regular visits, match by visit ID
@@ -322,7 +325,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
           visitPrescriptions = prescriptions.results.filter((rx: any) => {
             if (isConsultationSession) {
               // For consultation sessions, match by date
-              const rxDate = rx.prescribed_at ? new Date(rx.prescribed_at).toISOString().split('T')[0] : '';
+              const rxDate = rx.prescribed_at ? toApiDateFromInstant(rx.prescribed_at) : '';
               return rxDate === rawVisitData.date;
             } else {
               // For regular visits, match by visit ID
@@ -391,7 +394,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
           const visitRadiologyOrders = radiologyOrders.results.filter((order: any) => {
             if (isConsultationSession) {
               // For consultation sessions, match by date
-              const orderDate = order.ordered_at ? new Date(order.ordered_at).toISOString().split('T')[0] : '';
+              const orderDate = order.ordered_at ? toApiDateFromInstant(order.ordered_at) : '';
               return orderDate === rawVisitData.date;
             } else {
               // For regular visits, match by visit ID
@@ -545,28 +548,14 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
   const formatTime = (timestamp?: string) => {
     if (!timestamp) return '';
-    try {
-      const date = new Date(timestamp);
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '';
-    }
+    const formatted = formatDisplayTime(timestamp);
+    return formatted === '—' ? '' : formatted;
   };
 
   const formatDateTime = (timestamp?: string) => {
     if (!timestamp) return '';
-    try {
-      const date = new Date(timestamp);
-      return date.toLocaleString('en-US', { 
-        month: 'short', 
-        day: 'numeric', 
-        year: 'numeric',
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-    } catch {
-      return '';
-    }
+    const formatted = formatDisplayDateTime(timestamp);
+    return formatted === '—' ? '' : formatted;
   };
 
   const getStatusIcon = (status: string) => {
@@ -586,19 +575,12 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className={`${modalNoOverflow('lg')} p-0 flex flex-col`}>
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
-          <div className="flex items-center justify-between">
-            <div>
-              <DialogTitle className="text-2xl font-bold">
-                Visit Journey: {visit?.id || visitProp?.visitId || visitProp?.id || 'Loading...'}
-              </DialogTitle>
-              <DialogDescription className="mt-1">
-                {patient ? `${patient.name} • ${patient.id}` : 'Loading patient...'} • {visit?.date || ''} {visit?.time ? `at ${visit.time}` : ''}
-              </DialogDescription>
-            </div>
-            <Button variant="ghost" size="sm" onClick={loadVisitJourney} disabled={loading} title="Refresh">
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            </Button>
-          </div>
+          <DialogTitle className="text-2xl font-bold">
+            Visit Journey: {visit?.id || visitProp?.visitId || visitProp?.id || 'Loading...'}
+          </DialogTitle>
+          <DialogDescription className="mt-1">
+            {patient ? `${patient.name} • ${patient.id}` : 'Loading patient...'} • {visit?.date || ''} {visit?.time ? `at ${visit.time}` : ''}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">

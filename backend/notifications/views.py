@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from .models import Notification, NotificationPreferences
 from .serializers import NotificationSerializer, NotificationPreferencesSerializer
+from permissions.drf_permissions import ApiPageAccessPermission
 from .permissions import CanManageNotificationRouting
 from .routing_matrix import (
     clear_routing_matrix_override,
@@ -23,6 +24,9 @@ from .routing_matrix import (
     set_routing_matrix_override,
     ROLE_DEPARTMENT_HINTS,
 )
+from common.openapi import document_api_view, document_viewset
+from drf_spectacular.utils import extend_schema, extend_schema_view
+from common.openapi import GENERIC_JSON_REQUEST, JSON_MUTATION_RESPONSES, JSON_OBJECT_RESPONSE
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +38,9 @@ _AUTO_ARCHIVE_LOCK_KEY = "notifications:auto_archive_running"
 _AUTO_ARCHIVE_INTERVAL_SECS = 24 * 60 * 60  # 24h
 
 
+@document_viewset(tag="Notifications", resource="notifications")
 class NotificationViewSet(viewsets.ModelViewSet):
     """ViewSet for managing notifications."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = NotificationSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['notification_type', 'priority', 'status']
@@ -45,6 +48,9 @@ class NotificationViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Notification.objects.none()
+        
         """Return only current user's notifications.
 
         Side-effect: kick off the auto-archive sweep at most once every
@@ -83,6 +89,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         finally:
             cache.delete(_AUTO_ARCHIVE_LOCK_KEY)
     
+    @extend_schema(tags=["Notifications"], summary="Mark read", description="Mark notification as read.")
     @action(detail=True, methods=['post'])
     def mark_read(self, request, pk=None):
         """Mark notification as read."""
@@ -90,6 +97,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         notification.mark_as_read()
         return Response(NotificationSerializer(notification).data)
     
+    @extend_schema(tags=["Notifications"], summary="Mark all read", description="Mark all notifications as read.")
     @action(detail=False, methods=['post'])
     def mark_all_read(self, request):
         """Mark all notifications as read."""
@@ -99,6 +107,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         ).update(status='read', read_at=timezone.now())
         return Response({'message': f'{count} notifications marked as read'})
     
+    @extend_schema(tags=["Notifications"], summary="Archive", description="Archive a notification.")
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
         """Archive a notification."""
@@ -107,6 +116,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         notification.save()
         return Response(NotificationSerializer(notification).data)
     
+    @extend_schema(tags=["Notifications"], summary="Unread count", description="Get unread notification count.")
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
         """Get unread notification count."""
@@ -117,6 +127,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         return Response({'count': count})
 
 
+@document_viewset(tag="Notifications", resource="notification preferences")
 class NotificationPreferencesViewSet(viewsets.ModelViewSet):
     """ViewSet for managing notification preferences.
 
@@ -126,11 +137,12 @@ class NotificationPreferencesViewSet(viewsets.ModelViewSet):
     updates it. ``user`` is enforced server-side and never trusted from
     the request body.
     """
-
-    permission_classes = [IsAuthenticated]
     serializer_class = NotificationPreferencesSerializer
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return NotificationPreferences.objects.none()
+
         # Auto-create the singleton on first read so the frontend can
         # PATCH it without an explicit POST step.
         NotificationPreferences.objects.get_or_create(user=self.request.user)
@@ -145,6 +157,24 @@ class NotificationPreferencesViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Get notification routing matrix",
+        tags=["Notifications"],
+        responses=JSON_OBJECT_RESPONSE,
+    ),
+    patch=extend_schema(
+        summary="Update notification routing matrix override",
+        tags=["Notifications"],
+        request=GENERIC_JSON_REQUEST,
+        responses=JSON_MUTATION_RESPONSES,
+    ),
+    delete=extend_schema(
+        summary="Clear notification routing matrix override",
+        tags=["Notifications"],
+        responses={204: None},
+    ),
+)
 class NotificationRoutingMatrixView(APIView):
     """
     Admin: inspect and update the notification audience routing matrix.
@@ -154,7 +184,7 @@ class NotificationRoutingMatrixView(APIView):
     overlay in cache; DELETE removes the overlay (file defaults only).
     """
 
-    permission_classes = [CanManageNotificationRouting]
+    permission_classes = [IsAuthenticated, ApiPageAccessPermission, CanManageNotificationRouting]
 
     def get(self, request):
         return Response(

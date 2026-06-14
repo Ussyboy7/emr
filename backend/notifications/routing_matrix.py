@@ -21,6 +21,7 @@ ROLE_DEPARTMENT_HINTS: Dict[str, List[str]] = {
     "Medical Records Officer": ["MED-REC", "Medical Records"],
     "Physiotherapist": ["PHYSIO", "Physiotherapy"],
     "Optamologist": ["EYE", "Eye Clinic"],
+    "Human Resources Officer": ["HR", "Human Resources"],
 }
 
 ROUTING_MATRIX_CACHE_KEY = "notifications:routing_matrix:v1"

@@ -15,13 +15,17 @@ import {
   Activity,
   ClipboardList,
   TrendingUp,
-  RefreshCw,
   UserCheck,
 } from "lucide-react";
 import { physioService, type PhysioOrder } from "@/lib/services";
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
+import {
+  DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+  useReloadOnFocus,
+} from "@/hooks/use-reload-on-focus";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { useServerToday } from "@/hooks/use-server-today";
+import { formatDisplayDateTime } from "@/lib/dates";
 import { joinDisplayParts } from "@/lib/utils/clinic-utils";
 import { toast } from "sonner";
 import { PhysiotherapyPatientFinder } from "@/components/physiotherapy/PhysiotherapyPatientFinder";
@@ -34,30 +38,11 @@ interface PhysioDashboardStats {
   scheduledTomorrow: number;
 }
 
-function addDaysYmd(ymd: string, days: number): string {
-  const d = new Date(`${ymd}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function ymdFromIso(iso?: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 function formatOrderedAt(iso?: string): string {
   if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-  } catch {
-    return "";
-  }
+  const formatted = formatDisplayDateTime(iso);
+  return formatted === "—" ? "" : formatted;
 }
 
 function statusLabel(status: string): string {
@@ -80,66 +65,39 @@ export default function PhysiotherapyPage() {
   });
   const [recentOrders, setRecentOrders] = useState<PhysioOrder[]>([]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
-      const tomorrow = addDaysYmd(serverToday, 1);
-      const dayStart = `${serverToday}T00:00:00`;
-      const dayEnd = `${serverToday}T23:59:59`;
+      if (!opts.silent) setLoading(true);
 
-      const [
-        pendingRes,
-        scheduledRes,
-        inProgressRes,
-        completedTodayRes,
-        scheduledListRes,
-        recentRes,
-      ] = await Promise.all([
-        physioService.getOrders({ status: "pending", page_size: 1 }),
-        physioService.getOrders({ status: "scheduled", page_size: 1 }),
-        physioService.getOrders({ status: "in_progress", page_size: 1 }),
-        physioService.getSessions({
-          status: "completed",
-          completed_after: dayStart,
-          completed_before: dayEnd,
-          page_size: 1,
-        }),
-        physioService.getOrders({ status: "scheduled", page_size: 100 }),
-        physioService.getOrders({
-          ordered_at_after: serverToday,
-          ordered_at_before: serverToday,
-          page: 1,
-          page_size: 5,
-        }),
-      ]);
-
-      const scheduledTomorrow = (scheduledListRes.results ?? []).filter(
-        (o) => ymdFromIso(o.scheduled_at) === tomorrow,
-      ).length;
+      const data = await physioService.getHomeDashboard({ date: serverToday });
 
       setStats({
-        pending: pendingRes.count ?? 0,
-        scheduled: scheduledRes.count ?? 0,
-        inProgress: inProgressRes.count ?? 0,
-        completedToday: completedTodayRes.count ?? 0,
-        scheduledTomorrow,
+        pending: data.stats.pending,
+        scheduled: data.stats.scheduled,
+        inProgress: data.stats.inProgress,
+        completedToday: data.stats.completedToday,
+        scheduledTomorrow: data.stats.scheduledTomorrow,
       });
-      setRecentOrders(recentRes.results ?? []);
+      setRecentOrders(data.recentOrders ?? []);
     } catch (error) {
       console.error("Failed to load physiotherapy dashboard:", error);
       if (isAuthenticationError(error)) {
         setAuthError(error);
-      } else {
+      } else if (!opts.silent) {
         toast.error("Failed to load physiotherapy dashboard. Please try again.");
       }
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, [serverToday]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useReloadOnFocus(() => loadData({ silent: true }), {
+    pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+  });
 
   const queueCount = useMemo(
     () => stats.pending + stats.scheduled,
@@ -178,15 +136,6 @@ export default function PhysiotherapyPage() {
                 >
                   <ClipboardList className="h-4 w-4 mr-2" />
                   Orders Queue
-                </Button>
-                <Button
-                  variant="outline"
-                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => void loadData()}
-                  disabled={loading}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-                  Refresh
                 </Button>
               </div>
             </div>

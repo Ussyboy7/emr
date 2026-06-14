@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.utils import timezone
 from django.db.models import Count, Q
 from django.http import HttpResponse
@@ -44,6 +45,7 @@ from .serializers import (
     OTHER_TEMPLATE_CODES,
 )
 from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
+from common.openapi import ORDER_DISPATCH_ID_PARAMS, document_viewset
 from .pagination import FlexiblePageNumberPagination
 from .result_display import dedupe_result_alias_rows, sort_lab_result_rows_for_pdf
 from audit.services import AuditService
@@ -88,10 +90,9 @@ def _parse_results_payload(results):
     return results
 
 
+@document_viewset(tag="Laboratory", resource="lab partners")
 class LabPartnerViewSet(viewsets.ModelViewSet):
     """CRUD for outsourced lab partners (dropdown + Django admin)."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = LabPartnerSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["is_active"]
@@ -102,13 +103,15 @@ class LabPartnerViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return LabPartner.objects.none()
+        
         return LabPartner.objects.all()
 
 
+@document_viewset(tag="Laboratory", resource="lab templates")
 class LabTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet for managing lab templates."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = LabTemplateSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['sample_type', 'is_active', 'code', 'category']
@@ -119,8 +122,12 @@ class LabTemplateViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         # Return all templates (not just active) to allow status management
+        if getattr(self, 'swagger_fake_view', False):
+            return LabTemplate.objects.none()
+        
         return LabTemplate.objects.all()
     
+    @extend_schema(tags=["Laboratory"], summary="Reorder", description="Bulk-update sort_order for templates.")
     @action(detail=False, methods=['patch'], url_path='reorder')
     def reorder(self, request):
         """Bulk-update sort_order for templates.
@@ -139,11 +146,45 @@ class LabTemplateViewSet(viewsets.ModelViewSet):
         
         return Response({'status': 'ok'})
 
+    @extend_schema(tags=["Laboratory"], summary="Resolve", description="Return a single template by exact code (no paginated list hop).")
+    @action(detail=False, methods=['get'], url_path='resolve')
+    def resolve_template(self, request):
+        """Return a single template by exact code (no paginated list hop)."""
+        code = (request.query_params.get('code') or '').strip()
+        if not code:
+            return Response({'detail': 'code is required'}, status=status.HTTP_400_BAD_REQUEST)
+        template = self.get_queryset().filter(code__iexact=code).first()
+        if not template:
+            return Response({'detail': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(LabTemplateSerializer(template).data)
 
+    @extend_schema(tags=["Laboratory"], summary="List stats", description="Template tab counts in one request.")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Template tab counts in one request."""
+        qs = LabTemplate.objects.all()
+        categories = ['chemistry', 'hematology', 'microbiology', 'serology', 'toxicology']
+        by_cat = {
+            row['category']: row['count']
+            for row in qs.values('category').annotate(count=Count('id'))
+        }
+        return Response({
+            'total': qs.count(),
+            'active': qs.filter(is_active=True).count(),
+            **{cat: by_cat.get(cat, 0) for cat in categories},
+        })
+
+
+@extend_schema_view(
+    list=extend_schema(summary="List lab orders", tags=["Laboratory"]),
+    retrieve=extend_schema(summary="Retrieve lab order", tags=["Laboratory"]),
+    create=extend_schema(summary="Create lab order", tags=["Laboratory"]),
+    update=extend_schema(summary="Update lab order", tags=["Laboratory"]),
+    partial_update=extend_schema(summary="Partially update lab order", tags=["Laboratory"]),
+    destroy=extend_schema(summary="Delete lab order", tags=["Laboratory"]),
+)
 class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing lab orders."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = LabOrderSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -164,6 +205,9 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     ordering = ['-ordered_at']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return LabOrder.objects.none()
+        
         qs = (
             LabOrder.objects.all()
             .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
@@ -208,6 +252,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             qs = qs.filter(source_type=source_type)
         return self.scope_queryset(qs)
 
+    @extend_schema(tags=["Laboratory"], summary="Stats", description="Server-side counts for lab order dashboard cards/tabs.")
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """
@@ -419,6 +464,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
     
+    @extend_schema(tags=["Laboratory"], summary="Generate lab number", description="Generate Lab ID (BT-YY-NNNN) for a test. Used when patient comes to lab and sample is collected.")
     @action(detail=True, methods=['post'])
     def generate_lab_number(self, request, pk=None):
         """Generate Lab ID (BT-YY-NNNN) for a test. Used when patient comes to lab and sample is collected.
@@ -469,6 +515,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(tags=["Laboratory"], summary="Collect samples", description="Collect samples for multiple tests in the order. Generates ONE Lab ID (BT-YY-NNNN) and")
     @action(detail=True, methods=['post'])
     def collect_samples(self, request, pk=None):
         """Collect samples for multiple tests in the order. Generates ONE Lab ID (BT-YY-NNNN) and
@@ -556,6 +603,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
+    @extend_schema(tags=["Laboratory"], summary="Process", description="Mark test as processing.")
     @action(detail=True, methods=['post'])
     def process(self, request, pk=None):
         """Mark test as processing."""
@@ -596,6 +644,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     # Outsourced dispatch (Phase 2)
     # ------------------------------------------------------------------
 
+    @extend_schema(tags=["Laboratory"], summary="Dispatches", description="List every LabReferralDispatch ever issued for this order (most recent first).")
     @action(detail=True, methods=['get'], url_path='dispatches')
     def list_dispatches(self, request, pk=None):
         """List every LabReferralDispatch ever issued for this order (most recent first)."""
@@ -603,6 +652,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         dispatches = order.dispatches.all().prefetch_related('tests')
         return Response(LabReferralDispatchSerializer(dispatches, many=True).data)
 
+    @extend_schema(tags=["Laboratory"], summary="Dispatch outsourced", description="Send a batch of tests in this order to one external lab partner.")
     @action(detail=True, methods=['post'], url_path='dispatch_outsourced')
     def dispatch_outsourced(self, request, pk=None):
         """
@@ -738,6 +788,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @extend_schema(tags=["Laboratory"], summary="Dispatches/(?P<dispatch id>[^/.]+)/cancel", description="Cancel a still-issued dispatch (e.g. wrong partner, withdrew sample).", parameters=ORDER_DISPATCH_ID_PARAMS)
     @action(detail=True, methods=['post'], url_path='dispatches/(?P<dispatch_id>[^/.]+)/cancel')
     def cancel_dispatch(self, request, pk=None, dispatch_id=None):
         """
@@ -813,6 +864,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
         return Response(LabReferralDispatchSerializer(dispatch).data)
 
+    @extend_schema(tags=["Laboratory"], summary="Dispatches/(?P<dispatch id>[^/.]+)/referral letter", description="Download the referral letter PDF for a specific dispatch.", parameters=ORDER_DISPATCH_ID_PARAMS)
     @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_id>[^/.]+)/referral_letter')
     def dispatch_referral_letter(self, request, pk=None, dispatch_id=None):
         """Download the referral letter PDF for a specific dispatch."""
@@ -834,6 +886,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Laboratory"], summary="Dispatches/(?P<dispatch id>[^/.]+)/responsibility form", description="Download the financial-responsibility form PDF for a specific dispatch.", parameters=ORDER_DISPATCH_ID_PARAMS)
     @action(detail=True, methods=['get'], url_path='dispatches/(?P<dispatch_id>[^/.]+)/responsibility_form')
     def dispatch_responsibility_form(self, request, pk=None, dispatch_id=None):
         """Download the financial-responsibility form PDF for a specific dispatch."""
@@ -855,6 +908,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
+    @extend_schema(tags=["Laboratory"], summary="Submit results", description="Submit results for a test.")
     @action(detail=True, methods=['post'])
     def submit_results(self, request, pk=None):
         """Submit results for a test."""
@@ -1022,10 +1076,9 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             return Response({'error': 'Test not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
+@document_viewset(tag="Laboratory", resource="lab tests")
 class LabTestViewSet(viewsets.ModelViewSet):
     """ViewSet for managing lab tests."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = LabTestSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['order', 'status', 'processing_method', 'order__patient']
@@ -1033,9 +1086,16 @@ class LabTestViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return LabTest.objects.none()
+        
         queryset = LabTest.objects.all().select_related(
             'order',
+            'order__location_clinic',
             'order__visit',
+            'order__visit__location_clinic',
+            'order__consultation_session',
+            'order__consultation_session__location_clinic',
             'order__consultation_session__room__clinic',
             'template',
             'collected_by',
@@ -1049,6 +1109,10 @@ class LabTestViewSet(viewsets.ModelViewSet):
         status_filter = self.request.query_params.get('status', None)
         if status_filter:
             queryset = queryset.filter(status=status_filter)
+
+        results_only = (self.request.query_params.get('results_only') or '').lower()
+        if results_only in ('1', 'true', 'yes'):
+            queryset = queryset.filter(status__in=['results_ready', 'verified'])
 
         # Filter by patient if provided (goes through order relationship)
         patient_filter = self.request.query_params.get('patient', None)
@@ -1109,11 +1173,11 @@ class LabTestViewSet(viewsets.ModelViewSet):
             serializer.save()
 
 
+@document_viewset(tag="Laboratory", resource="lab results", read_only=True)
 class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing lab results awaiting verification."""
     
     clinic_filter_field = 'order__processing_clinic'
-    permission_classes = [IsAuthenticated]
     serializer_class = LabResultSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
@@ -1134,6 +1198,9 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         # Filter by status if provided, default to 'results_ready' for pending verifications
+        if getattr(self, 'swagger_fake_view', False):
+            return LabResult.objects.none()
+        
         status_filter = self.request.query_params.get('status', 'results_ready')
 
         # Include test template to avoid N+1 queries when serializing template fields (normal_range/unit/etc).
@@ -1199,6 +1266,7 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
 
         return self.scope_queryset(queryset)
 
+    @extend_schema(tags=["Laboratory"], summary="Stats", description="Stats for verification history/completed tests.")
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """
@@ -1221,6 +1289,7 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
             'critical': by_status.get('critical', 0) or 0,
         })
     
+    @extend_schema(tags=["Laboratory"], summary="Download report", description="Download lab result as PDF report (uses standardized NPA PDF house style).")
     @action(detail=True, methods=['get'])
     def download_report(self, request, pk=None):
         """Download lab result as PDF report (uses standardized NPA PDF house style)."""
@@ -1239,6 +1308,7 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         base_qs = self.scope_queryset(base_qs)
         result = get_object_or_404(base_qs, pk=pk)
 
+        from common.date_display import format_display_date, format_display_datetime
         from common.pdf import (
             NPADocument,
             patient_info_block,
@@ -1257,12 +1327,9 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
             if not value:
                 return 'N/A'
             try:
-                return timezone.localtime(value).strftime('%b %d, %Y %I:%M %p')
+                return format_display_datetime(value)
             except Exception:
-                try:
-                    return value.strftime('%b %d, %Y %I:%M %p')
-                except Exception:
-                    return 'N/A'
+                return 'N/A'
 
         def _normalize_key(s):
             return ' '.join(str(s or '').split()).strip().lower()
@@ -1467,12 +1534,10 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
             if not value:
                 return '—'
             try:
-                return timezone.localtime(value).strftime('%d.%m.%Y')
+                formatted = format_display_date(value)
+                return formatted or '—'
             except Exception:
-                try:
-                    return value.strftime('%d.%m.%Y')
-                except Exception:
-                    return '—'
+                return '—'
 
         ordered_at = None
         try:
@@ -1632,6 +1697,7 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
 
         return response
 
+    @extend_schema(tags=["Laboratory"], summary="Verify", description="Verify a lab result.")
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verify a lab result."""
@@ -1681,10 +1747,10 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         return Response(LabResultSerializer(result).data)
 
 
+@document_viewset(tag="Laboratory", resource="template field options")
 class TemplateFieldOptionViewSet(viewsets.ModelViewSet):
     queryset = TemplateFieldOption.objects.all()
     serializer_class = TemplateFieldOptionSerializer
-    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['template', 'field_name']
     pagination_class = None

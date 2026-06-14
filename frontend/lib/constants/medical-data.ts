@@ -84,6 +84,14 @@ export const WOUND_LOCATIONS = [
   'Other (specify in instructions)',
 ] as const;
 
+/** Procedure type recorded when completing a nursing dressing order. */
+export const NURSING_DRESSING_PROCEDURE_TYPES = [
+  'Dressing',
+  'Suturing',
+  'Suture removal',
+  'Incision and drainage',
+] as const;
+
 export const DRESSING_SUPPLIES = [
   'Gauze',
   'Bandage',

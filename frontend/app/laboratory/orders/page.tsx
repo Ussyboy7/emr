@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { MAX_LIST_PAGE_SIZE, DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { getMediaUrl, openMediaInNewTab } from '@/lib/media-url';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -48,6 +50,7 @@ import {
   ClipboardList, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle, Plus, Pencil,
   Send, Printer, FileSignature, Mail, History, Hash
 } from 'lucide-react';
+import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, formatDisplayTime } from '@/lib/dates';
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -56,48 +59,26 @@ import {
 // Safe date formatting utility
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Date';
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  } catch {
-    return 'Invalid Date';
-  }
+  const formatted = formatDisplayDate(dateString);
+  return formatted === '—' ? 'Invalid Date' : formatted;
 };
 
 const formatTime = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Time';
-    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-  } catch {
-    return 'Invalid Time';
-  }
+  const formatted = formatDisplayTime(dateString);
+  return formatted === '—' ? 'Invalid Time' : formatted;
 };
 
 /** Lab order placed-at (ordered_at) — date + time of order sent */
 const formatOrderedAtDisplay = (isoString: string | undefined): string => {
   if (!isoString) return '';
-  try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return '';
-    const datePart = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-    const timePart = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    return `${datePart}, ${timePart}`;
-  } catch {
-    return '';
-  }
+  const datePart = formatDisplayDateMedium(isoString);
+  const timePart = formatDisplayTime(isoString);
+  if (datePart === '—') return '';
+  return `${datePart}, ${timePart}`;
 };
 
-const getLabResultFileUrl = (filePath?: string | null) => {
-  if (!filePath) return '';
-  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
-  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
-  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
-  if (filePath.startsWith('/media/')) return `${mediaBase}${filePath}`;
-  return `${mediaBase}/media/${filePath.replace(/^\/+/, '')}`;
-};
+const getLabResultFileUrl = (filePath?: string | null) => getMediaUrl(filePath ?? '') ?? '';
 
 // Enhanced Test interface - each test is independent
 interface LabTest {
@@ -932,7 +913,7 @@ export default function LabOrdersPage() {
   // Load Test Templates from API for result entry (so FBC, etc. use template parameters)
   const loadTemplatesForResults = useCallback(async () => {
     try {
-      const { results } = await labService.getTemplates({ page_size: 200 });
+      const { results } = await labService.getTemplates();
 
       // Fetch all DB-managed field options and index by template code + field name
       let allOptions: Record<string, Record<string, string[]>> = {};
@@ -981,7 +962,7 @@ export default function LabOrdersPage() {
 
   const loadTemplatesForExternalOrders = useCallback(async () => {
     try {
-      const response = await labService.getTemplates({ page_size: 200, is_active: true });
+      const response = await labService.getTemplates({ is_active: true });
       setLabTemplates((response.results || []).map((t) => ({
         id: Number(t.id),
         name: t.name,
@@ -1003,7 +984,7 @@ export default function LabOrdersPage() {
           labTemplates.length === 0 ? loadTemplatesForExternalOrders() : Promise.resolve(),
           (async () => {
             try {
-              const res = await adminService.getClinics({ is_active: true, page_size: 200 });
+              const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
               setExternalClinics(res.results || []);
             } catch {
               setExternalClinics([]);
@@ -1028,7 +1009,7 @@ export default function LabOrdersPage() {
     const t = setTimeout(async () => {
       setSearchingExternalPatients(true);
       try {
-        const res = await patientService.getPatients({ search: q, page_size: 10 });
+        const res = await patientService.getPatients({ search: q, page_size: DEFAULT_LIST_PAGE_SIZE });
         if (!cancelled) setExternalPatientResults(res.results || []);
       } catch {
         if (!cancelled) setExternalPatientResults([]);
@@ -1564,7 +1545,7 @@ export default function LabOrdersPage() {
   const loadLabPartners = useCallback(async (): Promise<LabPartner[]> => {
     setLoadingLabPartners(true);
     try {
-      const res = await labService.getLabPartners({ page_size: 200 });
+      const res = await labService.getLabPartners();
       const partners = res.results || [];
       setLabPartners(partners);
       return partners;
@@ -1844,16 +1825,8 @@ export default function LabOrdersPage() {
     return dates[0];
   };
 
-  const formatDisplayDate = (isoString: string | undefined): string => {
-    if (!isoString) return '—';
-    try {
-      const date = new Date(isoString);
-      if (isNaN(date.getTime())) return '—';
-      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '—';
-    }
-  };
+  const formatCollectedAtDisplay = (isoString: string | undefined): string =>
+    formatDisplayDateTime(isoString);
 
   const testStatusBadgeClass = (status: string): string => {
     switch (status) {
@@ -2690,7 +2663,9 @@ export default function LabOrdersPage() {
                                           className="h-6 px-2 text-xs"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            window.open(attachmentUrl, '_blank', 'noopener,noreferrer');
+                                            void openMediaInNewTab(attachment?.file).catch((err: any) =>
+                                              toast.error(err?.message || 'Failed to open file')
+                                            );
                                           }}
                                         >
                                           <Eye className="h-3 w-3 mr-1" />View file
@@ -2748,11 +2723,9 @@ export default function LabOrdersPage() {
                             onClick={(e) => {
                               e.stopPropagation();
                               if (test.resultFile) {
-                                // Construct download URL
-                                const fileUrl = test.resultFile.name.startsWith('http') 
-                                  ? test.resultFile.name 
-                                  : `/api${test.resultFile.name}`;
-                                window.open(fileUrl, '_blank');
+                                void openMediaInNewTab(test.resultFile.name).catch((err: any) =>
+                                  toast.error(err?.message || 'Failed to open file')
+                                );
                               }
                             }}
                           >
@@ -2786,7 +2759,9 @@ export default function LabOrdersPage() {
                                     className="h-6 px-2 text-xs text-indigo-600 shrink-0"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      window.open(attUrl, '_blank', 'noopener,noreferrer');
+                                      void openMediaInNewTab(att.file).catch((err: any) =>
+                                        toast.error(err?.message || 'Failed to open file')
+                                      );
                                     }}
                                   >
                                     <Eye className="h-3 w-3 mr-1" />View
@@ -2846,7 +2821,7 @@ export default function LabOrdersPage() {
                                 </span>
                                 {issuedDate && (
                                   <span className="text-muted-foreground">
-                                    • {issuedDate.toLocaleDateString()} {formatTime(d.issued_at)}
+                                    • {formatDisplayDate(d.issued_at)} {formatTime(d.issued_at)}
                                     {d.issued_by_name ? ` by ${d.issued_by_name}` : ''}
                                   </span>
                                 )}
@@ -3025,7 +3000,7 @@ export default function LabOrdersPage() {
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
                   <Calendar className="h-4 w-4 text-blue-600" />
                   <span className="text-sm text-blue-700 dark:text-blue-400">
-                    Collection Time: {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} at {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                    Collection Time: {formatDisplayDateTime(new Date())}
                   </span>
                 </div>
 

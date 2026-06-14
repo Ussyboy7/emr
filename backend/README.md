@@ -1,69 +1,85 @@
 # EMR Backend
 
-Django REST Framework backend for the NPA EMR (Electronic Medical Records) system.
+Django REST Framework API for NPA EMR.
 
-## Structure
+## Apps
 
-```
-backend/
-├── emr_backend/      # Django project settings
-├── accounts/         # User authentication & management
-├── common/           # Shared utilities
-├── organization/     # Organizational structure
-├── correspondence/   # Correspondence management
-├── manage.py
-└── requirements.txt
-```
+| App | Domain |
+|-----|--------|
+| `accounts` | Users, JWT authentication |
+| `organization` | Clinics, departments, config |
+| `patients` | Patients, visits, vitals |
+| `consultation` | Consultation sessions |
+| `nursing` | Nursing workflows |
+| `laboratory` | Lab orders and results |
+| `pharmacy` | Prescriptions, inventory |
+| `radiology` | Imaging orders |
+| `physiotherapy`, `eyecare` | Specialty modules |
+| `wards`, `appointments` | Inpatient and scheduling |
+| `permissions` | Roles and page RBAC |
+| `audit` | Audit trail |
+| `notifications` | Notifications |
+| `reports`, `analytics`, `dashboard` | Reporting |
+| `common` | Uploads, media, metrics, health |
+| `hr` | HR check-up compliance |
 
 ## Setup
 
-1. Create virtual environment:
 ```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install dependencies:
-```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. Configure environment variables (create `.env` file):
-```env
-DJANGO_SECRET_KEY=your-secret-key
-DJANGO_DEBUG=True
-DB_NAME=emr_db
-DB_USER=emr_user
-DB_PASSWORD=emr_password
-DB_HOST=localhost
-DB_PORT=5432
-REDIS_HOST=localhost
-REDIS_PORT=6379
-CORS_ALLOWED_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
-```
+Environment files: `env/local.env`, `env/stag.env`, `env/prod.env` (not committed).
 
-4. Run migrations:
 ```bash
-python manage.py makemigrations
 python manage.py migrate
-```
-
-5. Create superuser:
-```bash
 python manage.py createsuperuser
-```
-
-6. Start development server:
-```bash
 python manage.py runserver 8001
 ```
 
-## API Documentation
+## Tests
 
-Once the server is running, access:
-- Swagger UI: http://localhost:8001/api/docs/
-- ReDoc: http://localhost:8001/api/redoc/
+Integration tests use **PostgreSQL** (production uses Postgres; some migrations use PG-only SQL that SQLite cannot run).
+
+```bash
+# Start local Postgres (docker-compose.local.yml → localhost:5435)
+docker compose -f ../docker-compose.local.yml up -d postgres
+
+DB_HOST=localhost DB_PORT=5435 DB_NAME=emr_db_local DB_USER=emradmin DB_PASSWORD=emradmin \
+  DJANGO_SETTINGS_MODULE=emr_backend.settings_test python manage.py test
+```
+
+`settings_test` inherits `DATABASES` from main settings and creates a separate `test_emr_db` database for the run.
+
+## Seed data
+
+```bash
+python manage.py seed_demo_data
+python manage.py seed_demo_data --reset
+```
+
+## API docs (local)
+
+Set `ENABLE_API_DOCS=true`, then:
+
+- Swagger: http://localhost:8001/api/docs/
 - Schema: http://localhost:8001/api/schema/
 
-For complete implementation details, see `../docs/IMPLEMENTATION_STATUS.md`.
+See [../docs/api/README.md](../docs/api/README.md).
 
+## RBAC & security
+
+Default permission class: `ApiPageAccessPermission`. See [../docs/architecture/AUTH_AND_RBAC.md](../docs/architecture/AUTH_AND_RBAC.md).
+
+## Documentation
+
+Run after changing UI page permissions:
+
+```bash
+make docs-check    # frontend page-permissions.ts vs backend page_catalog.py
+make docs-schema   # optional ERD (venv + requirements-dev.txt + graphviz)
+```
+
+See [../docs/README.md](../docs/README.md).

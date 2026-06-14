@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   Dialog,
   DialogContent,
@@ -113,7 +114,7 @@ export function PrincipalDependentsModal({
       const res = await patientService.getPatients({
         category: "dependent",
         principal_staff: principalNumericId,
-        page_size: 100,
+        page_size: MAX_LIST_PAGE_SIZE,
       });
       setDependents(res.results || []);
     } catch (e: unknown) {

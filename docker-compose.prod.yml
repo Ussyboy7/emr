@@ -18,6 +18,12 @@ services:
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data
       - ./backups:/backups
+    command:
+      - postgres
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_statement=none
     ports:
       - "5434:5432"  # Different from npa-emr (5433) and npa-ecm
     networks:

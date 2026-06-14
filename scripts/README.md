@@ -37,7 +37,8 @@ scripts/
 ├── backup/             Backup / restore helpers (see backup/README.md runbook)
 ├── monitoring/         Long-running monitor scripts (invoked by env-manager monitor/performance)
 ├── security/           Cron setup, permission hardening
-└── testing/            Security & go-live validation suites
+├── testing/            Security & go-live validation suites
+└── docs/               Documentation checks (page catalog sync)
 ```
 
 ### Why this shape
@@ -187,6 +188,8 @@ BACKUP_DIR=/var/backups/emr /home/emrprod/emr/scripts/production/env-manager.sh 
 3. Document it in this README.
 
 ## Conventions
+
+- **Documentation:** After adding UI pages, run `make docs-check` from repo root (see `scripts/docs/check_page_catalog_sync.py`). Full doc index: `docs/README.md`.
 
 - Every script starts with `set -euo pipefail`.
 - Every script sources `lib/stack-utils.sh` and (where useful) `lib/ui.sh`.

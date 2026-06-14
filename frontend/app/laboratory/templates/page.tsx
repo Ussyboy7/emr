@@ -1,4 +1,5 @@
 "use client";
+import { todayApiDateString } from "@/lib/dates";
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -92,8 +93,8 @@ const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
     specimenType: apiTemplate.sample_type,
     turnaroundTime: (apiTemplate as any).turnaround_time || '', // Read from backend API
     status: apiTemplate.is_active !== false ? 'Active' : 'Inactive',
-    createdAt: apiTemplate.created_at || new Date().toISOString().split('T')[0],
-    updatedAt: apiTemplate.updated_at || new Date().toISOString().split('T')[0],
+    createdAt: apiTemplate.created_at || todayApiDateString(),
+    updatedAt: apiTemplate.updated_at || todayApiDateString(),
     version: (apiTemplate as any).version || 1,
   };
 };
@@ -166,21 +167,15 @@ export default function TestTemplatesPage() {
 
   const loadTemplateStats = useCallback(async () => {
     try {
-      const base = { page: 1, page_size: 1 } as const;
-      const cats = ['chemistry', 'hematology', 'microbiology', 'serology', 'toxicology'] as const;
-      const [totalRes, activeRes, ...catRes] = await Promise.all([
-        labService.getTemplates({ ...base }),
-        labService.getTemplates({ ...base, is_active: true }),
-        ...cats.map((c) => labService.getTemplates({ ...base, category: c })),
-      ]);
+      const stats = await labService.getTemplateListStats();
       setStats({
-        total: totalRes.count ?? 0,
-        active: activeRes.count ?? 0,
-        chemistry: catRes[0]?.count ?? 0,
-        hematology: catRes[1]?.count ?? 0,
-        microbiology: catRes[2]?.count ?? 0,
-        serology: catRes[3]?.count ?? 0,
-        toxicology: catRes[4]?.count ?? 0,
+        total: stats.total ?? 0,
+        active: stats.active ?? 0,
+        chemistry: stats.chemistry ?? 0,
+        hematology: stats.hematology ?? 0,
+        microbiology: stats.microbiology ?? 0,
+        serology: stats.serology ?? 0,
+        toxicology: stats.toxicology ?? 0,
       });
     } catch {
       /* keep previous */

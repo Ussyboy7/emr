@@ -1,4 +1,5 @@
 "use client";
+import { todayApiDateString, toApiDateFromInstant, formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 
 import { useState, useMemo, useEffect } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
@@ -14,7 +15,7 @@ import { adminService, type AuditLog as ApiAuditLog } from "@/lib/services";
 import {
   ClipboardList, Search, Eye, Download, User, Calendar, Clock,
   Activity, LogIn, LogOut, Edit, Trash2, Plus, CheckCircle, XCircle,
-  AlertTriangle, RefreshCw, Loader2
+  AlertTriangle, Loader2
 } from 'lucide-react';
 
 interface AuditLog {
@@ -230,8 +231,8 @@ export default function AuditTrailPage() {
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
     return {
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      date: formatDisplayDateMedium(date),
+      time: formatDisplayTime(date),
       relative: getRelativeTime(date),
     };
   };
@@ -283,7 +284,7 @@ export default function AuditTrailPage() {
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `audit_logs_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', `audit_logs_${todayApiDateString()}.csv`);
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
@@ -294,11 +295,6 @@ export default function AuditTrailPage() {
       console.error('Export error:', err);
       toast.error('Failed to export audit logs');
     }
-  };
-
-  const handleRefresh = async () => {
-    await loadLogs();
-    toast.success('Audit logs refreshed');
   };
 
   return (
@@ -313,9 +309,6 @@ export default function AuditTrailPage() {
             <p className="text-muted-foreground mt-1">Monitor system activity and user actions</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={handleRefresh}>
-              <RefreshCw className="h-4 w-4 mr-2" />Refresh
-            </Button>
             <Button variant="outline" onClick={handleExport}>
               <Download className="h-4 w-4 mr-2" />Export
             </Button>

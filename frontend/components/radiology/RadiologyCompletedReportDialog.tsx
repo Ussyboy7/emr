@@ -21,12 +21,12 @@ import {
   openRadiologyReportUrl,
   printRadiologyReport,
 } from '@/lib/radiology/radiologyReportActions';
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 
 function formatDateTime(isoString: string) {
-  const date = new Date(isoString);
   return {
-    date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-    time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+    date: formatDisplayDateMedium(isoString),
+    time: formatDisplayTime(isoString),
   };
 }
 

@@ -37,7 +37,6 @@ import {
   Loader2,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   Trash2,
 } from "lucide-react";
@@ -46,6 +45,7 @@ import {
   type Ward,
   type Bed,
 } from "@/lib/services/ward-service";
+import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 
 const WARD_TYPES: { value: string; label: string }[] = [
   { value: "general", label: "General Medicine" },
@@ -163,7 +163,7 @@ export const WardsAdminManager = forwardRef<
   const loadWards = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await wardService.getWards({ page_size: 500 });
+      const res = await wardService.getWards({ page_size: MAX_LIST_PAGE_SIZE });
       setWards(res.results || []);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to load wards";
@@ -385,10 +385,6 @@ export const WardsAdminManager = forwardRef<
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => void loadWards()}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
         </CardContent>
       </Card>
 

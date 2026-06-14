@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,10 +16,12 @@ import {
   TestTube, ScanLine, Pill, Heart, Activity, Building2, ClipboardList,
   ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText, Pencil, Share2,
 } from "lucide-react";
+import Link from "next/link";
 import { patientService, consultationService, labService, radiologyService,
-         pharmacyService, physioService, wardService, medicalCertificateService, referralService, eyeCareService, type Patient, type Visit } from '@/lib/services';
+         pharmacyService, physioService, wardService, medicalCertificateService, referralService, eyeCareService, annualCheckupService, type Patient, type Visit, type AnnualCheckup } from '@/lib/services';
 import type { Referral } from '@/lib/services/referral-service';
 import { apiFetch } from '@/lib/api-client';
+import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
@@ -33,159 +35,31 @@ import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
+import { mapClinicalOverviewToPatientHistory } from '@/lib/clinical-overview-utils';
+import { loadAnnualCheckupReportSession } from '@/lib/annual-checkup-report';
 import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
 import { RadiologyCompletedReportDialog } from '@/components/radiology/RadiologyCompletedReportDialog';
 import { PrescriptionReportDialog } from '@/components/pharmacy/PrescriptionReportDialog';
 import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
-import { ViewEyeOrderModal } from '@/components/eyecare/ViewEyeOrderModal';
+import { EyeSessionReportDialog } from '@/components/eyecare/EyeSessionReportDialog';
 import { PatientHistoryTabs } from '@/components/patient-history/PatientHistoryTabs';
+import { MedicalCertificateCreateDialog } from '@/components/medical-records/MedicalCertificateCreateDialog';
 import { transformApiRowToCompletedTest, type CompletedTest } from '@/lib/laboratory/completedLabReport';
 import { transformApiRadiologyReportToCompleted, type CompletedRadiologyReport } from '@/lib/radiology/completedRadiologyReport';
 import { getVisitServiceClinicsDisplay, joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
+import { formatDisplayDate, formatDisplayTime, toApiDateFromInstant, formatDisplayDateTime } from '@/lib/dates';
 
-// Utility functions
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return '';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleDateString();
-  } catch {
-    return '';
-  }
+  const formatted = formatDisplayDate(dateString);
+  return formatted === '—' ? '' : formatted;
 };
 
 const formatTime = (dateString: string | undefined): string => {
   if (!dateString) return '';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-  } catch {
-    return '';
-  }
-};
-
-const escapeHtml = (value: string) => {
-  return String(value ?? '')
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-};
-
-const purposeLabelMap: Record<string, string> = {
-  fitness: "FITNESS FOR DUTY",
-  illness: "UNFIT FOR WORK",
-  travel: "FIT TO TRAVEL",
-  employment: "FIT FOR EMPLOYMENT",
-};
-
-const patientCategoryLabelMap: Record<string, string> = {
-  employee: "Employee",
-  retiree: "Retiree",
-  dependent: "Dependent",
-  nonnpa: "Non-NPA",
-};
-
-const buildMedicalCertificateHtmlFromRecord = (cert: any) => {
-  const purposeLabel = purposeLabelMap[cert?.purpose] ?? String(cert?.purpose ?? "");
-  const patientCategoryLabel = patientCategoryLabelMap[cert?.patient_category_snapshot] ?? (cert?.patient_category_snapshot ?? "");
-
-  const validFrom = formatDate(cert?.valid_from);
-  const validTo = formatDate(cert?.valid_to);
-  const issueDate = formatDate(cert?.issued_at);
-
-  const findings = (cert?.findings ?? "").trim();
-  const recommendations = (cert?.recommendations ?? "").trim();
-
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(purposeLabel)} - ${escapeHtml(cert?.certificate_number ?? "")}</title>
-  <style>
-    @page { size: A4; margin: 18mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; line-height: 1.4; }
-    .title { text-align: center; font-weight: 700; font-size: 20px; margin-bottom: 8px; }
-    .subtle { color: #333; font-size: 12px; }
-    .block { margin-top: 10px; }
-    .row { display: flex; justify-content: space-between; gap: 16px; }
-    .kv { width: 50%; }
-    .label { font-weight: 700; }
-    .content { margin-top: 14px; font-size: 14px; white-space: pre-wrap; }
-    .signature { margin-top: 28px; display: flex; justify-content: flex-end; }
-    .sig-line { border-top: 1px solid #111; width: 240px; padding-top: 6px; text-align: left; }
-  </style>
-</head>
-<body>
-  <div class="title">MEDICAL CERTIFICATE</div>
-  <div class="subtle" style="text-align:center;">Certificate No: ${escapeHtml(cert?.certificate_number ?? "")} &nbsp; | &nbsp; Issued: ${escapeHtml(issueDate)}</div>
-
-  <div class="block">
-    <div class="row">
-      <div class="kv">
-        <div><span class="label">Patient Name:</span> ${escapeHtml(cert?.patient_name_snapshot ?? cert?.patient_name ?? "")}</div>
-        <div><span class="label">Patient ID:</span> ${escapeHtml(cert?.patient_id_snapshot ?? "")}</div>
-      </div>
-      <div class="kv">
-        <div><span class="label">Category:</span> ${escapeHtml(patientCategoryLabel)}</div>
-        <div><span class="label">Type:</span> ${escapeHtml(purposeLabel)}</div>
-      </div>
-    </div>
-
-    <div class="content">
-      This is to certify that <strong>${escapeHtml(cert?.patient_name_snapshot ?? cert?.patient_name ?? "")}</strong> is ${escapeHtml(
-        purposeLabel.toLowerCase(),
-      )}.
-      ${
-        validFrom && validTo
-          ? `The certificate is valid from ${escapeHtml(validFrom)} to ${escapeHtml(validTo)}.`
-          : ""
-      }
-      ${
-        cert?.purpose === "illness" &&
-        cert?.sick_leave_days != null &&
-        Number(cert.sick_leave_days) >= 1
-          ? `\n\nNumber of sick leave days (calendar): ${escapeHtml(String(cert.sick_leave_days))}.`
-          : ""
-      }
-      ${
-        findings
-          ? `\n\nClinical findings:\n${escapeHtml(findings)}`
-          : ""
-      }
-      ${
-        recommendations
-          ? `\n\nRecommendations:\n${escapeHtml(recommendations)}`
-          : ""
-      }
-    </div>
-  </div>
-
-  <div class="signature">
-    <div class="sig-line">
-      <div><strong>${escapeHtml(cert?.doctor_name_snapshot ?? cert?.issued_by_name ?? "")}</strong></div>
-      <div class="subtle">Doctor</div>
-    </div>
-  </div>
-</body>
-</html>`;
-};
-
-const openPrintWindow = (title: string, html: string) => {
-  const popup = window.open("", "_blank", "width=900,height=1000");
-  if (!popup) {
-    throw new Error("Allow popups to print documents.");
-  }
-  popup.document.open();
-  popup.document.write(html);
-  popup.document.close();
-  popup.document.title = title;
-  popup.focus();
-  popup.print();
+  const formatted = formatDisplayTime(dateString);
+  return formatted === '—' ? '' : formatted;
 };
 
 const formatPriority = (p: string | undefined): string => {
@@ -246,9 +120,15 @@ const getImagingBadgeClass = (label: string) => {
 
 export default function PatientMedicalRecordsPage({ params }: { params: Promise<{ patientId: string }> }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const resolvedParams = use(params);
   const patientId = resolvedParams.patientId;
+  const initialHistoryTab = searchParams.get("tab") === "annual" ? "annual" : "consultations";
+  const [historyTab, setHistoryTab] = useState(initialHistoryTab);
+  const [certDialogOpen, setCertDialogOpen] = useState(false);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
   const [patient, setPatient] = useState<Patient | null>(null);
+  const [annualCheckup, setAnnualCheckup] = useState<AnnualCheckup | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
@@ -305,8 +185,8 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
   const [physioHistory, setPhysioHistory] = useState<any[]>([]);
   const [eyeHistory, setEyeHistory] = useState<any[]>([]);
-  const [selectedEyeOrderId, setSelectedEyeOrderId] = useState<number | undefined>(undefined);
-  const [showEyeOrderModal, setShowEyeOrderModal] = useState(false);
+  const [eyeSessionReportOpen, setEyeSessionReportOpen] = useState(false);
+  const [eyeSessionReportOrderId, setEyeSessionReportOrderId] = useState<number | undefined>(undefined);
   const [wardAdmissions, setWardAdmissions] = useState<any[]>([]);
   const [certificateHistory, setCertificateHistory] = useState<any[]>([]);
   const [medicalHistory, setMedicalHistory] = useState<any>(null);
@@ -326,7 +206,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       }
 
       const resolveFromSearch = async (query: string) => {
-        const searchResult = await patientService.getPatients({ search: query });
+        const searchResult = await patientService.getPatients({ search: query, page_size: DEFAULT_LIST_PAGE_SIZE });
         const list = searchResult.results || [];
         const q = query;
         const qu = q.toUpperCase();
@@ -373,6 +253,19 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         }
 
         setPatient(patientData);
+        if (patientData.category === 'employee') {
+          try {
+            const ac = await annualCheckupService.resolve({
+              patient: numericId,
+              programme_year: new Date().getFullYear(),
+            }).catch(() => null);
+            setAnnualCheckup(ac);
+          } catch {
+            setAnnualCheckup(null);
+          }
+        } else {
+          setAnnualCheckup(null);
+        }
         await loadPatientHistory(numericId);
       } catch (err: any) {
         const status = err?.status as number | undefined;
@@ -403,175 +296,25 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const loadPatientHistory = async (numericPatientId: number) => {
     setLoadingHistory(true);
     try {
-      // Load consultations first (needed for sessionRows mapping)
-      const consultations = await consultationService.getSessions({ patient: numericPatientId });
-      const consultationRows = consultations.results || [];
-      setConsultationHistory(consultationRows);
+      const overview = await patientService.getClinicalOverview(numericPatientId);
+      const history = mapClinicalOverviewToPatientHistory(overview);
 
-      const sessionRows = consultationRows.map((session: any) => {
-        const startedAt = session?.started_at || '';
-        const [datePart, timePartRaw] = startedAt.includes('T')
-          ? startedAt.split('T')
-          : [startedAt, ''];
-        const timePart = timePartRaw ? String(timePartRaw).substring(0, 5) : '';
-
-        return {
-          id: `session-${session.id}`,
-          visit_id: session.session_id || `session-${session.id}`,
-          patient: session.patient,
-          date: datePart || '',
-          time: timePart || '',
-          visit_type: 'Consultation',
-          clinic: session.clinic_name || '',
-          clinics: Array.isArray((session as any).visit_clinics)
-            ? (session as any).visit_clinics
-            : undefined,
-          doctor_name: session.doctor_name || (session.doctor as any)?.name || '',
-          clinical_notes: session.notes || '',
-          status: session.status,
-        };
-      });
-
-      // All remaining calls only depend on numericPatientId — fire in parallel
-      const [
-        visitsResp,
-        referralsRes,
-        labResults,
-        imagingOrders,
-        prescriptions,
-        vitals,
-        physioOrders,
-        eyeOrders,
-        admissions,
-        certificates,
-        history,
-      ] = await Promise.all([
-        patientService.getPatientVisits(numericPatientId).catch(() => []),
-        referralService.getReferrals({ patient: numericPatientId.toString(), page_size: 500 }).catch(() => ({ results: [] })),
-        labService.getCompletedTests({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
-        radiologyService.getOrders({ patient: numericPatientId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
-        pharmacyService.getPrescriptions({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
-        patientService.getPatientVitals(numericPatientId).catch(() => []),
-        physioService.getOrders({ patient: numericPatientId.toString() }).catch(() => ({ results: [] })),
-        eyeCareService.getOrders({ patient: Number(numericPatientId) }).catch(() => ({ results: [] })),
-        wardService.getAdmissions({ patient: numericPatientId }).catch(() => ({ results: [] })),
-        medicalCertificateService.getCertificates({ patient: numericPatientId.toString(), page_size: 200 }).catch(() => ({ results: [] })),
-        patientService.getPatientHistory(numericPatientId).catch(() => null),
-      ]);
-
-      // Process visits (only Visit records, not consultation sessions)
-      try {
-        const list = Array.isArray(visitsResp) ? [...visitsResp] : [];
-        list.sort((a, b) => {
-          const dateA = String(a.date || '').split('T')[0];
-          const dateB = String(b.date || '').split('T')[0];
-          const timeA = String(a.time || '00:00:00');
-          const timeB = String(b.time || '00:00:00');
-          const ta = new Date(`${dateA}T${timeA}`).getTime();
-          const tb = new Date(`${dateB}T${timeB}`).getTime();
-          const safeTa = Number.isFinite(ta) ? ta : 0;
-          const safeTb = Number.isFinite(tb) ? tb : 0;
-          return safeTb - safeTa;
-        });
-        setVisitHistory(list);
-      } catch (err) {
-        console.warn('Could not load visits:', err);
-        setVisitHistory([]);
-      }
-
-      // Process referrals
-      try {
-        const refList = [...((referralsRes as any)?.results || [])];
-        refList.sort((a: any, b: any) => {
-          const ta = new Date(a.referred_at || 0).getTime();
-          const tb = new Date(b.referred_at || 0).getTime();
-          return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-        });
-        setReferralHistory(refList);
-      } catch (err) {
-        console.warn('Could not load referrals:', err);
-        setReferralHistory([]);
-      }
-
-      setLabHistory((labResults as any)?.results || []);
-      setPrescriptionHistory((prescriptions as any)?.results || []);
-      setVitalsHistory((vitals as any) || []);
-      setWardAdmissions((admissions as any)?.results || []);
-      setMedicalHistory(history);
-
-      // Process imaging
-      try {
-        const items = ((imagingOrders as any)?.results || []).flatMap((order: any) => {
-          const studies = Array.isArray(order.studies) ? order.studies : [];
-          return studies.map((study: any) => ({
-            id: study?.id ?? `${order.id}-${study?.procedure ?? 'study'}`,
-            order: order.id,
-            order_id: order.order_id,
-            patient: order.patient,
-            patient_name: order.patient_name,
-            patient_details: order.patient_details,
-            created_at: study?.created_at ?? order.ordered_at,
-            overall_status: null,
-            priority: order.priority,
-            order_details: {
-              id: order.id,
-              order_id: order.order_id,
-              doctor: order.doctor,
-              doctor_name: order.doctor_name,
-              doctor_specialty: order.doctor_details?.specialty ?? '',
-              doctor_details: order.doctor_details,
-              clinic: order.clinic,
-              clinical_notes: order.clinical_notes,
-              patient_details: order.patient_details,
-            },
-            study_details: study,
-          }));
-        });
-        items.sort((a: any, b: any) => {
-          const aDate = new Date(a?.study_details?.verified_at || a?.study_details?.reported_at || a?.study_details?.created_at || a?.created_at || 0).getTime();
-          const bDate = new Date(b?.study_details?.verified_at || b?.study_details?.reported_at || b?.study_details?.created_at || b?.created_at || 0).getTime();
-          return bDate - aDate;
-        });
-        setImagingHistory(items);
-      } catch (err) {
-        console.warn('Could not load imaging history:', err);
-        setImagingHistory([]);
-      }
-
-      // Process physio
-      try {
-        setPhysioHistory((physioOrders as any)?.results || []);
-      } catch (err) {
-        console.warn('Could not load physio history:', err);
-        setPhysioHistory([]);
-      }
-      // Process eye
-      try {
-        setEyeHistory((eyeOrders as any)?.results || []);
-      } catch (err) {
-        console.warn('Could not load eye history:', err);
-        setEyeHistory([]);
-      }
-    
-      // Process certificates
-      try {
-        setCertificateHistory((certificates as any)?.results || []);
-      } catch (err) {
-        console.warn('Could not load medical certificates:', err);
-        setCertificateHistory([]);
-      }
+      setConsultationHistory(history.consultations);
+      setVisitHistory(history.visits);
+      setReferralHistory(history.referrals);
+      setLabHistory(history.labResults);
+      setPrescriptionHistory(history.prescriptions);
+      setVitalsHistory(history.vitals);
+      setWardAdmissions(history.wardAdmissions);
+      setMedicalHistory(history.medicalHistory);
+      setImagingHistory(history.imagingOrders);
+      setPhysioHistory(history.physioOrders);
+      setEyeHistory(history.eyeOrders);
+      setCertificateHistory(history.certificates);
     } catch (err) {
       console.error('Error loading patient history:', err);
     } finally {
       setLoadingHistory(false);
-    }
-  };
-
-  const handlePrintMedicalCertificate = (cert: any) => {
-    try {
-      openPrintWindow(`Medical Certificate - ${cert?.certificate_number ?? ''}`, buildMedicalCertificateHtmlFromRecord(cert));
-    } catch (e: any) {
-      toast.error(e?.message || "Allow popups to print documents.");
     }
   };
 
@@ -586,6 +329,23 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
     } catch (err: any) {
       console.error('Error loading session details:', err);
       toast.error('Failed to load consultation details');
+      setShowConsultationReport(false);
+    } finally {
+      setLoadingReport(false);
+    }
+  };
+
+  const viewAnnualCheckupDetails = async (checkup: AnnualCheckup) => {
+    try {
+      setLoadingReport(true);
+      setSelectedSession(null);
+      setShowConsultationReport(true);
+      const fresh = await annualCheckupService.getById(checkup.id);
+      const fullSession = await loadAnnualCheckupReportSession(fresh);
+      setSelectedSession(fullSession);
+    } catch (err: any) {
+      console.error('Error loading annual check-up report:', err);
+      toast.error('Failed to load annual check-up report');
       setShowConsultationReport(false);
     } finally {
       setLoadingReport(false);
@@ -757,6 +517,55 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                        patient.category === 'nonnpa' ? 'NonNPA' : patient.category}
                     </Badge>
                   </div>
+                  {patient.category === 'employee' && (
+                    <div className="col-span-2 md:col-span-4">
+                      <p className="text-xs text-muted-foreground">
+                        Annual Check-up ({new Date().getFullYear()})
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        {annualCheckup ? (
+                          <>
+                            <Badge
+                              className={`text-xs ${
+                                annualCheckup.status === 'completed'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : annualCheckup.status === 'cancelled'
+                                    ? 'bg-slate-100 text-slate-700'
+                                    : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {annualCheckup.status === 'completed'
+                                ? annualCheckup.fitness_outcome_display || 'Completed'
+                                : annualCheckup.status === 'in_progress'
+                                  ? 'In progress'
+                                  : 'Cancelled'}
+                            </Badge>
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0"
+                              onClick={() => viewAnnualCheckupDetails(annualCheckup)}
+                            >
+                              View report
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">
+                              Not started
+                            </Badge>
+                            <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
+                              <Link
+                                href={`/medical-records/visits/new?patient=${encodeURIComponent(patient.patient_id || String(patient.id))}&visit_type=annual_checkup`}
+                              >
+                                Schedule check-up
+                              </Link>
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {patient.blood_group && (
                     <div>
                       <p className="text-xs text-muted-foreground">Blood Group</p>
@@ -917,7 +726,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                               s.session_number != null ? `Session ${s.session_number}` : '',
                               s.status === 'completed' ? '(Completed)' : '',
                               s.scheduled_at
-                                ? new Date(s.scheduled_at).toLocaleString()
+                                ? formatDisplayDateTime(s.scheduled_at)
                                 : s.id != null
                                   ? `PHY-${String(s.id).padStart(6, '0')}`
                                   : '',
@@ -1010,10 +819,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                             <p><span className="font-medium">Session:</span> {selectedPhysioSession.session_number}</p>
                           )}
                           {selectedPhysioSession.scheduled_at && (
-                            <p><span className="font-medium">Scheduled:</span> {new Date(selectedPhysioSession.scheduled_at).toLocaleString()}</p>
+                            <p><span className="font-medium">Scheduled:</span> {formatDisplayDateTime(selectedPhysioSession.scheduled_at)}</p>
                           )}
                           {selectedPhysioSession.completed_at && (
-                            <p><span className="font-medium">Completed:</span> {new Date(selectedPhysioSession.completed_at).toLocaleString()}</p>
+                            <p><span className="font-medium">Completed:</span> {formatDisplayDateTime(selectedPhysioSession.completed_at)}</p>
                           )}
                         </div>
                       </div>
@@ -1231,7 +1040,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                   {/* Footer */}
                   <div className="border-t pt-4">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <p>Report generated on {new Date().toLocaleString()}</p>
+                      <p>Report generated on {formatDisplayDateTime(new Date())}</p>
                       {selectedPhysioSession?.id != null && (
                         <p>Session ID: PHY-{String(selectedPhysioSession.id).padStart(6, '0')}</p>
                       )}
@@ -1496,10 +1305,18 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         <PatientHistoryTabs
           patientId={patient.id}
           showVisits
+          showAnnual={patient.category === "employee"}
+          scheduleCheckupHref={`/medical-records/visits/new?patient=${encodeURIComponent(patient.patient_id || String(patient.id))}&visit_type=annual_checkup`}
           showCertificates
           showReferrals
           showBackground
+          tab={historyTab}
+          onTabChange={setHistoryTab}
+          onIssueCertificate={() => setCertDialogOpen(true)}
+          historyReloadToken={historyReloadToken}
+          onReferralUpdated={() => setHistoryReloadToken((n) => n + 1)}
           onViewConsultation={viewSessionDetails}
+          onViewAnnualCheckup={viewAnnualCheckupDetails}
           onViewVisit={openVisitDetail}
           onViewPrescription={(p) => { setSelectedPrescription(p); setShowPrescriptionView(true); }}
           onViewVital={(v) => { setSelectedVital(v); setIsVitalsDetailModalOpen(true); }}
@@ -1507,13 +1324,25 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           onViewImaging={(i) => setSelectedImagingReport(transformApiRadiologyReportToCompleted(i))}
           onViewPhysio={openPhysioDetail}
           onViewWard={(a) => { setSelectedWard(a); }}
-          onViewEyeOrder={(o) => { setSelectedEyeOrderId(o.id); setShowEyeOrderModal(true); }}
+          onViewEyeOrder={(o) => {
+            setEyeSessionReportOrderId(o.id);
+            setEyeSessionReportOpen(true);
+          }}
         />
       </div>
-      <ViewEyeOrderModal
-        open={showEyeOrderModal}
-        onOpenChange={setShowEyeOrderModal}
-        orderId={selectedEyeOrderId}
+      <EyeSessionReportDialog
+        open={eyeSessionReportOpen}
+        onOpenChange={setEyeSessionReportOpen}
+        orderId={eyeSessionReportOrderId}
+      />
+      <MedicalCertificateCreateDialog
+        open={certDialogOpen}
+        onOpenChange={setCertDialogOpen}
+        patient={patient}
+        onCreated={() => {
+          setHistoryReloadToken((n) => n + 1);
+          if (patient?.id) void loadPatientHistory(patient.id);
+        }}
       />
     </DashboardLayout>
   );

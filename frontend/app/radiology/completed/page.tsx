@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useSearchParams } from 'next/navigation';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -25,10 +26,11 @@ import { useServerToday } from '@/hooks/use-server-today';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle,
-  Stethoscope, RefreshCw, Download, Loader2, Printer
+  Stethoscope, Download, Loader2, Printer
 } from 'lucide-react';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { useClinic } from "@/hooks/use-clinic";
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 
 export default function CompletedReportsPage() {
   const serverToday = useServerToday();
@@ -66,13 +68,10 @@ export default function CompletedReportsPage() {
     if (urlDate === 'all') setDateFilter('all');
   }, [searchParams]);
 
-  const formatDateTime = (isoString: string) => {
-    const date = new Date(isoString);
-    return {
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-    };
-  };
+  const formatDateTime = (isoString: string) => ({
+    date: formatDisplayDateMedium(isoString),
+    time: formatDisplayTime(isoString),
+  });
 
   const buildDateQuery = useCallback(
     (filter: string): Record<string, string> => {
@@ -98,7 +97,7 @@ export default function CompletedReportsPage() {
   // Load clinics function
   const loadClinics = useCallback(async () => {
     try {
-      const clinicsResult = await adminService.getClinics({ page_size: 200 });
+      const clinicsResult = await adminService.getClinics({ page_size: MAX_LIST_PAGE_SIZE });
       setClinics(clinicsResult.results);
     } catch (err) {
       console.error('Failed to load clinics:', err);
@@ -201,17 +200,12 @@ export default function CompletedReportsPage() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-              Completed Studies
-            </h1>
-            <p className="text-muted-foreground mt-1">History of verified and completed radiology studies</p>
-          </div>
-          <Button variant="outline" onClick={loadReports} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-          </Button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
+            <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+            Completed Studies
+          </h1>
+          <p className="text-muted-foreground mt-1">History of verified and completed radiology studies</p>
         </div>
 
         {/* Stats */}

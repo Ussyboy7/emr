@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,6 @@ import {
   Key,
   Loader2,
   Lock,
-  RefreshCw,
   Search,
   Shield,
 } from "lucide-react";
@@ -106,7 +106,7 @@ export function PermissionsCatalogTab() {
     setLoading(true);
     setError(null);
     try {
-      const response = await adminService.getRoles({ page_size: 200 });
+      const response = await adminService.getRoles({ page_size: MAX_LIST_PAGE_SIZE });
       const transformed: RoleLite[] = (response.results || []).map((r) => ({
         id: r.id,
         name: r.name,
@@ -306,10 +306,6 @@ export function PermissionsCatalogTab() {
                   <SelectItem value="unused">Granted to no role</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="sm" onClick={() => void refresh()}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-muted-foreground">

@@ -4,6 +4,7 @@ Views for the Organization app.
 from datetime import timedelta
 
 from django.db import transaction
+from drf_spectacular.utils import extend_schema
 from django.db.models import Count, Q
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -23,12 +24,12 @@ from .serializers import (
     SystemConfigSerializer,
 )
 from audit.services import AuditService
+from common.openapi import document_viewset
 
 
+@document_viewset(tag="Organization", resource="clinics")
 class ClinicViewSet(viewsets.ModelViewSet):
     """ViewSet for managing clinics."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = ClinicSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
@@ -50,6 +51,9 @@ class ClinicViewSet(viewsets.ModelViewSet):
         # window keeps the dashboard tile honest: it reflects current
         # operational throughput, not "anyone who ever touched this
         # clinic".
+        if getattr(self, 'swagger_fake_view', False):
+            return Clinic.objects.none()
+        
         window_start = timezone.now() - timedelta(days=self.CLINIC_ACTIVITY_WINDOW_DAYS)
         window_start_date = window_start.date()
         return Clinic.objects.annotate(
@@ -134,6 +138,7 @@ class ClinicViewSet(viewsets.ModelViewSet):
         )
         instance.delete()
 
+    @extend_schema(tags=["Organization"], summary="Admin stats", description="Aggregate counts for the Facilities & Departments admin KPI strip (full org, not paginated).")
     @action(detail=False, methods=["get"], url_path="admin-stats")
     def admin_stats(self, request):
         """Aggregate counts for the Facilities & Departments admin KPI strip (full org, not paginated)."""
@@ -165,6 +170,7 @@ class ClinicViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @extend_schema(tags=["Organization"], summary="Visit clinics", description="GET: OPD visit clinic types at this facility. PUT: replace offerings { type_ids: [id, ...] }.")
     @action(detail=True, methods=["get", "put"])
     def visit_clinics(self, request, pk=None):
         """GET: OPD visit clinic types at this facility. PUT: replace offerings { type_ids: [id, ...] }."""
@@ -222,10 +228,9 @@ class ClinicViewSet(viewsets.ModelViewSet):
         )
 
 
+@document_viewset(tag="Organization", resource="outpatient clinic types")
 class OutpatientClinicTypeViewSet(viewsets.ModelViewSet):
     """CRUD for master OPD visit clinic types (GOPD, Eye Clinic, …)."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = OutpatientClinicTypeSerializer
     queryset = OutpatientClinicType.objects.all()
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -235,10 +240,9 @@ class OutpatientClinicTypeViewSet(viewsets.ModelViewSet):
     ordering = ["sort_order", "name"]
 
 
+@document_viewset(tag="Organization", resource="departments")
 class DepartmentViewSet(viewsets.ModelViewSet):
     """ViewSet for managing departments."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = DepartmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['clinic', 'is_active']
@@ -247,6 +251,9 @@ class DepartmentViewSet(viewsets.ModelViewSet):
     ordering = ['name']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Department.objects.none()
+        
         return Department.objects.all().select_related('clinic', 'head')
     
     def perform_create(self, serializer):
@@ -301,10 +308,9 @@ class DepartmentViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
+@document_viewset(tag="Organization", resource="rooms")
 class RoomViewSet(viewsets.ModelViewSet):
     """ViewSet for managing rooms."""
-    
-    permission_classes = [IsAuthenticated]
     serializer_class = RoomSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['clinic', 'department', 'room_type', 'status', 'is_active']
@@ -313,6 +319,9 @@ class RoomViewSet(viewsets.ModelViewSet):
     ordering = ['room_number']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Room.objects.none()
+        
         return Room.objects.all().select_related('clinic', 'department')
     
     def perform_create(self, serializer):
@@ -367,10 +376,9 @@ class RoomViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
+@document_viewset(tag="Organization", resource="work locations", read_only=True)
 class WorkLocationViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for employee work locations (port complexes)."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = WorkLocationSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["is_active"]
@@ -378,18 +386,23 @@ class WorkLocationViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ["name"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return WorkLocation.objects.none()
+        
         return WorkLocation.objects.all()
 
 
+@document_viewset(tag="Organization", resource="system configuration", read_only=True)
 class SystemConfigViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only view of system configuration values for the frontend."""
-
-    permission_classes = [IsAuthenticated]
     serializer_class = SystemConfigSerializer
     filter_backends = [SearchFilter]
     search_fields = ['key']
     ordering = ['key']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return SystemConfig.objects.none()
+        
         return SystemConfig.objects.all()
 

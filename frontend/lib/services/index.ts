@@ -99,6 +99,15 @@ export { nursingService } from './nursing-service';
 export { eyeCareService } from './eye-care-service';
 
 export { medicalCertificateService } from './medical-certificate-service';
+export { annualCheckupService } from './annual-checkup-service';
+export { hrService } from './hr-service';
+export type {
+  AnnualCheckup,
+  AnnualCheckupProgramme,
+  CatalogItem,
+  ChecklistItem,
+  FitnessOutcome,
+} from './annual-checkup-service';
 
 // Export utility functions
 export { sanitizePatientForRendering, formatPatientGenderLabel } from './patient-service';

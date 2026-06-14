@@ -1,4 +1,4 @@
-.PHONY: backend-install backend-migrate backend-seed backend-run backend-reset db-bootstrap
+.PHONY: backend-install backend-migrate backend-seed backend-run backend-reset db-bootstrap docs-schema docs-check
 
 VENV=backend/.venv
 PYTHON=$(VENV)/bin/python
@@ -25,4 +25,12 @@ backend-reset:
 # Requires psql superuser privileges
 db-bootstrap:
 	psql -U postgres -f backend/scripts/bootstrap_postgres.sql
+
+# Generate docs/database/schema.dot and schema.png (requires venv + requirements-dev.txt + graphviz)
+docs-schema:
+	bash backend/scripts/generate_schema_diagram.sh
+
+# Fail if frontend page-permissions.ts and backend page_catalog.py diverge
+docs-check:
+	python3 scripts/docs/check_page_catalog_sync.py
 

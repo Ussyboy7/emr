@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.openapi import document_api_view
 from laboratory.models import LabOrder, LabResult, LabTest
 
 
@@ -55,6 +56,7 @@ def _filter_results_by_search(qs, search: str):
     ).distinct()
 
 
+@document_api_view(tag="Laboratory", summary="Cross-workflow lab patient tracker")
 class LaboratoryPatientTrackerView(APIView):
     """
     GET /laboratory/patient-tracker/?search=...
@@ -62,8 +64,6 @@ class LaboratoryPatientTrackerView(APIView):
     Returns active and completed lab tests for a patient search term with
     screen/tab hints for the frontend.
     """
-
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         search = (request.query_params.get('search') or '').strip()

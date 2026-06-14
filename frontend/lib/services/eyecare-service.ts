@@ -39,8 +39,13 @@ export interface EyecareAnalyticsSummary {
 }
 
 class EyecareService {
-  async getAnalyticsSummary(start: string, end: string): Promise<EyecareAnalyticsSummary> {
-    const query = buildQueryString({ start_date: start, end_date: end });
+  async getAnalyticsSummary(
+    period: URLSearchParams | { start: string; end: string }
+  ): Promise<EyecareAnalyticsSummary> {
+    const query =
+      period instanceof URLSearchParams
+        ? `?${period.toString()}`
+        : buildQueryString({ start_date: period.start, end_date: period.end });
     return apiFetch<EyecareAnalyticsSummary>(`/eyecare/analytics/summary/${query}`);
   }
 }

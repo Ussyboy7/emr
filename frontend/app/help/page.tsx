@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { formatDisplayTime } from '@/lib/dates';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -117,14 +118,14 @@ export default function HelpPage() {
       setSystemStatus({
         status: status.status,
         services,
-        lastUpdated: new Date().toLocaleTimeString(),
+        lastUpdated: formatDisplayTime(new Date()),
       });
     } catch (err) {
       console.error('Error loading system status:', err);
       setSystemStatus({
         status: 'unhealthy',
         services: { api: 'Connection failed' },
-        lastUpdated: new Date().toLocaleTimeString(),
+        lastUpdated: formatDisplayTime(new Date()),
       });
     } finally {
       setLoadingStatus(false);

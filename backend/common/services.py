@@ -10,6 +10,13 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
 
+from .upload_validation import (
+    UploadValidationError,
+    normalize_upload_folder,
+    sanitize_upload_filename,
+    validate_upload_file,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,17 +25,16 @@ class FileUploadService:
     
     @staticmethod
     def upload_file(file, folder: str = 'uploads', filename: Optional[str] = None) -> str:
-        """Upload a file and return the file path."""
+        """Upload a file and return the relative path under MEDIA_ROOT."""
         try:
-            if filename is None:
-                filename = file.name
-            
-            # Create folder path
-            file_path = os.path.join(folder, filename)
-            
-            # Save file
+            validate_upload_file(file)
+            safe_folder = normalize_upload_folder(folder)
+            safe_name = sanitize_upload_filename(filename or file.name)
+            file_path = os.path.join(safe_folder, safe_name)
             saved_path = default_storage.save(file_path, ContentFile(file.read()))
             return saved_path
+        except UploadValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error uploading file: {str(e)}")
             raise

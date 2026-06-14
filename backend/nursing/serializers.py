@@ -5,6 +5,8 @@ from datetime import timedelta
 
 from django.utils import timezone
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from .models import NursingOrder, Procedure
 
 
@@ -20,6 +22,7 @@ class NursingOrderSerializer(serializers.ModelSerializer):
     ordered_by_name = serializers.CharField(source='ordered_by.get_full_name', read_only=True, allow_null=True)
     admission_id_display = serializers.CharField(source='admission.admission_id', read_only=True, allow_null=True)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_age(self, obj):
         if not obj.patient_id or not obj.patient.date_of_birth:
             return None
@@ -27,6 +30,7 @@ class NursingOrderSerializer(serializers.ModelSerializer):
         today = timezone.now().date()
         return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_allergies(self, obj):
         if not obj.patient_id:
             return []
@@ -70,6 +74,8 @@ class ProcedureSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_category = serializers.CharField(source='patient.category', read_only=True)
+    patient_blood_group = serializers.CharField(source='patient.blood_group', read_only=True, allow_null=True)
     patient_age = serializers.SerializerMethodField()
     patient_date_of_birth = serializers.DateField(
         source='patient.date_of_birth', read_only=True, allow_null=True
@@ -77,6 +83,7 @@ class ProcedureSerializer(serializers.ModelSerializer):
     ordered_by_name = serializers.SerializerMethodField()
     performed_by_name = serializers.CharField(source='performed_by.get_full_name', read_only=True, allow_null=True)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_patient_age(self, obj):
         if not obj.patient_id or not obj.patient.date_of_birth:
             return None
@@ -84,6 +91,7 @@ class ProcedureSerializer(serializers.ModelSerializer):
         today = timezone.now().date()
         return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_ordered_by_name(self, obj):
         order = getattr(obj, 'nursing_order', None)
         if order and order.ordered_by_id:

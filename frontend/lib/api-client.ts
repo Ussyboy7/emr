@@ -35,7 +35,7 @@ export const AUTH_REFRESH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
  * API root used by fetch() (must hit Django, not the Next.js dev server).
  * Uses NEXT_PUBLIC_API_URL environment variable for the API base URL.
  */
-const getBaseUrl = (): string => {
+export const getBaseUrl = (): string => {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL;
   if (!baseUrl || baseUrl.trim() === "") {
     throw new Error("NEXT_PUBLIC_API_URL environment variable is not set");
@@ -437,7 +437,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
   }
 
   if (responseType === "blob" && !requestHeaders.has("Accept")) {
-    requestHeaders.set("Accept", "application/pdf, */*;q=0.5");
+    requestHeaders.set("Accept", "application/pdf, text/csv, */*;q=0.5");
   } else if (!requestHeaders.has("Accept")) {
     // Force JSON responses instead of HTML (Django REST Framework browsable API)
     requestHeaders.set("Accept", "application/json");
@@ -889,32 +889,6 @@ export const impersonateUser = async (username: string) => {
   }
   storeTokens(data.access, data.refresh, data.expires_in);
   return data;
-};
-
-/**
- * Get the media base URL from the API URL configuration
- */
-const getMediaBaseUrl = () => {
-  const apiRoot = getBaseUrl();
-  if (apiRoot.endsWith("/api")) return apiRoot.slice(0, -4);
-  if (apiRoot.endsWith("/api/v1")) return apiRoot.slice(0, -7);
-  return apiRoot;
-};
-
-/**
- * Construct a full photo URL from a relative path
- * @param relativePath - Relative path from backend (e.g., "/media/patients/photos/image.jpg")
- * @returns Full URL or null if path is invalid
- */
-export const getPhotoUrl = (relativePath: string | null | undefined): string | null => {
-  if (!relativePath) return null;
-  if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
-    return relativePath; // Already a full URL
-  }
-  if (relativePath.startsWith('/media/')) {
-    return `${getMediaBaseUrl()}${relativePath}`;
-  }
-  return null; // Unknown format
 };
 
 /** User-facing message from apiFetch errors (message usually set by apiFetch with status/URL in dev). */

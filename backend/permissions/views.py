@@ -6,17 +6,28 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema, extend_schema_view
 
+from permissions.drf_permissions import ApiPageAccessPermission
+from common.openapi import document_viewset
 from .models import Role, UserRole
 from .serializers import RoleSerializer, UserRoleSerializer
 from audit.services import AuditService
-from django.db.models import Count
+from django.db.models import Count, Q
 
 
+@extend_schema_view(
+    list=extend_schema(summary="List roles", tags=["Permissions"]),
+    retrieve=extend_schema(summary="Retrieve role", tags=["Permissions"]),
+    create=extend_schema(summary="Create role", tags=["Permissions"]),
+    update=extend_schema(summary="Update role", tags=["Permissions"]),
+    partial_update=extend_schema(summary="Partially update role", tags=["Permissions"]),
+    destroy=extend_schema(summary="Delete role", tags=["Permissions"]),
+)
 class RoleViewSet(viewsets.ModelViewSet):
     """ViewSet for managing roles."""
     
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAdminUser, ApiPageAccessPermission]
     serializer_class = RoleSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['type', 'is_active']
@@ -25,6 +36,9 @@ class RoleViewSet(viewsets.ModelViewSet):
     ordering = ['name']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Role.objects.none()
+        
         qs = Role.objects.all().prefetch_related('user_roles')
         tg = (self.request.query_params.get('type_group') or '').strip().lower()
         if tg == 'system':
@@ -98,6 +112,7 @@ class RoleViewSet(viewsets.ModelViewSet):
         )
         instance.delete()
     
+    @extend_schema(tags=["Permissions"], summary="Users", description="Get all users with this role.")
     @action(detail=True, methods=['get'])
     def users(self, request, pk=None):
         """Get all users with this role."""
@@ -106,11 +121,25 @@ class RoleViewSet(viewsets.ModelViewSet):
         serializer = UserRoleSerializer(user_roles, many=True)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Permissions"], summary="List stats", description="Role KPI counts (replaces parallel COUNT requests).")
+    @action(detail=False, methods=['get'], url_path='list-stats')
+    def list_stats(self, request):
+        """Role KPI counts (replaces parallel COUNT requests)."""
+        clinical_types = ['doctor', 'nurse', 'lab_tech', 'pharmacist', 'radiologist']
+        base = Role.objects.all()
+        return Response({
+            'total': base.count(),
+            'active': base.filter(is_active=True).count(),
+            'clinical': base.filter(type__in=clinical_types).count(),
+            'totalUsers': UserRole.objects.values('user_id').distinct().count(),
+        })
 
+
+@document_viewset(tag="Permissions", resource="user roles")
 class UserRoleViewSet(viewsets.ModelViewSet):
     """ViewSet for managing user-role assignments."""
     
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAdminUser, ApiPageAccessPermission]
     serializer_class = UserRoleSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['user', 'role']
@@ -118,8 +147,12 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     ordering = ['-assigned_at']
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return UserRole.objects.none()
+        
         return UserRole.objects.all().select_related('user', 'role', 'assigned_by')
 
+    @extend_schema(tags=["Permissions"], summary="Summary", description="Summary counts for role assignments.")
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
         """

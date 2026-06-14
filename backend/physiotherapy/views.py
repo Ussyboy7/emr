@@ -1,53 +1,39 @@
 """
 Physiotherapy views.
 """
-from django.http import JsonResponse
-from django.utils.decorators import method_decorator
-from django.views import View
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.dateparse import parse_datetime
-from django.utils import timezone
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from common.analytics_export import maybe_export_analytics
+from common.module_analytics import parse_analytics_dates
+from common.openapi import document_api_view
+
 from .analytics import build_physiotherapy_analytics
 from .models import PhysioOrder, PhysioSession
 
 
-@method_decorator(csrf_exempt, name='dispatch')
-class PhysiotherapyAnalyticsSummaryView(View):
-    """
-    API view for physiotherapy analytics summary.
-    """
+@document_api_view(tag="Analytics", summary="Physiotherapy analytics summary")
+class PhysiotherapyAnalyticsSummaryView(APIView):
+    """GET ?start=YYYY-MM-DD&end=YYYY-MM-DD — orders and sessions in range."""
 
     def get(self, request):
-        """Return physiotherapy analytics data."""
-        # Get date range from query params
-        start_date_str = request.GET.get('start_date')
-        end_date_str = request.GET.get('end_date')
-
-        # Default to last 30 days if not provided
-        if not start_date_str or not end_date_str:
-            end_date = timezone.now()
-            start_date = end_date - timezone.timedelta(days=30)
-        else:
-            start_date = parse_datetime(start_date_str) or (timezone.now() - timezone.timedelta(days=30))
-            end_date = parse_datetime(end_date_str) or timezone.now()
-
-        # Ensure start_date is timezone aware
-        if timezone.is_naive(start_date):
-            start_date = timezone.make_aware(start_date)
-        if timezone.is_naive(end_date):
-            end_date = timezone.make_aware(end_date)
-
+        parsed = parse_analytics_dates(request)
+        if isinstance(parsed, Response):
+            return parsed
+        start_date, end_date, _all_time = parsed
         analytics_data = build_physiotherapy_analytics(start_date, end_date)
+        exported = maybe_export_analytics(request, analytics_data, module_key="physiotherapy")
+        if exported is not None:
+            return exported
+        return Response(analytics_data)
 
-        return JsonResponse(analytics_data)
 
-
-@method_decorator(csrf_exempt, name='dispatch')
-class PhysiotherapyStatsView(View):
-    """Basic physiotherapy queue/session counters."""
+@document_api_view(tag="Physiotherapy", summary="Physiotherapy queue counters")
+class PhysiotherapyStatsView(APIView):
+    """Basic physiotherapy order and session counts."""
 
     def get(self, request):
-        return JsonResponse({
+        return Response({
             'total_orders': PhysioOrder.objects.count(),
             'pending_orders': PhysioOrder.objects.filter(status__in=['pending', 'scheduled']).count(),
             'completed_sessions': PhysioSession.objects.filter(status='completed').count(),

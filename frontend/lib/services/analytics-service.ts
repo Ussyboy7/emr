@@ -2,6 +2,7 @@
  * Analytics service for the main clinical dashboard
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { peekServerTodayApi, toApiDateString } from '../dates';
 
 export interface ClinicalDashboardData {
   period: {
@@ -84,9 +85,12 @@ class AnalyticsService {
 
   async getClinicDistribution(): Promise<Array<{ name: string; value: number }>> {
     try {
+      const end = new Date();
+      const start = new Date(end);
+      start.setDate(start.getDate() - 30);
       const data = await this.getClinicalDashboard(
-        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        new Date().toISOString().split('T')[0]
+        toApiDateString(start),
+        peekServerTodayApi()
       );
       return Object.entries(data.clinic_distribution).map(([name, value]) => ({
         name,

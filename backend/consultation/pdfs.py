@@ -26,14 +26,18 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import HRFlowable, Paragraph, Spacer, Table, TableStyle
 
+from common.date_display import format_display_date, format_display_month_year
 from common.pdf import (
     COLOR_BODY,
     COLOR_LINE,
     NPADocument,
     body_paragraph,
+    centered_section_title,
     label_paragraph,
     npa_styles,
     rich_paragraph,
+    section_heading,
+    signature_block,
     small_paragraph,
 )
 
@@ -46,12 +50,10 @@ def _fmt_short(value) -> str:
     if not value:
         return "—"
     try:
-        return timezone.localtime(value).strftime("%d.%m.%Y")
+        formatted = format_display_date(value)
+        return formatted or "—"
     except Exception:
-        try:
-            return value.strftime("%d.%m.%Y")
-        except Exception:
-            return "—"
+        return "—"
 
 
 def _plain_centered_title(text: str) -> Paragraph:
@@ -284,20 +286,11 @@ def build_responsibility_form_pdf(referral, form) -> bytes:
     valid_from = getattr(form, "valid_from", None)
     valid_to = getattr(form, "valid_to", None)
 
-    month_str = "—"
-    try:
-        month_dt = timezone.localtime(issue_date) if issue_date else None
-        if month_dt:
-            month_str = month_dt.strftime("%B %Y")
-    except Exception:
-        try:
-            month_str = issue_date.strftime("%B %Y") if issue_date else "—"
-        except Exception:
-            month_str = "—"
+    month_str = format_display_month_year(issue_date) if issue_date else "—"
 
     validity = "—"
     if valid_from and valid_to:
-        validity = f"{valid_from.strftime('%d.%m.%Y')} – {valid_to.strftime('%d.%m.%Y')}"
+        validity = f"{format_display_date(valid_from)} – {format_display_date(valid_to)}"
 
     # Receiving facility for the right-hand detach signoff column
     partner = getattr(referral, "facility_partner", None)
@@ -417,4 +410,104 @@ def build_responsibility_form_pdf(referral, form) -> bytes:
     return buffer.getvalue()
 
 
-__all__ = ["build_responsibility_form_pdf"]
+def _referral_location_name(referral) -> str:
+    from common.order_location import location_clinic_name
+
+    if referral.session_id:
+        name = location_clinic_name(referral.session)
+        if name:
+            return name
+    if referral.visit_id:
+        return location_clinic_name(referral.visit) or ""
+    return ""
+
+
+def _urgency_label(urgency: str | None) -> str:
+    return {
+        "routine": "Routine",
+        "urgent": "Urgent",
+        "emergency": "Emergency",
+    }.get((urgency or "").strip().lower(), (urgency or "—").strip() or "—")
+
+
+def build_referral_letter_pdf(referral) -> bytes:
+    """
+    Build the formal specialist referral letter Medical Records issues to the
+    receiving hospital. Layout mirrors the HTML letter the frontend used to
+    print, wrapped in the standard NPA letterhead.
+    """
+    buffer = BytesIO()
+    doc = NPADocument(
+        buffer,
+        department="MEDICAL DEPARTMENT",
+        document_title=f"Referral Letter — {referral.referral_id}",
+    )
+
+    patient = referral.patient
+    referring_doctor = referral.referred_by.get_full_name() if referral.referred_by else "—"
+    pno = _personal_number_line(patient)
+    department = _division_line(patient)
+    location = _referral_location_name(referral)
+
+    story = [
+        centered_section_title("REFERRAL LETTER"),
+        Spacer(1, 8),
+        rich_paragraph(
+            f"<b>Date:</b> {_e(_fmt_short(referral.referred_at))}"
+            f'<font color="#94a3b8">&nbsp;&nbsp;|&nbsp;&nbsp;</font>'
+            f"<b>Referral ID:</b> {_e(referral.referral_id)}"
+            f'<font color="#94a3b8">&nbsp;&nbsp;|&nbsp;&nbsp;</font>'
+            f"<b>Urgency:</b> {_e(_urgency_label(referral.urgency))}"
+        ),
+    ]
+    if location:
+        story.append(body_paragraph(f"Originating Location: {location}"))
+    story += [
+        Spacer(1, 10),
+        label_paragraph("To:"),
+        *[body_paragraph(line) for line in _addressee_lines(referral)],
+        Spacer(1, 10),
+        body_paragraph("Please kindly evaluate and manage the patient below:"),
+        Spacer(1, 6),
+        rich_paragraph(
+            f"<b>Patient Name:</b> {_e(patient.get_full_name())} "
+            f"(P.N. {_e(pno)}) "
+            f"<b>DEPT.</b> {_e(department)}"
+        ),
+        body_paragraph(f"Referred Specialty/Unit: {referral.specialty or '—'}"),
+        Spacer(1, 10),
+        section_heading("Reason for Referral"),
+        body_paragraph(referral.reason or "N/A"),
+        Spacer(1, 8),
+        section_heading("Clinical Summary"),
+        body_paragraph(referral.clinical_summary or "N/A"),
+        Spacer(1, 20),
+        signature_block(
+            left_role="Referring Doctor",
+            left_name=referring_doctor,
+            right_role="Medical Records Officer",
+            right_name="",
+            width=doc.usable_width,
+        ),
+    ]
+
+    doc.build(story, document_serial=referral.referral_id)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def build_referral_letter_pdf_response(referral):
+    from django.http import HttpResponse
+
+    pdf_bytes = build_referral_letter_pdf(referral)
+    filename = f"referral_letter_{referral.referral_id}.pdf"
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{filename}"'
+    return response
+
+
+__all__ = [
+    "build_referral_letter_pdf",
+    "build_referral_letter_pdf_response",
+    "build_responsibility_form_pdf",
+]

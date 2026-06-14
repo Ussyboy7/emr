@@ -21,9 +21,13 @@ from .serializers import (
     SystemRoleSerializer,
 )
 from audit.services import AuditService
+from permissions.drf_permissions import ApiPageAccessPermission
 from permissions.models import Role, UserRole
+from common.openapi import document_viewset
+from drf_spectacular.utils import extend_schema
 
 
+@document_viewset(tag="Accounts", resource="users")
 class UserViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing users.
@@ -36,7 +40,6 @@ class UserViewSet(viewsets.ModelViewSet):
     destroy: Delete user
     """
 
-    permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['system_role', 'is_active', 'is_staff', 'is_management', 'clinic', 'department']
     search_fields = ['username', 'email', 'first_name', 'last_name', 'employee_id']
@@ -44,6 +47,9 @@ class UserViewSet(viewsets.ModelViewSet):
     ordering = ['username']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return User.objects.none()
+        
         """
         Return queryset of users.
 
@@ -87,12 +93,14 @@ class UserViewSet(viewsets.ModelViewSet):
         - Admin-only: list/retrieve + all mutations on /accounts/users/*
         - Authenticated: /auth/me, /auth/me patch, change_password, staff directory lookups
         """
+        page = ApiPageAccessPermission()
         if self.action in ['me', 'update_me', 'change_password', 'directory', 'public']:
-            return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), page]
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update', 'destroy', 'reset_password', 'stats']:
-            return [permissions.IsAdminUser()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAdminUser(), page]
+        return [permissions.IsAuthenticated(), page]
 
+    @extend_schema(tags=["Accounts"], summary="Stats", description="Lightweight user counts for admin dashboards.")
     @action(detail=False, methods=["get"], permission_classes=[permissions.IsAdminUser])
     def stats(self, request):
         """
@@ -117,6 +125,7 @@ class UserViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @extend_schema(tags=["Accounts"], summary="Directory", description="Staff directory endpoint for cross-department lookups.")
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def directory(self, request):
         """
@@ -133,6 +142,7 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = UserDirectorySerializer(qs, many=True)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Accounts"], summary="Public", description="Minimal user profile for cross-department display (e.g., doctor name).")
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def public(self, request, pk=None):
         """Minimal user profile for cross-department display (e.g., doctor name)."""
@@ -255,12 +265,14 @@ class UserViewSet(viewsets.ModelViewSet):
         )
         instance.delete()
 
+    @extend_schema(tags=["Accounts"], summary="Current user profile and permissions")
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def me(self, request):
         """Get current user's profile."""
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
 
+    @extend_schema(tags=["Accounts"], summary="Update current user profile")
     @action(detail=False, methods=['patch'], permission_classes=[permissions.IsAuthenticated])
     def update_me(self, request):
         """Update current user's profile."""
@@ -288,6 +300,7 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response(UserSerializer(request.user).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(tags=["Accounts"], summary="Change password", description="Change current user's password.")
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def change_password(self, request):
         """Change current user's password."""
@@ -332,6 +345,7 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({"message": "Password changed successfully."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(tags=["Accounts"], summary="Reset password", description="Admin action to reset a user's password.")
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def reset_password(self, request, pk=None):
         """Admin action to reset a user's password."""
@@ -378,6 +392,7 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({"message": f"Password reset successfully for {user.get_full_name() or user.username}."})
 
 
+@document_viewset(tag="Accounts", resource="system roles")
 class SystemRoleViewSet(viewsets.ModelViewSet):
     """
     API endpoint for managing system roles (professional identities).
@@ -395,6 +410,9 @@ class SystemRoleViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return SystemRole.objects.none()
+        
         queryset = SystemRole.objects.all()
         # Filter by active status if requested
         is_active = self.request.query_params.get('is_active', None)
@@ -402,6 +420,7 @@ class SystemRoleViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
         return queryset
 
+    @extend_schema(tags=["Accounts"], summary="Stats", description="Get statistics about system roles.")
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get statistics about system roles."""

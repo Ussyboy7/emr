@@ -2,6 +2,7 @@
  * Administration API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { MAX_LIST_PAGE_SIZE } from '../pagination-constants';
 
 export interface User {
   id: number;
@@ -234,7 +235,7 @@ class AdminService {
    * Get role assignments for a user.
    */
   async getUserRoleAssignments(userId: number): Promise<UserRoleAssignment[]> {
-    const query = buildQueryString({ user: userId, page_size: 200 } as any);
+    const query = buildQueryString({ user: userId, page_size: MAX_LIST_PAGE_SIZE } as any);
     const res = await apiFetch<{ results: UserRoleAssignment[] }>(`/permissions/user-roles/${query}`);
     return res.results || [];
   }
@@ -287,6 +288,15 @@ class AdminService {
   }): Promise<{ results: Role[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Role[]; count: number }>(`/permissions/roles/${query}`);
+  }
+
+  async getRoleListStats(): Promise<{
+    total: number;
+    active: number;
+    clinical: number;
+    totalUsers: number;
+  }> {
+    return apiFetch('/permissions/roles/list-stats/');
   }
 
   /**
@@ -657,189 +667,22 @@ class AdminService {
     /** Per-key data source: 'live' (real measurement) or 'sample' (placeholder). */
     metricSources?: Record<string, 'live' | 'sample'>;
   }> {
-    // Load all data in parallel (online count from server presence, not client filters)
-    const [
-      usersResponse,
-      activeUsersResponse,
-      rolesResponse,
-      clinicsResponse,
-      roomsResponse,
-      auditResponse,
-      metricsResponse,
-      livePresence,
-    ] = await Promise.all([
-      this.getUsers({ page_size: 500 }),
-      this.getUsers({ page_size: 1, is_active: true }),
-      this.getRoles({ page_size: 200 }),
-      this.getClinics({ page_size: 200 }),
-      this.getRooms({ page_size: 200 }),
-      this.getAuditLogs({ page_size: 10 }),
-      apiFetch('/common/metrics/').catch(() => ({})),
-      this.getDashboardLive().catch(() => ({
-        onlineNow: 0,
-        presenceWindowSeconds: 120,
-        systemHealth: [],
-        serverTime: new Date().toISOString(),
-      })),
-    ]);
+    return apiFetch('/common/dashboard/admin/');
+  }
 
-    const users = usersResponse.results;
-    const roles = rolesResponse.results;
-    const clinics = clinicsResponse.results;
-    const rooms = roomsResponse.results;
-    const auditLogs = auditResponse.results;
-
-    const totalUsers = usersResponse.count ?? users.length;
-    const activeUsers = activeUsersResponse.count ?? users.filter(u => u.is_active).length;
-    const inactiveUsers = Math.max(0, totalUsers - activeUsers);
-    const onlineNow = livePresence.onlineNow;
-    const presenceWindowSeconds = livePresence.presenceWindowSeconds ?? 120;
-
-    const totalRoles = rolesResponse.count ?? roles.length;
-    // RoleSerializer exposes ``user_count`` (count of UserRole rows
-    // pointing at that Role). A role is "in use" if at least one
-    // user is assigned to it — gives the dashboard a non-trivial
-    // subtext alongside the other KPI cards.
-    const rolesInUse = roles.filter((r: Role) => (r.user_count ?? 0) > 0).length;
-    const totalClinics = clinicsResponse.count ?? clinics.length;
-    const activeClinics = clinics.filter(c => c.is_active).length;
-    // ``count`` is the full server total — robust past the 1000-row
-    // page_size we request. ``rooms.length`` would silently cap.
-    const totalRooms = roomsResponse.count ?? rooms.length;
-    // ConsultationRoom exposes ``active_session`` via the serializer:
-    // present (truthy object) when a session is in progress in that
-    // room. That's the correct "occupied" signal — the older code
-    // looked for ``assigned_doctor`` which doesn't exist on this model.
-    const availableRooms = rooms.filter(
-      (r: Record<string, unknown>) => r.status === 'active' && !r.active_session,
-    ).length;
-    const occupiedRooms = rooms.filter(
-      (r: Record<string, unknown>) => r.status === 'active' && Boolean(r.active_session),
-    ).length;
-
-    // Users by role with proper role mapping
-    const roleCounts: Record<string, number> = {};
-    const roleDisplayNames: Record<string, string> = {
-      superuser: 'System Administrator',
-      admin: 'System Administrator',
-      doctor: 'Medical Doctor',
-      nurse: 'Nursing Officer',
-      lab_tech: 'Laboratory Scientist',
-      pharmacist: 'Pharmacist',
-      radiologist: 'Radiologist',
-      physiotherapist: 'Physiotherapist',
-      records: 'Medical Records Officer',
-      medical_records: 'Medical Records Officer',
-      optometrist: 'Optometrist',
-      ophthalmologist: 'Ophthalmologist',
-    };
-    const formatRoleLabel = (role: string) => {
-      if (roleDisplayNames[role]) return roleDisplayNames[role];
-      if (role === 'No Role') return role;
-      return role
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (c) => c.toUpperCase());
-    };
-
-    users.forEach(user => {
-      const role = user.system_role || 'No Role';
-      const displayRole = formatRoleLabel(role);
-      roleCounts[displayRole] = (roleCounts[displayRole] || 0) + 1;
-    });
-
-    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#64748b'];
-    const usersByRole = Object.entries(roleCounts).map(([role, count], index) => ({
-      role,
-      count,
-      color: colors[index % colors.length],
-    }));
-
-    // Recent audit events
-    const recentAuditEvents = auditLogs.slice(0, 5).map((log: AuditLog) => ({
-      id: log.id.toString(),
-      user: log.user_name || log.user_email || 'Unknown',
-      action: log.action,
-      module: log.module || 'System',
-      detail: log.description || '',
-      time: this.getRelativeTime(log.created_at),
-      status: log.result === 'success' ? 'success' : 'failed',
-    }));
-
-    // System health — prefer real values from /common/metrics/. The
-    // backend reports API uptime (process start time), Postgres uptime
-    // (pg_postmaster_start_time), and MEDIA_ROOT writability + free
-    // space. We only fall back to a static "Healthy" stub if the
-    // metrics endpoint failed or didn't include systemHealth (older
-    // backend deploy).
-    const metricsAny = metricsResponse as any;
-    const liveHealth = Array.isArray(metricsAny?.systemHealth) ? metricsAny.systemHealth : null;
-    const systemHealth = liveHealth && liveHealth.length > 0
-      ? liveHealth
-      : [
-          { name: 'API Server', status: 'healthy', uptime: null, detail: 'Health probe unavailable.', icon: 'Server' },
-          { name: 'Database', status: 'healthy', uptime: null, detail: 'Health probe unavailable.', icon: 'Database' },
-          { name: 'File Storage', status: 'healthy', uptime: null, detail: 'Health probe unavailable.', icon: 'HardDrive' },
-        ];
-
-    // Expiring licenses (from users with license_expiry)
-    const now = new Date();
-    const threeMonths = new Date();
-    threeMonths.setMonth(threeMonths.getMonth() + 3);
-    const expiringLicenses = users
-      .filter(u => u.license_expiry)
-      .filter(u => {
-        const expiry = new Date(u.license_expiry!);
-        return expiry <= threeMonths && expiry >= now;
-      })
-      .map(u => ({
-        name: `${u.first_name} ${u.last_name}`,
-        type: u.specialty || 'License',
-        expires: u.license_expiry!,
-        daysLeft: Math.ceil((new Date(u.license_expiry!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
-      }))
-      .slice(0, 5);
-
-    // Clinic status (patient_count / doctor_count from organization API annotations)
-    const clinicStatus = clinics.map((c: any) => ({
-      name: c.name,
-      status: c.is_active ? 'open' : 'closed',
-      patients: typeof c.patient_count === 'number' ? c.patient_count : 0,
-      doctors: typeof c.doctor_count === 'number' ? c.doctor_count : 0,
-    }));
-
-    // Pending approvals (simplified)
-    const pendingApprovals: Record<string, unknown>[] = [];
-
-    // Extract metrics from response
-    const metrics = metricsResponse as any;
-
-    return {
-      totalUsers,
-      activeUsers,
-      inactiveUsers,
-      onlineNow,
-      presenceWindowSeconds,
-      totalRoles,
-      rolesInUse,
-      totalClinics,
-      activeClinics,
-      totalRooms,
-      availableRooms,
-      occupiedRooms,
-      usersByRole,
-      recentAuditEvents,
-      systemHealth,
-      expiringLicenses,
-      clinicStatus,
-      pendingApprovals,
-      responseTimeMs: metrics?.responseTimeMs,
-      errorRate: metrics?.errorRate,
-      responseTimeSample: metrics?.responseTimeSample,
-      mediaStorageGb: metrics?.mediaStorageGb ?? metrics?.dataProcessedGb,
-      dataProcessedGb: metrics?.dataProcessedGb,
-      backupStatus: metrics?.backupStatus,
-      metricSources: metrics?.sources,
-    };
+  /**
+   * Live infrastructure metrics (health probes, backup scan, API timing).
+   */
+  async getSystemMetrics(): Promise<{
+    systemHealth: Record<string, unknown>[];
+    backupStatus?: Record<string, unknown>;
+    responseTimeMs?: number;
+    errorRate?: number;
+    responseTimeSample?: number;
+    mediaStorageGb?: number;
+    sources?: Record<string, 'live' | 'sample'>;
+  }> {
+    return apiFetch('/common/metrics/');
   }
 
   async getOnlineUsers(): Promise<{

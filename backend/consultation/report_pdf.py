@@ -8,6 +8,7 @@ from django.http import HttpResponse
 from reportlab.lib.units import inch
 from reportlab.platypus import Spacer
 
+from common.date_display import format_display_datetime
 from common.pdf import (
     NPADocument,
     patient_info_block,
@@ -22,7 +23,7 @@ def _format_dt(dt):
     if not dt:
         return "—"
     try:
-        return dt.strftime("%m/%d/%Y %I:%M %p")
+        return format_display_datetime(dt)
     except Exception:
         return str(dt)
 

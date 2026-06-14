@@ -4,15 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import {
   AnalyticsReportLayout,
-  analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
+import { useReportDateRange } from "@/hooks/use-report-date-range";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { apiFetch, getReadableApiError } from '@/lib/api-client';
+import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
 import { pharmacyService, type PharmacyAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
-import { endOfMonth, format, startOfMonth } from 'date-fns';
+import { endOfMonth, startOfMonth } from 'date-fns';
+import { toApiDateString, peekServerTodayMonthPrefix, peekServerTodayYear } from '@/lib/dates';
+import { buildReportPeriodQuery, canFetchReportPeriod } from '@/lib/report-period-query';
 import {
   Bar,
   BarChart,
@@ -47,10 +50,6 @@ interface DispensedItemRow {
   medication: string;
   unit: string;
   quantity_dispensed: number;
-}
-
-function toYmd(d: Date) {
-  return format(d, 'yyyy-MM-dd');
 }
 
 function triggerCsvDownload(filename: string, content: string) {
@@ -162,40 +161,47 @@ export default function PharmacyAnalyticsPage() {
   const [year, setYear] = useState(() => new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
+
+  const { handleExportCsv, handleDownloadPdf } = useAnalyticsExportHandlers({
+    apiPath: "/pharmacy/analytics/summary/",
+    filenameBase: "pharmacy_analytics",
+    viewMode,
+    year,
+    startDate,
+    endDate,
+    queryStyle: "start",
+  });
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PharmacyAnalyticsSummary | null>(null);
   const [dispensedItems, setDispensedItems] = useState<DispensedItemRow[]>([]);
 
   const range = useMemo(
-    () => analyticsRangeFromFilters(viewMode, year, startDate, endDate),
-    [viewMode, year, startDate, endDate]
+    () => reportRange,
+    [reportRange]
   );
 
   const highlightThisMonth =
     viewMode === 'range' &&
     Boolean(startDate) &&
-    startDate.includes(new Date().toISOString().slice(0, 7));
-  const highlightThisYear = viewMode === 'year' && year === new Date().getFullYear().toString();
+    startDate.includes(peekServerTodayMonthPrefix());
+  const highlightThisYear = viewMode === 'year' && year === peekServerTodayYear();
 
   const fetchReport = useCallback(async () => {
-    const r = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    if (!r) {
+    const params = buildReportPeriodQuery(viewMode, reportRange, 'start');
+    if (!params) {
       if (viewMode === 'range') toast.error('Please select start and end dates');
       return;
     }
     setLoading(true);
     try {
-      // Fetch analytics data
-      const res = await pharmacyService.getAnalyticsSummary(r.start, r.end);
+      const res = await pharmacyService.getAnalyticsSummary(params);
       setData(res);
 
-      // Fetch dispensed items
-      let url = "/reports/dispensed-prescriptions/?";
-      if (viewMode === "year") {
-        url += `year=${year}`;
-      } else if (startDate && endDate) {
-        url += `start_date=${startDate}&end_date=${endDate}`;
-      }
+      const dispensedParams = buildReportPeriodQuery(viewMode, reportRange, 'start_date');
+      const url = `/reports/dispensed-prescriptions/?${dispensedParams?.toString() ?? ''}`;
 
       const dispensedResponse = await apiFetch<{
         dispensed_items: DispensedItemRow[];
@@ -209,22 +215,18 @@ export default function PharmacyAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewMode, year, startDate, endDate]);
+  }, [reportRange, viewMode]);
 
   useEffect(() => {
-    const shouldFetch =
-      (viewMode === 'year' && year) ||
-      (viewMode === 'range' && startDate && endDate) ||
-      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
-    if (shouldFetch) {
+    if (canFetchReportPeriod(viewMode, reportRange)) {
       void fetchReport();
     }
-  }, [viewMode, year, startDate, endDate, fetchReport]);
+  }, [reportRange, fetchReport]);
 
   const setThisMonth = () => {
     const n = new Date();
-    setStartDate(toYmd(startOfMonth(n)));
-    setEndDate(toYmd(endOfMonth(n)));
+    setStartDate(toApiDateString(startOfMonth(n)));
+    setEndDate(toApiDateString(endOfMonth(n)));
     setViewMode('range');
   };
 
@@ -233,16 +235,6 @@ export default function PharmacyAnalyticsPage() {
     setViewMode('year');
   };
 
-  const exportCsv = () => {
-    if (!data || !range) {
-      toast.error('No data to export');
-      return;
-    }
-    const csv = pharmacyAnalyticsToCsv(data, viewMode, year, startDate, endDate);
-    const period = viewMode === 'year' ? year : `${startDate}_to_${endDate}`;
-    triggerCsvDownload(`pharmacy_analytics_${period}.csv`, csv);
-    toast.success('Exported CSV');
-  };
 
   const dayTrend = useMemo(() => {
     if (!data?.by_day?.length) return [];
@@ -334,10 +326,10 @@ export default function PharmacyAnalyticsPage() {
         ReportIcon={Pill}
         reportIconClassName="text-violet-600 dark:text-violet-400"
         loading={loading}
-        onRefresh={fetchReport}
         onGenerate={fetchReport}
         exportCsvDisabled={!data}
-        onExportCsv={exportCsv}
+        onExportCsv={handleExportCsv}
+        onPrint={handleDownloadPdf}
         printDisabled={!data}
         viewMode={viewMode}
         onViewModeChange={setViewMode}

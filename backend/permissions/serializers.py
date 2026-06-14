@@ -2,6 +2,8 @@
 Serializers for the Permissions app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from .models import Role, UserRole
 from .role_permissions import normalize_role_permissions_list
 
@@ -25,6 +27,7 @@ class RoleSerializer(serializers.ModelSerializer):
             data['permissions'] = normalize_role_permissions_list(instance.permissions)
         return data
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_user_count(self, obj):
         return obj.user_roles.count()
 

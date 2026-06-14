@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Download, FileText, Pill, Printer, Stethoscope } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatDisplayDate, formatDisplayTime, formatDisplayDateTime } from '@/lib/dates';
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 
 export interface PrescriptionReportMedicationRow {
@@ -120,20 +121,14 @@ function escapeHtml(s: string): string {
 
 function formatDateStr(d: string | undefined): string {
   if (!d) return '';
-  try {
-    const date = new Date(d);
-    if (isNaN(date.getTime())) return d;
-    return date.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
-  } catch { return d; }
+  const formatted = formatDisplayDate(d);
+  return formatted === '—' ? d : formatted;
 }
 
 function formatTimeStr(d: string | undefined): string {
   if (!d) return '';
-  try {
-    const date = new Date(d);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  } catch { return ''; }
+  const formatted = formatDisplayTime(d);
+  return formatted === '—' ? '' : formatted;
 }
 
 function buildPrescriptionReportHTML(
@@ -298,7 +293,7 @@ function buildPrescriptionReportHTML(
   </div>
   <div class="footer">
     <p>${escapeHtml(getOrganizationServicesHeader())}</p>
-    <p>Generated: ${escapeHtml(new Date().toLocaleString())}</p>
+    <p>Generated: ${escapeHtml(formatDisplayDateTime(new Date()))}</p>
   </div>
 </body>
 </html>`;
@@ -357,34 +352,12 @@ export function PrescriptionReportDialog({
     }
   };
 
-  const formatDate = (d: string | undefined): string => {
-    if (!d) return '';
-    try {
-      const date = new Date(d);
-      if (isNaN(date.getTime())) return d;
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      });
-    } catch {
-      return d;
-    }
-  };
+  const formatDate = (d: string | undefined): string => formatDateStr(d);
 
   const formatTime = (d: string | undefined): string => {
     if (!d) return '';
-    try {
-      const date = new Date(d);
-      if (isNaN(date.getTime())) return '';
-      return date.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      });
-    } catch {
-      return '';
-    }
+    const formatted = formatDisplayTime(d);
+    return formatted === '—' ? '' : formatted;
   };
 
   return (

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { normalizeRolePagePath } from "@/lib/page-permissions";
 import { useState } from "react";
 import {
   LayoutDashboard,
@@ -46,6 +47,7 @@ import {
   LucideIcon,
   Send,
   Package,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -117,7 +119,7 @@ const menuSections: MenuSection[] = [
       { label: "Home", href: "/nursing", icon: LayoutDashboard },
       { label: "Pool Queue", href: "/nursing/pool-queue", icon: Users },
       { label: "Room Queue", href: "/nursing/room-queue", icon: DoorOpen },
-      { label: "Patient Vitals", href: "/nursing/patient-vitals", icon: Activity },
+      { label: "Vitals History", href: "/nursing/vitals-history", icon: Activity },
       { label: "Procedures", href: "/nursing/procedures", icon: Syringe },
       { label: "Procedures History", href: "/nursing/procedures/history", icon: ClipboardList },
       { label: "Ward Care", href: "/nursing/wards", icon: Building2 },
@@ -218,6 +220,18 @@ const menuSections: MenuSection[] = [
     ],
   },
   {
+    label: "Human Resources",
+    icon: ClipboardList,
+    color: "text-violet-400",
+    activeColor: "data-[active=true]:bg-violet-500/10 data-[active=true]:text-violet-400",
+    basePath: "/hr",
+    items: [
+      { label: "Home", href: "/hr", icon: LayoutDashboard },
+      { label: "Annual Check-ups", href: "/hr/annual-checkups", icon: ClipboardList },
+      { label: "Exemptions", href: "/hr/exemptions", icon: ShieldCheck },
+    ],
+  },
+  {
     label: "Analytics",
     icon: BarChart3,
     color: "text-indigo-400",
@@ -239,6 +253,8 @@ const menuSections: MenuSection[] = [
       { label: "Roles & Permissions", href: "/admin/roles", icon: Shield },
       { label: "Clinics & Departments", href: "/admin/clinics", icon: Building2 },
       { label: "System Settings", href: "/admin/settings", icon: Settings },
+      { label: "System Health", href: "/admin/health", icon: Activity },
+      { label: "Annual Check-up", href: "/admin/annual-checkup-programme", icon: ClipboardCheck },
       { label: "Audit Trail", href: "/admin/audit", icon: ClipboardList },
     ],
   },
@@ -309,6 +325,7 @@ export function AppSidebar() {
 
     // Check if user has access to pages from each module
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    const allowedSet = new Set(allowedPages.map(normalizeRolePagePath));
 
     return menuSections.filter(section => {
       // Department heads automatically get access to the Administration section
@@ -316,7 +333,7 @@ export function AppSidebar() {
         return true;
       }
       // Check if user has access to any page in this section
-      return section.items.some(item => allowedPages.includes(item.href));
+      return section.items.some(item => allowedSet.has(normalizeRolePagePath(item.href)));
     });
   };
 
@@ -342,6 +359,7 @@ export function AppSidebar() {
 
     // Check if user has access to specific pages
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    const allowedSet = new Set(allowedPages.map(normalizeRolePagePath));
 
     return baseItems.filter(item => {
       // Department heads automatically get access to User Management
@@ -349,7 +367,10 @@ export function AppSidebar() {
         return true;
       }
       // Check if the specific page URL is in the allowed pages
-      return allowedPages.includes(item.href);
+      if (item.href === '/admin/health' && allowedSet.has('/admin')) {
+        return true;
+      }
+      return allowedSet.has(normalizeRolePagePath(item.href));
     });
   };
 

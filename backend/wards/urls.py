@@ -22,6 +22,7 @@ urlpatterns = [
     path('wards/<int:pk>/occupancy/', WardViewSet.as_view({'get': 'occupancy'}), name='ward-occupancy'),
 
     # Admission endpoints
+    path('admissions/list-stats/', PatientAdmissionViewSet.as_view({'get': 'list_stats'}), name='admission-list-stats'),
     path('admissions/', PatientAdmissionViewSet.as_view({'get': 'list', 'post': 'create'}), name='admission-list'),
     path('admissions/<int:pk>/', PatientAdmissionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='admission-detail'),
     path('admissions/<int:pk>/initiate_discharge/', PatientAdmissionViewSet.as_view({'post': 'initiate_discharge'}), name='admission-initiate-discharge'),

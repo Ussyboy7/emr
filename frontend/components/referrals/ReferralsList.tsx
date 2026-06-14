@@ -13,6 +13,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { formatDisplayDate } from "@/lib/dates";
 import {
   type ReferralWithPatient,
   getFacilityTypeBadgeClass,
@@ -167,7 +168,7 @@ export function ReferralsList({
                     <span>•</span>
                     <span className="flex items-center gap-1">
                       <Calendar className="h-3 w-3" />
-                      {new Date(referral.referred_at).toLocaleDateString()}
+                      {formatDisplayDate(referral.referred_at)}
                     </span>
                     <span>•</span>
                     <span className="flex items-center gap-1">

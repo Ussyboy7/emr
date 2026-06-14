@@ -2,6 +2,7 @@
  * Ward management API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { MAX_LIST_PAGE_SIZE } from '../pagination-constants';
 
 export interface Ward {
   id: number;
@@ -311,6 +312,19 @@ class WardService {
   }): Promise<{ results: PatientAdmission[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: PatientAdmission[]; count: number }>(`/admissions/${query}`);
+  }
+
+  async getAdmissionListStats(params?: Omit<
+    Parameters<WardService['getAdmissions']>[0],
+    'page' | 'page_size' | 'status' | 'ordering'
+  >): Promise<{
+    total: number;
+    admitted: number;
+    pending_discharge: number;
+  }> {
+    const query = buildQueryString(params || {});
+    const path = query ? `/admissions/list-stats/${query}` : '/admissions/list-stats/';
+    return apiFetch(path);
   }
 
   /**
@@ -641,7 +655,7 @@ class WardService {
   }
 
   async getObservationVitals(params: { admission: number }): Promise<{ results: AdmissionObservationVital[]; count?: number }> {
-    const query = buildQueryString({ ...params, page_size: 500 });
+    const query = buildQueryString({ ...params, page_size: MAX_LIST_PAGE_SIZE });
     return apiFetch<{ results: AdmissionObservationVital[]; count?: number }>(`/observation-vitals/${query}`);
   }
 
@@ -664,7 +678,7 @@ class WardService {
   }
 
   async getTreatmentSheetRows(params: { admission: number }): Promise<{ results: AdmissionTreatmentRow[]; count?: number }> {
-    const query = buildQueryString({ ...params, page_size: 500 });
+    const query = buildQueryString({ ...params, page_size: MAX_LIST_PAGE_SIZE });
     return apiFetch<{ results: AdmissionTreatmentRow[]; count?: number }>(`/treatment-sheet-rows/${query}`);
   }
 

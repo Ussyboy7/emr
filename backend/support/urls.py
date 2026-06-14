@@ -1,8 +1,8 @@
 from django.urls import path
-from . import views
+from .views import ClientLogsView
 
 app_name = "support"
 
 urlpatterns = [
-    path("client-logs/", views.client_logs, name="client_logs"),
+    path("client-logs/", ClientLogsView.as_view(), name="client_logs"),
 ]

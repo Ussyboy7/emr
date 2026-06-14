@@ -4,16 +4,13 @@ import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  TestTube, Printer, Users
-} from "lucide-react";
+import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
+import { RefreshCw, ArrowLeft, TestTube, TrendingUp, Calendar, Users } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
+import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { analyticsRangeFromFilters } from "@/components/analytics/AnalyticsReportLayout";
+import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
 
 interface LabCategoryData {
   sn: number;
@@ -25,124 +22,91 @@ interface LabCategoryData {
 }
 
 interface LabSummary {
-  total_employee: number;
-  total_non_employee: number;
-  total_male: number;
-  total_female: number;
   grand_total: number;
-  new_registrations: number;
   first_time_patients: number;
   returning_patients: number;
   total_unique_patients_seen: number;
-  total_visits: number;
+  total_lab_orders: number;
+}
+
+const emptySummary: LabSummary = {
+  grand_total: 0,
+  first_time_patients: 0,
+  returning_patients: 0,
+  total_unique_patients_seen: 0,
+  total_lab_orders: 0,
+};
+
+function normalizeSummary(raw?: Partial<LabSummary> & { total_visits?: number } | null): LabSummary {
+  return {
+    grand_total: raw?.grand_total ?? 0,
+    first_time_patients: raw?.first_time_patients ?? 0,
+    returning_patients: raw?.returning_patients ?? 0,
+    total_unique_patients_seen:
+      raw?.total_unique_patients_seen ?? raw?.grand_total ?? 0,
+    total_lab_orders: raw?.total_lab_orders ?? raw?.total_visits ?? 0,
+  };
 }
 
 export default function LaboratoryAttendanceReport() {
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<string>("monthly");
+  const {
+    year,
+    setYear,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    viewMode,
+    setViewMode,
+    periodLabel,
+    canFetch,
+    buildQuery,
+    filenameSuffix,
+    years,
+  } = useMrReportPeriod("all");
+
   const [data, setData] = useState<LabCategoryData[]>([]);
-  const [summary, setSummary] = useState<LabSummary>({
-    total_employee: 0,
-    total_non_employee: 0,
-    total_male: 0,
-    total_female: 0,
-    grand_total: 0,
-    new_registrations: 0,
-    first_time_patients: 0,
-    returning_patients: 0,
-    total_unique_patients_seen: 0,
-    total_visits: 0,
-  });
+  const [summary, setSummary] = useState<LabSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
 
+  const isAllTime = viewMode === "all";
+  const showLifecycleCards = !isAllTime;
+
   const fetchReport = async () => {
+    const params = buildQuery();
+    if (!params) {
+      toast.error("Please select a valid date range");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-      if (!range) {
-        toast.error("Please select a valid date range");
-        setIsLoading(false);
-        return;
-      }
-      const url = `/reports/laboratory-attendance/?start_date=${range.start}&end_date=${range.end}`;
-      const response = await apiFetch<{ data: LabCategoryData[]; summary: LabSummary }>(url);
-      setData(response.data || []);
-      setSummary(response.summary || {
-        total_employee: 0,
-        total_non_employee: 0,
-        total_male: 0,
-        total_female: 0,
-        grand_total: 0,
-        new_registrations: 0,
-        first_time_patients: 0,
-        returning_patients: 0,
-        total_unique_patients_seen: 0,
-        total_visits: 0,
-      });
-    } catch (error: any) {
+      const response = await apiFetch<{ data: LabCategoryData[]; summary: LabSummary }>(
+        `/reports/laboratory-attendance/?${params.toString()}`
+      );
+      setData(response.data ?? []);
+      setSummary(normalizeSummary(response.summary));
+    } catch (error: unknown) {
       console.error("Error fetching lab report:", error);
-      toast.error(error.message || "Failed to load laboratory report");
+      toast.error(error instanceof Error ? error.message : "Failed to load laboratory report");
       setData([]);
-      setSummary({
-        total_employee: 0,
-        total_non_employee: 0,
-        total_male: 0,
-        total_female: 0,
-        grand_total: 0,
-        new_registrations: 0,
-        first_time_patients: 0,
-        returning_patients: 0,
-        total_unique_patients_seen: 0,
-        total_visits: 0,
-      });
+      setSummary(emptySummary);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    if (range) fetchReport();
+    if (canFetch) fetchReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);
 
-  const exportToCSV = () => {
-    if (data.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-
-    const headers = ["S/N", "Category", "Male", "Female", "Total", "%"];
-    const rows = data.map(row => [
-      row.sn, row.category, row.male, row.female, row.total, `${row.percentage}%`
-    ]);
-    
-    const csv = [
-      headers.join(','),
-      ...rows.map(row => row.join(',')),
-      `TOTAL,,${summary.total_male},${summary.total_female},${summary.grand_total},100.0%`
-    ].join('\n');
-    
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const range = analyticsRangeFromFilters(viewMode as any, year, startDate, endDate);
-    const period = range ? `${range.start}_to_${range.end}` : year;
-    a.download = `laboratory_attendance_${period}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    
-    toast.success("Report exported successfully");
-  };
-
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
+  const hasData = (summary.grand_total ?? 0) > 0;
+  const uniquePatients = summary.total_unique_patients_seen ?? summary.grand_total ?? 0;
 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header */}
         <div className="mb-2 print:hidden">
           <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
             <Link href="/medical-records/reports">
@@ -158,98 +122,46 @@ export default function LaboratoryAttendanceReport() {
               <TestTube className="h-8 w-8 text-pink-500" />
               Laboratory Attendance Report
             </h1>
-            <p className="text-muted-foreground mt-1">Lab services by patient category</p>
+            <p className="text-muted-foreground mt-1">
+              Unique patients with lab orders — {periodLabel}
+            </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={data.length === 0}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={data.length === 0}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <ReportExportButtons
+              apiPath="/reports/laboratory-attendance/"
+              buildQuery={() => buildQuery()}
+              filenameBase={`laboratory_attendance_${filenameSuffix}`}
+              disabled={!hasData}
+            />
           </div>
         </div>
 
-        {/* Filters */}
         <Card className="print:hidden">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Filters
+            </CardTitle>
+            <CardDescription>
+              Counts distinct patients who had at least one lab order in the selected period.
+            </CardDescription>
+          </CardHeader>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={setViewMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="half-yearly">Half-yearly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {viewMode === 'year' ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map(y => (
-                        <SelectItem key={y} value={y}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : viewMode === 'range' ? (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    />
-                  </div>
-                </>
-              ) : (
-                <div>
-                  <Label>Period</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {viewMode === 'daily' && 'Today'}
-                    {viewMode === 'weekly' && 'This week'}
-                    {viewMode === 'monthly' && 'This month'}
-                    {viewMode === 'bimonthly' && 'Last 2 months'}
-                    {viewMode === 'quarterly' && 'This quarter'}
-                    {viewMode === 'half-yearly' && 'This half-year'}
-                    {viewMode === 'annually' && 'This year'}
-                  </p>
-                </div>
-              )}
+              <ReportDateFilterFields
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                year={year}
+                onYearChange={setYear}
+                startDate={startDate}
+                onStartDateChange={setStartDate}
+                endDate={endDate}
+                onEndDateChange={setEndDate}
+                yearOptions={years}
+              />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
                   {isLoading ? "Loading..." : "Generate Report"}
                 </Button>
               </div>
@@ -257,98 +169,64 @@ export default function LaboratoryAttendanceReport() {
           </CardContent>
         </Card>
 
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card className="border-l-4 border-l-blue-500">
+        <div className={`grid gap-4 ${showLifecycleCards ? "md:grid-cols-4" : "md:grid-cols-2"}`}>
+          <Card className="border-l-4 border-l-indigo-500">
             <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Employee</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{summary.total_employee.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0 ? `${((summary.total_employee / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-green-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Non-Employee</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">{summary.total_non_employee.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0 ? `${((summary.total_non_employee / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-green-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-cyan-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Male</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0 ? `${((summary.total_male / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-cyan-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-pink-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Female</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.grand_total > 0 ? `${((summary.total_female / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-pink-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card className="border-l-4 border-l-cyan-500">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">New Registrations</p>
-              <p className="text-2xl sm:text-3xl font-bold text-cyan-600 dark:text-cyan-400">{summary.new_registrations.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">New patient records created in selected period (not attendance count)</p>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-slate-500">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Returning Patients</p>
-              <p className="text-2xl sm:text-3xl font-bold text-slate-700 dark:text-slate-300">{summary.returning_patients.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Seen this period with prior visit history</p>
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Unique patients
+              </p>
+              <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">
+                {uniquePatients.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Distinct patients with at least one lab order
+              </p>
             </CardContent>
           </Card>
           <Card className="border-l-4 border-l-emerald-500">
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Total Visit Records</p>
-              <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Includes repeat visits by the same patient</p>
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <TestTube className="h-4 w-4" />
+                Lab orders
+              </p>
+              <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                {(summary.total_lab_orders ?? 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Order count (repeat orders included)</p>
             </CardContent>
           </Card>
+          {showLifecycleCards && (
+            <>
+              <Card className="border-l-4 border-l-violet-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">First-time at lab</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">
+                    {(summary.first_time_patients ?? 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">First lab order falls in this period</p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-slate-500">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Returning patients</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-slate-700 dark:text-slate-300">
+                    {(summary.returning_patients ?? 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">Prior lab history before this period</p>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
 
-        {/* Data Table */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TestTube className="h-5 w-5" />
-              Laboratory Attendance by Category - {year}
+              Attendance by category
             </CardTitle>
-            <CardDescription>Lab services breakdown by patient category</CardDescription>
+            <CardDescription>Distinct patients with lab orders in {periodLabel}</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -356,7 +234,7 @@ export default function LaboratoryAttendanceReport() {
                 <RefreshCw className="h-8 w-8 mx-auto mb-4 animate-spin text-muted-foreground" />
                 <p className="text-muted-foreground">Loading report data...</p>
               </div>
-            ) : data.length > 0 ? (
+            ) : hasData ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -381,10 +259,16 @@ export default function LaboratoryAttendanceReport() {
                       </tr>
                     ))}
                     <tr className="border-t-2 border-border bg-muted/50 font-bold">
-                      <td colSpan={2} className="p-3 text-foreground">TOTAL ATTENDANCE</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.grand_total.toLocaleString()}</td>
+                      <td colSpan={2} className="p-3 text-foreground">Total</td>
+                      <td className="p-3 text-right text-foreground">
+                        {data.reduce((sum, row) => sum + row.male, 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-foreground">
+                        {data.reduce((sum, row) => sum + row.female, 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-foreground">
+                        {(summary.grand_total ?? 0).toLocaleString()}
+                      </td>
                       <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
@@ -394,7 +278,9 @@ export default function LaboratoryAttendanceReport() {
               <div className="text-center py-12">
                 <TestTube className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-1">No data available</p>
-                <p className="text-sm text-muted-foreground">No laboratory records found for this year</p>
+                <p className="text-sm text-muted-foreground">
+                  No lab orders found for {periodLabel}. Try a wider period or All Time.
+                </p>
               </div>
             )}
           </CardContent>

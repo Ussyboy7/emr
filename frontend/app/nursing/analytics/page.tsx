@@ -4,15 +4,19 @@ import React, { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
-  analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
+import { useReportDateRange } from "@/hooks/use-report-date-range";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Activity, Heart, Timer, Users } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, buildQueryString } from "@/lib/api-client";
+import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
+import { useServerDateAnchor } from "@/components/providers/ServerDateProvider";
+import { localMonthBounds, peekServerTodayMonthPrefix, peekServerTodayYear } from "@/lib/dates";
+import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { nursingService, type NursingAnalyticsSummary } from '@/lib/services';
@@ -34,14 +38,25 @@ export default function NursingAnalyticsPage() {
   const [endDate, setEndDate] = useState("");
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>("year");
 
+  const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
+  const serverToday = useServerDateAnchor();
+
+  const { handleExportCsv, handleDownloadPdf } = useAnalyticsExportHandlers({
+    apiPath: "/nursing/analytics/summary/",
+    filenameBase: "nursing_analytics",
+    viewMode,
+    year,
+    startDate,
+    endDate,
+    queryStyle: "start",
+  });
+
   const emptyState = () => setAnalyticsData(null);
 
   const setThisMonth = () => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setStartDate(firstDay.toISOString().split("T")[0]);
-    setEndDate(lastDay.toISOString().split("T")[0]);
+    const { start, end } = localMonthBounds(serverToday);
+    setStartDate(start);
+    setEndDate(end);
     setViewMode("range");
   };
 
@@ -51,15 +66,15 @@ export default function NursingAnalyticsPage() {
   };
 
   const loadAnalytics = async () => {
-    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    if (!range) {
+    const params = buildReportPeriodQuery(viewMode, reportRange, "start");
+    if (!params) {
       toast.error("Please select a valid date range");
       return;
     }
 
     setLoading(true);
     try {
-      const data = await nursingService.getAnalyticsSummary(range.start, range.end);
+      const data = await nursingService.getAnalyticsSummary(params);
       setAnalyticsData(data);
     } catch (error: any) {
       console.error("Error loading analytics:", error);
@@ -71,14 +86,10 @@ export default function NursingAnalyticsPage() {
   };
 
   useEffect(() => {
-    const shouldFetch =
-      (viewMode === "year" && year) ||
-      (viewMode === "range" && startDate && endDate) ||
-      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
-    if (shouldFetch) {
+    if (canFetchReportPeriod(viewMode, reportRange)) {
       void loadAnalytics();
     }
-  }, [viewMode, year, startDate, endDate]);
+  }, [reportRange, viewMode]);
 
   const periodBreakdown = useMemo(() => {
     if (!analyticsData) return [];
@@ -117,83 +128,6 @@ export default function NursingAnalyticsPage() {
     }));
   }, [analyticsData, viewMode]);
 
-  const exportCSV = () => {
-    if (!analyticsData) {
-      toast.error("No data to export");
-      return;
-    }
-
-    const csvData = [
-      ["Nursing Analytics Report"],
-      ["Period", `${analyticsData.period.start} to ${analyticsData.period.end}`],
-      [""],
-      ["Summary"],
-      ["Total Orders", analyticsData.summary.total_orders],
-      ["Completed Orders", analyticsData.summary.completed_orders],
-      ["Pending Orders", analyticsData.summary.pending_orders],
-      ["Unique Patients", analyticsData.summary.unique_patients],
-      [""],
-      ["Orders by Status"],
-    ].concat(
-      Object.entries(analyticsData.orders_by_status).map(([status, count]) => [status, count])
-    ).concat([
-      [""],
-      ["Orders by Priority"],
-    ]).concat(
-      Object.entries(analyticsData.orders_by_priority).map(([priority, count]) => [priority, count])
-    ).concat([
-      [""],
-      ["Orders by Type"],
-    ]).concat(
-      Object.entries(analyticsData.orders_by_type).map(([type, count]) => [type, count])
-    ).concat([
-      [""],
-      ["Orders by Day"],
-      ["Date", "Orders", "Completed"],
-    ]).concat(
-      (analyticsData.by_day || []).map((row) => [row.date || '', row.orders, row.completed])
-    ).concat([
-      [""],
-      ["Orders by Week"],
-      ["Week", "Orders", "Completed"],
-    ]).concat(
-      (analyticsData.by_week || []).map((row) => [row.week || '', row.orders, row.completed])
-    ).concat([
-      [""],
-      ["Orders by Month"],
-      ["Month", "Orders", "Completed"],
-    ]).concat(
-      (analyticsData.by_month || []).map((row) => [row.month || '', row.orders, row.completed])
-    ).concat([
-      [""],
-      ["Orders by Bi-Month"],
-      ["Bi-Month", "Orders", "Completed"],
-    ]).concat(
-      (analyticsData.by_bimonth || []).map((row) => [row.bimonth || '', row.orders, row.completed])
-    ).concat([
-      [""],
-      ["Orders by Quarter"],
-      ["Quarter", "Orders", "Completed"],
-    ]).concat(
-      (analyticsData.by_quarter || []).map((row) => [row.quarter || '', row.orders, row.completed])
-    ).concat([
-      [""],
-      ["Orders by Half-Year"],
-      ["Half-Year", "Orders", "Completed"],
-    ]).concat(
-      (analyticsData.by_halfyear || []).map((row) => [row.halfyear || '', row.orders, row.completed])
-    );
-
-    const csvContent = csvData.map((row) => row.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `nursing-analytics-${analyticsData.period.start}-to-${analyticsData.period.end}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Report exported successfully");
-  };
 
   const summaryStats = useMemo(() => {
     if (!analyticsData) return null;
@@ -257,8 +191,8 @@ export default function NursingAnalyticsPage() {
   const highlightThisMonth =
     viewMode === "range" &&
     Boolean(startDate) &&
-    startDate.includes(new Date().toISOString().slice(0, 7));
-  const highlightThisYear = viewMode === "year" && year === new Date().getFullYear().toString();
+    startDate.includes(peekServerTodayMonthPrefix());
+  const highlightThisYear = viewMode === "year" && year === peekServerTodayYear();
 
   return (
     <DashboardLayout>
@@ -268,10 +202,10 @@ export default function NursingAnalyticsPage() {
         ReportIcon={Activity}
         reportIconClassName="text-violet-500"
         loading={loading}
-        onRefresh={loadAnalytics}
         onGenerate={loadAnalytics}
         exportCsvDisabled={!analyticsData}
-        onExportCsv={exportCSV}
+        onExportCsv={handleExportCsv}
+        onPrint={handleDownloadPdf}
         printDisabled={!analyticsData}
         viewMode={viewMode}
         onViewModeChange={setViewMode}

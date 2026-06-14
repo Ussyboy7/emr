@@ -5,23 +5,27 @@ from __future__ import annotations
 
 import json
 
-from datetime import timedelta
+from datetime import date as date_type, datetime, timedelta
 
 from django.db.models import Count, Q
+from drf_spectacular.utils import extend_schema
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
-from common.session_report_pdf import build_eye_session_pdf_bytes
+from common.pagination import StandardPageNumberPagination
+
+from .report_pdf import build_eye_session_pdf_response
 from accounts.utils import resolve_clinic, resolve_clinic_id
+from common.cache_helpers import cache_get_or_set
 from common.mixins import ClinicScopedMixin
+from common.openapi import document_destroy_viewset, document_viewset
 from organization.models import SystemConfig
 from patients.models import Visit
 
@@ -36,20 +40,13 @@ from .serializers import (
 )
 
 
-class StandardResultsPagination(PageNumberPagination):
-    page_size = 50
-    page_size_query_param = "page_size"
-    max_page_size = 500
-
-
 ACTIVE_EYE_ORDER_STATUSES = ("pending", "scheduled", "in_progress")
 
 
+@document_viewset(tag="Eyecare", resource="eye orders")
 class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Eye clinic orders (queue + CRUD)."""
-
-    permission_classes = [IsAuthenticated]
-    pagination_class = StandardResultsPagination
+    pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["priority", "patient", "visit", "consultation_session"]
     search_fields = [
@@ -63,8 +60,20 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ["-ordered_at"]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return EyeOrder.objects.none()
+        
         qs = (
-            EyeOrder.objects.select_related("patient", "ordered_by", "visit", "consultation_session")
+            EyeOrder.objects.select_related(
+                "patient",
+                "ordered_by",
+                "visit",
+                "visit__location_clinic",
+                "consultation_session",
+                "consultation_session__location_clinic",
+                "consultation_session__room__clinic",
+                "location_clinic",
+            )
             .annotate(
                 completed_sessions_count=Count(
                     "sessions",
@@ -97,15 +106,10 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 if before:
                     qs = qs.filter(ordered_at__date__lte=before)
             else:
+                from common.report_period import apply_date_preset
+
                 date_filter = (params.get("date_filter") or "today").strip().lower()
-                today = timezone.now().date()
-                if date_filter == "today":
-                    qs = qs.filter(ordered_at__date=today)
-                elif date_filter == "week":
-                    qs = qs.filter(ordered_at__date__gte=today - timedelta(days=7))
-                elif date_filter == "month":
-                    qs = qs.filter(ordered_at__date__gte=today - timedelta(days=31))
-                # "all" — no extra date constraint
+                qs = apply_date_preset(qs, date_filter, "ordered_at")
 
         return self.scope_queryset(qs)
 
@@ -115,9 +119,127 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return EyeOrderSerializer
 
     def perform_create(self, serializer):
+        from common.order_location import apply_order_location_clinic
+
         self.auto_set_clinic(serializer)
+        validated = apply_order_location_clinic(
+            dict(serializer.validated_data),
+            user=self.request.user,
+        )
+        for key, value in validated.items():
+            serializer.validated_data[key] = value
         serializer.save(ordered_by=self.request.user)
 
+    @extend_schema(tags=["Eyecare"], summary="Home dashboard", description="Single-request payload for the eye clinic home page.")
+    @action(detail=False, methods=["get"], url_path="home-dashboard")
+    def home_dashboard(self, request):
+        """Single-request payload for the eye clinic home page."""
+        day_str = (request.query_params.get("date") or "").strip()
+        if day_str:
+            try:
+                today = date_type.fromisoformat(day_str[:10])
+            except ValueError:
+                today = timezone.localdate()
+        else:
+            today = timezone.localdate()
+
+        scope_key = getattr(request.user, "pk", "anon")
+        cache_key = f"eyecare_home:{scope_key}:{today.isoformat()}"
+
+        def build() -> dict:
+            orders_qs = self.scope_queryset(
+                EyeOrder.objects.select_related(
+                    "patient",
+                    "ordered_by",
+                    "visit",
+                    "location_clinic",
+                )
+            )
+            sessions_qs = self.scope_queryset(
+                EyeSession.objects.select_related(
+                    "order",
+                    "order__patient",
+                    "order__ordered_by",
+                )
+            )
+            day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
+            day_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+
+            pending_qs = orders_qs.filter(status__in=["pending", "scheduled"])
+            in_progress_qs = orders_qs.filter(status="in_progress")
+            scheduled_today = orders_qs.filter(
+                scheduled_at__date=today,
+                status__in=["pending", "scheduled", "in_progress"],
+            ).count()
+            active_sessions_qs = sessions_qs.filter(status="in_progress")
+            completed_today_qs = sessions_qs.filter(
+                status="completed",
+                completed_at__gte=day_start,
+                completed_at__lte=day_end,
+            )
+
+            return {
+                "date": today.isoformat(),
+                "stats": {
+                    "queue": pending_qs.count(),
+                    "inProgress": in_progress_qs.count(),
+                    "activeSessions": active_sessions_qs.count(),
+                    "completedToday": completed_today_qs.count(),
+                    "scheduledToday": scheduled_today,
+                },
+                "queuePreview": EyeOrderSerializer(
+                    pending_qs.order_by("-ordered_at")[:4],
+                    many=True,
+                ).data,
+                "inProgressOrders": EyeOrderSerializer(
+                    in_progress_qs.order_by("-ordered_at")[:4],
+                    many=True,
+                ).data,
+                "activeSessions": EyeSessionSerializer(
+                    active_sessions_qs.order_by("-scheduled_at", "-created_at")[:5],
+                    many=True,
+                ).data,
+                "recentCompletedSessions": EyeSessionSerializer(
+                    completed_today_qs.order_by("-completed_at")[:5],
+                    many=True,
+                ).data,
+            }
+
+        return Response(cache_get_or_set(cache_key, build))
+
+    def _orders_stats_queryset(self):
+        """Orders queryset with list date filters but without status_tab."""
+        qs = EyeOrder.objects.select_related(
+            "patient", "ordered_by", "visit", "location_clinic"
+        ).all()
+        params = self.request.query_params
+        after = (params.get("ordered_at_after") or "").strip()
+        before = (params.get("ordered_at_before") or "").strip()
+        if after or before:
+            if after:
+                qs = qs.filter(ordered_at__date__gte=after)
+            if before:
+                qs = qs.filter(ordered_at__date__lte=before)
+        else:
+            from common.report_period import apply_date_preset
+
+            date_filter = (params.get("date_filter") or "today").strip().lower()
+            qs = apply_date_preset(qs, date_filter, "ordered_at")
+        return self.scope_queryset(qs)
+
+    @extend_schema(tags=["Eyecare"], summary="Stats", description="Per-tab counts for eye orders (replaces 4 parallel COUNT list calls).")
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """Per-tab counts for eye orders (replaces 4 parallel COUNT list calls)."""
+        qs = self._orders_stats_queryset()
+        return Response({
+            "pending": qs.filter(status__in=["pending", "scheduled"]).count(),
+            "in_progress": qs.filter(status="in_progress").count(),
+            "cancelled": qs.filter(status="cancelled").count(),
+            "completed": qs.filter(status="completed").count(),
+        })
+
+    @extend_schema(tags=["Eyecare"], summary="Complete")
     @action(detail=True, methods=["post"], url_path="complete")
     def complete(self, request, pk=None):
         order = self.get_object()
@@ -126,6 +248,7 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         order.save(update_fields=["status", "completed_at"])
         return Response(EyeOrderSerializer(order).data)
 
+    @extend_schema(tags=["Eyecare"], summary="Checkins for visits")
     @action(detail=False, methods=["get"], url_path="checkins-for-visits")
     def checkins_for_visits(self, request):
         raw = (request.query_params.get("visit_ids") or "").strip()
@@ -165,6 +288,7 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 out[str(vid)] = {"checked_in": False}
         return Response({"results": out})
 
+    @extend_schema(tags=["Eyecare"], summary="Checkin from visit")
     @action(detail=False, methods=["post"], url_path="checkin-from-visit")
     def checkin_from_visit(self, request):
         visit_raw = request.data.get("visit")
@@ -201,6 +325,8 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
         created = False
         if order is None:
+            from common.order_location import resolve_order_location_clinic
+
             create_kwargs = dict(
                 patient_id=visit.patient_id,
                 visit_id=visit_id,
@@ -219,10 +345,9 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 status="scheduled",
                 scheduled_at=timezone.now(),
             )
-            if SystemConfig.is_enabled('multi_clinic_enabled'):
-                clinic = resolve_clinic(self.request.user)
-                if clinic is not None:
-                    create_kwargs['location_clinic'] = clinic
+            clinic = resolve_order_location_clinic(visit=visit, user=request.user)
+            if clinic is not None:
+                create_kwargs['location_clinic'] = clinic
             order = EyeOrder.objects.create(**create_kwargs)
             created = True
         elif order.status == "pending":
@@ -235,19 +360,21 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response(data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
+@document_viewset(tag="Eyecare", resource="eye sessions")
 class EyeSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """Eye clinic clinical sessions."""
-
-    permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
-    pagination_class = StandardResultsPagination
+    pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = EyeSessionFilter
-    ordering_fields = ["scheduled_at", "created_at", "status", "session_number"]
-    ordering = ["-scheduled_at"]
+    ordering_fields = ["scheduled_at", "created_at", "completed_at", "status", "session_number"]
+    ordering = ["-completed_at", "-scheduled_at"]
     clinic_filter_field = 'order__location_clinic'
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return EyeSession.objects.none()
+        
         return self.scope_queryset(
             EyeSession.objects.select_related("order", "order__patient", "order__ordered_by")
             .prefetch_related("diagnostic_uploads")
@@ -258,6 +385,15 @@ class EyeSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if self.action == "create":
             return EyeSessionCreateSerializer
         return EyeSessionSerializer
+
+    @extend_schema(tags=["Eyecare"], summary="Completed stats", description="Aggregate completed-session card counts in one query.")
+    @action(detail=False, methods=["get"], url_path="completed-stats")
+    def completed_stats(self, request):
+        """Aggregate completed-session card counts in one query."""
+        from common.session_stats import aggregate_completed_session_stats
+
+        qs = self.filter_queryset(self.get_queryset()).filter(status="completed")
+        return Response(aggregate_completed_session_stats(qs, mode="eye"))
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -295,21 +431,23 @@ class EyeSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response(EyeSessionSerializer(instance, context={"request": request}).data)
         return super().partial_update(request, *args, **kwargs)
 
+    @extend_schema(tags=["Eyecare"], summary="Session report pdf")
     @action(detail=True, methods=["get"], url_path="session_report_pdf")
     def session_report_pdf(self, request, pk=None):
-        session = self.get_object()
-        pdf_bytes = build_eye_session_pdf_bytes(session)
-        filename = f"eye_session_{pk}.pdf"
-        return HttpResponse(
-            pdf_bytes,
-            content_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        session = (
+            EyeSession.objects.select_related(
+                "order",
+                "order__patient",
+                "order__ordered_by",
+                "order__location_clinic",
+            )
+            .get(pk=self.get_object().pk)
         )
+        return build_eye_session_pdf_response(session)
 
 
+@document_destroy_viewset(tag="Eyecare", resource="eye session diagnostic file")
 class EyeSessionDiagnosticFileViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
     """Delete uploaded diagnostic rows (multi-upload only)."""
-
-    permission_classes = [IsAuthenticated]
     queryset = EyeSessionDiagnosticFile.objects.all()
     serializer_class = EyeSessionDiagnosticFileSerializer

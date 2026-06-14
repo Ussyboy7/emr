@@ -2,7 +2,10 @@
  * Visit API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import { peekServerTodayApi } from '../dates';
 import { Visit } from './patient-service';
+import type { SessionWorkspaceBundle } from './consultation-service';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 export interface VisitFilters {
   patient?: number;
@@ -98,11 +101,45 @@ class VisitService {
     return apiFetch(path);
   }
 
+  /** Tab counts for visits list page (replaces 4 parallel COUNT requests). */
+  async getListStats(
+    params?: Omit<VisitFilters, 'page' | 'page_size' | 'status' | 'ordering'>
+  ): Promise<{
+    total: number;
+    scheduled: number;
+    inProgress: number;
+    completed: number;
+  }> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    const path = query ? `/visits/list-stats/?${query.slice(1)}` : '/visits/list-stats/';
+    return apiFetch(path);
+  }
+
   /**
    * Get a single visit by ID
    */
   async getVisit(id: number | string): Promise<Visit> {
     return apiFetch<Visit>(`/visits/${id}/`);
+  }
+
+  /** Best-matching visit for a patient (e.g. in-progress or latest). */
+  async resolveVisit(params: {
+    patient: number;
+    status?: string;
+    ordering?: string;
+    date?: string;
+  }): Promise<Visit | null> {
+    try {
+      const query = buildQueryString(params as Record<string, string | number | undefined>);
+      return await apiFetch<Visit>(`/visits/resolve/${query}`);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Diagnoses, orders, prescriptions, and vitals scoped to a visit. */
+  async getVisitWorkspaceBundle(visitId: number): Promise<SessionWorkspaceBundle> {
+    return apiFetch<SessionWorkspaceBundle>(`/visits/${visitId}/workspace-bundle/`);
   }
 
   /**
@@ -161,8 +198,8 @@ class VisitService {
    * Get today's visits
    */
   async getTodayVisits(): Promise<Visit[]> {
-    const today = new Date().toISOString().split('T')[0];
-    const result = await this.getVisits({ date: today, page_size: 100 });
+    const today = peekServerTodayApi();
+    const result = await this.getVisits({ date: today, page_size: MAX_LIST_PAGE_SIZE });
     return result.results;
   }
 
@@ -170,7 +207,7 @@ class VisitService {
    * Get active visits (in progress)
    */
   async getActiveVisits(): Promise<Visit[]> {
-    const result = await this.getVisits({ status: 'in_progress', page_size: 100 });
+    const result = await this.getVisits({ status: 'in_progress', page_size: MAX_LIST_PAGE_SIZE });
     return result.results;
   }
 
@@ -178,7 +215,7 @@ class VisitService {
    * Get visits for a specific patient
    */
   async getPatientVisits(patientId: number | string): Promise<Visit[]> {
-    const result = await this.getVisits({ patient: Number(patientId), page_size: 100 });
+    const result = await this.getVisits({ patient: Number(patientId), page_size: MAX_LIST_PAGE_SIZE });
     return result.results;
   }
 }

@@ -89,6 +89,7 @@ export interface Referral {
   referral_letter_acknowledged_by?: number;
   referral_letter_acknowledged_by_name?: string;
   responsibility_forms_count?: number;
+  unstamped_responsibility_forms_count?: number;
   latest_responsibility_form?: ResponsibilityFormIssuance | null;
 }
 
@@ -143,6 +144,37 @@ class ReferralService {
       ...(exclude_draft ? { exclude_draft: "true" as const } : {}),
     });
     return apiFetch<{ results: Referral[]; count: number }>(`/consultation/referrals/${query}`);
+  }
+
+  async getListStats(params?: {
+    patient?: string;
+    visit?: string;
+    session?: string;
+    referred_by?: string;
+    specialty?: string;
+    facility?: string;
+    urgency?: string;
+    search?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+    exclude_draft?: boolean;
+    exclude_status?: string;
+  }): Promise<{
+    total: number;
+    submitted: number;
+    inReview: number;
+    approved: number;
+  }> {
+    const { exclude_draft, ...rest } = params || {};
+    const query = buildQueryString({
+      ...rest,
+      ...(exclude_draft ? { exclude_draft: 'true' as const } : {}),
+    });
+    const path = query
+      ? `/consultation/referrals/list-stats/?${query.slice(1)}`
+      : '/consultation/referrals/list-stats/';
+    return apiFetch(path);
   }
 
   /**
@@ -322,6 +354,13 @@ class ReferralService {
   async fetchResponsibilityFormPdf(referralId: number, formId: number): Promise<Blob> {
     return apiFetch<Blob>(
       `/consultation/referrals/${referralId}/forms/${formId}/pdf/`,
+      { responseType: 'blob' },
+    );
+  }
+
+  async fetchReferralLetterPdf(referralId: number): Promise<Blob> {
+    return apiFetch<Blob>(
+      `/consultation/referrals/${referralId}/letter/pdf/`,
       { responseType: 'blob' },
     );
   }

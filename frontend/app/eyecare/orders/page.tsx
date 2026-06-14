@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   findEyecareOrdersTabForOrders,
   isValidEyecareOrdersTab,
@@ -32,6 +33,7 @@ import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton
 import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from '@/components/consultation/orders/PrescriptionOrderModal';
 import { eyeCareService, type EyeOrder, type EyeSession, type EyeSoapNote } from '@/lib/services/eye-care-service';
 import { pharmacyService } from '@/lib/services/pharmacy-service';
+import { patientService } from '@/lib/services';
 import {
   type DiagnosticCategory,
   examinationRows,
@@ -39,6 +41,7 @@ import {
   diagnosticAttachmentsForCategory,
 } from '@/lib/eyecare/eye-session-helpers';
 import { EyeSessionReportView } from '@/components/eyecare/EyeSessionReportView';
+import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dates';
 
 import {
   Search, Clock, CheckCircle, CheckCircle2, Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle, FileText, Stethoscope, Upload, X, Pill,
@@ -75,7 +78,7 @@ const formatRelativeTime = (dateString: string | null | undefined) => {
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    return formatDisplayDate(date) === '—' ? '' : formatDisplayDate(date);
   } catch {
     return '';
   }
@@ -307,19 +310,17 @@ export default function EyeClinicOrdersPage() {
           setLoading(true);
           setError(null);
         }
-        const [res, ...statsResponses] = await Promise.all([
+        const [res, orderStats] = await Promise.all([
           eyeCareService.getOrders(buildOrdersListParams()),
-          ...(['pending', 'in_progress', 'cancelled', 'completed'] as const).map((tab) =>
-            eyeCareService.getOrders({ ...buildOrdersStatsBase(), page: 1, page_size: 1, status_tab: tab })
-          ),
+          eyeCareService.getOrderStats(buildOrdersStatsBase()),
         ]);
         setOrders(res.results || []);
         setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
         setStats({
-          pending: statsResponses[0]?.count ?? 0,
-          inProgress: statsResponses[1]?.count ?? 0,
-          cancelled: statsResponses[2]?.count ?? 0,
-          completed: statsResponses[3]?.count ?? 0,
+          pending: orderStats.pending ?? 0,
+          inProgress: orderStats.in_progress ?? 0,
+          cancelled: orderStats.cancelled ?? 0,
+          completed: orderStats.completed ?? 0,
         });
       } catch (err) {
         console.error('Error loading eye clinic orders:', err);
@@ -359,7 +360,7 @@ export default function EyeClinicOrdersPage() {
     let cancelled = false;
     (async () => {
       try {
-        const response = await eyeCareService.getSessions({ order: selectedOrder.id, page_size: 100 });
+        const response = await eyeCareService.getSessions({ order: selectedOrder.id, page_size: MAX_LIST_PAGE_SIZE });
         if (!cancelled) {
           setSelectedOrderSessions(response.results || []);
         }
@@ -424,9 +425,8 @@ export default function EyeClinicOrdersPage() {
 
   const loadPatientVitals = async (patientId: number) => {
     try {
-      const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?patient=${patientId}&page_size=1`);
-      if (vitalsResult.results && vitalsResult.results.length > 0) {
-        const latestVitals = vitalsResult.results[0];
+      const latestVitals = await patientService.resolveVital({ patient: patientId });
+      if (latestVitals) {
         setPatientVitals({
           Temperature: latestVitals.temperature ? `${latestVitals.temperature}°C` : '—',
           'Blood Pressure': latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
@@ -447,7 +447,7 @@ export default function EyeClinicOrdersPage() {
   };
 
   const resolveCreatedSession = async (orderId: number, sessionNumber: number) => {
-    const response = await eyeCareService.getSessions({ order: orderId, page_size: 100 });
+    const response = await eyeCareService.getSessions({ order: orderId, page_size: MAX_LIST_PAGE_SIZE });
     const sessions = response.results || [];
     return sessions.find((session) => session.session_number === sessionNumber) || null;
   };
@@ -460,7 +460,7 @@ export default function EyeClinicOrdersPage() {
     }
     setIsSubmitting(true);
     try {
-      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
+      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: MAX_LIST_PAGE_SIZE });
       const existingSessions = sessionsResponse.results || [];
       let activeSession =
         existingSessions.find((session) => session.status === 'in_progress') ||
@@ -526,7 +526,7 @@ export default function EyeClinicOrdersPage() {
   const endTreatment = async (order: EyeOrder) => {
     setIsSubmitting(true);
     try {
-      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
+      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: MAX_LIST_PAGE_SIZE });
       const sessions = sessionsResponse.results || [];
 
       for (const session of sessions) {
@@ -572,7 +572,7 @@ export default function EyeClinicOrdersPage() {
     }
     setIsSubmitting(true);
     try {
-      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
+      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: MAX_LIST_PAGE_SIZE });
       const sessions = sessionsResponse.results || [];
       const nextSessionNumber = sessions.length > 0
         ? Math.max(...sessions.map((session) => session.session_number || 0)) + 1
@@ -1094,7 +1094,7 @@ export default function EyeClinicOrdersPage() {
                   Manage Eye Order
                 </DialogTitle>
                 <DialogDescription>
-                  EYE-{selectedOrder?.id?.toString().padStart(6, '0')} • {selectedOrder?.ordered_at ? new Date(selectedOrder.ordered_at).toLocaleString() : 'N/A'}
+                  EYE-{selectedOrder?.id?.toString().padStart(6, '0')} • {selectedOrder?.ordered_at ? formatDisplayDateTime(selectedOrder.ordered_at) : 'N/A'}
                 </DialogDescription>
               </DialogHeader>
               {selectedOrder && (
@@ -1178,18 +1178,18 @@ export default function EyeClinicOrdersPage() {
                     <div className="flex items-center gap-4 text-xs flex-wrap">
                       <div className="flex items-center gap-1">
                         <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                        <span>Ordered: {selectedOrder.ordered_at ? new Date(selectedOrder.ordered_at).toLocaleString() : 'N/A'}</span>
+                        <span>Ordered: {selectedOrder.ordered_at ? formatDisplayDateTime(selectedOrder.ordered_at) : 'N/A'}</span>
                       </div>
                       {selectedOrder.scheduled_at && (
                         <div className="flex items-center gap-1">
                           <div className="h-2 w-2 rounded-full bg-amber-500"></div>
-                          <span>Started: {new Date(selectedOrder.scheduled_at).toLocaleString()}</span>
+                          <span>Started: {formatDisplayDateTime(selectedOrder.scheduled_at)}</span>
                         </div>
                       )}
                       {selectedOrder.completed_at && (
                         <div className="flex items-center gap-1">
                           <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                          <span>Completed: {new Date(selectedOrder.completed_at).toLocaleString()}</span>
+                          <span>Completed: {formatDisplayDateTime(selectedOrder.completed_at)}</span>
                         </div>
                       )}
                     </div>
@@ -1243,7 +1243,7 @@ export default function EyeClinicOrdersPage() {
                                   Edit
                                 </Button>
                                 <span className="text-xs text-muted-foreground">
-                                  {session.completed_at ? new Date(session.completed_at).toLocaleString() : formatRelativeTime(session.started_at || session.scheduled_at)}
+                                  {session.completed_at ? formatDisplayDateTime(session.completed_at) : formatRelativeTime(session.started_at || session.scheduled_at)}
                                 </span>
                               </div>
                             </div>
@@ -1754,8 +1754,8 @@ export default function EyeClinicOrdersPage() {
                 </DialogTitle>
                 <DialogDescription>
                   {reportSession?.completed_at
-                    ? new Date(reportSession.completed_at).toLocaleString()
-                    : (reportSession?.scheduled_at ? new Date(reportSession.scheduled_at).toLocaleString() : '')}
+                    ? formatDisplayDateTime(reportSession.completed_at)
+                    : (reportSession?.scheduled_at ? formatDisplayDateTime(reportSession.scheduled_at) : '')}
                 </DialogDescription>
               </DialogHeader>
               {reportSession && (

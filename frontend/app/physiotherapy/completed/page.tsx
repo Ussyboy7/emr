@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
+import { formatDisplayDateTime } from '@/lib/dates';
 import { physioService, type PhysioSession } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -21,13 +22,14 @@ import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import {
-  buildCompletedAtApiRange,
-  rollingWeekStart,
-  calendarMonthBounds,
-} from '@/lib/utils/completed-session-filters';
+  buildCompletedSessionQueryParams,
+  fetchCompletedSessionStats,
+  type CompletedSessionStats,
+} from '@/lib/completed-sessions/completed-session-list';
+import { CompletedSessionStatsCards } from '@/components/completed-sessions/CompletedSessionStatsCards';
 
 import {
-  CheckCircle2, Search, Eye, Calendar, User,
+  CheckCircle2, Search, Eye, Calendar,
   FileText, TrendingUp, AlertTriangle, Loader2,
   Activity, Heart, Target, Lightbulb,
   Printer, Download,
@@ -43,7 +45,14 @@ export default function PhysioCompletedPage() {
   useAuthRedirect(authError);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('today');
+  const [stats, setStats] = useState<CompletedSessionStats>({
+    total: 0,
+    withDiagnosis: 0,
+    urgent: 0,
+    withFindings: 0,
+  });
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
@@ -51,9 +60,6 @@ export default function PhysioCompletedPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
-  const [weekCompletedCount, setWeekCompletedCount] = useState(0);
-  const [monthCompletedCount, setMonthCompletedCount] = useState(0);
-
   // Dialogs
   const [selectedSession, setSelectedSession] = useState<PhysioSession | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -64,9 +70,6 @@ export default function PhysioCompletedPage() {
   const [orderSessionsForReport, setOrderSessionsForReport] = useState<PhysioSession[]>([]);
   const [reportViewingSession, setReportViewingSession] = useState<PhysioSession | null>(null);
 
-  // Hint when 0 completed: count of sessions with other statuses (in_progress, scheduled, etc.)
-  const [otherStatusCount, setOtherStatusCount] = useState<number>(0);
-
   useEffect(() => {
     if (urlHydrated.current) return;
     urlHydrated.current = true;
@@ -76,71 +79,33 @@ export default function PhysioCompletedPage() {
     if (urlDate === 'all') setDateFilter('all');
   }, [searchParams]);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
   const loadSessions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      setOtherStatusCount(0);
 
-      const searching = Boolean(searchQuery.trim());
-      const effectiveDateFilter = searching || dateFilter === 'all' ? 'all' : dateFilter;
-      const completedRange = buildCompletedAtApiRange(
-        effectiveDateFilter,
-        searching ? { from: '', to: '' } : dateRange,
-      );
-      const search = searchQuery.trim() || undefined;
-      const baseList = {
-        status: 'completed' as const,
-        search,
-        ...completedRange,
-      };
+      const listParams = buildCompletedSessionQueryParams({
+        debouncedSearch: debouncedSearchQuery,
+        dateFilter,
+        dateRange,
+        currentPage,
+        itemsPerPage,
+      });
+      const { page, page_size, ...statsBase } = listParams;
 
-      const { start: monthStart, end: monthEnd } = calendarMonthBounds();
-      const weekStart = rollingWeekStart();
-
-      const [response, weekRow, monthRow] = await Promise.all([
-        physioService.getSessions({
-          ...baseList,
-          page: currentPage,
-          page_size: itemsPerPage,
-        }),
-        physioService.getSessions({
-          status: 'completed',
-          search,
-          page: 1,
-          page_size: 1,
-          completed_after: weekStart.toISOString(),
-        }),
-        physioService.getSessions({
-          status: 'completed',
-          search,
-          page: 1,
-          page_size: 1,
-          completed_after: monthStart.toISOString(),
-          completed_before: monthEnd.toISOString(),
-        }),
+      const [response, statsResult] = await Promise.all([
+        physioService.getSessions(listParams),
+        fetchCompletedSessionStats(physioService.getCompletedStats.bind(physioService), statsBase),
       ]);
 
-      const list = response?.results ?? [];
-      setSessions(list);
+      setSessions(response?.results ?? []);
       setTotalCount(response?.count ?? 0);
-      setWeekCompletedCount(weekRow?.count ?? 0);
-      setMonthCompletedCount(monthRow?.count ?? 0);
-
-      // When 0 completed for this filter, hint if other statuses exist
-      if (list.length === 0) {
-        try {
-          const [anyStatus, completedOnly] = await Promise.all([
-            physioService.getSessions({ page_size: 1 }),
-            physioService.getSessions({ status: 'completed', page_size: 1 }),
-          ]);
-          const total = anyStatus?.count ?? 0;
-          const nCompleted = completedOnly?.count ?? 0;
-          setOtherStatusCount(Math.max(0, total - nCompleted));
-        } catch {
-          setOtherStatusCount(0);
-        }
-      }
+      setStats(statsResult);
     } catch (err: any) {
       console.error('Error loading completed sessions:', err);
       if (isAuthenticationError(err)) {
@@ -152,7 +117,7 @@ export default function PhysioCompletedPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, dateFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
 
   useEffect(() => {
     loadSessions();
@@ -160,7 +125,7 @@ export default function PhysioCompletedPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   // When Session Report opens: load all sessions for the same order so user can switch Session 1, 2, 3...
   useEffect(() => {
@@ -212,13 +177,6 @@ export default function PhysioCompletedPage() {
     }
   };
 
-  const stats = useMemo(() => ({
-    total: totalCount,
-    uniquePatients: new Set(sessions.map((s) => s.patient_id).filter(Boolean)).size,
-    thisWeek: weekCompletedCount,
-    thisMonth: monthCompletedCount,
-  }), [totalCount, weekCompletedCount, monthCompletedCount, sessions]);
-
   const reportSession = isSessionReportOpen ? (reportViewingSession || selectedSession) : null;
 
   return (
@@ -226,70 +184,15 @@ export default function PhysioCompletedPage() {
       <DashboardLayout>
         <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-              Completed Sessions
-            </h1>
-            <p className="text-muted-foreground mt-1">Completed physiotherapy session reports</p>
-          </div>
-          <Button variant="outline" onClick={loadSessions} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
-            Refresh
-          </Button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
+            <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+            Completed Sessions
+          </h1>
+          <p className="text-muted-foreground mt-1">Completed physiotherapy session reports</p>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Matching filter</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.total}</p>
-                </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-blue-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Patients (this page)</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.uniquePatients}</p>
-                </div>
-                <User className="h-8 w-8 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">This week (all)</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.thisWeek}</p>
-                </div>
-                <Calendar className="h-8 w-8 text-amber-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-purple-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">This month (calendar)</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.thisMonth}</p>
-                </div>
-                <Calendar className="h-8 w-8 text-purple-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <CompletedSessionStatsCards stats={stats} fourthLabel="With Recommendations" fourthIcon="recommendations" />
 
         {/* Filters */}
         <Card>
@@ -307,7 +210,7 @@ export default function PhysioCompletedPage() {
               <div className="flex flex-wrap items-center gap-2">
                   <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
                 <Select value={dateFilter} onValueChange={setDateFilter}>
-                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Date Range" /></SelectTrigger>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Date Range" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
                     <SelectItem value="today">Today</SelectItem>
@@ -347,20 +250,10 @@ export default function PhysioCompletedPage() {
                 <Button variant="outline" className="mt-4" onClick={loadSessions}>Retry</Button>
               </CardContent>
             </Card>
-          ) : sessions.length === 0 ? (
+          ) : totalCount === 0 ? (
             <Card>
-              <CardContent className="p-8 text-center text-muted-foreground space-y-3">
-                <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No completed physiotherapy sessions found</p>
-                {otherStatusCount > 0 ? (
-                  <p className="text-sm max-w-md mx-auto">
-                    You have <strong>{otherStatusCount}</strong> session{otherStatusCount !== 1 ? 's' : ''} that {otherStatusCount !== 1 ? 'are' : 'is'} not completed yet. To see them here: <strong>Physiotherapy → Orders</strong> → open the order → green <strong>Complete Session</strong> button → fill and submit the Complete Session form. Sessions only appear here after that step.
-                  </p>
-                ) : (
-                  <p className="text-sm max-w-md mx-auto">
-                    Complete sessions from <strong>Physiotherapy → Orders</strong>: open an order → green <strong>Complete Session</strong> button → submit the Complete Session form.
-                  </p>
-                )}
+              <CardContent className="p-8 text-center text-muted-foreground">
+                No completed physiotherapy sessions found
               </CardContent>
             </Card>
           ) : (
@@ -447,7 +340,7 @@ export default function PhysioCompletedPage() {
                           <span>•</span>
                           <span className="flex items-center gap-1">
                             <Calendar className="h-3 w-3" />
-                            {completedDate.toLocaleDateString()} {completedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {formatDisplayDateTime(completedDate)}
                           </span>
 
                         </div>
@@ -483,7 +376,7 @@ export default function PhysioCompletedPage() {
                 Session Details - {selectedSession?.patient_name}
               </DialogTitle>
               <DialogDescription>
-                PHY-{selectedSession?.id?.toString().padStart(6, '0')} • Completed on {selectedSession?.completed_at ? new Date(selectedSession.completed_at).toLocaleString() : 'N/A'}
+                PHY-{selectedSession?.id?.toString().padStart(6, '0')} • Completed on {selectedSession?.completed_at ? formatDisplayDateTime(selectedSession.completed_at) : 'N/A'}
               </DialogDescription>
             </DialogHeader>
 
@@ -526,11 +419,11 @@ export default function PhysioCompletedPage() {
                   <div className="flex items-center gap-4 text-xs">
                     <div className="flex items-center gap-1">
                       <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                      <span>Scheduled: {selectedSession.scheduled_at ? new Date(selectedSession.scheduled_at).toLocaleString() : 'N/A'}</span>
+                      <span>Scheduled: {selectedSession.scheduled_at ? formatDisplayDateTime(selectedSession.scheduled_at) : 'N/A'}</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                      <span>Completed: {selectedSession.completed_at ? new Date(selectedSession.completed_at).toLocaleString() : 'N/A'}</span>
+                      <span>Completed: {selectedSession.completed_at ? formatDisplayDateTime(selectedSession.completed_at) : 'N/A'}</span>
                     </div>
                   </div>
                 </div>
@@ -740,10 +633,10 @@ export default function PhysioCompletedPage() {
                           <p><span className="font-medium">Session:</span> {reportSession.session_number}</p>
                         )}
                         {reportSession.scheduled_at && (
-                          <p><span className="font-medium">Scheduled:</span> {new Date(reportSession.scheduled_at).toLocaleString()}</p>
+                          <p><span className="font-medium">Scheduled:</span> {formatDisplayDateTime(reportSession.scheduled_at)}</p>
                         )}
                         {reportSession.completed_at && (
-                          <p><span className="font-medium">Completed:</span> {new Date(reportSession.completed_at).toLocaleString()}</p>
+                          <p><span className="font-medium">Completed:</span> {formatDisplayDateTime(reportSession.completed_at)}</p>
                         )}
                       </div>
                     </div>
@@ -961,7 +854,7 @@ export default function PhysioCompletedPage() {
                 {/* Footer */}
                 <div className="border-t pt-4">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <p>Report generated on {new Date().toLocaleString()}</p>
+                    <p>Report generated on {formatDisplayDateTime(new Date())}</p>
                     {reportSession?.id != null && (
                       <p>Session ID: PHY-{String(reportSession.id).padStart(6, '0')}</p>
                     )}

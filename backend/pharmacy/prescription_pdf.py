@@ -8,6 +8,7 @@ from django.http import HttpResponse
 from reportlab.lib.units import inch
 from reportlab.platypus import Spacer
 
+from common.date_display import format_display_datetime
 from common.pdf import (
     NPADocument,
     patient_info_block,
@@ -70,8 +71,8 @@ def build_prescription_pdf(prescription):
             ],
             right=[
                 ("Status", prescription.get_status_display()),
-                ("Prescribed", prescription.prescribed_at.strftime("%m/%d/%Y %I:%M %p") if prescription.prescribed_at else "—"),
-                ("Dispensed", prescription.dispensed_at.strftime("%m/%d/%Y %I:%M %p") if prescription.dispensed_at else "—"),
+                ("Prescribed", format_display_datetime(prescription.prescribed_at) if prescription.prescribed_at else "—"),
+                ("Dispensed", format_display_datetime(prescription.dispensed_at) if prescription.dispensed_at else "—"),
             ],
             width=6.5 * inch,
         )
