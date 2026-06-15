@@ -6,8 +6,6 @@
  * High/Medium/Low queue priority.
  */
 
-export type PriorityLevel = 'Emergency' | 'High' | 'Medium' | 'Low';
-
 export type QueueSortable = {
   priority?: number | string;
   queued_at: string;
@@ -58,11 +56,6 @@ export function getQueuePriorityFromVisitType(visitType: string): number {
   return isEmergencyVisitType(visitType) ? 0 : 1;
 }
 
-/** @deprecated Use getQueuePriorityFromVisitType */
-export function getPriorityFromVisitType(visitType: string): number {
-  return getQueuePriorityFromVisitType(visitType);
-}
-
 export function getVisitTypeLabel(visitType?: string | null): string {
   const key = normalizeVisitTypeKey(visitType);
   if (VISIT_TYPE_LABELS[key]) return VISIT_TYPE_LABELS[key];
@@ -86,31 +79,5 @@ export function getVisitTypeBadgeClass(visitType?: string | null): string {
       return 'border-teal-500/50 text-teal-600 dark:text-teal-400 bg-teal-500/10';
     default:
       return 'border-muted-foreground/50 text-muted-foreground bg-muted/30';
-  }
-}
-
-/** @deprecated Display visit type instead. Kept for legacy rows / other modules. */
-export function getPriorityLabel(priorityNum: number): PriorityLevel {
-  if (priorityNum === 0) return 'Emergency';
-  if (priorityNum === 1) return 'High';
-  if (priorityNum === 2) return 'Medium';
-  return 'Low';
-}
-
-/** @deprecated Use getVisitTypeBadgeClass for consultation queue UI. */
-export function getPriorityColor(priority: PriorityLevel | number): string {
-  const priorityLabel = typeof priority === 'number' ? getPriorityLabel(priority) : priority;
-
-  switch (priorityLabel) {
-    case 'Emergency':
-      return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400';
-    case 'High':
-      return 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400';
-    case 'Medium':
-      return 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400';
-    case 'Low':
-      return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400';
-    default:
-      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
   }
 }

@@ -18,7 +18,8 @@ import {
   ScanLine,
   FileText,
   ShieldCheck,
-  Activity
+  Activity,
+  ScanEye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,6 +56,7 @@ const modules = [
   { name: "Pharmacy", icon: Pill, color: "text-violet-400" },
   { name: "Radiology", icon: ScanLine, color: "text-cyan-400" },
   { name: "Physiotherapy", icon: Activity, color: "text-orange-400" },
+  { name: "Eye Clinic", icon: ScanEye, color: "text-indigo-400" },
 ];
 
 export default function LoginPage() {
@@ -236,19 +238,17 @@ export default function LoginPage() {
           <div className="space-y-8">
             <div className="inline-flex items-center gap-2 rounded-full bg-teal-500/10 border border-teal-500/20 px-4 py-2">
               <ShieldCheck className="h-4 w-4 text-teal-400" />
-              <span className="text-sm font-medium text-teal-400">Enterprise Healthcare System</span>
+              <span className="text-sm font-medium text-teal-400">Secure Clinical Access</span>
             </div>
             
             <div className="space-y-4">
               <h2 className="text-4xl font-bold leading-tight text-white max-w-lg">
-                Enterprise Healthcare System for{" "}
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-cyan-400">
-                  NPA Medical Operations
+                  NPA Clinical Operations
                 </span>
               </h2>
               <p className="text-lg text-slate-400 max-w-md leading-relaxed">
-                Secure access to patient records, clinical workflows, and operational data through
-                the Nigerian Ports Authority's enterprise healthcare management platform.
+                Records, nursing, consultations, lab, pharmacy and more — connected across NPA clinics.
               </p>
             </div>
 
@@ -326,7 +326,7 @@ export default function LoginPage() {
                 Sign in to EMR
               </CardTitle>
               <CardDescription className="text-slate-400">
-                Enter your credentials to access the NPA Electronic Medical Records system.
+                Sign in to continue to the NPA EMR workspace.
               </CardDescription>
             </CardHeader>
             <CardContent>

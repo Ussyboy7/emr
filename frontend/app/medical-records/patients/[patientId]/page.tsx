@@ -21,7 +21,7 @@ import { patientService, consultationService, labService, radiologyService,
          pharmacyService, physioService, wardService, medicalCertificateService, referralService, eyeCareService, annualCheckupService, type Patient, type Visit, type AnnualCheckup } from '@/lib/services';
 import type { Referral } from '@/lib/services/referral-service';
 import { apiFetch } from '@/lib/api-client';
-import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { resolvePatientNumericId } from '@/lib/utils/patient-id';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
@@ -205,52 +205,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         return;
       }
 
-      const resolveFromSearch = async (query: string) => {
-        const searchResult = await patientService.getPatients({ search: query, page_size: DEFAULT_LIST_PAGE_SIZE });
-        const list = searchResult.results || [];
-        const q = query;
-        const qu = q.toUpperCase();
-        return (
-          list.find((p) => p.patient_id === q) ||
-          list.find((p) => p.patient_id && p.patient_id.toUpperCase() === qu) ||
-          list.find((p) => String(p.id) === q) ||
-          null
-        );
-      };
-
       try {
         setLoading(true);
         setError(null);
-        let numericId: number;
-        let patientData: Patient;
-
-        const allDigits = /^\d+$/.test(raw);
-
-        if (!allDigits) {
-          const matchedPatient = await resolveFromSearch(raw);
-          if (!matchedPatient) {
-            throw new Error(`Patient with ID "${raw}" not found`);
-          }
-          numericId = matchedPatient.id;
-          patientData = await patientService.getPatient(numericId);
-        } else {
-          const parsedId = parseInt(raw, 10);
-          if (!Number.isFinite(parsedId) || parsedId <= 0) {
-            throw new Error(`Patient with ID "${raw}" not found`);
-          }
-          try {
-            patientData = await patientService.getPatient(parsedId);
-            numericId = patientData.id;
-          } catch (e: any) {
-            const is404 = e?.status === 404;
-            if (!is404) throw e;
-            // Digits in the URL may be a human patient_id (e.g. "10042"), not the DB pk
-            const matchedPatient = await resolveFromSearch(raw);
-            if (!matchedPatient) throw e;
-            numericId = matchedPatient.id;
-            patientData = await patientService.getPatient(numericId);
-          }
-        }
+        const numericId = await resolvePatientNumericId(raw);
+        const patientData = await patientService.getPatient(numericId);
 
         setPatient(patientData);
         if (patientData.category === 'employee') {

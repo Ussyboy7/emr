@@ -327,13 +327,20 @@ export function AppSidebar() {
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
     const allowedSet = new Set(allowedPages.map(normalizeRolePagePath));
 
+    const canManageUsers =
+      currentUser.isSuperuser ||
+      currentUser.isStaff ||
+      currentUser.isDepartmentHead;
+
     return menuSections.filter(section => {
-      // Department heads automatically get access to the Administration section
-      if (section.basePath === '/admin' && currentUser.department) {
-        return true;
-      }
-      // Check if user has access to any page in this section
-      return section.items.some(item => allowedSet.has(normalizeRolePagePath(item.href)));
+      return section.items.some(item => {
+        if (item.href === '/admin/users') {
+          const hasPage =
+            allowedSet.has('/admin/users') || allowedSet.has('/admin');
+          return hasPage && canManageUsers;
+        }
+        return allowedSet.has(normalizeRolePagePath(item.href));
+      });
     });
   };
 
@@ -361,12 +368,17 @@ export function AppSidebar() {
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
     const allowedSet = new Set(allowedPages.map(normalizeRolePagePath));
 
+    const canManageUsers =
+      currentUser.isSuperuser ||
+      currentUser.isStaff ||
+      currentUser.isDepartmentHead;
+
     return baseItems.filter(item => {
-      // Department heads automatically get access to User Management
-      if (item.href === '/admin/users' && currentUser.department) {
-        return true;
+      if (item.href === '/admin/users') {
+        const hasPage =
+          allowedSet.has('/admin/users') || allowedSet.has('/admin');
+        return hasPage && canManageUsers;
       }
-      // Check if the specific page URL is in the allowed pages
       if (item.href === '/admin/health' && allowedSet.has('/admin')) {
         return true;
       }

@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultation/orders/LabOrderModal';
 import { AnnualCheckupPanel } from '@/components/consultation/AnnualCheckupPanel';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
-import { summarizeLabTestForConsultationReport } from '@/lib/consultation-report';
+import { buildConsultationDetailOrdersFromBundle } from '@/lib/consultation/workspace-bundle-enrichment';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 // ==========================================
@@ -743,200 +743,31 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     // Get session timeframe for filtering orders by creation time
     const sessionStart = consultationSession?.started_at ? new Date(consultationSession.started_at) : null;
     const sessionEnd = consultationSession?.ended_at ? new Date(consultationSession.ended_at) : (consultationSession?.started_at ? new Date() : null);
-    
-    // Helper function to filter orders by session timeframe
-    const filterBySessionTime = <T extends { created_at?: string; createdAt?: string }>(orders: T[]): T[] => {
-      if (!sessionStart) return orders; // If no session, return all (fallback behavior)
-      return orders.filter((order) => {
-        const orderDate = new Date(order.created_at || order.createdAt || '');
-        return orderDate >= sessionStart && orderDate <= sessionEnd!;
-      });
-    };
 
-    let prescriptionsResult: ApiResponse<PrescriptionData>;
-    let labOrdersResult: ApiResponse<LabOrderData>;
-    let radiologyOrdersResult: { results: any[] };
-    let nursingOrdersResult: { results: any[] };
-    let physioResult: { results: any[] };
-    let vitalsResult: { results: any[] };
-
+    let bundleSlice: Parameters<typeof buildConsultationDetailOrdersFromBundle>[0];
     if (consultationSessionId) {
       const bundle = await consultationService.getSessionWorkspaceBundle(Number(consultationSessionId));
-      prescriptionsResult = bundle.prescriptions as ApiResponse<PrescriptionData>;
-      labOrdersResult = bundle.lab_orders as ApiResponse<LabOrderData>;
-      radiologyOrdersResult = bundle.radiology_orders as { results: any[] };
-      nursingOrdersResult = bundle.nursing_orders as { results: any[] };
-      physioResult = bundle.physio_orders as { results: any[] };
-      vitalsResult = bundle.vitals as { results: any[] };
+      bundleSlice = bundle;
     } else {
       const bundle = await visitService.getVisitWorkspaceBundle(Number(visitId));
-      prescriptionsResult = bundle.prescriptions as ApiResponse<PrescriptionData>;
-      labOrdersResult = bundle.lab_orders as ApiResponse<LabOrderData>;
-      radiologyOrdersResult = bundle.radiology_orders as { results: any[] };
-      nursingOrdersResult = bundle.nursing_orders as { results: any[] };
-      physioResult = bundle.physio_orders as { results: any[] };
-      vitalsResult = bundle.vitals as { results: any[] };
-      if (!vitalsResult.results?.length) {
+      let vitalsRows = bundle.vitals?.results || [];
+      if (!vitalsRows.length) {
         const vital = await patientService.resolveVital({ visit: Number(visitId) }).catch(() => null);
-        vitalsResult = { results: vital ? [vital] : [] };
+        vitalsRows = vital ? [vital] : [];
       }
+      bundleSlice = { ...bundle, vitals: { results: vitalsRows, count: vitalsRows.length } };
     }
 
-    try {
-      const filteredPrescriptions = filterBySessionTime((prescriptionsResult.results || []) as PrescriptionData[]);
-      prescriptions = filteredPrescriptions.map((p: PrescriptionData) => ({
-        id: String(p.id),
-        medication: p.medication_name ||
-                   (p.medication && typeof p.medication === 'object' && p.medication.name) ||
-                   (p.medication && typeof p.medication === 'string' && !(p.medication as string).match(/^\d+$/) && p.medication) ||
-                   'Unknown',
-        strength: p.strength || '',
-        form: p.form || '',
-        dosage: p.dosage || '',
-        frequency: p.frequency || '',
-        duration: p.duration || '',
-        instructions: p.instructions || '',
-      }));
-    } catch (err) {
-      console.warn('Could not load prescriptions:', err);
-    }
-    
-    try {
-      const filteredLabOrders = filterBySessionTime((labOrdersResult.results || []) as LabOrderData[]);
-      // Flatten lab orders - each test in an order should be a separate entry
-      labOrders = filteredLabOrders.flatMap((l: LabOrderData) => {
-        // If order has tests array, create an entry for each test
-        if (l.tests && Array.isArray(l.tests) && l.tests.length > 0) {
-          return l.tests.map((test: any) => ({
-            id: `LAB-${l.id}-${test.id}`,
-            test: test.name || test.test_name || test.template?.name || 'Unknown Test',
-            priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
-            instructions: test.notes || l.clinical_notes || '',
-            status: test.status || 'pending',
-            orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
-            createdAt: test.created_at || l.ordered_at || new Date().toISOString(),
-            result: test.results ? summarizeLabTestForConsultationReport(test) : undefined,
-          }));
-        }
-        // Fallback: single test entry from order-level fields
-        const testName = l.test_name || l.test || l.name || 'Unknown Test';
-        return [{
-          id: String(l.id),
-          test: testName,
-          priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
-          instructions: l.clinical_notes || '',
-          status: l.status || 'pending',
-          orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
-          createdAt: l.ordered_at || l.created_at || new Date().toISOString(),
-          result: undefined, // Add result property for consistency
-        }];
-      });
-    } catch (err) {
-      console.warn('Could not load lab orders:', err);
-    }
-    
-    try {
-      const filteredRadiologyOrders = filterBySessionTime((radiologyOrdersResult.results || []) as any[]);
-      // Flatten radiology orders - each study in an order should be a separate entry
-      radiologyOrders = filteredRadiologyOrders.flatMap((r: any) => {
-        // If order has studies array, create an entry for each study
-        if (r.studies && Array.isArray(r.studies) && r.studies.length > 0) {
-          return r.studies.map((study: any) => ({
-            id: `RAD-${r.id}-${study.id}`,
-            study: study.procedure || study.study_type || study.name || 'Unknown Study',
-            priority: r.priority === 'stat' ? 'STAT' : r.priority === 'urgent' ? 'Urgent' : r.priority === 'routine' ? 'Routine' : String(r.priority || 'Routine'),
-            instructions: study.technical_notes || r.clinical_notes || '',
-            status: study.status || 'pending',
-            orderedBy: r.doctor_name || r.created_by_name || 'Unknown',
-            createdAt: study.created_at || r.ordered_at || new Date().toISOString(),
-            result: study.report || study.findings ? `${study.findings || ''}\n${study.impression || ''}`.trim() : undefined,
-          }));
-        }
-        // Fallback: single study entry from order-level fields
-        return [{
-          id: String(r.id),
-          study: r.study_type || r.study || r.name || 'Unknown Study',
-          priority: r.priority === 'stat' ? 'STAT' : r.priority === 'urgent' ? 'Urgent' : r.priority === 'routine' ? 'Routine' : String(r.priority || 'Routine'),
-          instructions: r.clinical_notes || '',
-          status: r.status || 'pending',
-          orderedBy: r.doctor_name || r.created_by_name || 'Unknown',
-          createdAt: r.ordered_at || r.created_at || new Date().toISOString(),
-        }];
-      });
-    } catch (err) {
-      console.warn('Could not load radiology orders:', err);
-    }
-    
-    try {
-      const filteredNursingOrders = filterBySessionTime((nursingOrdersResult.results || []) as any[]);
-      nursingOrders = filteredNursingOrders.map((n: any) => ({
-        id: String(n.id),
-        type: n.order_type || n.type || 'General',
-        instructions: n.instructions || '',
-        status: n.status || 'pending',
-        priority: n.priority === 'urgent' ? 'Urgent' : n.priority === 'high' ? 'High' : n.priority === 'medium' ? 'Medium' : n.priority === 'low' ? 'Low' : String(n.priority || 'Medium'),
-        orderedBy: n.ordered_by_name || 'Unknown',
-        createdAt: n.created_at || new Date().toISOString(),
-      }));
-    } catch (err) {
-      console.warn('Could not load nursing orders:', err);
-    }
-
-    let physioOrders: ConsultationRecord['physioOrders'] = [];
-    try {
-      physioOrders = (physioResult.results || []).map((o: any) => ({
-          id: String(o.id),
-          diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
-          chiefComplaint: o.chief_complaint ?? '',
-          priority: o.priority === 'stat' ? 'STAT' : o.priority === 'urgent' ? 'Urgent' : String(o.priority || 'Routine'),
-          status: o.status ?? 'pending',
-        }));
-    } catch (err) {
-      console.warn('Could not load physio orders:', err);
-    }
-    
-    // Get vitals - filter by consultation session if available, otherwise by visit
-    let vitals: ConsultationRecord['vitals'] = [];
-    try {
-      vitals = (vitalsResult.results || []).map((v: any) => {
-        // Handle temperature - could be string or number
-        const temp = v.temperature ? (typeof v.temperature === 'string' ? parseFloat(v.temperature) : Number(v.temperature)) : null;
-        // Handle blood pressure - could be separate fields or combined
-        const systolic = v.blood_pressure_systolic || v.systolic || (v.blood_pressure ? parseFloat(v.blood_pressure.split('/')[0]) : null) || 0;
-        const diastolic = v.blood_pressure_diastolic || v.diastolic || (v.blood_pressure ? parseFloat(v.blood_pressure.split('/')[1]) : null) || 0;
-        // Handle weight/height
-        const weight = v.weight ? (typeof v.weight === 'string' ? parseFloat(v.weight) : Number(v.weight)) : null;
-        const height = v.height ? (typeof v.height === 'string' ? parseFloat(v.height) : Number(v.height)) : null;
-        const oxygenSat = v.oxygen_saturation ? (typeof v.oxygen_saturation === 'string' ? parseFloat(v.oxygen_saturation) : Number(v.oxygen_saturation)) : null;
-        const bmiRaw = v.bmi != null && v.bmi !== '' ? Number(v.bmi) : NaN;
-        const painRaw = v.pain_scale != null && v.pain_scale !== '' ? Number(v.pain_scale) : NaN;
-        const bsRaw = v.blood_sugar != null && v.blood_sugar !== '' ? Number(v.blood_sugar) : NaN;
-        const rbsRaw = v.random_blood_sugar != null && v.random_blood_sugar !== '' ? Number(v.random_blood_sugar) : NaN;
-
-        return {
-          id: String(v.id),
-          systolic: systolic || 0,
-          diastolic: diastolic || 0,
-          heartRate: v.heart_rate || v.heartRate || 0,
-          temperature: temp || 0,
-          respiratoryRate: v.respiratory_rate || v.respiratoryRate || 0,
-          weight: weight != null && !Number.isNaN(weight) ? weight : undefined,
-          height: height != null && !Number.isNaN(height) ? height : undefined,
-          oxygenSaturation: oxygenSat != null && !Number.isNaN(oxygenSat) ? oxygenSat : 0,
-          bmi: !Number.isNaN(bmiRaw) ? bmiRaw : undefined,
-          painScale: !Number.isNaN(painRaw) ? painRaw : undefined,
-          bloodSugar: !Number.isNaN(bsRaw) ? bsRaw : undefined,
-          randomBloodSugar: !Number.isNaN(rbsRaw) ? rbsRaw : undefined,
-          comment: v.notes || v.comment || '',
-          recordedBy: v.recorded_by_name || (typeof v.recorded_by === 'object' ? v.recorded_by?.full_name || v.recorded_by?.username : v.recorded_by) || 'Unknown',
-          date: v.recorded_at || v.created_at || new Date().toISOString(),
-          time: formatDisplayTime(v.recorded_at) || '00:00',
-        };
-      });
-    } catch (err) {
-      // Ignore
-    }
-    
+    const orders = buildConsultationDetailOrdersFromBundle(bundleSlice, {
+      sessionStart,
+      sessionEnd,
+    });
+    prescriptions = orders.prescriptions;
+    labOrders = orders.labOrders;
+    radiologyOrders = orders.radiologyOrders;
+    nursingOrders = orders.nursingOrders;
+    const physioOrders = orders.physioOrders;
+    const vitals = orders.vitals;
     
     const sessionDuration = consultationSession?.started_at && consultationSession?.ended_at
       ? Math.floor((new Date(consultationSession.ended_at).getTime() - new Date(consultationSession.started_at).getTime()) / (1000 * 60))
@@ -1092,188 +923,27 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     
     // Get session timeframe for filtering orders by creation time
     const sessionStart = session.started_at ? new Date(session.started_at) : null;
-    const sessionEnd = session.ended_at ? new Date(session.ended_at) : new Date(); // Use current time if session not ended
-    
-    // Helper function to filter orders by session timeframe
-    const filterBySessionTime = <T extends { created_at?: string; createdAt?: string }>(orders: T[]): T[] => {
-      if (!sessionStart) return orders;
-      return orders.filter((order) => {
-        const orderDate = new Date(order.created_at || order.createdAt || '');
-        return orderDate >= sessionStart && orderDate <= sessionEnd;
-      });
-    };
-    
-    // Try to filter by consultation_session first, fallback to visit if needed
-    const sessionFilter = `consultation_session=${sessionId}`;
-    const visitFilter = session.visit ? `visit=${session.visit}` : '';
+    const sessionEnd = session.ended_at ? new Date(session.ended_at) : new Date();
 
     const bundle = await consultationService.getSessionWorkspaceBundle(Number(sessionId));
-    const prescriptionsResult = bundle.prescriptions;
-    const labOrdersResult = bundle.lab_orders;
-    const radiologyOrdersResult = bundle.radiology_orders;
-    const nursingOrdersResult = bundle.nursing_orders;
-    const physioResult = bundle.physio_orders;
-    let vitalsResult = bundle.vitals as { results: any[] };
-    if (!vitalsResult.results?.length && session.visit) {
+    let vitalsRows = bundle.vitals?.results || [];
+    if (!vitalsRows.length && session.visit) {
       const vital = await patientService.resolveVital({ visit: Number(session.visit) }).catch(() => null);
-      vitalsResult = { results: vital ? [vital] : [] };
+      vitalsRows = vital ? [vital] : [];
     }
 
-    try {
-      const filteredPrescriptions = filterBySessionTime((prescriptionsResult.results || []) as PrescriptionData[]);
-      prescriptions = filteredPrescriptions.map((p: PrescriptionData) => ({
-        id: String(p.id),
-        medication: p.medication_name ||
-                   (p.medication && typeof p.medication === 'object' && p.medication.name) ||
-                   (p.medication && typeof p.medication === 'string' && !(p.medication as string).match(/^\d+$/) && p.medication) ||
-                   'Unknown',
-        strength: p.strength || '',
-        form: p.form || '',
-        dosage: p.dosage || '',
-        frequency: p.frequency || '',
-        duration: p.duration || '',
-        instructions: p.instructions || '',
-      }));
-    } catch (err) {
-      console.warn('Could not load prescriptions:', err);
-    }
-    
-    try {
-      const filteredLabOrders = filterBySessionTime((labOrdersResult.results || []) as LabOrderData[]);
-      // Flatten lab orders - each test in an order should be a separate entry
-      labOrders = filteredLabOrders.flatMap((l: LabOrderData) => {
-        // If order has tests array, create an entry for each test
-        if (l.tests && Array.isArray(l.tests) && l.tests.length > 0) {
-          return l.tests.map((test: any) => ({
-            id: `LAB-${l.id}-${test.id}`,
-            test: test.name || test.test_name || test.template?.name || 'Unknown Test',
-            priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
-            instructions: test.notes || l.clinical_notes || '',
-            status: test.status || 'pending',
-            orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
-            createdAt: test.created_at || l.ordered_at || new Date().toISOString(),
-            result: test.results ? summarizeLabTestForConsultationReport(test) : undefined,
-          }));
-        }
-        // Fallback: single test entry from order-level fields
-        const testName = l.test_name || l.test || l.name || 'Unknown Test';
-        return [{
-          id: String(l.id),
-          test: testName,
-          priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
-          instructions: l.clinical_notes || '',
-          status: l.status || 'pending',
-          orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
-          createdAt: l.ordered_at || l.created_at || new Date().toISOString(),
-          result: undefined, // Add result property for consistency
-        }];
-      });
-    } catch (err) {
-      console.warn('Could not load lab orders:', err);
-    }
-    
-    try {
-      const filteredRadiologyOrders = filterBySessionTime((radiologyOrdersResult.results || []) as any[]);
-      // Flatten radiology orders - each study in an order should be a separate entry
-      radiologyOrders = filteredRadiologyOrders.flatMap((r: any) => {
-        // If order has studies array, create an entry for each study
-        if (r.studies && Array.isArray(r.studies) && r.studies.length > 0) {
-          return r.studies.map((study: any) => ({
-            id: `RAD-${r.id}-${study.id}`,
-            study: study.procedure || study.study_type || study.name || 'Unknown Study',
-            priority: r.priority === 'stat' ? 'STAT' : r.priority === 'urgent' ? 'Urgent' : r.priority === 'routine' ? 'Routine' : String(r.priority || 'Routine'),
-            instructions: study.technical_notes || r.clinical_notes || '',
-            status: study.status || 'pending',
-            orderedBy: r.doctor_name || r.created_by_name || 'Unknown',
-            createdAt: study.created_at || r.ordered_at || new Date().toISOString(),
-            result: study.report || study.findings ? `${study.findings || ''}\n${study.impression || ''}`.trim() : undefined,
-          }));
-        }
-        // Fallback: single study entry from order-level fields
-        return [{
-          id: String(r.id),
-          study: r.study_type || r.study || r.name || 'Unknown Study',
-          priority: r.priority === 'stat' ? 'STAT' : r.priority === 'urgent' ? 'Urgent' : r.priority === 'routine' ? 'Routine' : String(r.priority || 'Routine'),
-          instructions: r.clinical_notes || '',
-          status: r.status || 'pending',
-          orderedBy: r.doctor_name || r.created_by_name || 'Unknown',
-          createdAt: r.ordered_at || r.created_at || new Date().toISOString(),
-        }];
-      });
-    } catch (err) {
-      console.warn('Could not load radiology orders:', err);
-    }
-    
-    try {
-      const filteredNursingOrders = filterBySessionTime((nursingOrdersResult.results || []) as any[]);
-      nursingOrders = filteredNursingOrders.map((n: any) => ({
-        id: String(n.id),
-        type: n.order_type || n.type || 'General',
-        instructions: n.instructions || '',
-        status: n.status || 'pending',
-        priority: n.priority === 'urgent' ? 'Urgent' : n.priority === 'high' ? 'High' : n.priority === 'medium' ? 'Medium' : n.priority === 'low' ? 'Low' : String(n.priority || 'Medium'),
-        orderedBy: n.ordered_by_name || 'Unknown',
-        createdAt: n.created_at || new Date().toISOString(),
-      }));
-    } catch (err) {
-      console.warn('Could not load nursing orders:', err);
-    }
+    const orders = buildConsultationDetailOrdersFromBundle(bundle, {
+      sessionStart,
+      sessionEnd,
+      vitalsOverride: vitalsRows,
+    });
+    prescriptions = orders.prescriptions;
+    labOrders = orders.labOrders;
+    radiologyOrders = orders.radiologyOrders;
+    nursingOrders = orders.nursingOrders;
+    const physioOrders = orders.physioOrders;
+    const vitals = orders.vitals;
 
-    let physioOrders: ConsultationRecord['physioOrders'] = [];
-    try {
-      physioOrders = (physioResult.results || []).map((o: any) => ({
-        id: String(o.id),
-        diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
-        chiefComplaint: o.chief_complaint ?? '',
-        priority: o.priority === 'stat' ? 'STAT' : o.priority === 'urgent' ? 'Urgent' : String(o.priority || 'Routine'),
-        status: o.status ?? 'pending',
-      }));
-    } catch (err) {
-      console.warn('Could not load physio orders:', err);
-    }
-    
-    // Get vitals - filter by consultation session (fallback to visit if session filter not supported)
-    let vitals: ConsultationRecord['vitals'] = [];
-    try {
-      vitals = (vitalsResult.results || []).map((v: any) => {
-        // Handle temperature - could be string or number
-        const temp = v.temperature ? (typeof v.temperature === 'string' ? parseFloat(v.temperature) : Number(v.temperature)) : null;
-        // Handle blood pressure - could be separate fields or combined
-        const systolic = v.blood_pressure_systolic || v.systolic || (v.blood_pressure ? parseFloat(v.blood_pressure.split('/')[0]) : null) || 0;
-        const diastolic = v.blood_pressure_diastolic || v.diastolic || (v.blood_pressure ? parseFloat(v.blood_pressure.split('/')[1]) : null) || 0;
-        // Handle weight/height
-        const weight = v.weight ? (typeof v.weight === 'string' ? parseFloat(v.weight) : Number(v.weight)) : null;
-        const height = v.height ? (typeof v.height === 'string' ? parseFloat(v.height) : Number(v.height)) : null;
-        const oxygenSat = v.oxygen_saturation ? (typeof v.oxygen_saturation === 'string' ? parseFloat(v.oxygen_saturation) : Number(v.oxygen_saturation)) : null;
-        const bmiRaw = v.bmi != null && v.bmi !== '' ? Number(v.bmi) : NaN;
-        const painRaw = v.pain_scale != null && v.pain_scale !== '' ? Number(v.pain_scale) : NaN;
-        const bsRaw = v.blood_sugar != null && v.blood_sugar !== '' ? Number(v.blood_sugar) : NaN;
-        const rbsRaw = v.random_blood_sugar != null && v.random_blood_sugar !== '' ? Number(v.random_blood_sugar) : NaN;
-
-        return {
-          id: String(v.id),
-          systolic: systolic || 0,
-          diastolic: diastolic || 0,
-          heartRate: v.heart_rate || v.heartRate || 0,
-          temperature: temp || 0,
-          respiratoryRate: v.respiratory_rate || v.respiratoryRate || 0,
-          weight: weight != null && !Number.isNaN(weight) ? weight : undefined,
-          height: height != null && !Number.isNaN(height) ? height : undefined,
-          oxygenSaturation: oxygenSat != null && !Number.isNaN(oxygenSat) ? oxygenSat : 0,
-          bmi: !Number.isNaN(bmiRaw) ? bmiRaw : undefined,
-          painScale: !Number.isNaN(painRaw) ? painRaw : undefined,
-          bloodSugar: !Number.isNaN(bsRaw) ? bsRaw : undefined,
-          randomBloodSugar: !Number.isNaN(rbsRaw) ? rbsRaw : undefined,
-          comment: v.notes || v.comment || '',
-          recordedBy: v.recorded_by_name || (typeof v.recorded_by === 'object' ? v.recorded_by?.full_name || v.recorded_by?.username : v.recorded_by) || 'Unknown',
-          date: v.recorded_at || v.created_at || new Date().toISOString(),
-          time: formatDisplayTime(v.recorded_at) || '00:00',
-        };
-      });
-    } catch (err) {
-      // Ignore
-    }
-    
     return {
       id: String(session.id),
       patient: patient.full_name ?? '',

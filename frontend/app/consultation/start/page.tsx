@@ -539,7 +539,7 @@ const StartConsultation = () => {
         // Check if vitals exist for this visit
         const vitalsCompleted = visitId
           ? await safeAsync(
-              () => patientService.vitalsExistForVisit(visitId),
+              () => patientService.vitalsExistForVisit(Number(visitId)),
               false,
               { operation: 'checkVitalsStatus', visitId: visitId ? String(visitId) : undefined, component: 'ConsultationStart' }
             )

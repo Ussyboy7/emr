@@ -51,6 +51,7 @@ import { LabOrderModal, type LabOrderSubmitInput } from "@/components/consultati
 import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from "@/components/consultation/orders/RadiologyOrderModal";
 import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/consultation/orders/PhysioOrderModal";
 import { NursingOrderModal, type NursingOrderSubmitInput } from "@/components/consultation/orders/NursingOrderModal";
+import { extractSessionEditState } from '@/lib/consultation/workspace-bundle-enrichment';
 
 // NOTE: doctor name is now taken directly from the session serializer (doctor_name)
 // to avoid per-row API calls in large lists.
@@ -572,43 +573,13 @@ export default function ConsultationHistoryPage() {
           consultationService.getSessionWorkspaceBundle(sessionId),
           consultationService.getSession(sessionId),
         ]);
-        const rxRes = bundle.prescriptions;
-        const labRes = bundle.lab_orders;
-        const radRes = bundle.radiology_orders;
-        const physioRes = bundle.physio_orders;
-        const nursingRes = bundle.nursing_orders;
-        const diagnosesRes = bundle.diagnoses;
-        setEditPrescriptions(rxRes.results || []);
-        setEditLabOrders(labRes.results || []);
-        setEditRadiologyOrders(radRes.results || []);
-        setEditPhysioOrders(physioRes.results || []);
-        setEditNursingOrders(nursingRes.results || []);
-
-        // Sync edit form with backend: notes and diagnoses (so Edit shows what was saved in the session)
-        const diagnosisList = diagnosesRes?.results || [];
-        const diagnosisCodes = diagnosisList.map((d: { id: number; certainty?: string; icd10_code_details?: { code: string; description: string }; diagnosis_text?: string; notes?: string }) => {
-          const details = d.icd10_code_details;
-          const type = (d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential') as 'Primary' | 'Secondary' | 'Differential';
-          return {
-            id: String(d.id),
-            code: details?.code ?? '',
-            name: details?.description ?? d.diagnosis_text ?? '',
-            type,
-            notes: d.notes ?? '',
-          };
-        });
-        // Coerce session note fields to string; form always reflects backend after fetch
-        const safeStr = (v: unknown): string => (v != null && typeof v === 'string' ? v : '');
-        setEditForm((prev) => ({
-          ...prev,
-          presentationComplaint: safeStr(session.presentation_complaint),
-          historyOfPresentIllness: safeStr(session.history_of_presenting_illness),
-          physicalExamination: safeStr(session.physical_examination),
-          assessment: safeStr(session.assessment),
-          plan: safeStr(session.plan),
-          status: session.status === 'completed' ? 'Completed' : 'In Progress',
-          diagnosisCodes,
-        }));
+        const editState = extractSessionEditState(bundle, session);
+        setEditPrescriptions(editState.editPrescriptions);
+        setEditLabOrders(editState.editLabOrders);
+        setEditRadiologyOrders(editState.editRadiologyOrders);
+        setEditPhysioOrders(editState.editPhysioOrders);
+        setEditNursingOrders(editState.editNursingOrders);
+        setEditForm((prev) => ({ ...prev, ...editState.formPatch }));
       } catch (err) {
         console.error('Error loading orders/session for edit:', err);
         toast.error('Failed to load prescriptions and orders');
@@ -625,11 +596,13 @@ export default function ConsultationHistoryPage() {
     if (isNaN(sessionId)) return;
     try {
       const bundle = await consultationService.getSessionWorkspaceBundle(sessionId);
-      setEditPrescriptions(bundle.prescriptions.results || []);
-      setEditLabOrders(bundle.lab_orders.results || []);
-      setEditRadiologyOrders(bundle.radiology_orders.results || []);
-      setEditPhysioOrders(bundle.physio_orders.results || []);
-      setEditNursingOrders(bundle.nursing_orders.results || []);
+      const { editPrescriptions, editLabOrders, editRadiologyOrders, editPhysioOrders, editNursingOrders } =
+        extractSessionEditState(bundle, {});
+      setEditPrescriptions(editPrescriptions);
+      setEditLabOrders(editLabOrders);
+      setEditRadiologyOrders(editRadiologyOrders);
+      setEditPhysioOrders(editPhysioOrders);
+      setEditNursingOrders(editNursingOrders);
     } catch (err) {
       console.error('Error refetching orders:', err);
     }

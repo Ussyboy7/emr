@@ -19,6 +19,7 @@ import { labService, type LabResult as ApiLabResult } from '@/lib/services';
 import { DEFAULT_CATALOG_PAGE_SIZE } from '@/lib/pagination-constants';
 import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { StandardPagination } from '@/components/shared/StandardPagination';
 import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';

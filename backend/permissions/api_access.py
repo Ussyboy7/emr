@@ -54,13 +54,23 @@ MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 ADMIN_API_PREFIXES = (
     "system-config/",
+    "organization/system-config/",
 )
 
 ORGANIZATION_READ_PREFIXES = (
+    "organization/clinics/",
+    "organization/departments/",
+    "organization/work-locations/",
+    "organization/outpatient-clinic-types/",
     "clinics/",
     "departments/",
     "work-locations/",
     "outpatient-clinic-types/",
+)
+
+ORGANIZATION_ROOM_PREFIXES = (
+    "organization/rooms/",
+    "rooms/",
 )
 
 _PATIENT_DETAIL = re.compile(r"^patients/\d+")
@@ -116,10 +126,24 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
     if api_path.startswith("accounts/users"):
         return user_has_any_page(allowed_pages, ("/admin/users", "/admin"))
 
+    if api_path.startswith("accounts/system-roles"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
+                allowed_pages, ("/admin/users", "/admin")
+            )
+        return user_has_any_page(allowed_pages, ("/admin/users", "/admin"))
+
+    if api_path.startswith("permissions/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return user_has_any_page(
+                allowed_pages, ("/admin/roles", "/admin/users", "/admin")
+            )
+        return user_has_any_page(allowed_pages, ("/admin/roles",))
+
     if api_path.startswith(ADMIN_API_PREFIXES):
         return user_has_any_page(allowed_pages, ("/admin/settings", "/admin/clinics", "/admin"))
 
-    if api_path.startswith("rooms/"):
+    if api_path.startswith(ORGANIZATION_ROOM_PREFIXES):
         if method in ("GET", "HEAD", "OPTIONS"):
             return user_has_any_page(allowed_pages, ("/admin/rooms", "/admin", "/consultation"))
         return user_has_any_page(allowed_pages, ("/admin/rooms", "/admin"))
@@ -127,7 +151,7 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
     if api_path.startswith(ORGANIZATION_READ_PREFIXES):
         if method in ("GET", "HEAD", "OPTIONS"):
             return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/admin/clinics", "/admin")
+                allowed_pages, ("/admin/clinics", "/admin/users", "/admin")
             )
         return user_has_any_page(allowed_pages, ("/admin/clinics", "/admin/settings", "/admin"))
 

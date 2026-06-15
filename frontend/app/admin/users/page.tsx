@@ -21,6 +21,7 @@ import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type User as ApiUser, type Role as ApiRole } from "@/lib/services";
 import { ALL_PAGE_PERMISSIONS, groupPagePermissionsByModule } from "@/lib/page-permissions";
 import { apiFetch } from "@/lib/api-client";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
@@ -92,6 +93,17 @@ const emptyStaff: Partial<StaffMember> = {
 const statuses = ['All Status', 'Active', 'Inactive'];
 
 export default function UserManagementPage() {
+  const { currentUser, hydrated } = useCurrentUser();
+
+  const isScopedDeptHead = Boolean(
+    hydrated &&
+      currentUser?.isDepartmentHead &&
+      !currentUser?.isStaff &&
+      !currentUser?.isSuperuser,
+  );
+
+  const headedDepartments = currentUser?.headedDepartments ?? [];
+
   // System roles (professional identity) - fetched from backend
   const [systemRoles, setSystemRoles] = useState<string[]>(['All Roles']);
 
@@ -107,6 +119,51 @@ export default function UserManagementPage() {
   const [allClinics, setAllClinics] = useState<Clinic[]>([]);
   const [allDepartments, setAllDepartments] = useState<Department[]>([]);
   const [departmentFilter, setDepartmentFilter] = useState('all');
+
+  const departmentOptions = useMemo(() => {
+    if (isScopedDeptHead && headedDepartments.length > 0) {
+      return headedDepartments.map((d) => ({
+        id: d.id,
+        name: d.name,
+        code: "",
+      }));
+    }
+    return allDepartments;
+  }, [isScopedDeptHead, headedDepartments, allDepartments]);
+
+  const staffRoleNames = useMemo(() => {
+    const names = new Set(
+      staff.map((member) => member.systemRole).filter((role): role is string => Boolean(role)),
+    );
+    return Array.from(names).sort();
+  }, [staff]);
+
+  const roleFilterOptions = useMemo(() => {
+    if (isScopedDeptHead && staffRoleNames.length > 0) {
+      return ["All Roles", ...staffRoleNames];
+    }
+    return systemRoles;
+  }, [isScopedDeptHead, staffRoleNames, systemRoles]);
+
+  const showDepartmentFilter = !isScopedDeptHead || headedDepartments.length > 1;
+  const showRoleFilter = !isScopedDeptHead || staffRoleNames.length > 1;
+
+  const formDepartmentOptions = departmentOptions;
+  const formSystemRoleOptions = isScopedDeptHead && staffRoleNames.length > 0
+    ? staffRoleNames
+    : systemRoles.slice(1);
+
+  useEffect(() => {
+    if (!isScopedDeptHead) return;
+    if (headedDepartments.length === 1) {
+      setDepartmentFilter(String(headedDepartments[0].id));
+    }
+  }, [isScopedDeptHead, headedDepartments]);
+
+  useEffect(() => {
+    if (showRoleFilter) return;
+    setRoleFilter("all");
+  }, [showRoleFilter]);
 
   // System roles management state
   const [allSystemRoles, setAllSystemRoles] = useState<SystemRole[]>([]);
@@ -389,9 +446,16 @@ export default function UserManagementPage() {
   };
 
   const openCreate = useCallback(() => {
-    setFormData(emptyStaff);
+    const defaults: Partial<StaffMember> = { ...emptyStaff };
+    if (isScopedDeptHead && headedDepartments.length === 1) {
+      defaults.departmentId = headedDepartments[0].id;
+    }
+    if (isScopedDeptHead && staffRoleNames.length === 1) {
+      defaults.systemRole = staffRoleNames[0];
+    }
+    setFormData(defaults);
     setIsCreateDialogOpen(true);
-  }, []);
+  }, [isScopedDeptHead, headedDepartments, staffRoleNames]);
 
   const openEdit = useCallback(async (s: StaffMember) => {
     setSelectedStaff(s);
@@ -733,20 +797,30 @@ export default function UserManagementPage() {
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Select value={roleFilter} onValueChange={setRoleFilter}>
-                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Role" /></SelectTrigger>
-                  <SelectContent>
-                    {systemRoles.map(r => <SelectItem key={r} value={r === 'All Roles' ? 'all' : r}>{r}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {showRoleFilter && (
+                  <Select value={roleFilter} onValueChange={setRoleFilter}>
+                    <SelectTrigger className="w-[150px]"><SelectValue placeholder="Role" /></SelectTrigger>
+                    <SelectContent>
+                      {roleFilterOptions.map((r) => (
+                        <SelectItem key={r} value={r === "All Roles" ? "all" : r}>{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
 
-                <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                  <SelectTrigger className="w-[160px]"><SelectValue placeholder="Department" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Departments</SelectItem>
-                    {allDepartments.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {showDepartmentFilter && (
+                  <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                    <SelectTrigger className="w-[160px]"><SelectValue placeholder="Department" /></SelectTrigger>
+                    <SelectContent>
+                      {!isScopedDeptHead && (
+                        <SelectItem value="all">All Departments</SelectItem>
+                      )}
+                      {departmentOptions.map((d) => (
+                        <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
 
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
@@ -967,7 +1041,7 @@ export default function UserManagementPage() {
                   <Select value={formData.systemRole || ''} onValueChange={(v) => setFormData(prev => ({ ...prev, systemRole: v }))}>
                     <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
                     <SelectContent>
-                      {systemRoles.slice(1).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      {formSystemRoleOptions.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -984,8 +1058,12 @@ export default function UserManagementPage() {
                   >
                     <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {allDepartments.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
+                      {headedDepartments.length !== 1 && (
+                        <SelectItem value="none">None</SelectItem>
+                      )}
+                      {formDepartmentOptions.map((d) => (
+                        <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

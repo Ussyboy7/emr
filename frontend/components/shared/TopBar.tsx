@@ -9,7 +9,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useClinic } from "@/hooks/use-clinic";
 import { NPA_LOGO_URL, NPA_EMR_TITLE } from "@/lib/branding";
-import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
+import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates-core";
 import { hasTokens, logout } from "@/lib/api-client";
 import { getHomeRouteForUser } from "@/lib/home-route";
 import {

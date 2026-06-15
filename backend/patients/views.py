@@ -62,6 +62,11 @@ from .annual_checkup_catalog import (
 )
 from .annual_checkup_pdfs import build_annual_checkup_report_pdf
 from audit.services import AuditService
+from .permissions import (
+    can_manage_patient_lifecycle,
+    is_system_admin_user,
+    requires_lifecycle_category_change,
+)
 from .workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
 
 
@@ -340,6 +345,16 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def perform_update(self, serializer):
         """Update patient and log audit."""
         old_instance = self.get_object()
+        new_category = serializer.validated_data.get("category")
+        if (
+            new_category
+            and new_category != old_instance.category
+            and requires_lifecycle_category_change(old_instance.category, new_category)
+            and not can_manage_patient_lifecycle(self.request.user)
+        ):
+            raise PermissionDenied(
+                "Only system administrators or department heads/deputies can convert employees to retiree."
+            )
         old_values = {
             'surname': old_instance.surname,
             'first_name': old_instance.first_name,
@@ -399,10 +414,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """
         Restrict patient deletion to super admin/admin users.
         """
-        user = request.user
-        role = (getattr(user, 'system_role', '') or '').strip().lower()
-        is_admin_user = user.is_superuser or role in {'system administrator', 'admin staff'}
-        if not is_admin_user:
+        if not is_system_admin_user(request.user):
             raise PermissionDenied('Only super admin or admin users can delete patients.')
         return super().destroy(request, *args, **kwargs)
     
@@ -496,16 +508,14 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def _is_admin_user(self, user):
-        role = (getattr(user, 'system_role', '') or '').strip().lower()
-        return user.is_superuser or role in {'system administrator', 'admin staff'}
-
     @extend_schema(tags=["Patients"], summary="Promote", description="Promote a Staff employee to Officer with a new personal number.")
     @action(detail=True, methods=['patch'], url_path='promote')
     def promote(self, request, pk=None):
         """Promote a Staff employee to Officer with a new personal number."""
-        if not self._is_admin_user(request.user):
-            raise PermissionDenied('Only super admin or admin users can promote patients to Officer.')
+        if not can_manage_patient_lifecycle(request.user):
+            raise PermissionDenied(
+                'Only system administrators or department heads/deputies can promote patients to Officer.'
+            )
         patient = self.get_object()
         if patient.category != 'employee':
             return Response({'error': 'Only Employee patients can be promoted.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -516,11 +526,13 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if not new_personal_number:
             return Response({'error': 'New personal number is required for promotion.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        from django.core.exceptions import ValidationError as DjangoValidationError
         from .validators import validate_personal_number_uniqueness
         try:
             validate_personal_number_uniqueness(new_personal_number, patient_id=patient.id, category='employee')
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as e:
+            message = e.message_dict.get('personal_number', [str(e)])[0] if hasattr(e, 'message_dict') else str(e)
+            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
 
         old_values = {
             'employee_type': patient.employee_type,
@@ -562,8 +574,10 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['patch'], url_path='convert-to-csr')
     def convert_to_csr(self, request, pk=None):
         """Convert a Retiree patient to NonNPA (CSR) along with their dependents."""
-        if not self._is_admin_user(request.user):
-            raise PermissionDenied('Only super admin or admin users can convert patients to CSR.')
+        if not can_manage_patient_lifecycle(request.user):
+            raise PermissionDenied(
+                'Only system administrators or department heads/deputies can convert patients to CSR.'
+            )
         patient = self.get_object()
         if patient.category != 'retiree':
             return Response({'error': 'Only Retiree patients can be converted to CSR.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -648,7 +662,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         Permission: super admin or system administrator / admin staff.
         """
-        if not self._is_admin_user(request.user):
+        if not is_system_admin_user(request.user):
             raise PermissionDenied('Only super admin or admin users can merge patients.')
 
         winner_id = request.data.get('winner_id')
@@ -662,6 +676,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if int(winner_id) == loser.id:
             return Response({'error': 'Cannot merge a record with itself.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        from django.core.exceptions import ValidationError as DjangoValidationError
         from .merge import merge_patients
         try:
             result = merge_patients(
@@ -672,8 +687,10 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             )
         except Patient.DoesNotExist:
             return Response({'error': f'Winner patient {winner_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
+        except DjangoValidationError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except PermissionDenied as e:
+            raise e
 
         # Audit log entry for the patient module.
         AuditService.log_patient_action(
@@ -742,7 +759,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
               merged_into, etc.).
             - An un-merge audit row is written.
         """
-        if not self._is_admin_user(request.user):
+        if not is_system_admin_user(request.user):
             raise PermissionDenied('Only super admin or admin users can un-merge patients.')
 
         from .models import PatientMerge
@@ -769,11 +786,14 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from django.core.exceptions import ValidationError as DjangoValidationError
         from .merge import unmerge_patients
         try:
             result = unmerge_patients(audit_id=audit_id, user=request.user)
-        except Exception as e:
+        except DjangoValidationError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except PermissionDenied as e:
+            raise e
 
         # Audit log.
         AuditService.log_patient_action(

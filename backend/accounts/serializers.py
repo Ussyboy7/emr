@@ -21,6 +21,9 @@ class UserSerializer(serializers.ModelSerializer):
     multi_clinic_enabled = serializers.SerializerMethodField()
     clinics_ids = serializers.SerializerMethodField()
     active_clinic_id = serializers.SerializerMethodField()
+    is_department_head = serializers.SerializerMethodField()
+    is_department_deputy = serializers.SerializerMethodField()
+    headed_departments = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -50,6 +53,9 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "is_staff",
             "is_superuser",
+            "is_department_head",
+            "is_department_deputy",
+            "headed_departments",
             "avatar",
             "last_activity",
             "last_login",
@@ -89,6 +95,30 @@ class UserSerializer(serializers.ModelSerializer):
     @extend_schema_field({"type": "integer", "nullable": True})
     def get_active_clinic_id(self, obj):
         return obj.active_clinic_id
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_department_head(self, obj):
+        from permissions.user_management import is_department_head
+        return is_department_head(obj)
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_department_deputy(self, obj):
+        from permissions.user_management import is_department_deputy_only
+        return is_department_deputy_only(obj)
+
+    @extend_schema_field({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "name": {"type": "string"},
+            },
+        },
+    })
+    def get_headed_departments(self, obj):
+        from permissions.user_management import headed_departments_for_user
+        return headed_departments_for_user(obj)
 
     @extend_schema_field({
     "type": "object",

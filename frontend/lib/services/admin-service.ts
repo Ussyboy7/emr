@@ -80,6 +80,8 @@ export interface Department {
   clinic_name?: string;
   head?: number;
   head_name?: string;
+  deputy_head?: number;
+  deputy_head_name?: string;
   staff_count?: number;
   is_active: boolean;
   created_at: string;
@@ -659,10 +661,8 @@ class AdminService {
     errorRate?: number;
     /** Number of requests measured in the rolling 5-minute window. */
     responseTimeSample?: number;
-    /** Cumulative MEDIA_ROOT size — preferred truthful name. */
+    /** Cumulative MEDIA_ROOT size. */
     mediaStorageGb?: number;
-    /** @deprecated Mislabeled — same value as ``mediaStorageGb``. */
-    dataProcessedGb?: number;
     backupStatus?: Record<string, unknown>;
     /** Per-key data source: 'live' (real measurement) or 'sample' (placeholder). */
     metricSources?: Record<string, 'live' | 'sample'>;

@@ -365,7 +365,7 @@ export default function NursingInventoryPage() {
               <CardContent className="p-8 text-center text-muted-foreground">
                 <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p className="text-red-600 dark:text-red-400">{error}</p>
-                <Button variant="outline" className="mt-4" onClick={loadInventory}>Retry</Button>
+                <Button variant="outline" className="mt-4" onClick={() => loadInventory()}>Retry</Button>
               </CardContent>
             </Card>
           ) : inventory.length > 0 ? (

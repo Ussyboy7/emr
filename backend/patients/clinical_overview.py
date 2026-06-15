@@ -17,14 +17,11 @@ from radiology.serializers import RadiologyOrderSerializer, RadiologyReportSeria
 from wards.models import PatientAdmission
 from wards.serializers import PatientAdmissionSerializer
 
+from common.api_payload import list_payload
 from .models import MedicalHistory, Patient, Visit, VitalReading
 from .serializers import MedicalHistorySerializer, VisitSerializer, VitalReadingSerializer
 
 _OVERVIEW_LIMIT = 100
-
-
-def _list_payload(data: list) -> dict:
-    return {"results": data, "count": len(data)}
 
 
 def build_patient_clinical_overview(patient: Patient) -> dict:
@@ -49,7 +46,14 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
 
     radiology_reports = RadiologyReportSerializer(
         RadiologyReport.objects.filter(study__order__patient_id=pid, study__status="verified")
-        .select_related("study", "study__order", "study__order__patient", "verified_by")
+        .select_related(
+            "study",
+            "study__order",
+            "study__order__patient",
+            "study__verified_by",
+            "order",
+            "patient",
+        )
         .order_by("-study__verified_at")[:_OVERVIEW_LIMIT],
         many=True,
     ).data
@@ -72,7 +76,7 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
 
     vitals = VitalReadingSerializer(
         VitalReading.objects.filter(patient_id=pid)
-        .select_related("patient", "visit", "recorded_by", "location_clinic")
+        .select_related("patient", "visit", "visit__location_clinic", "recorded_by")
         .order_by("-recorded_at")[:_OVERVIEW_LIMIT],
         many=True,
     ).data
@@ -94,7 +98,7 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
     ward_admissions = PatientAdmissionSerializer(
         PatientAdmission.objects.filter(patient_id=pid)
         .select_related("patient", "ward", "visit")
-        .order_by("-admitted_at")[:_OVERVIEW_LIMIT],
+        .order_by("-admission_date")[:_OVERVIEW_LIMIT],
         many=True,
     ).data
 
@@ -124,7 +128,7 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
     from patients.serializers import AnnualCheckupSerializer
 
     annual_checkups = AnnualCheckupSerializer(
-        AnnualCheckup.objects.filter(patient_id=pid).order_by("-checkup_date")[:_OVERVIEW_LIMIT],
+        AnnualCheckup.objects.filter(patient_id=pid).order_by("-programme_year", "-created_at")[:_OVERVIEW_LIMIT],
         many=True,
     ).data
 
@@ -132,18 +136,18 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
     medical_history = MedicalHistorySerializer(history).data
 
     return {
-        "consultations": _list_payload(consultations),
-        "lab_results": _list_payload(lab_results),
-        "radiology_reports": _list_payload(radiology_reports),
-        "radiology_orders": _list_payload(radiology_orders),
-        "prescriptions": _list_payload(prescriptions),
-        "vitals": _list_payload(vitals),
-        "physio_orders": _list_payload(physio_orders),
-        "eye_orders": _list_payload(eye_orders),
-        "ward_admissions": _list_payload(ward_admissions),
-        "certificates": _list_payload(certificates),
-        "referrals": _list_payload(referrals),
+        "consultations": list_payload(consultations),
+        "lab_results": list_payload(lab_results),
+        "radiology_reports": list_payload(radiology_reports),
+        "radiology_orders": list_payload(radiology_orders),
+        "prescriptions": list_payload(prescriptions),
+        "vitals": list_payload(vitals),
+        "physio_orders": list_payload(physio_orders),
+        "eye_orders": list_payload(eye_orders),
+        "ward_admissions": list_payload(ward_admissions),
+        "certificates": list_payload(certificates),
+        "referrals": list_payload(referrals),
         "visits": visits,
-        "annual_checkups": _list_payload(annual_checkups),
+        "annual_checkups": list_payload(annual_checkups),
         "medical_history": medical_history,
     }

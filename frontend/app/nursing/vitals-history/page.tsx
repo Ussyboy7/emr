@@ -86,25 +86,30 @@ const formatGender = (gender?: string): string => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
+function vitalDetailValue(value: string | number | null | undefined): string | undefined {
+  if (value == null || value === '') return undefined;
+  return String(value);
+}
+
 function apiVitalToDetail(v: ApiVital) {
   return {
     id: v.id,
     recorded_at: v.recorded_at,
     recorded_by_name: v.recorded_by_name,
     location_clinic_name: v.location_clinic_name,
-    temperature: v.temperature,
-    pulse: v.heart_rate,
-    heartRate: v.heart_rate,
-    bloodPressureSystolic: v.blood_pressure_systolic,
-    bloodPressureDiastolic: v.blood_pressure_diastolic,
-    respiratoryRate: v.respiratory_rate,
-    oxygenSaturation: v.oxygen_saturation,
-    weight: v.weight,
-    height: v.height,
-    bmi: v.bmi,
-    painScale: v.pain_scale,
-    bloodSugar: v.blood_sugar,
-    randomBloodSugar: v.random_blood_sugar,
+    temperature: vitalDetailValue(v.temperature),
+    pulse: vitalDetailValue(v.heart_rate),
+    heartRate: vitalDetailValue(v.heart_rate),
+    bloodPressureSystolic: vitalDetailValue(v.blood_pressure_systolic),
+    bloodPressureDiastolic: vitalDetailValue(v.blood_pressure_diastolic),
+    respiratoryRate: vitalDetailValue(v.respiratory_rate),
+    oxygenSaturation: vitalDetailValue(v.oxygen_saturation),
+    weight: vitalDetailValue(v.weight),
+    height: vitalDetailValue(v.height),
+    bmi: vitalDetailValue(v.bmi),
+    painScale: vitalDetailValue(v.pain_scale),
+    bloodSugar: vitalDetailValue(v.blood_sugar),
+    randomBloodSugar: vitalDetailValue(v.random_blood_sugar),
     notes: v.notes,
   };
 }

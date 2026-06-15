@@ -1,67 +1,42 @@
 "use client";
-import { formatDisplayDateTime, formatDisplayTime, toApiDateFromInstant } from "@/lib/dates";
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
+import { formatDisplayDateTime, formatDisplayTime } from "@/lib/dates";
 import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { modalNoOverflow } from "@/components/ui/modal-sizes";
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from "sonner";
-import { visitService, patientService, consultationService, pharmacyService, labService, radiologyService } from '@/lib/services';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
+import {
+  loadVisitJourneyData,
+  type VisitJourneyDisplayVisit,
+  type VisitJourneyEvent,
+  type VisitJourneyPatient,
+} from '@/lib/visit-journey';
 import {
   Calendar, Clock, CheckCircle2, Loader2, AlertTriangle,
-  ClipboardList, Heart, Stethoscope, Pill, TestTube, User, Building2, ScanLine
+  User, Building2,
 } from 'lucide-react';
 
-interface Visit {
-  id: string;
-  numericId?: number;
-  visitId?: string;
-  patientId: string;
-  patient?: string;
-  date: string;
-  time: string;
-  type: string;
-  department: string;
-  location_clinic_name?: string;
-  doctor: string;
-  status: string;
-  notes?: string;
-}
-
 interface VisitDetailModalProps {
-  visit: Visit | null;
+  visit: { id: string; numericId?: number; visitId?: string } | null;
   visitId?: string | number;
   isOpen: boolean;
   onClose: () => void;
   onVisitUpdated?: () => void;
 }
 
-interface JourneyEvent {
-  id: string;
-  step: number;
-  title: string;
-  description: string;
-  module: string;
-  location?: string;
-  status: 'completed' | 'in_progress' | 'pending';
-  timestamp?: string;
-  staff?: string;
-  icon: any;
-  color: string;
-  details?: any;
-}
-
-export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpen, onClose, onVisitUpdated }: VisitDetailModalProps) {
-  const [visit, setVisit] = useState<any>(null);
-  const [visitData, setVisitData] = useState<any>(null);
-  const [patient, setPatient] = useState<any>(null);
+export function VisitDetailModal({
+  visit: visitProp,
+  visitId: visitIdProp,
+  isOpen,
+  onClose,
+}: VisitDetailModalProps) {
+  const [visit, setVisit] = useState<VisitJourneyDisplayVisit | null>(null);
+  const [patient, setPatient] = useState<VisitJourneyPatient | null>(null);
   const [loading, setLoading] = useState(false);
-  const [journey, setJourney] = useState<JourneyEvent[]>([]);
+  const [journey, setJourney] = useState<VisitJourneyEvent[]>([]);
 
   const loadVisitJourney = useCallback(async () => {
     const idToUse = visitIdProp || visitProp?.numericId || visitProp?.id;
@@ -69,472 +44,16 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
     try {
       setLoading(true);
-
-      // Get visit data
-      let rawVisitData: any;
-      let isConsultationSession = false;
-
-      // Check if this is a consultation session ID (prefixed with "session-")
-      if (typeof idToUse === 'string' && idToUse.startsWith('session-')) {
-        const sessionId = idToUse.replace('session-', '');
-        const numericSessionId = Number(sessionId);
-        if (!isNaN(numericSessionId) && numericSessionId > 0) {
-          // Load consultation session data
-          const sessionData = await consultationService.getSession(numericSessionId);
-          rawVisitData = {
-            id: sessionData.id,
-            visit_id: `session-${sessionData.id}`,
-            patient: sessionData.patient,
-            date: toApiDateFromInstant(sessionData.started_at),
-            time: formatDisplayTime(sessionData.started_at),
-            visit_type: 'Consultation',
-            clinic: getVisitServiceClinicsDisplay({
-              clinic: (sessionData as any).clinic_name,
-              clinics: (sessionData as any).visit_clinics,
-            }),
-            doctor_name:
-              (sessionData.doctor as any)?.name ||
-              (sessionData.doctor as any)?.get_full_name ||
-              sessionData.doctor_name ||
-              '',
-            clinical_notes: sessionData.notes || '',
-            status: sessionData.status,
-            created_at: sessionData.started_at,
-            ended_at: sessionData.ended_at,
-          };
-          isConsultationSession = true;
-        }
-      }
-
-      if (!isConsultationSession) {
-        const numericId = Number(idToUse);
-        if (!isNaN(numericId) && numericId > 0) {
-          rawVisitData = await visitService.getVisit(numericId);
-        } else {
-          const visitsResult = await visitService.getVisits({ search: String(idToUse), page_size: MAX_LIST_PAGE_SIZE });
-          const foundVisit = visitsResult.results.find((v: any) => (v.visit_id || String(v.id)) === idToUse);
-          if (!foundVisit) {
-            throw new Error(`Visit with ID "${idToUse}" not found`);
-          }
-          rawVisitData = await visitService.getVisit(foundVisit.id);
-        }
-      }
-
-      setVisit({
-        id: rawVisitData.visit_id || String(rawVisitData.id),
-        numericId: rawVisitData.id,
-        patientId: String(rawVisitData.patient),
-        date: rawVisitData.date || '',
-        time: rawVisitData.time || '',
-        type: rawVisitData.visit_type || 'consultation',
-        department: rawVisitData.clinic || '',
-        location_clinic_name: rawVisitData.location_clinic_name || (rawVisitData as any).location_clinic_name || undefined,
-        doctor: rawVisitData.doctor_name || 'Doctor',
-        status: rawVisitData.status || 'scheduled',
-        notes: rawVisitData.clinical_notes || '',
-      });
-
-      // Fire all enrichment API calls in parallel
-      const [patientDataResult, overview, sessionsResult] = await Promise.all([
-        patientService.getPatient(rawVisitData.patient).catch(() => null),
-        patientService.getClinicalOverview(rawVisitData.patient).catch(() => null),
-        consultationService.getSessions({ patient: rawVisitData.patient.toString() }).catch(() => ({ results: [] })),
-      ]);
-      const labOrdersResult = { results: overview?.lab_results?.results || [] };
-      const prescriptionsResult = { results: overview?.prescriptions?.results || [] };
-      const radiologyOrdersResult = { results: overview?.radiology_orders?.results || [] };
-      const vitalsDataResult = overview?.vitals?.results || [];
-
-      // Load patient
-      try {
-        const patientData = patientDataResult;
-        if (patientData) {
-          setPatient({
-            id: patientData.patient_id || '',
-            name: patientData.full_name ?? '',
-          });
-        }
-      } catch (err) {
-        console.error('Failed to load patient:', err);
-      }
-
-      // Build journey timeline
-      const journeyEvents: JourneyEvent[] = [];
-      let step = 1;
-
-      // Declare variables for later use in completion checks
-      let visitLabOrders: any[] = [];
-      let visitPrescriptions: any[] = [];
-
-      // 1. Visit Created (always present)
-      journeyEvents.push({
-        id: 'visit-created',
-        step: step++,
-        title: 'Visit Created',
-        description: `Visit ${rawVisitData.visit_id || rawVisitData.id} created`,
-        module: 'Medical Records',
-        location: 'Reception',
-        status: 'completed',
-        timestamp: rawVisitData.created_at || rawVisitData.date,
-        icon: ClipboardList,
-        color: 'bg-blue-500',
-      });
-
-      // 2. Sent to Nursing (if status is completed/in_progress)
-      if (rawVisitData.status === 'completed' || rawVisitData.status === 'in_progress') {
-        journeyEvents.push({
-          id: 'sent-nursing',
-          step: step++,
-          title: 'Sent to Nursing Pool',
-          description: 'Patient forwarded to nursing for vitals',
-          module: 'Nursing',
-          location: 'Nursing Pool',
-          status: 'completed',
-          timestamp: rawVisitData.updated_at,
-          icon: Heart,
-          color: 'bg-pink-500',
-        });
-      }
-
-      // 3. Vitals Recorded (check if vitals exist for this visit date)
-      try {
-        const vitalsData = vitalsDataResult;
-        const visitVitals = vitalsData.filter((v: any) => {
-          const vitalDate = v.date || (v.recorded_at ? toApiDateFromInstant(v.recorded_at) : '');
-          return vitalDate === rawVisitData.date;
-        });
-        if (visitVitals.length > 0) {
-          const latestVitals = visitVitals[visitVitals.length - 1];
-          const bp = latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic 
-            ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}`
-            : '-';
-          const temp = latestVitals.temperature || '-';
-          journeyEvents.push({
-            id: 'vitals-recorded',
-            step: step++,
-            title: 'Vitals Recorded',
-            description: `BP: ${bp} | Temp: ${temp}°C`,
-            module: 'Nursing',
-            location: 'Nursing Pool',
-            status: 'completed',
-            timestamp: latestVitals.recorded_at,
-            staff: (latestVitals as any).recorded_by_name || 'Nurse',
-            icon: Heart,
-            color: 'bg-red-500',
-          });
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      // 4. Consultation Session (if exists) - filter by patient and date
-      try {
-        const sessions = sessionsResult;
-        if (sessions.results && sessions.results.length > 0) {
-          // Filter sessions by visit date or session ID
-          const visitSessions = sessions.results.filter((s: any) => {
-            if (isConsultationSession) {
-              // For consultation sessions, match by session ID
-              return s.id === rawVisitData.id;
-            } else {
-              // For regular visits, match by date or visit reference
-              const sessionDate = s.started_at ? toApiDateFromInstant(s.started_at) : '';
-              return sessionDate === rawVisitData.date || s.visit === rawVisitData.id;
-            }
-          });
-          if (visitSessions.length > 0) {
-            const session = visitSessions[0];
-            journeyEvents.push({
-              id: 'consultation-started',
-              step: step++,
-              title: 'Consultation Started',
-              description: 'Consultation session initiated',
-              module: 'Consultation',
-              location: session.room_name || undefined,
-              status: 'completed',
-              timestamp: session.started_at,
-              staff: session.doctor_name,
-              icon: Stethoscope,
-              color: 'bg-purple-500',
-              details: session,
-            });
-
-            // Add consultation completed event if session has ended
-            if (session.status === 'completed' && session.ended_at) {
-              journeyEvents.push({
-                id: 'consultation-completed',
-                step: step++,
-                title: 'Consultation Completed',
-                description: 'Consultation session ended',
-                module: 'Consultation',
-                location: session.room_name || undefined,
-                status: 'completed',
-                timestamp: session.ended_at,
-                staff: session.doctor_name,
-                icon: CheckCircle2,
-                color: 'bg-emerald-500',
-                details: session,
-              });
-            }
-          }
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      // 5. Lab Orders (if any) - filter by visit
-      try {
-        const labOrders = labOrdersResult;
-        if (labOrders.results && labOrders.results.length > 0) {
-          visitLabOrders = labOrders.results.filter((order: any) => {
-            if (isConsultationSession) {
-              // For consultation sessions, match by date
-              const orderDate = order.ordered_at ? toApiDateFromInstant(order.ordered_at) : '';
-              return orderDate === rawVisitData.date;
-            } else {
-              // For regular visits, match by visit ID
-              return order.visit === rawVisitData.id;
-            }
-          });
-          if (visitLabOrders.length > 0) {
-            const testCount = visitLabOrders.reduce((count: number, order: any) => count + (order.tests?.length || 0), 0);
-            journeyEvents.push({
-              id: 'lab-orders',
-              step: step++,
-              title: 'Lab Tests Ordered',
-              description: `${testCount} test${testCount !== 1 ? 's' : ''} ordered`,
-              module: 'Laboratory',
-              location: 'Laboratory',
-              status: 'completed',
-              timestamp: visitLabOrders[0].ordered_at,
-              staff: (visitLabOrders[0] as any).doctor_name || (visitLabOrders[0] as any).doctor?.name,
-              icon: TestTube,
-              color: 'bg-amber-500',
-              details: visitLabOrders,
-            });
-          }
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      // 6. Prescriptions (if any) - filter by visit
-      try {
-        const prescriptions = prescriptionsResult;
-        if (prescriptions.results && prescriptions.results.length > 0) {
-          visitPrescriptions = prescriptions.results.filter((rx: any) => {
-            if (isConsultationSession) {
-              // For consultation sessions, match by date
-              const rxDate = rx.prescribed_at ? toApiDateFromInstant(rx.prescribed_at) : '';
-              return rxDate === rawVisitData.date;
-            } else {
-              // For regular visits, match by visit ID
-              return rx.visit === rawVisitData.id;
-            }
-          });
-          if (visitPrescriptions.length > 0) {
-            const itemCount = visitPrescriptions.reduce((count: number, rx: any) => count + (rx.items?.length || rx.medications?.length || 0), 0);
-            journeyEvents.push({
-              id: 'prescriptions',
-              step: step++,
-              title: 'Prescriptions Created',
-              description: `${itemCount} medication${itemCount !== 1 ? 's' : ''} prescribed`,
-              module: 'Pharmacy',
-              location: 'Pharmacy',
-              status: 'completed',
-              timestamp: visitPrescriptions[0].prescribed_at,
-              staff: (visitPrescriptions[0] as any).doctor_name || (visitPrescriptions[0] as any).doctor?.name,
-              icon: Pill,
-              color: 'bg-green-500',
-              details: visitPrescriptions,
-            });
-          }
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      // 7. Lab Results Completed (if any tests have results)
-      try {
-        if (visitLabOrders && visitLabOrders.length > 0) {
-          const completedTests = visitLabOrders.flatMap((order: any) =>
-            (order.tests || []).filter((test: any) => test.status === 'results_ready' || test.status === 'verified')
-          );
-          if (completedTests.length > 0) {
-            // Find the latest completion timestamp
-            const latestResult = completedTests.reduce((latest: any, test: any) => {
-              const testTime = new Date(test.verified_at || test.processed_at || test.updated_at);
-              return testTime > new Date(latest.timestamp || '1970-01-01') ? { ...test, timestamp: testTime } : latest;
-            }, {});
-
-            journeyEvents.push({
-              id: 'lab-results-completed',
-              step: step++,
-              title: 'Lab Results Completed',
-              description: `${completedTests.length} test${completedTests.length !== 1 ? 's' : ''} completed`,
-              module: 'Laboratory',
-              location: 'Laboratory',
-              status: 'completed',
-              timestamp: latestResult.timestamp?.toISOString() || latestResult.verified_at || latestResult.processed_at,
-              staff: latestResult.verified_by || latestResult.processed_by || 'Lab Technician',
-              icon: TestTube,
-              color: 'bg-blue-500',
-              details: completedTests,
-            });
-          }
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      // 8. Radiology Reports Completed (if any studies have reports)
-      try {
-        const radiologyOrders = radiologyOrdersResult;
-        if (radiologyOrders.results && radiologyOrders.results.length > 0) {
-          const visitRadiologyOrders = radiologyOrders.results.filter((order: any) => {
-            if (isConsultationSession) {
-              // For consultation sessions, match by date
-              const orderDate = order.ordered_at ? toApiDateFromInstant(order.ordered_at) : '';
-              return orderDate === rawVisitData.date;
-            } else {
-              // For regular visits, match by visit ID
-              return order.visit === rawVisitData.id;
-            }
-          });
-          if (visitRadiologyOrders.length > 0) {
-            const studyCount = visitRadiologyOrders.reduce((count: number, order: any) => count + (order.studies?.length || 0), 0);
-            journeyEvents.push({
-              id: 'radiology-orders',
-              step: step++,
-              title: 'Radiology Studies Ordered',
-              description: `${studyCount} stud${studyCount !== 1 ? 'ies' : 'y'} ordered`,
-              module: 'Radiology',
-              location: 'Radiology',
-              status: 'completed',
-              timestamp: visitRadiologyOrders[0].ordered_at,
-              staff: (visitRadiologyOrders[0] as any).doctor_name || (visitRadiologyOrders[0] as any).doctor?.name,
-              icon: ScanLine,
-              color: 'bg-indigo-500',
-              details: visitRadiologyOrders,
-            });
-
-            // Check for completed radiology reports
-            const completedStudies = visitRadiologyOrders.flatMap((order: any) =>
-              (order.studies || []).filter((study: any) => study.status === 'reported' || study.status === 'completed')
-            );
-            if (completedStudies.length > 0) {
-              const latestReport = completedStudies.reduce((latest: any, study: any) => {
-                const studyTime = new Date(study.reported_at || study.updated_at);
-                return studyTime > new Date(latest.timestamp || '1970-01-01') ? { ...study, timestamp: studyTime } : latest;
-              }, {});
-
-              journeyEvents.push({
-                id: 'radiology-reports-completed',
-                step: step++,
-                title: 'Radiology Reports Completed',
-                description: `${completedStudies.length} report${completedStudies.length !== 1 ? 's' : ''} completed`,
-                module: 'Radiology',
-                location: 'Radiology',
-                status: 'completed',
-                timestamp: latestReport.timestamp?.toISOString() || latestReport.reported_at || latestReport.updated_at,
-                staff: latestReport.reported_by || 'Radiologist',
-                icon: ScanLine,
-                color: 'bg-teal-500',
-                details: completedStudies,
-              });
-            }
-          }
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      // 9. Prescriptions Dispensed (if any prescriptions were dispensed)
-      try {
-        if (visitPrescriptions && visitPrescriptions.length > 0) {
-          const dispensedItems = visitPrescriptions.flatMap((rx: any) =>
-            (rx.items || rx.medications || []).filter((item: any) => item.status === 'dispensed' || item.dispensed_at)
-          );
-          if (dispensedItems.length > 0) {
-            const latestDispense = dispensedItems.reduce((latest: any, item: any) => {
-              const dispenseTime = new Date(item.dispensed_at || item.updated_at);
-              return dispenseTime > new Date(latest.timestamp || '1970-01-01') ? { ...item, timestamp: dispenseTime } : latest;
-            }, {});
-
-            journeyEvents.push({
-              id: 'prescriptions-dispensed',
-              step: step++,
-              title: 'Prescriptions Dispensed',
-              description: `${dispensedItems.length} medication${dispensedItems.length !== 1 ? 's' : ''} dispensed`,
-              module: 'Pharmacy',
-              location: 'Pharmacy',
-              status: 'completed',
-              timestamp: latestDispense.timestamp?.toISOString() || latestDispense.dispensed_at || latestDispense.updated_at,
-              staff: latestDispense.dispensed_by || 'Pharmacist',
-              icon: Pill,
-              color: 'bg-emerald-500',
-              details: dispensedItems,
-            });
-          }
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      // 10. Visit Completed (if status is completed)
-      if (rawVisitData.status === 'completed') {
-        journeyEvents.push({
-          id: 'visit-completed',
-          step: step++,
-          title: 'Visit Completed',
-          description: 'Patient visit concluded',
-          module: 'Medical Records',
-          location: getVisitServiceClinicsDisplay({
-            clinic: rawVisitData.clinic,
-            clinics: rawVisitData.clinics,
-          }) || undefined,
-          status: 'completed',
-          timestamp: rawVisitData.updated_at,
-          icon: CheckCircle2,
-          color: 'bg-emerald-500',
-        });
-      }
-
-      // Set pending status for next step if visit not completed
-      if (rawVisitData.status !== 'completed' && journeyEvents.length > 0) {
-        const lastEvent = journeyEvents[journeyEvents.length - 1];
-        // Determine next step based on last completed
-        if (lastEvent.id === 'visit-created') {
-          journeyEvents.push({
-            id: 'next-nursing',
-            step: step++,
-            title: 'Awaiting Nursing',
-            description: 'Waiting to be sent to nursing pool',
-            module: 'Nursing',
-            status: 'pending',
-            icon: Heart,
-            color: 'bg-gray-400',
-          });
-        } else if (lastEvent.id === 'vitals-recorded') {
-          journeyEvents.push({
-            id: 'next-consultation',
-            step: step++,
-            title: 'Awaiting Consultation',
-            description: 'Waiting for consultation',
-            module: 'Consultation',
-            status: 'pending',
-            icon: Stethoscope,
-            color: 'bg-gray-400',
-          });
-        }
-      }
-
-      setJourney(journeyEvents);
-    } catch (err: any) {
+      const data = await loadVisitJourneyData(idToUse);
+      setVisit(data.visit);
+      setPatient(data.patient);
+      setJourney(data.journey);
+    } catch (err: unknown) {
       console.error('Error loading visit journey:', err);
       if (!isAuthenticationError(err)) {
         toast.error('Failed to load visit journey');
       }
+      setJourney([]);
     } finally {
       setLoading(false);
     }
@@ -545,12 +64,6 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       loadVisitJourney();
     }
   }, [isOpen, loadVisitJourney]);
-
-  const formatTime = (timestamp?: string) => {
-    if (!timestamp) return '';
-    const formatted = formatDisplayTime(timestamp);
-    return formatted === '—' ? '' : formatted;
-  };
 
   const formatDateTime = (timestamp?: string) => {
     if (!timestamp) return '';
@@ -579,7 +92,8 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
             Visit Journey: {visit?.id || visitProp?.visitId || visitProp?.id || 'Loading...'}
           </DialogTitle>
           <DialogDescription className="mt-1">
-            {patient ? `${patient.name} • ${patient.id}` : 'Loading patient...'} • {visit?.date || ''} {visit?.time ? `at ${visit.time}` : ''}
+            {patient ? `${patient.name} • ${patient.id}` : 'Loading patient...'} • {visit?.date || ''}{' '}
+            {visit?.time ? `at ${visit.time}` : ''}
           </DialogDescription>
         </DialogHeader>
 
@@ -596,7 +110,6 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
             </div>
           ) : (
             <div className="space-y-4">
-              {/* Visit Info Card */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -630,7 +143,6 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
                 </CardContent>
               </Card>
 
-              {/* Journey Timeline */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -645,17 +157,23 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
                       const isLast = index === journey.length - 1;
                       return (
                         <div key={event.id} className="flex gap-4">
-                          {/* Timeline Line */}
                           <div className="flex flex-col items-center">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center ${event.color} text-white`}>
                               <Icon className="h-5 w-5" />
                             </div>
                             {!isLast && (
-                              <div className={`w-0.5 flex-1 ${event.status === 'completed' ? 'bg-blue-300' : event.status === 'in_progress' ? 'bg-blue-200' : 'bg-gray-200'}`} />
+                              <div
+                                className={`w-0.5 flex-1 ${
+                                  event.status === 'completed'
+                                    ? 'bg-blue-300'
+                                    : event.status === 'in_progress'
+                                      ? 'bg-blue-200'
+                                      : 'bg-gray-200'
+                                }`}
+                              />
                             )}
                           </div>
 
-                          {/* Event Content */}
                           <div className="flex-1 pb-6">
                             <div className="flex items-start justify-between">
                               <div className="flex-1">

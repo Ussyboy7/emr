@@ -32,7 +32,7 @@ import {
   CheckCircle2, Search, Eye, Calendar,
   FileText, TrendingUp, AlertTriangle, Loader2,
   Activity, Heart, Target, Lightbulb,
-  Printer, Download,
+  Printer, Download, User,
 } from 'lucide-react';
 
 export default function PhysioCompletedPage() {

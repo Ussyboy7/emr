@@ -35,6 +35,27 @@ class ApiAccessTests(SimpleTestCase):
     def test_auth_exempt(self):
         self.assertTrue(check_api_page_access("accounts/auth/token/", "POST", set()))
 
+    def test_permissions_roles_read_allowed_for_user_management_page(self):
+        allowed = {"/admin/users"}
+        self.assertTrue(check_api_page_access("permissions/roles/", "GET", allowed))
+
+    def test_permissions_roles_write_denied_for_user_management_only(self):
+        allowed = {"/admin/users"}
+        self.assertFalse(check_api_page_access("permissions/roles/", "POST", allowed))
+
+    def test_departments_read_allowed_for_user_management_page(self):
+        allowed = {"/admin/users"}
+        self.assertTrue(check_api_page_access("departments/", "GET", allowed))
+        self.assertTrue(check_api_page_access("organization/departments/", "GET", allowed))
+
+    def test_clinics_read_allowed_for_user_management_page(self):
+        allowed = {"/admin/users"}
+        self.assertTrue(check_api_page_access("organization/clinics/", "GET", allowed))
+
+    def test_system_roles_read_allowed_for_user_management_page(self):
+        allowed = {"/admin/users"}
+        self.assertTrue(check_api_page_access("accounts/system-roles/", "GET", allowed))
+
     def test_normalize_api_path(self):
         self.assertEqual(normalize_api_path("/api/v1/nursing/orders/"), "nursing/orders/")
 

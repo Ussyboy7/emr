@@ -122,6 +122,14 @@ class Department(models.Model):
         blank=True,
         related_name='departments_led'
     )
+    deputy_head = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='departments_deputied',
+        help_text="Deputy / assistant head with the same department user-management scope as head.",
+    )
     is_active = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

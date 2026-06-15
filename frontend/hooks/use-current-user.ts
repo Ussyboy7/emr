@@ -44,6 +44,9 @@ interface ApiUser {
   };
   is_active?: boolean;
   is_superuser?: boolean;
+  is_staff?: boolean;
+  is_department_head?: boolean;
+  headed_departments?: { id: number; name: string }[];
   clinics_ids?: number[];
   active_clinic_id?: number | null;
   multi_clinic_enabled?: boolean;
@@ -90,6 +93,9 @@ const mapApiUserToUser = (data: ApiUser): User => {
     avatar: undefined,
     active: data.is_active ?? true,
     isSuperuser: data.is_superuser ?? false,
+    isStaff: data.is_staff ?? false,
+    isDepartmentHead: data.is_department_head ?? false,
+    headedDepartments: Array.isArray(data.headed_departments) ? data.headed_departments : [],
     clinics_ids: data.clinics_ids ?? undefined,
     active_clinic_id: data.active_clinic_id ?? undefined,
     multi_clinic_enabled: data.multi_clinic_enabled ?? false,
@@ -205,6 +211,9 @@ export const useCurrentUser = () => {
       permissions: remoteUser.permissions,
       permissionActions: remoteUser.permissionActions,
       isSuperuser: remoteUser.isSuperuser ?? false,
+      isStaff: remoteUser.isStaff ?? false,
+      isDepartmentHead: remoteUser.isDepartmentHead ?? false,
+      headedDepartments: remoteUser.headedDepartments ?? [],
     } satisfies User;
   }, [remoteUser, users]);
 

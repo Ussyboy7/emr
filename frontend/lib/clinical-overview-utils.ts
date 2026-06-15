@@ -87,34 +87,23 @@ export function mapClinicalOverviewToPatientHistory(
 ): PatientHistoryData {
   const consultationRows = overview.consultations?.results || [];
 
-  let combinedVisits: any[] = [];
-  try {
-    const list = Array.isArray(overview.visits) ? [...overview.visits] : [];
-    combinedVisits = [...list];
-    combinedVisits.sort((a, b) => {
-      const dateA = toApiDateFromInstant(a.date);
-      const dateB = toApiDateFromInstant(b.date);
-      const timeA = String(a.time || '00:00:00');
-      const timeB = String(b.time || '00:00:00');
-      const ta = new Date(`${dateA}T${timeA}`).getTime();
-      const tb = new Date(`${dateB}T${timeB}`).getTime();
-      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-    });
-  } catch {
-    combinedVisits = [];
-  }
+  let combinedVisits: any[] = Array.isArray(overview.visits) ? [...overview.visits] : [];
+  combinedVisits.sort((a, b) => {
+    const dateA = toApiDateFromInstant(a.date);
+    const dateB = toApiDateFromInstant(b.date);
+    const timeA = String(a.time || '00:00:00');
+    const timeB = String(b.time || '00:00:00');
+    const ta = new Date(`${dateA}T${timeA}`).getTime();
+    const tb = new Date(`${dateB}T${timeB}`).getTime();
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
 
-  let refList: any[] = [];
-  try {
-    refList = [...(overview.referrals?.results || [])];
-    refList.sort((a, b) => {
-      const ta = new Date(a.referred_at || 0).getTime();
-      const tb = new Date(b.referred_at || 0).getTime();
-      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-    });
-  } catch {
-    refList = [];
-  }
+  const refList = [...(overview.referrals?.results || [])] as Array<{ referred_at?: string }>;
+  refList.sort((a, b) => {
+    const ta = new Date(a.referred_at || 0).getTime();
+    const tb = new Date(b.referred_at || 0).getTime();
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
 
   return {
     consultations: consultationRows,

@@ -5,21 +5,30 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from "sonner";
-import { adminService, type User as ApiUser } from '@/lib/services';
+import { adminService, type Department, type User as ApiUser } from '@/lib/services';
 import { Loader2, Search, UserPlus, UserMinus, Star, UserCog, X } from 'lucide-react';
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 interface DepartmentStaffDialogProps {
-  department: { id: number; name: string; clinicName?: string | null; headName?: string | null } | null;
+  department: {
+    id: number;
+    name: string;
+    clinicName?: string | null;
+    headName?: string | null;
+    headUserId?: number | null;
+    deputyHeadName?: string | null;
+    deputyUserId?: number | null;
+  } | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onStaffChanged: () => void;
 }
 
 export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffChanged }: DepartmentStaffDialogProps) {
+  const { currentUser } = useCurrentUser();
   const [staff, setStaff] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,12 +36,31 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
   const [searchingUsers, setSearchingUsers] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
 
+  const headUserId = department?.headUserId ?? null;
+  const headName = department?.headName ?? null;
+  const deputyUserId = department?.deputyUserId ?? null;
+  const deputyHeadName = department?.deputyHeadName ?? null;
+
+  const canManageStructure =
+    Boolean(currentUser?.isSuperuser) ||
+    Boolean(currentUser?.permissions?.includes('/admin/clinics'));
+
+  const canManageStaff =
+    canManageStructure ||
+    Boolean(currentUser?.isStaff) ||
+    (Boolean(currentUser?.isDepartmentHead) &&
+      Boolean(currentUser?.permissions?.includes('/admin/users')) &&
+      Boolean(department?.id) &&
+      (currentUser?.headedDepartments ?? []).some((d) => d.id === department?.id));
+
+  const departmentId = department?.id;
+
   const loadStaff = useCallback(async () => {
-    if (!department) return;
+    if (!departmentId) return;
     setLoading(true);
     try {
       const res = await adminService.getUsers({
-        department: department.id,
+        department: departmentId,
         page_size: MAX_LIST_PAGE_SIZE,
       });
       setStaff(res.results || []);
@@ -41,15 +69,15 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
     } finally {
       setLoading(false);
     }
-  }, [department]);
+  }, [departmentId]);
 
   useEffect(() => {
-    if (open && department) {
+    if (open && departmentId) {
       loadStaff();
       setShowAddUser(false);
       setSearchQuery('');
     }
-  }, [open, department, loadStaff]);
+  }, [open, departmentId, loadStaff]);
 
   const searchAvailableUsers = useCallback(async (query: string) => {
     if (!query.trim() || query.length < 2) {
@@ -81,6 +109,7 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
       await adminService.updateUser(userId, { department: department!.id } as any);
       toast.success('User assigned to department');
       loadStaff();
+      onStaffChanged();
       setSearchQuery('');
       setAvailableUsers([]);
     } catch (err: any) {
@@ -101,12 +130,25 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
 
   async function setHead(userId: number, userName: string) {
     try {
-      await adminService.updateDepartment(department!.id, { head: userId });
+      const payload: Partial<Department> = { head: userId };
+      if (deputyUserId === userId) {
+        payload.deputy_head = undefined;
+      }
+      await adminService.updateDepartment(department!.id, payload);
       toast.success(`${userName} is now department head`);
-      loadStaff();
       onStaffChanged();
     } catch (err: any) {
       toast.error(err.message || 'Failed to set department head');
+    }
+  }
+
+  async function setDeputy(userId: number, userName: string) {
+    try {
+      await adminService.updateDepartment(department!.id, { deputy_head: userId });
+      toast.success(`${userName} is now deputy head`);
+      onStaffChanged();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to set deputy head');
     }
   }
 
@@ -120,9 +162,19 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
     }
   }
 
-  const isHead = (userId: number) => false;
+  async function removeDeputy() {
+    try {
+      await adminService.updateDepartment(department!.id, { deputy_head: undefined });
+      toast.success('Deputy head removed');
+      onStaffChanged();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove deputy head');
+    }
+  }
+
+  const isHead = (userId: number) => headUserId != null && headUserId === userId;
+  const isDeputy = (userId: number) => deputyUserId != null && deputyUserId === userId;
   const clinicName = department?.clinicName ?? null;
-  const headName = department?.headName ?? null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -134,10 +186,11 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
           </DialogTitle>
           <DialogDescription>
             {clinicName ?? '—'} · Head: {headName ?? 'None'}
+            {deputyHeadName ? ` · Deputy: ${deputyHeadName}` : ''}
           </DialogDescription>
         </DialogHeader>
 
-        {!showAddUser && (
+        {canManageStaff && !showAddUser && (
           <Button variant="outline" size="sm" onClick={() => setShowAddUser(true)} className="self-start">
             <UserPlus className="h-4 w-4 mr-2" />Add Staff
           </Button>
@@ -194,13 +247,23 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
           <p className="text-xs text-muted-foreground">{staff.length} staff ({staff.filter(u => u.is_active).length} active)</p>
           <div className="space-y-1">
             {staff.map(user => (
-                  <div key={user.id} className={`flex items-center justify-between p-2 rounded-md hover:bg-muted/50 ${isHead(user.id) ? 'bg-blue-50 dark:bg-blue-950/20' : ''} ${!user.is_active ? 'opacity-50' : ''}`}>
+              <div
+                key={user.id}
+                className={`flex items-center justify-between p-2 rounded-md hover:bg-muted/50 ${
+                  isHead(user.id)
+                    ? 'bg-blue-50 dark:bg-blue-950/20'
+                    : isDeputy(user.id)
+                      ? 'bg-amber-50 dark:bg-amber-950/20'
+                      : ''
+                } ${!user.is_active ? 'opacity-50' : ''}`}
+              >
                 <div className="flex items-center gap-2 min-w-0">
                   {isHead(user.id) && <Star className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />}
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium">{user.first_name} {user.last_name}</span>
                       {isHead(user.id) && <Badge variant="secondary" className="text-[10px]">Head</Badge>}
+                      {isDeputy(user.id) && <Badge variant="secondary" className="text-[10px]">Deputy</Badge>}
                       {!user.is_active && <Badge variant="secondary" className="text-[10px]">Inactive</Badge>}
                       {user.system_role && <Badge variant="outline" className="text-[10px]">{user.system_role}</Badge>}
                     </div>
@@ -208,14 +271,40 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  {!isHead(user.id) && (
-                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setHead(user.id, `${user.first_name} ${user.last_name}`)} title="Set as department head">
+                  {canManageStructure && !isHead(user.id) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setHead(user.id, `${user.first_name} ${user.last_name}`)}
+                      title="Set as department head"
+                    >
                       <Star className="h-3.5 w-3.5 mr-1" />Set as Head
                     </Button>
                   )}
-                  <Button variant="ghost" size="sm" className="h-7 text-xs text-rose-600 hover:text-rose-700" onClick={() => removeUser(user.id)}>
-                    <UserMinus className="h-3.5 w-3.5" />
-                  </Button>
+                  {canManageStructure && !isHead(user.id) && !isDeputy(user.id) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setDeputy(user.id, `${user.first_name} ${user.last_name}`)}
+                      title="Set as deputy head"
+                    >
+                      <UserCog className="h-3.5 w-3.5 mr-1" />Set as Deputy
+                    </Button>
+                  )}
+                  {canManageStaff && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-rose-600 hover:text-rose-700"
+                      onClick={() => removeUser(user.id)}
+                      disabled={isHead(user.id) || isDeputy(user.id)}
+                      title={isHead(user.id) || isDeputy(user.id) ? 'Remove head or deputy assignment first' : 'Remove from department'}
+                    >
+                      <UserMinus className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -223,12 +312,29 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
           </>
         )}
 
-        {headName ? (
-          <div className="text-xs text-muted-foreground">
-            Current head: {headName} · <button onClick={removeHead} className="text-rose-600 hover:underline">Remove head</button>
+        {canManageStructure && (
+          <div className="space-y-1 text-xs text-muted-foreground">
+            {headName ? (
+              <div>
+                Current head: {headName} ·{' '}
+                <button type="button" onClick={removeHead} className="text-rose-600 hover:underline">
+                  Remove head
+                </button>
+              </div>
+            ) : (
+              <div>No department head assigned</div>
+            )}
+            {deputyHeadName ? (
+              <div>
+                Current deputy: {deputyHeadName} ·{' '}
+                <button type="button" onClick={removeDeputy} className="text-rose-600 hover:underline">
+                  Remove deputy
+                </button>
+              </div>
+            ) : (
+              <div>No deputy head assigned</div>
+            )}
           </div>
-        ) : (
-          <div className="text-xs text-muted-foreground">No department head assigned</div>
         )}
 
         <DialogFooter>

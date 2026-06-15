@@ -1,7 +1,7 @@
 """
 Views for the Permissions app.
 """
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -9,6 +9,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
 
 from permissions.drf_permissions import ApiPageAccessPermission
+from permissions.user_management import CanManageRoles, CanManageUsers, filter_users_by_managed_departments, assert_user_in_managed_departments
 from common.openapi import document_viewset
 from .models import Role, UserRole
 from .serializers import RoleSerializer, UserRoleSerializer
@@ -26,15 +27,20 @@ from django.db.models import Count, Q
 )
 class RoleViewSet(viewsets.ModelViewSet):
     """ViewSet for managing roles."""
-    
-    permission_classes = [permissions.IsAdminUser, ApiPageAccessPermission]
+
     serializer_class = RoleSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['type', 'is_active']
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
-    
+
+    def get_permissions(self):
+        page = ApiPageAccessPermission()
+        if self.action in ('list', 'retrieve', 'list_stats', 'users'):
+            return [CanManageUsers(), page]
+        return [CanManageRoles(), page]
+
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return Role.objects.none()
@@ -138,19 +144,22 @@ class RoleViewSet(viewsets.ModelViewSet):
 @document_viewset(tag="Permissions", resource="user roles")
 class UserRoleViewSet(viewsets.ModelViewSet):
     """ViewSet for managing user-role assignments."""
-    
-    permission_classes = [permissions.IsAdminUser, ApiPageAccessPermission]
+
     serializer_class = UserRoleSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['user', 'role']
     ordering_fields = ['assigned_at']
     ordering = ['-assigned_at']
-    
+
+    def get_permissions(self):
+        return [CanManageUsers(), ApiPageAccessPermission()]
+
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return UserRole.objects.none()
-        
-        return UserRole.objects.all().select_related('user', 'role', 'assigned_by')
+
+        qs = UserRole.objects.all().select_related('user', 'role', 'assigned_by')
+        return filter_users_by_managed_departments(qs, self.request.user, user_field='user')
 
     @extend_schema(tags=["Permissions"], summary="Summary", description="Summary counts for role assignments.")
     @action(detail=False, methods=['get'], url_path='summary')
@@ -170,6 +179,9 @@ class UserRoleViewSet(viewsets.ModelViewSet):
         )
     
     def perform_create(self, serializer):
+        user = serializer.validated_data.get("user")
+        if user is not None:
+            assert_user_in_managed_departments(self.request.user, user)
         user_role = serializer.save(assigned_by=self.request.user)
         
         # Log audit
@@ -187,6 +199,7 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     
     def perform_destroy(self, instance):
         """Remove user role and log audit."""
+        assert_user_in_managed_departments(self.request.user, instance.user)
         user_role_id = instance.id
         user_name = instance.user.get_full_name() or instance.user.username
         role_name = instance.role.name

@@ -62,6 +62,9 @@ interface Department {
   name: string;
   description: string;
   head: string;
+  headUserId: string;
+  deputyHead: string;
+  deputyUserId: string;
   staffCount: number;
   clinics: string[];
   clinic: string;
@@ -137,7 +140,9 @@ export default function ClinicDepartmentPage() {
   const [clinicForm, setClinicForm] = useState<Partial<Clinic>>({
     code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true
   });
-  const [deptForm, setDeptForm] = useState<Partial<Department>>({ code: '', name: '', description: '', clinic: '', head: '', isActive: true });
+  const [deptForm, setDeptForm] = useState<Partial<Department>>({
+    code: '', name: '', description: '', clinic: '', headUserId: '', deputyUserId: '', isActive: true,
+  });
   const [availableUsers, setAvailableUsers] = useState<any[]>([]);
   const [userRoleCounts, setUserRoleCounts] = useState<Record<string, number>>({});
 
@@ -210,6 +215,9 @@ export default function ClinicDepartmentPage() {
         name: dept.name,
         description: dept.description || '',
         head: dept.head_name || '',
+        headUserId: dept.head != null ? String(dept.head) : '',
+        deputyHead: dept.deputy_head_name || '',
+        deputyUserId: dept.deputy_head != null ? String(dept.deputy_head) : '',
         staffCount: dept.staff_count ?? 0,
         clinics: dept.clinic_name ? [dept.clinic_name] : [],
         clinic: dept.clinic?.toString() || '',
@@ -280,6 +288,15 @@ export default function ClinicDepartmentPage() {
 
   const departmentsWithStaffCounts = departments;
 
+  // Keep the open staff dialog in sync when the departments list reloads.
+  useEffect(() => {
+    setSelectedDepartment((prev) => {
+      if (!prev) return prev;
+      const fresh = departments.find((d) => d.id === prev.id);
+      return fresh ?? prev;
+    });
+  }, [departments]);
+
   const filteredVisitTypes = useMemo(() => {
     let list = visitTypesList;
     if (statusFilter === 'Active') {
@@ -330,7 +347,11 @@ export default function ClinicDepartmentPage() {
     setClinicForm({ code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true });
   };
 
-  const resetDeptForm = () => { setDeptForm({ code: '', name: '', description: '', clinic: '', head: '', isActive: true }); };
+  const resetDeptForm = () => {
+    setDeptForm({
+      code: '', name: '', description: '', clinic: '', headUserId: '', deputyUserId: '', isActive: true,
+    });
+  };
 
   const openCreateClinic = () => {
     resetClinicForm();
@@ -479,7 +500,8 @@ export default function ClinicDepartmentPage() {
       name: d.name,
       description: d.description,
       clinic: d.clinic || '',
-      head: d.head || '',
+      headUserId: d.headUserId || '',
+      deputyUserId: d.deputyUserId || '',
       isActive: d.isActive,
     }); 
     setIsEditDialogOpen(true); 
@@ -587,7 +609,8 @@ export default function ClinicDepartmentPage() {
         name: deptForm.name,
         description: deptForm.description,
         clinic: parseInt(deptForm.clinic as string),
-        head: deptForm.head ? parseInt(deptForm.head as string) : undefined,
+        head: deptForm.headUserId ? parseInt(deptForm.headUserId as string, 10) : undefined,
+        deputy_head: deptForm.deputyUserId ? parseInt(deptForm.deputyUserId as string, 10) : undefined,
         is_active: deptForm.isActive,
       });
       
@@ -618,7 +641,8 @@ export default function ClinicDepartmentPage() {
         name: deptForm.name,
         description: deptForm.description,
         clinic: parseInt(deptForm.clinic as string),
-        head: deptForm.head ? parseInt(deptForm.head as string) : undefined,
+        head: deptForm.headUserId ? parseInt(deptForm.headUserId as string, 10) : undefined,
+        deputy_head: deptForm.deputyUserId ? parseInt(deptForm.deputyUserId as string, 10) : undefined,
         is_active: deptForm.isActive,
       });
       
@@ -974,7 +998,13 @@ export default function ClinicDepartmentPage() {
                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                           <span className="font-medium text-foreground">{dept.description}</span>
                           <span>•</span>
-                          <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />Head: {dept.head}</span>
+                          <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />Head: {dept.head || 'Not assigned'}</span>
+                          {dept.deputyHead ? (
+                            <>
+                              <span>•</span>
+                              <span>Deputy: {dept.deputyHead}</span>
+                            </>
+                          ) : null}
                           <span>•</span>
                           <span className="flex items-center gap-1"><Users className="h-3 w-3" />{dept.staffCount} staff</span>
                           {dept.clinics.length > 0 && (
@@ -1141,7 +1171,49 @@ export default function ClinicDepartmentPage() {
               <div className="space-y-2"><Label>Facility *</Label><Select value={deptForm.clinic || ''} onValueChange={(value) => setDeptForm(prev => ({ ...prev, clinic: value }))}><SelectTrigger><SelectValue placeholder="Select a facility" /></SelectTrigger><SelectContent>{clinics.filter(c => c.isActive).map(clinic => (<SelectItem key={clinic.id} value={clinic.id.toString()}>{clinic.name}</SelectItem>))}</SelectContent></Select></div>
               <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Code *</Label><Input value={deptForm.code || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} placeholder="e.g., MED" /></div><div className="space-y-2"><Label>Name *</Label><Input value={deptForm.name || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., Medical Services" /></div></div>
               <div className="space-y-2"><Label>Description</Label><Textarea value={deptForm.description || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, description: e.target.value }))} /></div>
-              <div className="space-y-2"><Label>Department Head</Label><Select value={deptForm.head || ''} onValueChange={(value) => setDeptForm(prev => ({ ...prev, head: value }))}><SelectTrigger><SelectValue placeholder="Select department head (optional)" /></SelectTrigger><SelectContent><SelectItem value="none">None</SelectItem>{availableUsers.filter(u => u.is_active).map(user => (<SelectItem key={user.id} value={user.id.toString()}>{user.first_name} {user.last_name} ({user.system_role || 'Staff'})</SelectItem>))}</SelectContent></Select></div>
+              <div className="space-y-2">
+                <Label>Department Head</Label>
+                <Select
+                  value={deptForm.headUserId || 'none'}
+                  onValueChange={(value) => setDeptForm((prev) => ({
+                    ...prev,
+                    headUserId: value === 'none' ? '' : value,
+                  }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select department head (optional)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {availableUsers.filter((u) => u.is_active).map((user) => (
+                      <SelectItem key={user.id} value={user.id.toString()}>
+                        {user.first_name} {user.last_name} ({user.system_role || 'Staff'})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Deputy Head (user management)</Label>
+                <Select
+                  value={deptForm.deputyUserId || 'none'}
+                  onValueChange={(value) => setDeptForm((prev) => ({
+                    ...prev,
+                    deputyUserId: value === 'none' ? '' : value,
+                  }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select deputy head (optional)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {availableUsers.filter((u) => u.is_active).map((user) => (
+                      <SelectItem key={user.id} value={user.id.toString()}>
+                        {user.first_name} {user.last_name} ({user.system_role || 'Staff'})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Deputy can manage staff in this department (same as head), when their role includes User Management.
+                </p>
+              </div>
               <div className="flex items-center gap-2"><Switch checked={deptForm.isActive} onCheckedChange={(checked) => setDeptForm(prev => ({ ...prev, isActive: checked }))} /><Label>Active</Label></div>
             </div>
             <DialogFooter className="mt-6"><Button variant="outline" onClick={() => { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); }}>Cancel</Button><Button onClick={isCreateDialogOpen ? handleCreateDept : handleUpdateDept} disabled={isSubmitting || !deptForm.name} className="bg-blue-600 hover:bg-blue-700">{isSubmitting ? 'Saving...' : isCreateDialogOpen ? 'Create Department' : 'Save Changes'}</Button></DialogFooter>
@@ -1175,6 +1247,7 @@ export default function ClinicDepartmentPage() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div><p className="text-muted-foreground">Facility</p><p className="font-medium">{selectedDepartment.clinics[0] || 'N/A'}</p></div>
                 <div><p className="text-muted-foreground">Head</p><p className="font-medium">{selectedDepartment.head || 'Not assigned'}</p></div>
+                <div><p className="text-muted-foreground">Deputy head</p><p className="font-medium">{selectedDepartment.deputyHead || 'Not assigned'}</p></div>
                 <div><p className="text-muted-foreground">Staff Count</p><p className="font-medium">{selectedDepartment.staffCount}</p></div>
               </div>
             </div>)}
@@ -1184,12 +1257,20 @@ export default function ClinicDepartmentPage() {
 
         {/* Department Staff Dialog */}
         <DepartmentStaffDialog
-          department={isDeptStaffDialogOpen && selectedDepartment ? { id: Number(selectedDepartment.id), name: selectedDepartment.name, clinicName: selectedDepartment.clinic || null, headName: selectedDepartment.head || null } : null}
+          department={isDeptStaffDialogOpen && selectedDepartment ? {
+            id: Number(selectedDepartment.id),
+            name: selectedDepartment.name,
+            clinicName: selectedDepartment.clinics[0] || null,
+            headName: selectedDepartment.head || null,
+            headUserId: selectedDepartment.headUserId ? Number(selectedDepartment.headUserId) : null,
+            deputyHeadName: selectedDepartment.deputyHead || null,
+            deputyUserId: selectedDepartment.deputyUserId ? Number(selectedDepartment.deputyUserId) : null,
+          } : null}
           open={isDeptStaffDialogOpen}
           onOpenChange={setIsDeptStaffDialogOpen}
-          onStaffChanged={() => {
-            loadData();
-            loadKpiStats();
+          onStaffChanged={async () => {
+            await loadData();
+            await loadKpiStats();
           }}
         />
 

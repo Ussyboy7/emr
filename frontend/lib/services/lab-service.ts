@@ -4,7 +4,7 @@
  * Laboratory API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
-import { DEFAULT_CATALOG_PAGE_SIZE } from '../pagination-constants';
+import { DEFAULT_CATALOG_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '../pagination-constants';
 
 export interface LabOrder {
   id: number;

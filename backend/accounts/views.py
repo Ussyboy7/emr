@@ -23,6 +23,14 @@ from .serializers import (
 from audit.services import AuditService
 from permissions.drf_permissions import ApiPageAccessPermission
 from permissions.models import Role, UserRole
+from permissions.user_management import (
+    CanManageUsers,
+    assert_department_id_managed,
+    assert_user_in_managed_departments,
+    filter_users_by_managed_departments,
+    managed_department_ids,
+)
+from organization.models import Department
 from common.openapi import document_viewset
 from drf_spectacular.utils import extend_schema
 
@@ -66,14 +74,10 @@ class UserViewSet(viewsets.ModelViewSet):
         if not getattr(self.request, "user", None) or not self.request.user.is_authenticated:
             return qs.none()
 
-        if self.request.user.is_superuser:
-            return qs
-
-        # Scope user-management surfaces to department only.
-        if self.action in ['list', 'create', 'update', 'partial_update', 'destroy', 'reset_password']:
-            if self.request.user.department_id is None:
-                return qs.none()
-            return qs.filter(department_id=self.request.user.department_id)
+        if self.action in [
+            'list', 'create', 'update', 'partial_update', 'destroy', 'reset_password', 'stats',
+        ]:
+            return filter_users_by_managed_departments(qs, self.request.user)
 
         return qs
 
@@ -97,11 +101,11 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action in ['me', 'update_me', 'change_password', 'directory', 'public']:
             return [permissions.IsAuthenticated(), page]
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update', 'destroy', 'reset_password', 'stats']:
-            return [permissions.IsAdminUser(), page]
+            return [CanManageUsers(), page]
         return [permissions.IsAuthenticated(), page]
 
     @extend_schema(tags=["Accounts"], summary="Stats", description="Lightweight user counts for admin dashboards.")
-    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAdminUser])
+    @action(detail=False, methods=["get"], permission_classes=[CanManageUsers])
     def stats(self, request):
         """
         Lightweight user counts for admin dashboards.
@@ -163,16 +167,23 @@ class UserViewSet(viewsets.ModelViewSet):
             raise ValidationError({"access_role_id": ["Selected access role does not exist or is inactive."]})
 
         # Enforce department scoping for non-superusers creating users.
-        if not self.request.user.is_superuser:
-            if self.request.user.department_id is None:
-                raise ValidationError({"department": ["Your account has no department assigned. Contact an administrator."]})
+        dept_ids = managed_department_ids(self.request.user)
+        if dept_ids is not None:
+            if not dept_ids:
+                raise ValidationError(
+                    {"department": ["Your account has no department assigned. Contact an administrator."]}
+                )
             requested_dept = serializer.validated_data.get("department")
-            if requested_dept is not None and requested_dept.id != self.request.user.department_id:
-                raise PermissionDenied("You can only create users within your department.")
-
-            # Force department to the requester's department if omitted.
-            if requested_dept is None:
+            if requested_dept is not None:
+                assert_department_id_managed(self.request.user, requested_dept.id)
+            elif len(dept_ids) == 1:
+                serializer.validated_data["department"] = Department.objects.get(
+                    pk=next(iter(dept_ids))
+                )
+            elif self.request.user.department_id in dept_ids:
                 serializer.validated_data["department"] = self.request.user.department
+            else:
+                raise ValidationError({"department": ["This field is required."]})
 
         with transaction.atomic():
             user = serializer.save()
@@ -199,21 +210,19 @@ class UserViewSet(viewsets.ModelViewSet):
         old_instance = self.get_object()
 
         # Enforce department scoping for non-superusers updating users.
-        if not self.request.user.is_superuser:
-            if self.request.user.department_id is None:
-                raise PermissionDenied("Your account has no department assigned.")
-            if old_instance.department_id != self.request.user.department_id:
-                raise PermissionDenied("You can only update users within your department.")
-            # Prevent cross-department reassignment.
-            if "department" in serializer.validated_data:
-                new_dept = serializer.validated_data.get("department")
-                if new_dept is not None and new_dept.id != self.request.user.department_id:
-                    raise PermissionDenied("You cannot change a user to another department.")
-            # Prevent clinic reassignment across departments (optional safeguard).
-            if "clinic" in serializer.validated_data:
-                new_clinic = serializer.validated_data.get("clinic")
-                if new_clinic is not None and self.request.user.clinic_id is not None and new_clinic.id != self.request.user.clinic_id:
-                    raise PermissionDenied("You cannot change a user to another clinic.")
+        assert_user_in_managed_departments(self.request.user, old_instance)
+        if "department" in serializer.validated_data:
+            new_dept = serializer.validated_data.get("department")
+            if new_dept is not None:
+                assert_department_id_managed(self.request.user, new_dept.id)
+        if "clinic" in serializer.validated_data and not self.request.user.is_superuser:
+            new_clinic = serializer.validated_data.get("clinic")
+            if (
+                new_clinic is not None
+                and self.request.user.clinic_id is not None
+                and new_clinic.id != self.request.user.clinic_id
+            ):
+                raise PermissionDenied("You cannot change a user to another clinic.")
 
         old_values = {
             'username': old_instance.username,
@@ -244,11 +253,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         """Delete user and log audit."""
-        if not self.request.user.is_superuser:
-            if self.request.user.department_id is None:
-                raise PermissionDenied("Your account has no department assigned.")
-            if instance.department_id != self.request.user.department_id:
-                raise PermissionDenied("You can only delete users within your department.")
+        assert_user_in_managed_departments(self.request.user, instance)
 
         user_id = instance.id
         user_repr = instance.get_full_name() or instance.username
@@ -346,17 +351,12 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(tags=["Accounts"], summary="Reset password", description="Admin action to reset a user's password.")
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    @action(detail=True, methods=['post'], permission_classes=[CanManageUsers])
     def reset_password(self, request, pk=None):
         """Admin action to reset a user's password."""
         user = self.get_object()
 
-        # Enforce department scoping for non-superusers resetting passwords.
-        if not request.user.is_superuser:
-            if request.user.department_id is None:
-                raise PermissionDenied("Your account has no department assigned.")
-            if user.department_id != request.user.department_id:
-                raise PermissionDenied("You can only reset passwords for users within your department.")
+        assert_user_in_managed_departments(request.user, user)
 
         new_password = request.data.get('new_password')
 

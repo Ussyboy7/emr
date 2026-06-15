@@ -21,6 +21,7 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
 import { getHomeRouteForUser } from '@/lib/home-route';
 import { getServerToday } from '@/lib/utils/serverTime';
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -138,7 +139,7 @@ export default function DashboardPage() {
             <CardContent className="p-8 text-center">
               <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-red-500" />
               <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
-              <Button onClick={loadDashboardData}>Retry</Button>
+              <Button onClick={() => loadDashboardData()}>Retry</Button>
             </CardContent>
           </Card>
         </div>

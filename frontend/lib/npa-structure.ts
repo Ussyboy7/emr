@@ -98,6 +98,9 @@ export type User = {
   active: boolean;
   username?: string;
   isSuperuser?: boolean;
+  isStaff?: boolean;
+  isDepartmentHead?: boolean;
+  headedDepartments?: { id: number; name: string }[];
   clinics_ids?: number[];
   active_clinic_id?: number | null;
   multi_clinic_enabled?: boolean;

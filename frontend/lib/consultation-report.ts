@@ -9,6 +9,12 @@ import { logWarn } from './client-logger';
 import { patientService, consultationService } from '@/lib/services';
 import type { ApiResponse } from './types/common';
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
+import {
+  enrichSessionDisplayFromWorkspaceBundle,
+} from '@/lib/consultation/workspace-bundle-enrichment';
+import type { SessionWorkspaceBundle } from '@/lib/services/consultation-service';
+
+export { summarizeLabTestForConsultationReport } from '@/lib/consultation/workspace-bundle-enrichment';
 
 // API Response interfaces for consultation report
 interface PrescriptionApiResponse {
@@ -172,40 +178,6 @@ const formatResultWithPending = (
   const isDone = doneStatuses.some((s) => s.toLowerCase() === currentStatus);
   return isDone ? 'Completed' : 'Pending';
 };
-
-/** True if API attached a result file (string URL or { url } object). */
-function labTestHasResultFile(test: any): boolean {
-  const rf = test?.result_file;
-  if (rf != null && rf !== false) {
-    if (typeof rf === 'string') {
-      if (rf.trim().length > 0) return true;
-    } else if (typeof rf === 'object' && rf) {
-      if (typeof (rf as { url?: string }).url === 'string' && (rf as { url: string }).url.trim().length > 0) return true;
-      return true;
-    }
-  }
-  const attachments = test?.result_attachments || test?.reportAttachments;
-  if (Array.isArray(attachments) && attachments.length > 0) return true;
-  return false;
-}
-
-/**
- * Text for consultation report lab tables (session viewer, PDF, shared modal).
- * Uses structured results when present; otherwise PDF-on-file or a short status label.
- */
-export function summarizeLabTestForConsultationReport(test: any): string {
-  const status = String(test?.status ?? '').toLowerCase();
-  const norm = test?.template_normal_range || test?.template?.normal_range;
-  const fromResults = formatLabResult(test?.results ?? test?.result ?? '', norm).trim();
-  if (fromResults) return fromResults;
-  if (labTestHasResultFile(test)) {
-    return 'PDF report on file';
-  }
-  if (status === 'verified' || status === 'results_ready') {
-    return 'Completed';
-  }
-  return '';
-}
 
 // ----- HTML generator (single source for Download/Print) -----
 function escapeHtmlForHtml(s: string): string {
@@ -381,6 +353,52 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
 }
 
 // ----- Loader: fetch full session data for the report (used by both Medical Records and Consultation History) -----
+
+/** Apply workspace-bundle rows onto a report session (shared with annual check-up fallback). */
+export function applyBundleToReportSession(
+  session: ConsultationReportSession,
+  bundle: SessionWorkspaceBundle,
+  vitalsRows?: unknown[],
+): ConsultationReportSession {
+  const enriched = enrichSessionDisplayFromWorkspaceBundle(bundle, vitalsRows);
+
+  session.prescriptions = enriched.prescriptions.map((rx) => ({
+    ...rx,
+    quantity: rx.quantity != null ? String(rx.quantity) : '',
+  }));
+  session.labOrders = enriched.labOrders.map((lab) => ({
+    test: lab.test,
+    priority: lab.priority,
+    status: lab.status,
+    result: lab.result,
+  }));
+  session.radiologyOrders = enriched.radiologyOrders.map((rad) => ({
+    procedure: rad.procedure,
+    priority: rad.priority,
+    status: rad.status,
+    result: formatRadiologyResult(rad.finding),
+  }));
+  session.physioOrders = enriched.physioOrders;
+  session.eyeOrders = enriched.eyeOrders.map((o) => ({
+    chief_complaint: o.diagnosis,
+    diagnosis: o.diagnosis,
+    priority: o.priority,
+    status: o.status,
+  }));
+  session.diagnoses = enriched.diagnoses.map((d) => ({
+    id: String(d.id),
+    code: d.code,
+    name: d.name,
+    type: d.type,
+    notes: d.notes,
+  }));
+  if (Object.keys(enriched.vitals).length > 0) {
+    session.vitals = enriched.vitals;
+  }
+
+  return session;
+}
+
 export async function loadConsultationReportSession(sessionId: number): Promise<ConsultationReportSession> {
   const [session, bundle] = await Promise.all([
     apiFetch<Record<string, unknown>>(`/consultation/sessions/${sessionId}/`),
@@ -391,23 +409,16 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
   const visitId = session.visit as number | undefined;
   const visitType = session.visit_type ? String(session.visit_type) : undefined;
 
-  const prescriptionsResult = bundle.prescriptions;
-  const labOrders = bundle.lab_orders;
-  const radiologyOrders = bundle.radiology_orders;
-  const physioOrders = bundle.physio_orders;
-  const eyeOrdersResult = bundle.eye_orders;
-  const diagnosesResult = bundle.diagnoses;
-
   const patient = patientId
     ? await apiFetch<Record<string, unknown>>(`/patients/${patientId}/`).catch(() => null)
     : null;
-  let vitals: { results: any[] } = { results: bundle.vitals.results || [] };
-  if (visitId && !vitals.results.length) {
+
+  let vitalsRows: unknown[] = bundle.vitals.results || [];
+  if (visitId && !vitalsRows.length) {
     const vital = await patientService.resolveVital({ visit: visitId }).catch(() => null);
-    vitals = { results: vital ? [vital] : [] };
+    vitalsRows = vital ? [vital] : [];
   }
 
-  // Process patient data
   if (patient) {
     session.patient_name = patient.full_name ?? '';
     session.patient_id = patient.patient_id ?? String(patient.id);
@@ -415,97 +426,8 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
     session.patient_gender = patient.gender ?? '';
   }
 
-  // Process prescriptions
-  session.prescriptions = ((prescriptionsResult as any).results || []).flatMap((p: PrescriptionApiResponse) => {
-    const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
-    return items.map((m: any) => ({
-      id: String(p.id) + (m.id != null ? '-' + m.id : ''),
-      medication: (m.medication_name || m.medication_details?.name || m.medication?.name || p.medication_name || p.medication) ?? '',
-      dosage: m.dosage || p.dosage || '',
-      frequency: m.frequency || p.frequency || '',
-      duration: m.duration || p.duration || '',
-      quantity: m.quantity ?? p.quantity ?? '',
-    }));
-  });
-
-  // Process lab orders (tests are prefetched on each order from workspace bundle)
-  const labOrderRows = (labOrders as any).results || [];
-  session.labOrders = labOrderRows.flatMap((order: any) => {
-    const tests = order.tests || [];
-    if (!tests.length) return [];
-    return tests.map((t: any) => ({
-      test: (t.name || t.test_name || t.template_name || '').trim(),
-      priority: order.priority ?? '',
-      status: t.status ?? order.status ?? '',
-      result: summarizeLabTestForConsultationReport(t),
-    }));
-  });
-
-  // Process radiology orders
-  session.radiologyOrders = ((radiologyOrders as any).results || []).flatMap((order: any) => {
-    const studies = order.studies || [];
-    if (studies.length) {
-      return studies.map((s: any) => ({
-        procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
-        priority: order.priority ?? '',
-        status: s.status ?? order.status ?? '',
-        result: formatRadiologyResult(s.report ?? s.findings ?? s.impression ?? s.results ?? ''),
-      }));
-    }
-    const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
-    if (!proc) return [];
-    return [{
-      procedure: proc,
-      priority: order.priority ?? '',
-      status: order.status ?? '',
-      result: formatRadiologyResult(order.report ?? order.findings ?? order.impression ?? ''),
-    }];
-  });
-
-  // Process vitals
-  const vitalsResults = (vitals as any).results || [];
-  if (vitalsResults.length > 0) {
-    const v = vitalsResults[0];
-    session.vitals = {
-      temperature: v.temperature || '',
-      bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic
-        ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
-        : '',
-      heartRate: v.heart_rate || '',
-      respiratoryRate: v.respiratory_rate || '',
-      oxygenSaturation: v.oxygen_saturation || '',
-      weight: v.weight || '',
-      height: v.height || '',
-      recordedAt: v.recorded_at || '',
-    };
-  }
-
-  // Process physio orders
-  session.physioOrders = ((physioOrders as any).results || []).map((o: any) => ({
-    diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
-    priority: o.priority ?? '',
-    status: o.status ?? '',
-  }));
-
-  // Process eye orders
-  session.eyeOrders = ((eyeOrdersResult as any).results || []).map((o: any) => ({
-    chief_complaint: o.chief_complaint ?? '',
-    diagnosis: o.diagnosis ?? '',
-    priority: o.priority ?? '',
-    status: o.status ?? '',
-  }));
-
-  // Process diagnoses
-  session.diagnoses = ((diagnosesResult as any).results || []).map((d: any) => ({
-    id: String(d.id),
-    code: d.icd10_code_details?.code ?? '',
-    name: (d.icd10_code_details?.description || d.diagnosis_text) ?? '',
-    type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : (d.certainty ?? ''),
-    notes: d.notes || d.diagnosis_text || '',
-  }));
-
   return {
-    ...(session as unknown as ConsultationReportSession),
+    ...applyBundleToReportSession(session as unknown as ConsultationReportSession, bundle, vitalsRows),
     visit_type: visitType,
   };
 }

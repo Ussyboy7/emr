@@ -23,7 +23,9 @@ import { MergeHistoryTab } from '@/components/patient-overview/MergeHistoryTab';
 import {
   getVisitServiceClinicsDisplay,
 } from '@/lib/utils/clinic-utils';
+import { resolvePatientRecord } from '@/lib/utils/patient-id';
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
+import { mapClinicalOverviewToPatientHistory } from '@/lib/clinical-overview-utils';
 import {
   User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
   AlertTriangle, Loader2, Mail, MapPin, Droplets,
@@ -283,27 +285,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
     try {
       setLoading(true);
       
-      // Get numeric ID for API calls
-      const patientIdStr = patient.id.trim();
-      let numericId: number;
-      let apiPatient: ApiPatient;
-      
-        const parsedId = parseInt(patientIdStr, 10);
-        if (!isNaN(parsedId) && parsedId > 0) {
-          numericId = parsedId;
-        } else {
-          const searchResult = await patientService.getPatients({ search: patientIdStr, page_size: DEFAULT_LIST_PAGE_SIZE });
-          const matchedPatient = searchResult.results.find(
-            p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
-          );
-          if (!matchedPatient) {
-            throw new Error(`Patient with ID "${patientIdStr}" not found`);
-          }
-          numericId = matchedPatient.id;
-        }
-        
-        // Always fetch full patient details using the detailed serializer
-        apiPatient = await patientService.getPatient(numericId);
+      const apiPatient = await resolvePatientRecord(patient.id);
+      const numericId = apiPatient.id;
       setOverviewPatientName(apiPatient.full_name ?? '');
 
       const overview = await patientService.getClinicalOverview(numericId);
@@ -314,7 +297,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       const historyRecord = mapped.medicalHistory;
       const prescriptionsList = mapped.prescriptions;
       const consultationsList = mapped.consultations;
-      const imagingOrdersList = overview.radiology_orders?.results || [];
+      const imagingOrdersList = mapped.imagingOrders;
       const physioOrdersList = mapped.physioOrders;
       const eyeOrdersList = mapped.eyeOrders;
       const wardAdmissionsList = mapped.wardAdmissions;
@@ -508,30 +491,24 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
 
       setMedicalCertificates(certificatesList);
 
-      // Process imaging results - extract studies from orders
-      if (imagingOrdersList.length) {
-        const allStudies: any[] = [];
-        imagingOrdersList.forEach((order: any) => {
-          if (order.studies && Array.isArray(order.studies)) {
-            order.studies.forEach((study: any) => {
-              allStudies.push({
-                id: study.id?.toString() || String(study.id),
-                studyId: order.order_id ? `${order.order_id}-${study.id}` : `IMG-${study.id}`,
-                type: study.modality || study.procedure || 'Unknown',
-                description: study.body_part || study.procedure || '',
-                date: formatDisplayDate(order.ordered_at || study.created_at),
-                status: study.status || 'pending',
-                orderedBy: order.doctor_name || order.doctor?.name || 'Unknown',
-                result: study.findings || study.report || 'Pending',
-                report: study.report || '',
-                _rawOrder: order,
-                _rawStudy: study,
-              });
-            });
-          }
-        });
-        setImagingResults(allStudies);
-      }
+      setImagingResults(
+        imagingOrdersList.map((item: any) => {
+          const study = item.study_details || {};
+          return {
+            id: String(item.id),
+            studyId: item.order_id ? `${item.order_id}-${study.id ?? item.id}` : `IMG-${item.id}`,
+            type: study.modality || study.procedure || 'Unknown',
+            description: study.body_part || study.procedure || '',
+            date: formatDisplayDate(study.verified_at || study.reported_at || study.created_at || item.created_at),
+            status: study.status || 'pending',
+            orderedBy: item.order_details?.doctor_name || 'Unknown',
+            result: study.report || study.findings || 'Pending',
+            report: study.report || '',
+            _rawOrder: item,
+            _rawStudy: study,
+          };
+        }),
+      );
 
       // Process prescriptions
       if (prescriptionsList.length) {

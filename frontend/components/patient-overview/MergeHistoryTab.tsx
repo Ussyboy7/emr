@@ -19,6 +19,7 @@ import { Loader2, GitMerge, GitMergeIcon, Undo2, AlertTriangle } from 'lucide-re
 import { toast } from 'sonner';
 import { patientService } from '@/lib/services';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { isSystemAdminUser } from '@/lib/patient-permissions';
 
 export interface MergeAuditRow {
   id: number;
@@ -38,12 +39,6 @@ interface MergeHistoryTabProps {
   patientNumericId: number;
   /** Optional callback after a successful un-merge (e.g. refresh parent). */
   onUnmerged?: () => void;
-}
-
-function isAdminUser(user: { isSuperuser?: boolean; systemRole?: string } | null): boolean {
-  if (!user) return false;
-  if (user.isSuperuser) return true;
-  return (user.systemRole || '').toLowerCase().includes('admin');
 }
 
 function formatCounters(counters: Record<string, number> | undefined): string {
@@ -71,7 +66,7 @@ export function MergeHistoryTab({ patientNumericId, onUnmerged }: MergeHistoryTa
   const [unmerging, setUnmerging] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
 
-  const admin = isAdminUser(currentUser);
+  const admin = isSystemAdminUser(currentUser);
 
   const load = useCallback(async () => {
     setLoading(true);

@@ -17,11 +17,10 @@ import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { patientService, type Patient as ApiPatient } from '@/lib/services';
-import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { resolvePatientNumericId, resolvePatientRecord } from '@/lib/utils/patient-id';
 import {
   PATIENT_TITLE_OPTIONS,
   normalizePatientTitleValue,
-  TITLES,
   MARITAL_STATUSES,
   RELIGIONS,
   NIGERIAN_TRIBES,
@@ -34,6 +33,8 @@ import {
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { canManagePatientLifecycle, isSystemAdminUser } from '@/lib/patient-permissions';
+import { medicalHistoryFormFromRecord } from '@/lib/clinical-overview-utils';
 import { 
   Search, Filter, Users, Phone, Eye, 
   UserPlus, Calendar, FileText, Edit, X, Loader2,
@@ -269,20 +270,12 @@ function PatientsListPageContent() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
-  const isAdminUser = useMemo(() => {
-    if (currentUser?.isSuperuser) return true;
-    return (currentUser?.systemRole || '').toLowerCase().includes('admin');
-  }, [currentUser?.isSuperuser, currentUser?.systemRole]);
-  const canDeletePatients = isAdminUser;
-  
-  // Reset form when selectedPatient changes (new patient selected for editing)
-  useEffect(() => {
-    if (selectedPatient && isEditModalOpen && !editFormLoading) {
-      // Form will be populated by openEditModal, this is just a safety reset
-      // The actual population happens in openEditModal after data is fetched
-    }
-  }, [selectedPatient?.id]);
-  
+  const isAdminUser = useMemo(() => isSystemAdminUser(currentUser), [currentUser]);
+  const canManagePatientLifecycleActions = useMemo(
+    () => canManagePatientLifecycle(currentUser),
+    [currentUser],
+  );
+
   // Medical History state
   const [medicalHistory, setMedicalHistory] = useState({
     allergies: [] as string[],
@@ -659,29 +652,8 @@ function PatientsListPageContent() {
     setEditPrincipalInfo(null);
 
     try {
-      // Look up patient by patient_id to get numeric ID and full data
-      const patientIdStr = patient.id.trim();
-      let numericId: number;
-      let apiPatient: ApiPatient;
-      
-      // Check if it's a numeric ID
-      const parsedId = parseInt(patientIdStr, 10);
-      if (!isNaN(parsedId) && parsedId > 0) {
-        numericId = parsedId;
-      } else {
-        // It's a string patient_id (like "E-A2962") - search for it to get numeric ID
-        const searchResult = await patientService.getPatients({ search: patientIdStr, page_size: DEFAULT_LIST_PAGE_SIZE });
-        const matchedPatient = searchResult.results.find(
-          p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
-        );
-        if (!matchedPatient) {
-          throw new Error(`Patient with ID "${patientIdStr}" not found`);
-        }
-        numericId = matchedPatient.id;
-      }
-      
-      // Always fetch full patient details using numeric ID (this returns PatientSerializer with all fields)
-      apiPatient = await patientService.getPatient(numericId);
+      const apiPatient = await resolvePatientRecord(patient.id);
+      const numericId = apiPatient.id;
 
       let historyPayload: Record<string, unknown> | null = null;
       try {
@@ -779,31 +751,9 @@ function PatientsListPageContent() {
       
       // Medical history (occupation is edited once under Personal Information; synced on save)
       if (historyPayload) {
-        const social = historyPayload.social_history as {
-          smoking?: string;
-          alcohol?: string;
-          exercise?: string;
-        } | undefined;
-        setMedicalHistory({
-          allergies: Array.isArray(historyPayload.allergies) ? historyPayload.allergies as string[] : [],
-          diagnoses: Array.isArray(historyPayload.diagnoses) ? historyPayload.diagnoses as Array<{ code?: string; name: string; status: string; diagnosedDate?: string; treatingDoctor?: string }> : [],
-          surgicalHistory: Array.isArray(historyPayload.surgical_history) ? historyPayload.surgical_history as Array<{ procedure: string; date: string; hospital: string }> : [],
-          familyHistory: Array.isArray(historyPayload.family_history) ? historyPayload.family_history as Array<{ relation: string; condition: string }> : [],
-          socialHistory: {
-            smoking: social?.smoking || '',
-            alcohol: social?.alcohol || '',
-            exercise: social?.exercise || '',
-            occupation: '',
-          },
-        });
+        setMedicalHistory(medicalHistoryFormFromRecord(historyPayload));
       } else {
-        setMedicalHistory({
-          allergies: [],
-          diagnoses: [],
-          surgicalHistory: [],
-          familyHistory: [],
-          socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
-        });
+        setMedicalHistory(medicalHistoryFormFromRecord(null));
       }
       
       // Only open the modal after data is loaded
@@ -844,26 +794,7 @@ function PatientsListPageContent() {
     setIsSubmitting(true);
 
     try {
-      // Look up patient by patient_id to get numeric ID
-      const patientIdStr = selectedPatient.id.trim();
-      let numericId: number;
-      
-      // Check if it's a numeric ID
-      const parsedId = parseInt(patientIdStr, 10);
-      if (!isNaN(parsedId) && parsedId > 0) {
-        numericId = parsedId;
-      } else {
-        // It's a string patient_id (like "E-A2962") - search for it
-        const searchResult = await patientService.getPatients({ search: patientIdStr, page_size: DEFAULT_LIST_PAGE_SIZE });
-        const matchedPatient = searchResult.results.find(
-          p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
-        );
-        if (!matchedPatient) {
-          throw new Error(`Patient with ID "${patientIdStr}" not found`);
-        }
-        numericId = matchedPatient.id;
-      }
-      
+      const numericId = await resolvePatientNumericId(selectedPatient.id);
       const first = editForm.firstName.trim();
       const last = editForm.lastName.trim();
       const dob = editForm.dateOfBirth?.trim() ?? '';
@@ -1230,7 +1161,7 @@ function PatientsListPageContent() {
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditModal(patient)} title="Edit Patient">
                                 <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                               </Button>
-                              {canDeletePatients && (
+                              {isAdminUser && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1254,17 +1185,19 @@ function PatientsListPageContent() {
                               )}
                               {patient.category === 'Employee' && (
                                 <>
-                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRetireeConversion(patient)} title="Convert to Retiree">
-                                    <UserCheck className="h-4 w-4 text-muted-foreground hover:text-orange-500" />
-                                  </Button>
-                                  {isAdminUser && patient.employeeType === 'Staff' && (
+                                  {canManagePatientLifecycleActions && (
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRetireeConversion(patient)} title="Convert to Retiree">
+                                      <UserCheck className="h-4 w-4 text-muted-foreground hover:text-orange-500" />
+                                    </Button>
+                                  )}
+                                  {canManagePatientLifecycleActions && patient.employeeType === 'Staff' && (
                                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openPromoteDialog(patient)} title="Promote to Officer">
                                       <Activity className="h-4 w-4 text-muted-foreground hover:text-purple-500" />
                                     </Button>
                                   )}
                                 </>
                               )}
-                              {isAdminUser && patient.category === 'Retiree' && (
+                              {canManagePatientLifecycleActions && patient.category === 'Retiree' && (
                                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openCsrConversion(patient)} title="Convert to CSR">
                                   <UserPlus className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                                 </Button>

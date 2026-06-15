@@ -418,7 +418,7 @@ export default function ProceduresQueuePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [typeFilter, setTypeFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
@@ -653,14 +653,16 @@ export default function ProceduresQueuePage() {
     if (procedure.status !== 'completed') return;
     try {
       setViewLoading(true);
-      const row = await nursingService.resolveProcedureForOrder(procedure.id);
+      const orderId = Number(procedure.id);
+      if (!Number.isFinite(orderId)) return;
+      const row = await nursingService.resolveProcedureForOrder(orderId);
       if (row) {
         setViewRecord({
-          site: row.site,
-          notes: row.notes,
-          wound_intervention: row.wound_intervention,
-          performed_by_name: row.performed_by_name,
-          performed_at: row.performed_at,
+          site: typeof row.site === 'string' ? row.site : undefined,
+          notes: typeof row.notes === 'string' ? row.notes : undefined,
+          wound_intervention: typeof row.wound_intervention === 'string' ? row.wound_intervention : undefined,
+          performed_by_name: typeof row.performed_by_name === 'string' ? row.performed_by_name : undefined,
+          performed_at: typeof row.performed_at === 'string' ? row.performed_at : undefined,
         });
       }
     } catch (err) {
@@ -1157,16 +1159,20 @@ export default function ProceduresQueuePage() {
             <CardContent className="flex flex-col items-center justify-center py-16">
               <CheckCircle2 className="h-16 w-16 text-emerald-500 mb-4" />
               <h3 className="text-xl font-semibold text-foreground mb-2">
-                {hasActiveFilters ? 'No matching procedures' : statusFilter === 'pending' ? 'All caught up!' : 'No procedures found'}
+                {statusFilter === 'pending'
+                  ? 'All caught up!'
+                  : hasActiveFilters
+                    ? 'No matching procedures'
+                    : 'No procedures found'}
               </h3>
               <p className="text-muted-foreground text-center max-w-md">
-                {hasActiveFilters
-                  ? 'No procedures match your current filters. Try a wider date range or clear filters.'
-                  : statusFilter === 'pending'
-                    ? 'No pending nursing orders in this date range.'
+                {statusFilter === 'pending'
+                  ? 'No pending nursing orders in this date range.'
+                  : hasActiveFilters
+                    ? 'No procedures match your current filters. Try a wider date range or clear filters.'
                     : 'No nursing procedure orders in this date range.'}
               </p>
-              {statusFilter === 'pending' && !hasActiveFilters ? (
+              {statusFilter === 'pending' ? (
                 <Button asChild variant="outline" size="sm" className="mt-4">
                   <Link href="/nursing/procedures/history">View Procedures History</Link>
                 </Button>

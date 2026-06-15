@@ -132,12 +132,13 @@ def _collect_system_health() -> list[dict]:
 
     # File Storage
     media_path = getattr(settings, 'MEDIA_ROOT', None) or ''
+    media_path_str = str(media_path) if media_path else ''
     storage_entry: dict = {'name': 'File Storage', 'icon': 'HardDrive'}
     try:
-        if media_path and os.path.exists(media_path) and os.access(media_path, os.W_OK):
+        if media_path_str and os.path.exists(media_path_str) and os.access(media_path_str, os.W_OK):
             storage_entry['status'] = 'healthy'
             try:
-                stat = os.statvfs(media_path)
+                stat = os.statvfs(media_path_str)
                 free_gb = stat.f_bavail * stat.f_frsize / (1024 ** 3)
                 total_gb = stat.f_blocks * stat.f_frsize / (1024 ** 3)
                 used_pct = (1 - (free_gb / total_gb)) * 100 if total_gb else 0
@@ -148,7 +149,7 @@ def _collect_system_health() -> list[dict]:
                 storage_entry['total_gb'] = round(total_gb, 2)
                 storage_entry['used_gb'] = round(total_gb - free_gb, 2)
                 storage_entry['used_pct'] = round(used_pct, 1)
-                storage_entry['path'] = media_path
+                storage_entry['path'] = media_path_str
                 # Degrade the badge if the disk is uncomfortably full.
                 if used_pct >= 95:
                     storage_entry['status'] = 'error'
@@ -157,14 +158,14 @@ def _collect_system_health() -> list[dict]:
             except (AttributeError, OSError):
                 # statvfs not available on Windows / unreadable mount.
                 storage_entry['detail'] = 'Writable; free-space stats unavailable.'
-        elif media_path and os.path.exists(media_path):
+        elif media_path_str and os.path.exists(media_path_str):
             storage_entry['status'] = 'error'
             storage_entry['detail'] = 'MEDIA_ROOT exists but is not writable by the API process.'
-            storage_entry['path'] = media_path
+            storage_entry['path'] = media_path_str
         else:
             storage_entry['status'] = 'warning'
             storage_entry['detail'] = 'MEDIA_ROOT path does not exist.'
-            storage_entry['path'] = media_path or None
+            storage_entry['path'] = media_path_str or None
     except Exception as exc:
         storage_entry['status'] = 'error'
         storage_entry['detail'] = f'Check failed: {exc}'
@@ -175,7 +176,6 @@ def _collect_system_health() -> list[dict]:
     return results
 
 
-@require_http_methods(["GET"])
 def _build_server_time_payload() -> dict:
     now = timezone.localtime()
     return {
@@ -253,6 +253,7 @@ class HealthCheckView(views.APIView):
         return Response(payload, status=http_status)
 
 
+@require_http_methods(["GET"])
 def server_time(request):
     """
     Return the server's current date and time in the configured timezone.
@@ -299,8 +300,6 @@ class SystemMetricsView(views.APIView):
 
     What is real today:
       * ``mediaStorageGb`` — cumulative size of ``MEDIA_ROOT`` on disk.
-        (This is NOT throughput "today"; the old key ``dataProcessedGb``
-        was mislabeled.)
       * ``responseTimeMs`` — only set when the cache key
         ``avg_response_time_ms`` is populated by middleware/job. Until
         that exists, the key is absent.
@@ -330,10 +329,7 @@ class SystemMetricsView(views.APIView):
                 sources['responseTimeMs'] = 'live'
                 sources['errorRate'] = 'live'
 
-            # Media storage — real, measurable, but reflects cumulative
-            # MEDIA_ROOT usage. We expose the truthful name and also
-            # keep ``dataProcessedGb`` as a deprecated alias so older
-            # frontend builds don't break.
+            # Media storage — cumulative MEDIA_ROOT usage on disk.
             try:
                 media_path = settings.MEDIA_ROOT
                 if media_path and os.path.exists(media_path):
@@ -349,7 +345,6 @@ class SystemMetricsView(views.APIView):
                 else:
                     media_gb = 0.0
                 metrics['mediaStorageGb'] = media_gb
-                metrics['dataProcessedGb'] = media_gb  # deprecated alias
                 sources['mediaStorageGb'] = 'live'
             except Exception:
                 pass

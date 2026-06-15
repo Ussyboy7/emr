@@ -171,7 +171,12 @@ export default function SystemHealthPage() {
         mediaStorageGb: metrics.mediaStorageGb,
       });
       setMetricSources(metrics.sources || {});
-      setReadiness(readinessResult.services || {});
+      const services = readinessResult.services || {};
+      setReadiness(
+        Object.fromEntries(
+          Object.entries(services).filter((entry): entry is [string, string] => entry[1] != null),
+        ),
+      );
       setReadinessOverall(readinessResult.status === "healthy" ? "healthy" : "error");
       setLastUpdated(formatDisplayTime(new Date()));
     } catch (err: unknown) {

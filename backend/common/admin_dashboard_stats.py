@@ -193,8 +193,7 @@ def build_admin_dashboard_stats(metrics_payload: dict | None = None) -> dict:
             "responseTimeMs": metrics.get("responseTimeMs"),
             "errorRate": metrics.get("errorRate"),
             "responseTimeSample": metrics.get("responseTimeSample"),
-            "mediaStorageGb": metrics.get("mediaStorageGb") or metrics.get("dataProcessedGb"),
-            "dataProcessedGb": metrics.get("dataProcessedGb"),
+            "mediaStorageGb": metrics.get("mediaStorageGb"),
             "backupStatus": metrics.get("backupStatus"),
             "metricSources": metrics.get("sources"),
         }

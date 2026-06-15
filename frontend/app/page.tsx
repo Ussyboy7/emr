@@ -15,7 +15,7 @@ import {
   Clock,
   Activity,
   Building2,
-  Dumbbell
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -85,6 +85,15 @@ const modules = [
     bgColor: "bg-orange-500/20",
     href: "/physiotherapy",
   },
+  {
+    title: "Eye Clinic",
+    description:
+      "Ophthalmic care workflows for eye clinic orders, vision assessments, session documentation, and completed visit tracking.",
+    icon: Eye,
+    color: "from-indigo-500 to-indigo-600",
+    bgColor: "bg-indigo-500/20",
+    href: "/eyecare",
+  },
 ];
 
 const features = [
@@ -115,8 +124,8 @@ const features = [
 ];
 
 const stats = [
-  { value: "7", label: "Integrated Clinical Modules" },
-  { value: "24/7", label: "System Availability for Clinical Operations" },
+  { value: "8", label: "Integrated Clinical Modules" },
+  { value: "24/7", label: "System availability" },
   { value: "100%", label: "Digital Patient Records Across Departments" },
 ];
 
@@ -169,7 +178,7 @@ export default function LandingPage() {
             </Link>
             <Button asChild className="bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold gap-2">
               <Link href="/login">
-                Access EMR
+                Sign in
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
@@ -196,15 +205,15 @@ export default function LandingPage() {
         </h1>
 
         <p className="max-w-2xl text-lg text-slate-400 leading-relaxed">
-          A unified, enterprise-grade healthcare system powering clinical operations across the Nigerian Ports Authority.
+          One secure system for patient records, consultations, labs, pharmacy, and nursing across NPA clinics.
           <br />
-          <span className="text-slate-300">Designed to ensure continuity of care, operational efficiency, and secure medical data management across all clinical departments.</span>
+          <span className="text-slate-300">Built for faster care coordination and safer clinical decisions.</span>
         </p>
         
         <div className="flex flex-col gap-4 sm:flex-row mt-4">
             <Button asChild size="lg" className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-semibold gap-2 h-14 px-8 text-base">
               <Link href="/login">
-                Access EMR System
+                Sign in to EMR
                 <ArrowRight className="h-5 w-5" />
               </Link>
             </Button>
@@ -236,7 +245,7 @@ export default function LandingPage() {
             Clinical Modules
           </h2>
           <p className="mt-4 max-w-2xl mx-auto text-slate-400">
-            Seven integrated modules designed to streamline healthcare operations and improve patient outcomes.
+            Eight integrated modules designed to streamline healthcare operations and improve patient outcomes.
           </p>
         </div>
         
@@ -253,6 +262,7 @@ export default function LandingPage() {
                     module.title === 'Pharmacy' ? 'text-purple-400 dark:text-purple-300' :
                     module.title === 'Radiology' ? 'text-cyan-400 dark:text-cyan-300' :
                     module.title === 'Physiotherapy' ? 'text-orange-400 dark:text-orange-300' :
+                    module.title === 'Eye Clinic' ? 'text-indigo-400 dark:text-indigo-300' :
                     'text-white'
                   }`} />
                 </div>
@@ -312,7 +322,7 @@ export default function LandingPage() {
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Button asChild size="lg" className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-semibold gap-2 h-12 px-8">
                 <Link href="/login">
-                  Sign In to EMR
+                  Sign in to EMR
                   <ArrowRight className="h-5 w-5" />
                 </Link>
               </Button>

@@ -53,9 +53,6 @@ export function getMediaUrl(relativePath: string | null | undefined): string | n
   return `${getApiRoot()}/common/media/${encodeURI(rel)}`;
 }
 
-/** @deprecated Use getMediaUrl — kept for existing imports. */
-export const getPhotoUrl = getMediaUrl;
-
 /**
  * Open a protected media file in a new tab (uses Bearer token via apiFetch).
  */

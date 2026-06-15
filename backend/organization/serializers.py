@@ -85,12 +85,27 @@ class DepartmentSerializer(serializers.ModelSerializer):
     
     clinic_name = serializers.CharField(source='clinic.name', read_only=True)
     head_name = serializers.CharField(source='head.get_full_name', read_only=True, allow_null=True)
+    deputy_head_name = serializers.CharField(source='deputy_head.get_full_name', read_only=True, allow_null=True)
     staff_count = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Department
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at', 'staff_count']
+
+    def validate(self, attrs):
+        head = attrs.get("head", getattr(self.instance, "head", None) if self.instance else None)
+        deputy = attrs.get(
+            "deputy_head",
+            getattr(self.instance, "deputy_head", None) if self.instance else None,
+        )
+        head_id = getattr(head, "pk", head)
+        deputy_id = getattr(deputy, "pk", deputy)
+        if head_id and deputy_id and head_id == deputy_id:
+            raise serializers.ValidationError(
+                {"deputy_head": "Deputy head must be a different person from the department head."}
+            )
+        return attrs
     
     @extend_schema_field(OpenApiTypes.INT)
     def get_staff_count(self, obj):

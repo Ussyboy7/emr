@@ -27,6 +27,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/hooks/use-location-options';
+import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useClinic } from '@/hooks/use-clinic';
 

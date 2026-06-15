@@ -254,7 +254,7 @@ class DepartmentViewSet(viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Department.objects.none()
         
-        return Department.objects.all().select_related('clinic', 'head')
+        return Department.objects.all().select_related('clinic', 'head', 'deputy_head')
     
     def perform_create(self, serializer):
         """Create department and log audit."""

@@ -1,6 +1,6 @@
 "use client";
 
-import { getPhotoUrl, getMediaUrl } from "@/lib/media-url";
+import { getMediaUrl } from "@/lib/media-url";
 
 interface PatientAvatarProps {
   name: string;
@@ -19,7 +19,7 @@ export function PatientAvatar({ name, photoUrl, size = 'md', className = '' }: P
   // Security: Sanitize name input to prevent XSS
   const safeName = (name || 'UP').replace(/[<>'"&]/g, '').substring(0, 50);
   const initials = safeName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-  const fullPhotoUrl = photoUrl ? getPhotoUrl(photoUrl) : null;
+  const fullPhotoUrl = photoUrl ? getMediaUrl(photoUrl) : null;
   
   if (fullPhotoUrl) {
     return (

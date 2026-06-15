@@ -34,6 +34,8 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from patients.permissions import is_system_admin_user
+
 from patients.models import (
     MedicalHistory,
     Patient,
@@ -125,13 +127,9 @@ def _import_model(qualified_name: str):
     return apps.get_model(app_label, model_name)
 
 
-def _is_admin(user) -> bool:
-    if not user or not getattr(user, "is_authenticated", False):
-        return False
-    if user.is_superuser:
-        return True
-    role = (getattr(user, "system_role", "") or "").strip().lower()
-    return role in {"system administrator", "admin staff"}
+def _require_admin(user) -> None:
+    if not is_system_admin_user(user):
+        raise PermissionDenied("Only super admin or admin users can merge patients.")
 
 
 def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
@@ -148,10 +146,7 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
     """
     if winner_id == loser_id:
         raise ValidationError("Cannot merge a record with itself.")
-    if not _is_admin(user):
-        raise PermissionDenied(
-            "Only super admin or admin users can merge patients."
-        )
+    _require_admin(user)
 
     with transaction.atomic():
         winner = Patient.objects.select_for_update().get(pk=winner_id)
@@ -317,10 +312,7 @@ def unmerge_patients(audit_id: int, user) -> dict:
         ValidationError if the audit row has no repointed_rows data
             (legacy merge that cannot be automatically reversed).
     """
-    if not _is_admin(user):
-        raise PermissionDenied(
-            "Only super admin or admin users can un-merge patients."
-        )
+    _require_admin(user)
 
     with transaction.atomic():
         audit = PatientMerge.objects.select_related(

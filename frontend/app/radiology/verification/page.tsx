@@ -26,6 +26,7 @@ import {
   type RadiologyVerificationTab,
 } from '@/lib/radiology/radiology-workflow-search';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { StandardPagination } from '@/components/shared/StandardPagination';
 import { transformPriority } from '@/lib/services/transformers';
 import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import {
@@ -769,7 +770,7 @@ export default function RadiologyVerificationPage() {
               totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={(newSize) => {
+              onItemsPerPageChange={(newSize: number) => {
                 setItemsPerPage(newSize);
                 setCurrentPage(1);
               }}
