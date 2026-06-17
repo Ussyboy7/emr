@@ -70,6 +70,30 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/consultation/start"}
         self.assertTrue(check_api_page_access("v1/pharmacy/prescriptions/", "POST", allowed))
 
+    def test_nursing_order_create_allowed_for_consultation_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("nursing/orders/", "POST", allowed))
+
+    def test_nursing_order_create_denied_without_nursing_or_consultation(self):
+        allowed = {"/laboratory"}
+        self.assertFalse(check_api_page_access("nursing/orders/", "POST", allowed))
+
+    def test_wards_read_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("wards/", "GET", allowed))
+
+    def test_admissions_read_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("admissions/", "GET", allowed))
+
+    def test_physio_order_create_allowed_for_consultation_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("orders/", "POST", allowed))
+
+    def test_eyecare_order_create_allowed_for_consultation_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("eyecare/orders/", "POST", allowed))
+
     def test_laboratory_orders_read_allowed_for_physiotherapy(self):
         allowed = {"/physiotherapy/orders"}
         self.assertTrue(check_api_page_access("laboratory/orders/", "GET", allowed))
@@ -172,5 +196,5 @@ class ApiAccessTests(SimpleTestCase):
         self.assertTrue(check_api_page_access("admissions/123/", "PATCH", allowed))
 
     def test_admissions_api_denied_without_ward_pages(self):
-        allowed = {"/consultation/start"}
+        allowed = {"/laboratory"}
         self.assertFalse(check_api_page_access("admissions/", "GET", allowed))
