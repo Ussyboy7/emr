@@ -108,10 +108,15 @@ stack_init_env() {
 
 stack_compose() {
     stack_detect_compose_cmd
+    local compose_args=()
+    if [[ -n "${STACK_ENV_FILE:-}" && -f "$STACK_ENV_FILE" ]]; then
+        compose_args+=(--env-file "$STACK_ENV_FILE")
+    fi
+    compose_args+=(-f "$STACK_COMPOSE_FILE")
     if [[ $# -gt 0 ]]; then
-        "${STACK_COMPOSE_CMD[@]}" -f "$STACK_COMPOSE_FILE" "$@"
+        "${STACK_COMPOSE_CMD[@]}" "${compose_args[@]}" "$@"
     else
-        "${STACK_COMPOSE_CMD[@]}" -f "$STACK_COMPOSE_FILE"
+        "${STACK_COMPOSE_CMD[@]}" "${compose_args[@]}"
     fi
 }
 
