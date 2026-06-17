@@ -1675,6 +1675,9 @@ export function useConsultationRoomOrders({
     const orderToEdit = radiologyOrders.find(o => o.id === orderId);
     if (!orderToEdit) return;
 
+    const tid =
+      orderToEdit.templateId ??
+      radiologyTemplatesCatalog.find((t) => t.name === orderToEdit.procedure)?.id;
     const template =
       (tid != null ? radiologyTemplatesCatalog.find((t) => t.id === tid) : undefined) ||
       radiologyTemplatesCatalog.find((t) => t.name === orderToEdit.procedure);
