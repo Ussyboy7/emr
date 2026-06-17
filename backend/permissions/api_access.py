@@ -38,7 +38,16 @@ MEDICAL_RECORDS_PAGES = (
 
 MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("nursing/", ("/nursing",)),
-    ("consultation/", ("/consultation", "/medical-records/referrals", "/medical-records/coding")),
+    (
+        "consultation/",
+        (
+            "/consultation",
+            "/medical-records/referrals",
+            "/medical-records/coding",
+            # Nursing room queue page fetches consultation rooms/sessions/queue APIs.
+            "/nursing/room-queue",
+        ),
+    ),
     ("laboratory/", ("/laboratory",)),
     ("pharmacy/", ("/pharmacy",)),
     ("radiology/", ("/radiology",)),

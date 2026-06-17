@@ -24,6 +24,12 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/nursing/procedures"}
         self.assertTrue(check_api_page_access("nursing/procedures/", "GET", allowed))
 
+    def test_consultation_api_allowed_for_nursing_room_queue_page(self):
+        allowed = {"/nursing/room-queue"}
+        self.assertTrue(check_api_page_access("consultation/rooms/", "GET", allowed))
+        self.assertTrue(check_api_page_access("consultation/sessions/", "GET", allowed))
+        self.assertTrue(check_api_page_access("consultation/queue/", "GET", allowed))
+
     def test_patient_detail_allowed_for_clinical_modules(self):
         allowed = {"/consultation/start"}
         self.assertTrue(check_api_page_access("patients/42/", "GET", allowed))
