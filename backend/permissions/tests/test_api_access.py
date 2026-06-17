@@ -30,13 +30,23 @@ class ApiAccessTests(SimpleTestCase):
         self.assertTrue(check_api_page_access("consultation/sessions/", "GET", allowed))
         self.assertTrue(check_api_page_access("consultation/queue/", "GET", allowed))
 
+    def test_consultation_api_allowed_for_nursing_pool_queue_page(self):
+        allowed = {"/nursing/pool-queue"}
+        self.assertTrue(check_api_page_access("consultation/rooms/", "GET", allowed))
+        self.assertTrue(check_api_page_access("consultation/sessions/", "GET", allowed))
+        self.assertTrue(check_api_page_access("consultation/queue/", "GET", allowed))
+
     def test_patient_detail_allowed_for_clinical_modules(self):
         allowed = {"/consultation/start"}
         self.assertTrue(check_api_page_access("patients/42/", "GET", allowed))
 
-    def test_patient_list_denied_for_consultation_only(self):
+    def test_patient_list_allowed_for_consultation_only(self):
         allowed = {"/consultation/start"}
-        self.assertFalse(check_api_page_access("patients/", "GET", allowed))
+        self.assertTrue(check_api_page_access("patients/", "GET", allowed))
+
+    def test_patient_list_allowed_for_laboratory_orders(self):
+        allowed = {"/laboratory/orders"}
+        self.assertTrue(check_api_page_access("patients/", "GET", allowed))
 
     def test_auth_exempt(self):
         self.assertTrue(check_api_page_access("accounts/auth/token/", "POST", set()))

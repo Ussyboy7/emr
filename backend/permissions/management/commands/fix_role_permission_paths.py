@@ -35,6 +35,7 @@ class Command(BaseCommand):
             "/consultation/dashboard": "/consultation",
             "/physiotherapy/pool-queue": "/physiotherapy/orders",
             "/nursing/patient-vitals": "/nursing/vitals-history",
+            "/medical-records/dependents": "/medical-records/patients",
             "/medical-records/reports/attendance-summary": "/medical-records/reports/attendance-statistics",
             "/medical-records/reports/clinic-attendance": "/medical-records/reports/clinic-statistics",
             "/medical-records/reports/gop-attendance": "/medical-records/reports/clinic-statistics",
@@ -61,6 +62,12 @@ class Command(BaseCommand):
                     continue
                 seen.add(key)
                 deduped.append(p)
+
+            # Backfill newer Medical Records pages for older "records" roles.
+            if role.type == "records":
+                for required in ("/medical-records/patient-records", "/medical-records/coding"):
+                    if required not in deduped:
+                        deduped.append(required)
 
             shape_mismatch = not isinstance(raw, list)
             path_changed = deduped != pages

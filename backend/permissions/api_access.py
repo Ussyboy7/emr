@@ -46,6 +46,8 @@ MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "/medical-records/coding",
             # Nursing room queue page fetches consultation rooms/sessions/queue APIs.
             "/nursing/room-queue",
+            # Nursing pool queue also fetches consultation queue/session APIs.
+            "/nursing/pool-queue",
         ),
     ),
     ("laboratory/", ("/laboratory",)),
@@ -204,6 +206,12 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
                 or api_path.startswith("patients/counts")
             ):
                 return user_has_clinical_module_access(allowed_pages)
+            # Clinical modules (Lab/Radiology/Consultation/etc.) need patient search/list
+            # for order-entry flows (e.g. New External Lab Request).
+            if _PATIENT_LIST.match(api_path.rstrip("/")):
+                return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
+                    allowed_pages, MEDICAL_RECORDS_PAGES
+                )
             return user_has_any_page(allowed_pages, MEDICAL_RECORDS_PAGES)
         if _PATIENT_LIST.match(api_path.rstrip("/")):
             return user_has_any_page(

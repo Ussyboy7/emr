@@ -20,6 +20,10 @@ describe('normalizeRolePagePath', () => {
   it('maps legacy nursing patient-vitals to vitals-history', () => {
     expect(normalizeRolePagePath('/nursing/patient-vitals')).toBe('/nursing/vitals-history');
   });
+
+  it('maps legacy medical-records dependents to patients', () => {
+    expect(normalizeRolePagePath('/medical-records/dependents')).toBe('/medical-records/patients');
+  });
 });
 
 describe('normalizeRolePagePaths', () => {

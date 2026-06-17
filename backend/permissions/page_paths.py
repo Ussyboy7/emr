@@ -8,6 +8,8 @@ GLOBAL_USER_PAGES = frozenset({"/notifications", "/settings", "/help"})
 LEGACY_PAGE_PATH_ALIASES = {
     "/consultation/dashboard": "/consultation",
     "/nursing/patient-vitals": "/nursing/vitals-history",
+    # Legacy path used by older seeds/UI; dependents are managed via Patients.
+    "/medical-records/dependents": "/medical-records/patients",
     "/medical-records/reports/attendance-summary": "/medical-records/reports/attendance-statistics",
     "/medical-records/reports/clinic-attendance": "/medical-records/reports/clinic-statistics",
     "/medical-records/reports/gop-attendance": "/medical-records/reports/clinic-statistics",

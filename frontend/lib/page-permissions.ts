@@ -129,6 +129,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
 const LEGACY_PAGE_PATH_ALIASES: Record<string, string> = {
   "/consultation/dashboard": "/consultation",
   "/nursing/patient-vitals": "/nursing/vitals-history",
+  "/medical-records/dependents": "/medical-records/patients",
   "/medical-records/reports/attendance-summary": "/medical-records/reports/attendance-statistics",
   "/medical-records/reports/clinic-attendance": "/medical-records/reports/clinic-statistics",
   "/medical-records/reports/gop-attendance": "/medical-records/reports/clinic-statistics",
