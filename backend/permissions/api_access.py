@@ -225,6 +225,11 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
 
     if api_path.startswith("visits/"):
         if not _is_write(method):
+            if _VISIT_LIST.match(api_path.rstrip("/")):
+                # Nursing pool queue and other clinical modules consume visit lists.
+                return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
+                    allowed_pages, MEDICAL_RECORDS_PAGES
+                )
             if (
                 _VISIT_DETAIL.match(api_path)
                 or "resolve" in api_path
@@ -257,12 +262,14 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
     if api_path.startswith("vitals/"):
         read_pages = (
             "/nursing",
+            "/nursing/pool-queue",
             "/nursing/vitals-history",
             "/consultation",
             "/medical-records",
             "/medical-records/patient-records",
         )
         write_pages = (
+            "/nursing/pool-queue",
             "/nursing/vitals-history",
             "/nursing/patient-vitals",
             "/nursing",

@@ -95,6 +95,10 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/consultation/start"}
         self.assertTrue(check_api_page_access("visits/", "POST", allowed))
 
+    def test_visit_list_allowed_for_nursing_pool_queue(self):
+        allowed = {"/nursing/pool-queue"}
+        self.assertTrue(check_api_page_access("visits/", "GET", allowed))
+
     def test_visit_update_allowed_from_nursing(self):
         allowed = {"/nursing"}
         self.assertTrue(check_api_page_access("visits/99/", "PATCH", allowed))
@@ -105,6 +109,11 @@ class ApiAccessTests(SimpleTestCase):
 
     def test_vitals_write_allowed_for_nursing_vitals(self):
         allowed = {"/nursing/patient-vitals"}
+        self.assertTrue(check_api_page_access("vitals/", "POST", allowed))
+
+    def test_vitals_read_and_write_allowed_for_nursing_pool_queue(self):
+        allowed = {"/nursing/pool-queue"}
+        self.assertTrue(check_api_page_access("vitals/latest-by-visits/", "GET", allowed))
         self.assertTrue(check_api_page_access("vitals/", "POST", allowed))
 
     def test_admissions_api_allowed_for_ward_pages(self):
