@@ -2,16 +2,11 @@
 
 from rest_framework.permissions import BasePermission
 
-HR_SYSTEM_ROLES = frozenset(
-    {
-        "Human Resources Officer",
-        "Human Resources",
-    }
-)
+from permissions.user_capabilities import user_has_capability
 
 
 class IsHumanResources(BasePermission):
-    """Allow HR staff and superusers only."""
+    """HR compliance capability or superuser."""
 
     message = "Human Resources access required."
 
@@ -21,5 +16,4 @@ class IsHumanResources(BasePermission):
             return False
         if user.is_superuser:
             return True
-        role = (getattr(user, "system_role", None) or "").strip()
-        return role in HR_SYSTEM_ROLES
+        return user_has_capability(user, "hr_compliance_manage")

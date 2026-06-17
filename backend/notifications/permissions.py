@@ -2,14 +2,11 @@
 
 from rest_framework.permissions import BasePermission
 
+from permissions.user_capabilities import user_has_capability
+
 
 class CanManageNotificationRouting(BasePermission):
-    """
-    Staff/superuser or System Administrator (clinical admin role).
-
-    Matches how other admin surfaces gate privileged operations without
-    requiring every admin to be Django ``is_staff``.
-    """
+    """Users with notification_routing_manage capability (or staff/superuser)."""
 
     message = "You do not have permission to manage notification routing."
 
@@ -19,5 +16,4 @@ class CanManageNotificationRouting(BasePermission):
             return False
         if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
             return True
-        role = (getattr(user, "system_role", None) or "").strip().lower()
-        return role == "system administrator"
+        return user_has_capability(user, "notification_routing_manage")

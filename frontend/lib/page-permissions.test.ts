@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { groupPagePermissionsByModule, normalizeRolePagePath, normalizeRolePagePaths } from './page-permissions';
+import { convertPermissionsFromBackend, groupPagePermissionsByModule, normalizeRolePagePath, normalizeRolePagePaths, sortPageModules } from './page-permissions';
+
+describe('convertPermissionsFromBackend', () => {
+  it('reads string arrays and legacy pages objects', () => {
+    expect(convertPermissionsFromBackend(['/nursing'])).toEqual(['/nursing']);
+    expect(convertPermissionsFromBackend({ pages: ['/pharmacy'] })).toEqual(['/pharmacy']);
+    expect(convertPermissionsFromBackend(null)).toEqual([]);
+  });
+});
+
+describe('sortPageModules', () => {
+  it('orders known modules before unknown', () => {
+    expect(sortPageModules(['Administration', 'Human Resources', 'Other'])).toEqual([
+      'Human Resources',
+      'Administration',
+      'Other',
+    ]);
+  });
+});
 
 describe('groupPagePermissionsByModule', () => {
   it('groups permissions by module', () => {

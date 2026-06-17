@@ -10,6 +10,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.contrib.auth import update_session_auth_hash
 from django.db import transaction
 from django.db import models
+from django.db.models import Prefetch
 
 from .models import User, SystemRole
 from .serializers import (
@@ -23,6 +24,8 @@ from .serializers import (
 from audit.services import AuditService
 from permissions.drf_permissions import ApiPageAccessPermission
 from permissions.models import Role, UserRole
+from permissions.access_role import sync_system_role_from_access_role
+from permissions.session_version import bump_user_permissions_version
 from permissions.user_management import (
     CanManageUsers,
     assert_department_id_managed,
@@ -69,7 +72,12 @@ class UserViewSet(viewsets.ModelViewSet):
         Note: We keep `retrieve` unscoped so other parts of the app (e.g., displaying the ordering
         doctor's name) can look up staff across modules. Mutations remain protected below.
         """
-        qs = User.objects.all().select_related('clinic', 'department')
+        qs = User.objects.all().select_related('clinic', 'department').prefetch_related(
+            Prefetch(
+                'user_roles',
+                queryset=UserRole.objects.select_related('role').filter(role__is_active=True).order_by('-assigned_at'),
+            )
+        )
 
         if not getattr(self.request, "user", None) or not self.request.user.is_authenticated:
             return qs.none()
@@ -77,7 +85,13 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action in [
             'list', 'create', 'update', 'partial_update', 'destroy', 'reset_password', 'stats',
         ]:
-            return filter_users_by_managed_departments(qs, self.request.user)
+            qs = filter_users_by_managed_departments(qs, self.request.user)
+            access_role = self.request.query_params.get('access_role')
+            if access_role not in (None, '', 'all'):
+                try:
+                    qs = qs.filter(user_roles__role_id=int(access_role)).distinct()
+                except (TypeError, ValueError):
+                    pass
 
         return qs
 
@@ -192,6 +206,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 role=selected_role,
                 assigned_by=self.request.user,
             )
+            sync_system_role_from_access_role(user)
 
         AuditService.log_activity(
             user=self.request.user,
@@ -231,6 +246,11 @@ class UserViewSet(viewsets.ModelViewSet):
             'is_active': old_instance.is_active,
         }
         user = serializer.save()
+        if (
+            "custom_pages_mode" in serializer.validated_data
+            or "custom_pages" in serializer.validated_data
+        ):
+            bump_user_permissions_version(user.pk)
 
         new_values = {
             'username': user.username,

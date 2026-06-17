@@ -5,7 +5,11 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from .models import Role, UserRole
-from .role_permissions import normalize_role_permissions_list
+from .role_permissions import (
+    normalize_role_permissions_list,
+    normalize_role_permissions_payload,
+    normalize_role_capabilities_list,
+)
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -19,12 +23,17 @@ class RoleSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
     def validate_permissions(self, value):
-        return normalize_role_permissions_list(value)
+        return normalize_role_permissions_payload(value)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        if 'permissions' in data:
-            data['permissions'] = normalize_role_permissions_list(instance.permissions)
+        if "permissions" in data:
+            pages = normalize_role_permissions_list(instance.permissions)
+            caps = normalize_role_capabilities_list(instance.permissions)
+            if caps:
+                data["permissions"] = {"pages": pages, "capabilities": caps}
+            else:
+                data["permissions"] = pages
         return data
 
     @extend_schema_field(OpenApiTypes.INT)

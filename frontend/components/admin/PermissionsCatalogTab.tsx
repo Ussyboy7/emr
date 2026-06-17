@@ -34,7 +34,9 @@ import {
 import { adminService, type Role as ApiRole } from "@/lib/services";
 import {
   ALL_PAGE_PERMISSIONS,
+  convertPermissionsFromBackend,
   normalizeRolePagePaths,
+  PAGE_MODULE_ORDER,
   type PagePermission,
 } from "@/lib/page-permissions";
 
@@ -46,34 +48,6 @@ type RoleLite = {
   is_active: boolean;
   pages: string[];
 };
-
-const MODULE_ORDER = [
-  "Overview",
-  "User",
-  "Medical Records",
-  "Nursing",
-  "Consultation",
-  "Laboratory",
-  "Pharmacy",
-  "Radiology",
-  "Physiotherapy",
-  "Eye Clinic",
-  "Analytics",
-  "Administration",
-];
-
-function convertPermissionsFromBackend(raw: ApiRole["permissions"]): string[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) {
-    return raw.filter((p): p is string => typeof p === "string");
-  }
-  if (typeof raw === "object" && Array.isArray((raw as Record<string, unknown>).pages)) {
-    return ((raw as Record<string, unknown>).pages as unknown[]).filter(
-      (p): p is string => typeof p === "string",
-    );
-  }
-  return [];
-}
 
 /**
  * Permissions Catalog tab.
@@ -162,8 +136,8 @@ export function PermissionsCatalogTab() {
   }, [moduleFilter, rolesByPage, search, usageFilter]);
 
   const orderedModules = useMemo(() => {
-    const known = MODULE_ORDER.filter((m) => groupedPages[m]?.length);
-    const unknown = Object.keys(groupedPages).filter((m) => !MODULE_ORDER.includes(m));
+    const known = PAGE_MODULE_ORDER.filter((m) => groupedPages[m]?.length);
+    const unknown = Object.keys(groupedPages).filter((m) => !PAGE_MODULE_ORDER.includes(m as (typeof PAGE_MODULE_ORDER)[number]));
     return [...known, ...unknown.sort()];
   }, [groupedPages]);
 
@@ -286,7 +260,7 @@ export function PermissionsCatalogTab() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All modules</SelectItem>
-                  {MODULE_ORDER.map((m) => (
+                  {PAGE_MODULE_ORDER.map((m) => (
                     <SelectItem key={m} value={m}>
                       {m}
                     </SelectItem>

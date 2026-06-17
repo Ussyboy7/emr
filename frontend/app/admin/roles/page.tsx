@@ -18,24 +18,32 @@ import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type Role as ApiRole } from "@/lib/services";
 import {
   ALL_PAGE_PERMISSIONS,
+  convertPermissionsFromBackend,
   normalizeRolePagePaths,
+  PAGE_MODULE_ORDER,
   type PagePermission,
 } from "@/lib/page-permissions";
 import {
-  Shield, Search, Plus, Edit, Trash2, Eye, Users, Copy, Check,
-  Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList,
-  Building2, Settings, Lock, Key, AlertTriangle, CheckCircle2, Loader2,
-  UserCog
+  ALL_CAPABILITIES,
+  convertCapabilitiesFromBackend,
+  groupCapabilitiesByModule,
+  SENSITIVE_CAPABILITY_IDS,
+} from "@/lib/capabilities";
+import { PermissionsCatalogTab } from "@/components/admin/PermissionsCatalogTab";
+import { EffectiveAccessPreview } from "@/components/admin/EffectiveAccessPreview";
+import {
+  Shield, Search, Plus, Edit, Trash2, Eye, Users, Lock, Key, AlertTriangle, CheckCircle2, Loader2,
+  Stethoscope, Building2, Settings, UserCog, Check, Copy,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
-import { PermissionsCatalogTab } from "@/components/admin/PermissionsCatalogTab";
 
 interface Role {
   id: string;
   name: string;
   description: string;
   type: 'System' | 'Clinical' | 'Administrative' | 'Custom';
-  permissions: string[]; // Now contains page URLs instead of permission IDs
+  permissions: string[];
+  capabilities: string[];
   userCount: number;
   isActive: boolean;
   createdAt: string;
@@ -104,6 +112,7 @@ export default function RolesPermissionsPage() {
     description: '',
     type: 'Clinical' as Role['type'],
     permissions: [] as string[],
+    capabilities: [] as string[],
     isActive: true,
   });
 
@@ -137,24 +146,11 @@ export default function RolesPermissionsPage() {
     return typeMap[frontendType] || 'custom';
   };
 
-  // Convert permissions from backend JSON format to frontend array of path strings
-  const convertPermissionsFromBackend = (backendPerms: any): string[] => {
-    if (Array.isArray(backendPerms)) {
-      return backendPerms.filter((p): p is string => typeof p === "string");
-    }
-    if (backendPerms && typeof backendPerms === "object" && Array.isArray(backendPerms.pages)) {
-      return backendPerms.pages.filter((p: unknown): p is string => typeof p === "string");
-    }
-    return [];
-  };
-
   // Convert permissions from frontend array format to backend page-based format
-  const convertPermissionsToBackend = (frontendPerms: string[]): Record<string, string[]> => {
-    // Backend expects: {module: [pages]}
-    // For now, group all permissions under a generic "pages" module
-    return {
-      pages: frontendPerms
-    };
+  const convertPermissionsToBackend = (pages: string[], capabilities: string[]) => {
+    const payload: { pages: string[]; capabilities?: string[] } = { pages };
+    if (capabilities.length > 0) payload.capabilities = capabilities;
+    return payload;
   };
 
   const loadRoleStats = useCallback(async () => {
@@ -191,6 +187,7 @@ export default function RolesPermissionsPage() {
         description: role.description || '',
         type: mapRoleType(role.type),
         permissions: normalizeRolePagePaths(convertPermissionsFromBackend(role.permissions)),
+        capabilities: convertCapabilitiesFromBackend(role.permissions),
         userCount: role.user_count || 0,
         isActive: role.is_active,
         createdAt: toApiDateFromInstant(role.created_at),
@@ -264,10 +261,38 @@ export default function RolesPermissionsPage() {
     }));
   };
 
-  const resetForm = () => { setFormData({ name: '', description: '', type: 'Clinical', permissions: [], isActive: true }); };
+  const resetForm = () => { setFormData({ name: '', description: '', type: 'Clinical', permissions: [], capabilities: [], isActive: true }); };
   const openCreate = () => { resetForm(); setIsCreateDialogOpen(true); };
   const openView = (role: Role) => { setSelectedRole(role); setIsViewDialogOpen(true); };
-  const openEdit = (role: Role) => { setSelectedRole(role); setFormData({ name: role.name, description: role.description, type: role.type, permissions: role.permissions, isActive: role.isActive }); setIsEditDialogOpen(true); };
+  const openEdit = (role: Role) => {
+    setSelectedRole(role);
+    setFormData({
+      name: role.name,
+      description: role.description,
+      type: role.type,
+      permissions: role.permissions,
+      capabilities: role.capabilities,
+      isActive: role.isActive,
+    });
+    setIsEditDialogOpen(true);
+  };
+  const openDuplicate = (role: Role) => {
+    const supportName = role.name.endsWith(' Support')
+      ? `${role.name} (Copy)`
+      : `${role.name} Support`;
+    setSelectedRole(null);
+    setFormData({
+      name: supportName,
+      description: role.description
+        ? `${role.description} — support-level access (review pages and capabilities).`
+        : 'Support-level access — review pages and capabilities before assigning.',
+      type: role.type === 'System' ? 'Custom' : role.type,
+      permissions: [...role.permissions],
+      capabilities: role.capabilities.filter((cap) => !SENSITIVE_CAPABILITY_IDS.includes(cap as typeof SENSITIVE_CAPABILITY_IDS[number])),
+      isActive: true,
+    });
+    setIsCreateDialogOpen(true);
+  };
   const openDelete = (role: Role) => { setSelectedRole(role); setIsDeleteDialogOpen(true); };
 
   // System role functions
@@ -354,7 +379,7 @@ export default function RolesPermissionsPage() {
         name: formData.name,
         description: formData.description,
         type: mapToBackendType(formData.type),
-        permissions: convertPermissionsToBackend(formData.permissions),
+        permissions: convertPermissionsToBackend(formData.permissions, formData.capabilities),
         is_active: formData.isActive,
       });
       
@@ -380,7 +405,7 @@ export default function RolesPermissionsPage() {
         name: formData.name,
         description: formData.description,
         type: mapToBackendType(formData.type),
-        permissions: convertPermissionsToBackend(formData.permissions),
+        permissions: convertPermissionsToBackend(formData.permissions, formData.capabilities),
         is_active: formData.isActive,
       });
       
@@ -565,6 +590,15 @@ export default function RolesPermissionsPage() {
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(role)}>
                             <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            title="Duplicate as support role"
+                            onClick={() => openDuplicate(role)}
+                          >
+                            <Copy className="h-4 w-4 text-muted-foreground hover:text-purple-500" />
+                          </Button>
                           {role.type !== 'System' && (
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700" onClick={() => openDelete(role)}>
                               <Trash2 className="h-4 w-4" />
@@ -694,7 +728,11 @@ export default function RolesPermissionsPage() {
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{isCreateDialogOpen ? 'Create Role' : 'Edit Role'}</DialogTitle><DialogDescription>{isCreateDialogOpen ? 'Define a new role with specific permissions' : `Update "${selectedRole?.name}" role settings`}</DialogDescription></DialogHeader>
             <Tabs defaultValue="details" className="mt-4">
-              <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="details">Role Details</TabsTrigger><TabsTrigger value="permissions">Pages ({formData.permissions.length})</TabsTrigger></TabsList>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="details">Role Details</TabsTrigger>
+                <TabsTrigger value="permissions">Pages ({formData.permissions.length})</TabsTrigger>
+                <TabsTrigger value="capabilities">Capabilities ({formData.capabilities.length})</TabsTrigger>
+              </TabsList>
               <TabsContent value="details" className="space-y-4 mt-4">
                 <div className="space-y-2"><Label>Role Name *</Label><Input value={formData.name} onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., Senior Nurse" /></div>
                 <div className="space-y-2"><Label>Description</Label><Input value={formData.description} onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))} placeholder="Brief description" /></div>
@@ -702,6 +740,7 @@ export default function RolesPermissionsPage() {
                   <div className="space-y-2"><Label>Role Type</Label><Select value={formData.type} onValueChange={(v) => setFormData(prev => ({ ...prev, type: v as Role['type'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Clinical">Clinical</SelectItem><SelectItem value="Administrative">Administrative</SelectItem><SelectItem value="Custom">Custom</SelectItem></SelectContent></Select></div>
                   <div className="space-y-2"><Label>Status</Label><Select value={formData.isActive ? 'active' : 'inactive'} onValueChange={(v) => setFormData(prev => ({ ...prev, isActive: v === 'active' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent></Select></div>
                 </div>
+                <EffectiveAccessPreview pages={formData.permissions} capabilities={formData.capabilities} />
               </TabsContent>
               <TabsContent value="permissions" className="mt-4">
                 <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
@@ -743,6 +782,44 @@ export default function RolesPermissionsPage() {
                   })}
                 </div>
               </TabsContent>
+              <TabsContent value="capabilities" className="mt-4">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Sensitive actions beyond page access. Some capabilities are also granted automatically by certain pages.
+                </p>
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                  {PAGE_MODULE_ORDER.filter((m) => ALL_CAPABILITIES.some((c) => c.module === m)).map((module) => {
+                    const caps = ALL_CAPABILITIES.filter((c) => c.module === module);
+                    return (
+                      <Card key={module}>
+                        <CardHeader className="py-3 px-4">
+                          <CardTitle className="text-base">{module}</CardTitle>
+                        </CardHeader>
+                        <CardContent className="py-2 px-4 space-y-2">
+                          {caps.map((cap) => (
+                            <label key={cap.id} className="flex items-start gap-2 text-sm cursor-pointer">
+                              <Checkbox
+                                checked={formData.capabilities.includes(cap.id)}
+                                onCheckedChange={(checked) => {
+                                  setFormData((prev) => {
+                                    const cur = new Set(prev.capabilities);
+                                    if (checked) cur.add(cap.id);
+                                    else cur.delete(cap.id);
+                                    return { ...prev, capabilities: Array.from(cur) };
+                                  });
+                                }}
+                              />
+                              <span>
+                                <span className="font-medium">{cap.name}</span>
+                                <span className="block text-xs text-muted-foreground">{cap.description}</span>
+                              </span>
+                            </label>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </TabsContent>
             </Tabs>
             <DialogFooter className="mt-6"><Button variant="outline" onClick={() => { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); }}>Cancel</Button><Button onClick={isCreateDialogOpen ? handleCreate : handleUpdate} disabled={isSubmitting || !formData.name} className="bg-purple-600 hover:bg-purple-700">{isSubmitting ? 'Saving...' : isCreateDialogOpen ? 'Create Role' : 'Save Changes'}</Button></DialogFooter>
           </DialogContent>
@@ -754,6 +831,7 @@ export default function RolesPermissionsPage() {
             {selectedRole && (<div className="space-y-6 mt-4">
               <div className="flex items-center gap-4"><Badge variant="outline" className={getTypeBadgeColor(selectedRole.type)}>{getRoleIcon(selectedRole.type)} {selectedRole.type}</Badge><Badge variant={selectedRole.isActive ? 'default' : 'secondary'}>{selectedRole.isActive ? 'Active' : 'Inactive'}</Badge><span className="text-sm text-muted-foreground">{selectedRole.userCount} users assigned</span></div>
               <div><h4 className="font-medium mb-3">Pages ({selectedRole.permissions.length})</h4><div className="space-y-3">{Object.entries(getPermissionsByModule(selectedRole.permissions)).map(([module, perms]) => (<Card key={module}><CardHeader className="py-2 px-4"><CardTitle className="text-sm">{module}</CardTitle></CardHeader><CardContent className="py-2 px-4"><div className="flex flex-wrap gap-1">{perms.map(p => (<Badge key={p.id} variant="secondary" className="text-xs"><Check className="h-3 w-3 mr-1" />{p.name}</Badge>))}</div></CardContent></Card>))}</div></div>
+              <EffectiveAccessPreview roleId={Number(selectedRole.id)} />
               <div className="text-xs text-muted-foreground"><p>Created: {selectedRole.createdAt}</p><p>Last updated: {selectedRole.updatedAt}</p></div>
             </div>)}
             <DialogFooter><Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button><Button onClick={() => { setIsViewDialogOpen(false); if (selectedRole) openEdit(selectedRole); }}><Edit className="h-4 w-4 mr-2" />Edit Role</Button></DialogFooter>

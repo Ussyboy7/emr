@@ -18,7 +18,7 @@ Guidance for AI coding agents working in this repository.
 - `frontend/scripts/` — frontend-only build utilities (favicon generation, org-data exports). Keep these scoped to frontend tasks.
 - Docker Compose files live at the **repo root** (`docker-compose.{local,stag,prod}.yml`) — not under `deployment/`.
 - **Documentation index**: `docs/README.md` — architecture, API, RBAC, runbook, workflows.
-- After changing UI page permissions: `make docs-check`.
+- After changing UI page permissions or capabilities: `make docs-check`.
 
 ## Backend Commands
 

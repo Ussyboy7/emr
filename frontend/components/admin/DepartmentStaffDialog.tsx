@@ -221,7 +221,9 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
                       <div>
                         <span className="text-sm font-medium">{user.first_name} {user.last_name}</span>
                         <span className="text-xs text-muted-foreground ml-2">{user.email}</span>
-                        {user.system_role && <Badge variant="outline" className="ml-2 text-[10px]">{user.system_role}</Badge>}
+                        {user.access_role_name && (
+                          <Badge variant="outline" className="ml-2 text-[10px]">{user.access_role_name}</Badge>
+                        )}
                       </div>
                       <Button size="sm" variant="ghost" className="h-7" onClick={() => assignUser(user.id)}>
                         <UserPlus className="h-3.5 w-3.5 mr-1" />Add
@@ -267,7 +269,9 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
                       {isHead(user.id) && <Badge variant="secondary" className="text-[10px]">Head</Badge>}
                       {isDeputy(user.id) && <Badge variant="secondary" className="text-[10px]">Deputy</Badge>}
                       {!user.is_active && <Badge variant="secondary" className="text-[10px]">Inactive</Badge>}
-                      {user.system_role && <Badge variant="outline" className="text-[10px]">{user.system_role}</Badge>}
+                      {user.access_role_name && (
+                        <Badge variant="outline" className="text-[10px]">{user.access_role_name}</Badge>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">{user.email}</div>
                   </div>

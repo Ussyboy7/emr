@@ -30,9 +30,10 @@ db-bootstrap:
 docs-schema:
 	bash backend/scripts/generate_schema_diagram.sh
 
-# Fail if frontend page-permissions.ts and backend page_catalog.py diverge
+# Fail if frontend catalogs diverge from backend
 docs-check:
 	python3 scripts/docs/check_page_catalog_sync.py
+	python3 scripts/docs/check_capability_catalog_sync.py
 
 # Local postgres defaults match docker-compose.local.yml (port 5435)
 TEST_DB_ENV=DB_HOST=localhost DB_PORT=5435 DB_NAME=emr_db_local DB_USER=emradmin DB_PASSWORD=emradmin DJANGO_SETTINGS_MODULE=emr_backend.settings_test

@@ -4,7 +4,7 @@ Permissions and Roles models for the EMR system.
 from django.db import models
 from django.conf import settings
 
-from .role_permissions import normalize_role_permissions_list
+from .role_permissions import normalize_role_permissions_list, normalize_role_permissions_payload, normalize_role_capabilities_list
 
 
 class Role(models.Model):
@@ -46,7 +46,7 @@ class Role(models.Model):
         """Always persist permissions as a plain list of path strings (when permissions are written)."""
         update_fields = kwargs.get("update_fields")
         if update_fields is None or "permissions" in update_fields:
-            self.permissions = normalize_role_permissions_list(self.permissions)
+            self.permissions = normalize_role_permissions_payload(self.permissions)
         super().save(*args, **kwargs)
 
     def has_permission(self, module: str, page: str = None) -> bool:

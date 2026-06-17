@@ -4,7 +4,8 @@ the account username or the email (case-insensitive for email).
 """
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
+from rest_framework_simplejwt.tokens import AccessToken
 
 User = get_user_model()
 
@@ -14,6 +15,12 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
     Accepts `username` + `password` from the client. If `username` looks like
     an email, resolve it to the real Django username before authentication.
     """
+
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token["pv"] = getattr(user, "permissions_version", 1)
+        return token
 
     def validate(self, attrs):
         field = User.USERNAME_FIELD
@@ -37,6 +44,20 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
                         "detail": "Multiple accounts use this email. Sign in with your username.",
                     }
                 )
-            # n == 0: leave cred as-is; authenticate() will fail as usual
 
         return super().validate(attrs)
+
+
+class EmailOrUsernameTokenRefreshSerializer(TokenRefreshSerializer):
+    """Re-issue access tokens with the current permissions_version claim."""
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        refresh = self.token_class(attrs["refresh"])
+        user = User.objects.filter(pk=refresh["user_id"]).first()
+        if user is None:
+            return data
+        access = AccessToken.for_user(user)
+        access["pv"] = getattr(user, "permissions_version", 1)
+        data["access"] = str(access)
+        return data

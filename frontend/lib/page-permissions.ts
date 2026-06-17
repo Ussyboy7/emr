@@ -163,6 +163,52 @@ export function normalizeRolePagePaths(paths: string[]): string[] {
   return out;
 }
 
+/** Canonical module display order for role editors and restrict-pages UI. */
+export const PAGE_MODULE_ORDER = [
+  "Overview",
+  "User",
+  "Medical Records",
+  "Nursing",
+  "Consultation",
+  "Laboratory",
+  "Pharmacy",
+  "Radiology",
+  "Physiotherapy",
+  "Eye Clinic",
+  "Human Resources",
+  "Analytics",
+  "Administration",
+] as const;
+
+/** Role.permissions from API — array of paths or legacy `{ pages: string[] }`. */
+export function convertPermissionsFromBackend(
+  raw: string[] | Record<string, unknown> | null | undefined,
+): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.filter((p): p is string => typeof p === "string");
+  }
+  if (typeof raw === "object" && Array.isArray((raw as { pages?: unknown }).pages)) {
+    return ((raw as { pages: unknown[] }).pages).filter(
+      (p): p is string => typeof p === "string",
+    );
+  }
+  return [];
+}
+
+/** Sort module keys using {@link PAGE_MODULE_ORDER}; unknown modules sort last. */
+export function sortPageModules(modules: string[]): string[] {
+  const order = PAGE_MODULE_ORDER as readonly string[];
+  return modules.slice().sort((a, b) => {
+    const ai = order.indexOf(a);
+    const bi = order.indexOf(b);
+    const aRank = ai === -1 ? order.length + 1 : ai;
+    const bRank = bi === -1 ? order.length + 1 : bi;
+    if (aRank !== bRank) return aRank - bRank;
+    return a.localeCompare(b);
+  });
+}
+
 export function groupPagePermissionsByModule(
   pageIds: string[]
 ): Record<string, PagePermission[]> {

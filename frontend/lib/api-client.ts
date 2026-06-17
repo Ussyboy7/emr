@@ -511,6 +511,23 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       lastError = null;
 
       if (response.status === 401 && !skipAuth) {
+        let permissionsStale = false;
+        try {
+          const peek = await response.clone().json();
+          permissionsStale =
+            peek?.code === "permissions_stale" ||
+            (typeof peek?.detail === "object" && peek?.detail?.code === "permissions_stale");
+        } catch {
+          // ignore parse errors
+        }
+        if (permissionsStale) {
+          await logout();
+          if (typeof window !== "undefined") {
+            window.location.replace("/login?reason=permissions_stale");
+          }
+          throw new Error("Your access permissions changed. Please sign in again.");
+        }
+
         const refreshed = await refreshAccessToken();
         if (refreshed) {
           requestHeaders.set("Authorization", `Bearer ${refreshed}`);

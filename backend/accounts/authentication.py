@@ -3,12 +3,29 @@ JWT authentication that periodically updates ``User.last_activity`` for online p
 """
 from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import InvalidToken
 
 from .models import User
 from .presence import ACTIVITY_UPDATE_INTERVAL
 
 # Cookie names mirrored from frontend ``lib/auth-cookie-names.ts``.
 _ACCESS_TOKEN_COOKIE_NAMES = ("emr_access_token", "npa_ecm_access_token")
+
+
+def _validate_permissions_version(user, validated_token) -> None:
+    if user is None or not getattr(user, "is_authenticated", False) or not user.pk:
+        return
+    token_pv = validated_token.get("pv")
+    if token_pv is None:
+        return
+    db_pv = User.objects.filter(pk=user.pk).values_list("permissions_version", flat=True).first() or 1
+    if int(token_pv) != int(db_pv):
+        raise InvalidToken(
+            {
+                "detail": "Your access permissions changed. Please sign in again.",
+                "code": "permissions_stale",
+            }
+        )
 
 
 class JWTCookieAuthentication(JWTAuthentication):
@@ -39,6 +56,12 @@ class JWTCookieAuthentication(JWTAuthentication):
         return user, validated_token
 
 
+    def get_user(self, validated_token):
+        user = super().get_user(validated_token)
+        _validate_permissions_version(user, validated_token)
+        return user
+
+
 class JWTAuthenticationWithActivity(JWTAuthentication):
     """
     After a valid JWT is resolved, bump ``last_activity`` at most once every
@@ -49,6 +72,8 @@ class JWTAuthenticationWithActivity(JWTAuthentication):
         user = super().get_user(validated_token)
         if user is None or not user.is_authenticated or not user.pk:
             return user
+
+        _validate_permissions_version(user, validated_token)
 
         now = timezone.now()
         threshold = now - ACTIVITY_UPDATE_INTERVAL

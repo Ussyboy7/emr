@@ -104,7 +104,7 @@ export const TopBar = () => {
 
   const getUserRoleDisplay = () => {
     if (!currentUser) return 'User';
-    return currentUser.systemRole || '';
+    return currentUser.accessRoleName || currentUser.systemRole || '';
   };
 
   const getUserInitials = () => {
@@ -248,10 +248,10 @@ export const TopBar = () => {
                     <div className="flex flex-col min-w-0">
                       <p className="text-sm font-semibold leading-none truncate">{currentUser.name || 'User'}</p>
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">{currentUser.email}</p>
-                      {currentUser.systemRole && (
+                      {(currentUser.accessRoleName || currentUser.systemRole) && (
                         <Badge variant="secondary" className="w-fit mt-1.5 text-[10px]">
                           <Shield className="h-3 w-3 mr-1" />
-                          {currentUser.systemRole}
+                          {currentUser.accessRoleName || currentUser.systemRole}
                         </Badge>
                       )}
                     </div>

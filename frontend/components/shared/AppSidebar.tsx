@@ -89,8 +89,8 @@ interface MenuSection {
   basePath: string;
 }
 
-// Menu configuration
-const menuSections: MenuSection[] = [
+// Menu configuration — exported for catalog alignment tests.
+export const menuSections: MenuSection[] = [
   {
     label: "Medical Records",
     icon: FileText,

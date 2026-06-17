@@ -38,9 +38,11 @@ interface ApiUser {
   department?: string | { name?: string };
   system_role?: string | { name?: string };
   system_role_name?: string;
+  access_role_name?: string;
   permissions?: {
     pages?: string[];
     actions?: Record<string, unknown>;
+    capabilities?: string[];
   };
   is_active?: boolean;
   is_superuser?: boolean;
@@ -65,18 +67,9 @@ const toOptionalString = (value: unknown): string | undefined => {
 
 const mapApiUserToUser = (data: ApiUser): User => {
   const name = `${data.first_name ?? ""} ${data.last_name ?? ""}`.trim();
-  // system_role is now a ForeignKey (UUID), but backend returns system_role_name for display
-  let roleName = data.system_role_name ?? (typeof data.system_role === 'object' && data.system_role?.name ? data.system_role.name : "");
-  // UUID pattern to detect if we accidentally got a UUID instead of a name
-  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  // Never use UUID as role name
-  if (uuidPattern.test(roleName)) {
-    roleName = "";
-  }
-  // If user is superuser and no role name, default to "System Administrator"
-  if (!roleName && data.is_superuser) {
-    roleName = "System Administrator";
-  }
+  const accessRoleName =
+    (typeof data.access_role_name === "string" && data.access_role_name) || "";
+  const displayRole = accessRoleName || (data.is_superuser ? "System Administrator" : "");
   return {
     id: String(data.id ?? data.username),
     username: data.username ?? undefined,
@@ -87,8 +80,12 @@ const mapApiUserToUser = (data: ApiUser): User => {
     directorate: (data.directorate_name || (typeof data.directorate === 'string' ? data.directorate : (data.directorate as any)?.name) || '') as string,
     division: toOptionalString(data.division_name ?? (typeof data.division === 'string' ? data.division : data.division?.name)),
     department: toOptionalString(data.department_name ?? (typeof data.department === 'string' ? data.department : data.department?.name)),
-    systemRole: (typeof data.system_role === 'string' ? data.system_role : (data.system_role as any)?.name) || roleName,
+    systemRole: displayRole,
+    accessRoleName: accessRoleName || undefined,
     permissions: (data.permissions as any)?.pages || [],
+    capabilities: Array.isArray((data.permissions as any)?.capabilities)
+      ? ((data.permissions as any).capabilities as string[])
+      : [],
     permissionActions: (data.permissions as any)?.actions || {},
     avatar: undefined,
     active: data.is_active ?? true,
@@ -208,6 +205,8 @@ export const useCurrentUser = () => {
       ...orgMatch,
       ...remoteUser,
       systemRole: remoteUser.systemRole,
+      accessRoleName: remoteUser.accessRoleName,
+      capabilities: remoteUser.capabilities,
       permissions: remoteUser.permissions,
       permissionActions: remoteUser.permissionActions,
       isSuperuser: remoteUser.isSuperuser ?? false,

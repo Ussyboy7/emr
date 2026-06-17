@@ -16,6 +16,8 @@ export interface User {
   employee_id?: string;
   phone?: string;
   system_role?: string;
+  access_role_id?: number | null;
+  access_role_name?: string;
   is_active: boolean;
   is_staff: boolean;
   date_joined: string;
@@ -141,6 +143,7 @@ class AdminService {
    */
   async getUsers(params?: {
     system_role?: string;
+    access_role?: number | string;
     is_active?: boolean;
     department?: number;
     search?: string;
@@ -156,6 +159,13 @@ class AdminService {
     by_system_role: Record<string, number>;
   }> {
     return apiFetch('/accounts/users/stats/');
+  }
+
+  async getUserRoleAssignmentSummary(): Promise<{
+    assignments: number;
+    unique_users: number;
+  }> {
+    return apiFetch('/permissions/user-roles/summary/');
   }
 
   /**
@@ -345,6 +355,17 @@ class AdminService {
   async getRoleUsers(roleId: number): Promise<User[]> {
     const response = await apiFetch<{ results: User[] }>(`/permissions/roles/${roleId}/users/`);
     return response.results || [];
+  }
+
+  async getRoleEffectiveAccess(roleId: number): Promise<{
+    pages: string[];
+    capabilities: string[];
+    explicit_capabilities: string[];
+    implied_capabilities: string[];
+    capability_details: { id: string; name: string; module: string; description: string }[];
+    api_families: { page: string; pattern: string; methods: string; note: string }[];
+  }> {
+    return apiFetch(`/permissions/roles/${roleId}/effective-access/`);
   }
 
   /**

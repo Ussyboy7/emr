@@ -11,7 +11,7 @@ from rest_framework_simplejwt.views import (
 from rest_framework import status
 from audit.services import AuditService
 
-from .jwt_serializers import EmailOrUsernameTokenObtainPairSerializer
+from .jwt_serializers import EmailOrUsernameTokenObtainPairSerializer, EmailOrUsernameTokenRefreshSerializer
 from .models import User as AccountUser
 
 
@@ -125,6 +125,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 class CustomTokenRefreshView(TokenRefreshView):
     """Token refresh with scoped rate limiting."""
 
+    serializer_class = EmailOrUsernameTokenRefreshSerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "auth_refresh"
 

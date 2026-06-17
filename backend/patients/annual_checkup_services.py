@@ -23,11 +23,13 @@ from .models import AnnualCheckup, MedicalHistory, Patient, Visit, VitalReading
 
 
 def _require_medical_doctor(user) -> None:
-    role = getattr(user, "system_role", None)
+    from permissions.user_capabilities import user_has_capability
+
     if user.is_superuser:
         return
-    if role != "Medical Doctor":
-        raise PermissionDenied("Only Medical Doctors can sign off annual check-ups.")
+    if user_has_capability(user, "annual_checkup_signoff"):
+        return
+    raise PermissionDenied("You do not have permission to sign off annual check-ups.")
 
 
 def _normalize_name(value: str) -> str:

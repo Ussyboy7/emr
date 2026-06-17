@@ -34,7 +34,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from patients.permissions import is_system_admin_user
+from patients.permissions import can_merge_patient, can_unmerge_patient
 
 from patients.models import (
     MedicalHistory,
@@ -128,8 +128,13 @@ def _import_model(qualified_name: str):
 
 
 def _require_admin(user) -> None:
-    if not is_system_admin_user(user):
-        raise PermissionDenied("Only super admin or admin users can merge patients.")
+    if not can_merge_patient(user):
+        raise PermissionDenied("You do not have permission to merge patients.")
+
+
+def _require_unmerge(user) -> None:
+    if not can_unmerge_patient(user):
+        raise PermissionDenied("You do not have permission to un-merge patients.")
 
 
 def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
@@ -312,7 +317,7 @@ def unmerge_patients(audit_id: int, user) -> dict:
         ValidationError if the audit row has no repointed_rows data
             (legacy merge that cannot be automatically reversed).
     """
-    _require_admin(user)
+    _require_unmerge(user)
 
     with transaction.atomic():
         audit = PatientMerge.objects.select_related(

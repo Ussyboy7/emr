@@ -75,6 +75,7 @@ import labService, { type LabTemplate } from "@/lib/services/lab-service";
 import { radiologyService, type RadiologyTemplate } from "@/lib/services/radiology-service";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/lib/pagination-constants";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { canEditAnnualCheckupProgramme } from "@/lib/patient-permissions";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 function codesToString(codes?: string[]) {
@@ -232,8 +233,7 @@ export default function AnnualCheckupProgrammePage() {
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatePickerSearch, setTemplatePickerSearch] = useState("");
 
-  const isAdmin =
-    currentUser?.isSuperuser || currentUser?.systemRole === "System Administrator";
+  const isAdmin = canEditAnnualCheckupProgramme(currentUser);
 
   const load = useCallback(async () => {
     setLoading(true);

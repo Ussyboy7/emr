@@ -92,6 +92,8 @@ export type User = {
   division?: string;
   department?: string;
   systemRole: string;
+  accessRoleName?: string;
+  capabilities?: string[];
   permissions?: string[]; // Page URLs for sidebar filtering
   permissionActions?: Record<string, string[]>; // Action counts for UI display
   avatar?: string;

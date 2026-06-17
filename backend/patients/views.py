@@ -65,6 +65,9 @@ from audit.services import AuditService
 from .permissions import (
     can_manage_patient_lifecycle,
     is_system_admin_user,
+    can_delete_patient,
+    can_merge_patient,
+    can_unmerge_patient,
     requires_lifecycle_category_change,
 )
 from .workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
@@ -414,8 +417,8 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """
         Restrict patient deletion to super admin/admin users.
         """
-        if not is_system_admin_user(request.user):
-            raise PermissionDenied('Only super admin or admin users can delete patients.')
+        if not can_delete_patient(request.user):
+            raise PermissionDenied('Only users with patient delete permission can delete patients.')
         return super().destroy(request, *args, **kwargs)
     
     @extend_schema(tags=["Patients"], summary="Counts", description="Return total and per-category patient counts (active only, not filtered by search/filters).")
@@ -662,8 +665,8 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         Permission: super admin or system administrator / admin staff.
         """
-        if not is_system_admin_user(request.user):
-            raise PermissionDenied('Only super admin or admin users can merge patients.')
+        if not can_merge_patient(request.user):
+            raise PermissionDenied('You do not have permission to merge patients.')
 
         winner_id = request.data.get('winner_id')
         reason = (request.data.get('reason') or '').strip()
@@ -759,8 +762,8 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
               merged_into, etc.).
             - An un-merge audit row is written.
         """
-        if not is_system_admin_user(request.user):
-            raise PermissionDenied('Only super admin or admin users can un-merge patients.')
+        if not can_unmerge_patient(request.user):
+            raise PermissionDenied('You do not have permission to un-merge patients.')
 
         from .models import PatientMerge
 
@@ -1648,8 +1651,11 @@ class AnnualCheckupViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         year = int(request.query_params.get("programme_year") or date.today().year)
         if request.method == "GET":
-            role = getattr(request.user, "system_role", None)
-            is_admin = request.user.is_superuser or role == "System Administrator"
+            from permissions.user_capabilities import user_has_capability
+
+            is_admin = request.user.is_superuser or user_has_capability(
+                request.user, "annual_checkup_programme_catalog_admin"
+            )
             catalog_source = get_full_catalog() if is_admin else get_active_catalog()
             catalog = [serialize_catalog_entry(d) for d in catalog_source]
             return Response(
@@ -1660,9 +1666,12 @@ class AnnualCheckupViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 }
             )
 
-        role = getattr(request.user, "system_role", None)
-        if not request.user.is_superuser and role != "System Administrator":
-            raise PermissionDenied("Only system administrators can edit programme settings.")
+        from permissions.user_capabilities import user_has_capability
+
+        if not request.user.is_superuser and not user_has_capability(
+            request.user, "annual_checkup_programme_edit"
+        ):
+            raise PermissionDenied("You do not have permission to edit programme settings.")
 
         catalog_creates = request.data.get("catalog_creates")
         catalog_updates = request.data.get("catalog_updates")

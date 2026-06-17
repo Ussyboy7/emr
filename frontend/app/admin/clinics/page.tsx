@@ -445,46 +445,14 @@ export default function ClinicDepartmentPage() {
         return;
       }
 
-      // Filter users based on department's matching roles
-      const roleMappings: Record<string, string[]> = {
-        'CONSULT': ['Medical Doctor'],
-        'LAB': ['Laboratory Scientist'],
-        'MED-REC': ['Medical Records Officer'],
-        'NURSING': ['Nursing Officer'],
-        'PHARM': ['Pharmacist'],
-        'PHYSIO': ['Physiotherapist'],
-        'RAD': ['Radiologist'],
-        // Also check by name for flexibility
-        'Consultation': ['Medical Doctor'],
-        'Laboratory': ['Laboratory Scientist'],
-        'Medical Records': ['Medical Records Officer'],
-        'Nursing': ['Nursing Officer'],
-        'Pharmacy': ['Pharmacist'],
-        'Physiotherapy': ['Physiotherapist'],
-        'Radiology': ['Radiologist'],
-      };
-
-      const deptCode = String(department.code || '');
-      const deptName = String(department.name || '');
-      const matchingRoles = (roleMappings[deptCode] || roleMappings[deptName] || []) as string[];
-      const perRole = await Promise.all(
-        matchingRoles.map((roleName) =>
-          adminService
-            .getUsers({
-              system_role: roleName,
-              is_active: true,
-              page: 1,
-              page_size: MAX_LIST_PAGE_SIZE,
-            })
-            .catch(() => ({ results: [] as any[] })),
-        ),
-      );
-      const rows = perRole.flatMap((r) => r.results || []);
-      const uniq = new Map<number, any>();
-      rows.forEach((u) => {
-        if (u && typeof u.id === 'number') uniq.set(u.id, u);
+      // Staff assigned to this department (access role is shown per user).
+      const response = await adminService.getUsers({
+        department: deptId,
+        is_active: true,
+        page: 1,
+        page_size: MAX_LIST_PAGE_SIZE,
       });
-      setDeptUsers(Array.from(uniq.values()));
+      setDeptUsers(response.results || []);
     } catch (err: any) {
       console.error('Error loading department details:', err);
       toast.error('Failed to load department details');
@@ -1185,7 +1153,7 @@ export default function ClinicDepartmentPage() {
                     <SelectItem value="none">None</SelectItem>
                     {availableUsers.filter((u) => u.is_active).map((user) => (
                       <SelectItem key={user.id} value={user.id.toString()}>
-                        {user.first_name} {user.last_name} ({user.system_role || 'Staff'})
+                        {user.first_name} {user.last_name} ({user.access_role_name || 'Staff'})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1205,7 +1173,7 @@ export default function ClinicDepartmentPage() {
                     <SelectItem value="none">None</SelectItem>
                     {availableUsers.filter((u) => u.is_active).map((user) => (
                       <SelectItem key={user.id} value={user.id.toString()}>
-                        {user.first_name} {user.last_name} ({user.system_role || 'Staff'})
+                        {user.first_name} {user.last_name} ({user.access_role_name || 'Staff'})
                       </SelectItem>
                     ))}
                   </SelectContent>

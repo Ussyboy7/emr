@@ -94,6 +94,7 @@ class User(AbstractUser):
     ]
     custom_pages_mode = models.CharField(max_length=16, blank=True, default="", choices=CUSTOM_PAGES_MODE_CHOICES)
     custom_pages = models.JSONField(default=list, blank=True, help_text="Page paths used by custom_pages_mode")
+    permissions_version = models.PositiveIntegerField(default=1)
     bio = models.TextField(blank=True, help_text="User biography or notes")
     is_management = models.BooleanField(default=False)
     last_activity = models.DateTimeField(null=True, blank=True, help_text="Last time the user was active")

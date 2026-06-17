@@ -8,7 +8,9 @@ from drf_spectacular.types import OpenApiTypes
 from django.contrib.auth.password_validation import validate_password
 from .models import User, SystemRole
 from permissions.permission_actions import build_permission_action_counts
+from permissions.access_role import get_primary_user_role
 from permissions.user_pages import get_user_allowed_pages_for_response
+from permissions.user_capabilities import get_user_capabilities_for_response
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -24,6 +26,8 @@ class UserSerializer(serializers.ModelSerializer):
     is_department_head = serializers.SerializerMethodField()
     is_department_deputy = serializers.SerializerMethodField()
     headed_departments = serializers.SerializerMethodField()
+    access_role_id = serializers.SerializerMethodField()
+    access_role_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -56,6 +60,8 @@ class UserSerializer(serializers.ModelSerializer):
             "is_department_head",
             "is_department_deputy",
             "headed_departments",
+            "access_role_id",
+            "access_role_name",
             "avatar",
             "last_activity",
             "last_login",
@@ -120,11 +126,24 @@ class UserSerializer(serializers.ModelSerializer):
         from permissions.user_management import headed_departments_for_user
         return headed_departments_for_user(obj)
 
+    @extend_schema_field({"type": "integer", "nullable": True})
+    def get_access_role_id(self, obj):
+        user_role = get_primary_user_role(obj)
+        return user_role.role_id if user_role else None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_access_role_name(self, obj):
+        user_role = get_primary_user_role(obj)
+        if user_role and user_role.role:
+            return user_role.role.name
+        return ""
+
     @extend_schema_field({
     "type": "object",
     "properties": {
         "pages": {"type": "array", "items": {"type": "string"}},
         "actions": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "capabilities": {"type": "array", "items": {"type": "string"}},
     },
 })
     def get_permissions(self, obj):
@@ -132,6 +151,7 @@ class UserSerializer(serializers.ModelSerializer):
         return {
             "pages": get_user_allowed_pages_for_response(obj),
             "actions": build_permission_action_counts(obj),
+            "capabilities": get_user_capabilities_for_response(obj),
         }
 
 

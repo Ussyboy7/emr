@@ -10,8 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -19,14 +17,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type User as ApiUser, type Role as ApiRole } from "@/lib/services";
-import { ALL_PAGE_PERMISSIONS, groupPagePermissionsByModule } from "@/lib/page-permissions";
-import { apiFetch } from "@/lib/api-client";
+import { convertPermissionsFromBackend, groupPagePermissionsByModule, normalizeRolePagePaths, sortPageModules } from "@/lib/page-permissions";
+import { getAccessRoleBadgeClass, getAccessRoleIcon } from "@/lib/access-role-display";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
-  Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
-  Phone, Mail, Calendar, BadgeCheck, AlertTriangle, XCircle, CheckCircle2,
-  Download, Upload, RefreshCw, Filter, UserPlus, Key, Lock, Unlock, Loader2
+  Building2, AlertTriangle, CheckCircle2, UserPlus, Key, Lock, Unlock, Loader2, Stethoscope, Download,
 } from "lucide-react";
 
 // Types
@@ -38,8 +34,8 @@ interface StaffMember {
   lastName: string;
   email: string;
   phone?: string;
-  systemRole?: string;
   accessRoleId?: number;
+  accessRoleName?: string;
   restrictedPages?: string[];
   status: string;
   employeeId?: string;
@@ -62,38 +58,16 @@ interface Department {
   clinic?: number;
 }
 
-interface SystemRole {
-  id: number;
-  name: string;
-  description: string;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-/** Normalize `/accounts/system-roles/` responses — always use API rows only (no hardcoded lists). */
-function parseSystemRolesResponse(raw: unknown): SystemRole[] {
-  if (Array.isArray(raw)) return raw as SystemRole[];
-  if (
-    raw &&
-    typeof raw === "object" &&
-    Array.isArray((raw as { results?: unknown }).results)
-  ) {
-    return (raw as { results: SystemRole[] }).results;
-  }
-  return [];
-}
-
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
-  firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, restrictedPages: [],
+  firstName: '', middleName: '', lastName: '', email: '', phone: '', accessRoleId: undefined, restrictedPages: [],
   username: '', status: 'Active', employeeId: ''
 };
 
 const statuses = ['All Status', 'Active', 'Inactive'];
 
 export default function UserManagementPage() {
-  const { currentUser, hydrated } = useCurrentUser();
+  const { currentUser, hydrated, refresh: refreshCurrentUser } = useCurrentUser();
 
   const isScopedDeptHead = Boolean(
     hydrated &&
@@ -104,9 +78,8 @@ export default function UserManagementPage() {
 
   const headedDepartments = currentUser?.headedDepartments ?? [];
 
-  // System roles (professional identity) - fetched from backend
-  const [systemRoles, setSystemRoles] = useState<string[]>(['All Roles']);
-
+  const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
+  const [usersWithAccessRole, setUsersWithAccessRole] = useState(0);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +88,6 @@ export default function UserManagementPage() {
 
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
   const [allClinics, setAllClinics] = useState<Clinic[]>([]);
   const [allDepartments, setAllDepartments] = useState<Department[]>([]);
   const [departmentFilter, setDepartmentFilter] = useState('all');
@@ -131,27 +103,16 @@ export default function UserManagementPage() {
     return allDepartments;
   }, [isScopedDeptHead, headedDepartments, allDepartments]);
 
-  const staffRoleNames = useMemo(() => {
-    const names = new Set(
-      staff.map((member) => member.systemRole).filter((role): role is string => Boolean(role)),
-    );
-    return Array.from(names).sort();
-  }, [staff]);
-
   const roleFilterOptions = useMemo(() => {
-    if (isScopedDeptHead && staffRoleNames.length > 0) {
-      return ["All Roles", ...staffRoleNames];
-    }
-    return systemRoles;
-  }, [isScopedDeptHead, staffRoleNames, systemRoles]);
+    return accessRoles
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [accessRoles]);
 
   const showDepartmentFilter = !isScopedDeptHead || headedDepartments.length > 1;
-  const showRoleFilter = !isScopedDeptHead || staffRoleNames.length > 1;
+  const showRoleFilter = roleFilterOptions.length > 1;
 
   const formDepartmentOptions = departmentOptions;
-  const formSystemRoleOptions = isScopedDeptHead && staffRoleNames.length > 0
-    ? staffRoleNames
-    : systemRoles.slice(1);
 
   useEffect(() => {
     if (!isScopedDeptHead) return;
@@ -165,16 +126,6 @@ export default function UserManagementPage() {
     setRoleFilter("all");
   }, [showRoleFilter]);
 
-  // System roles management state
-  const [allSystemRoles, setAllSystemRoles] = useState<SystemRole[]>([]);
-  const [systemRoleDialogOpen, setSystemRoleDialogOpen] = useState(false);
-  const [editingSystemRole, setEditingSystemRole] = useState<SystemRole | null>(null);
-  const [systemRoleForm, setSystemRoleForm] = useState({
-    name: '',
-    description: '',
-    is_active: true,
-  });
-  
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
@@ -182,30 +133,16 @@ export default function UserManagementPage() {
 
   const loadRoles = useCallback(async () => {
     try {
-      const rolesResponse = await adminService.getRoles({ page_size: MAX_LIST_PAGE_SIZE });
+      const [rolesResponse, assignmentSummary] = await Promise.all([
+        adminService.getRoles({ page_size: MAX_LIST_PAGE_SIZE }),
+        adminService.getUserRoleAssignmentSummary(),
+      ]);
       // Include inactive roles too so a user's currently-assigned role always appears/selects correctly.
       // (If we filter to active-only, the Select will show empty even though the assignment exists.)
       setAccessRoles(rolesResponse.results || []);
+      setUsersWithAccessRole(assignmentSummary.unique_users ?? 0);
     } catch (err: any) {
       console.error('Error loading roles:', err);
-    }
-  }, []);
-
-  /** Single source of truth for professional identities — one GET, both dropdown + admin table. */
-  const refreshSystemRolesCatalog = useCallback(async () => {
-    try {
-      const raw = await adminService.getSystemRoles();
-      const rolesArray = parseSystemRolesResponse(raw as unknown);
-      setAllSystemRoles(rolesArray);
-      const activeNames = rolesArray.filter((r) => r.is_active).map((r) => r.name);
-      setSystemRoles(["All Roles", ...activeNames]);
-    } catch (err: unknown) {
-      console.error("Error loading system roles:", err);
-      setAllSystemRoles([]);
-      setSystemRoles(["All Roles"]);
-      toast.error(
-        err instanceof Error ? err.message : "Could not load professional identities from the server.",
-      );
     }
   }, []);
 
@@ -227,71 +164,9 @@ export default function UserManagementPage() {
     }
   }, []);
 
-  const handleCreateSystemRole = async () => {
-    try {
-      await apiFetch('/accounts/system-roles/', {
-        method: 'POST',
-        body: JSON.stringify(systemRoleForm),
-      });
-      toast.success('System role created successfully');
-      setSystemRoleDialogOpen(false);
-      setSystemRoleForm({ name: '', description: '', is_active: true });
-      void refreshSystemRolesCatalog();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create system role');
-    }
-  };
-
-  const handleUpdateSystemRole = async () => {
-    if (!editingSystemRole) return;
-    try {
-      await apiFetch(`/accounts/system-roles/${editingSystemRole.id}/`, {
-        method: 'PUT',
-        body: JSON.stringify(systemRoleForm),
-      });
-      toast.success('System role updated successfully');
-      setSystemRoleDialogOpen(false);
-      setEditingSystemRole(null);
-      setSystemRoleForm({ name: '', description: '', is_active: true });
-      void refreshSystemRolesCatalog();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to update system role');
-    }
-  };
-
-  const handleDeleteSystemRole = async (roleId: number) => {
-    if (!confirm('Are you sure you want to delete this system role?')) return;
-    try {
-      await apiFetch(`/accounts/system-roles/${roleId}/`, {
-        method: 'DELETE',
-      });
-      toast.success('System role deleted successfully');
-      void refreshSystemRolesCatalog();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to delete system role');
-    }
-  };
-
-  const openSystemRoleDialog = (role?: SystemRole) => {
-    if (role) {
-      setEditingSystemRole(role);
-      setSystemRoleForm({
-        name: role.name,
-        description: role.description,
-        is_active: role.is_active,
-      });
-    } else {
-      setEditingSystemRole(null);
-      setSystemRoleForm({ name: '', description: '', is_active: true });
-    }
-    setSystemRoleDialogOpen(true);
-  };
-
-  // Load roles and system roles from API
   useEffect(() => {
     loadRoles();
-    void refreshSystemRolesCatalog();
-  }, [loadRoles, refreshSystemRolesCatalog]);
+  }, [loadRoles]);
 
   // Use a ref to track current page to avoid dependency loops
   const currentPageRef = useRef(currentPage);
@@ -306,7 +181,7 @@ export default function UserManagementPage() {
         page: currentPageRef.current,
         page_size: itemsPerPage,
         search: searchQuery || undefined,
-        system_role: roleFilter !== 'all' ? roleFilter : undefined,
+        access_role: roleFilter !== 'all' ? Number(roleFilter) : undefined,
         department: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
       });
@@ -315,14 +190,14 @@ export default function UserManagementPage() {
       // Transform API users to frontend format
       const transformedStaff: StaffMember[] = response.results.map((user: ApiUser) => ({
         id: user.id.toString(),
-        staffId: user.employee_id || `NPA-${user.id}`,
         firstName: user.first_name || '',
         middleName: (user as any).middle_name || '',
         lastName: user.last_name || '',
         email: user.email || '',
         phone: user.phone || '',
         username: user.username || '',
-        systemRole: user.system_role || '',
+        accessRoleId: user.access_role_id ?? undefined,
+        accessRoleName: user.access_role_name || undefined,
         restrictedPages: (user as any).custom_pages_mode === "restrict" && Array.isArray((user as any).custom_pages) ? (user as any).custom_pages : [],
         employeeId: user.employee_id,
         status: user.is_active ? 'Active' : 'Inactive' as StaffMember['status'],
@@ -384,8 +259,8 @@ export default function UserManagementPage() {
     totalRoles: accessRoles.length,
     activeRoles: accessRoles.filter(r => r.is_active).length,
     clinicalRoles: accessRoles.filter(r => ['doctor', 'nurse', 'lab_tech', 'pharmacist', 'radiologist'].includes(r.type)).length,
-    usersWithRoles: totalCount,
-  }), [accessRoles, totalCount]);
+    usersWithRoles: usersWithAccessRole,
+  }), [accessRoles, usersWithAccessRole]);
 
   // Dialog states
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -407,33 +282,15 @@ export default function UserManagementPage() {
   const paginatedStaff = staff;
 
 
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case 'Medical Doctor': return <Stethoscope className="h-4 w-4" />;
-      case 'Nursing Officer': return <Syringe className="h-4 w-4" />;
-      case 'Laboratory Scientist': return <FlaskConical className="h-4 w-4" />;
-      case 'Pharmacist': return <Pill className="h-4 w-4" />;
-      case 'Radiologist': return <ScanLine className="h-4 w-4" />;
-      case 'Medical Records Officer': return <ClipboardList className="h-4 w-4" />;
-      case 'System Administrator': return <Shield className="h-4 w-4" />;
-      case 'Admin Staff': return <UserCog className="h-4 w-4" />;
-      default: return <Users className="h-4 w-4" />;
-    }
-  };
-
-  const getRoleBadgeColor = (role: string) => {
-    switch (role) {
-      case 'Medical Doctor': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
-      case 'Nursing Officer': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30';
-      case 'Laboratory Scientist': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
-      case 'Pharmacist': return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/30';
-      case 'Radiologist': return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30';
-      case 'Medical Records Officer': return 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/30';
-      case 'System Administrator': return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30';
-      case 'Admin Staff': return 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30';
-      default: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30';
-    }
-  };
+  const getStaffAccessRole = useCallback((member: StaffMember) => {
+    const role = member.accessRoleId != null
+      ? accessRoles.find((r) => r.id === member.accessRoleId)
+      : undefined;
+    return {
+      name: member.accessRoleName,
+      type: role?.type,
+    };
+  }, [accessRoles]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -450,12 +307,9 @@ export default function UserManagementPage() {
     if (isScopedDeptHead && headedDepartments.length === 1) {
       defaults.departmentId = headedDepartments[0].id;
     }
-    if (isScopedDeptHead && staffRoleNames.length === 1) {
-      defaults.systemRole = staffRoleNames[0];
-    }
     setFormData(defaults);
     setIsCreateDialogOpen(true);
-  }, [isScopedDeptHead, headedDepartments, staffRoleNames]);
+  }, [isScopedDeptHead, headedDepartments]);
 
   const openEdit = useCallback(async (s: StaffMember) => {
     setSelectedStaff(s);
@@ -541,7 +395,6 @@ export default function UserManagementPage() {
         last_name: formData.lastName,
         email: formData.email,
         phone: formData.phone,
-        system_role: formData.systemRole,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
         department: formData.departmentId || undefined,
@@ -553,10 +406,16 @@ export default function UserManagementPage() {
       if (!newUser.id) {
         throw new Error('User created but no ID returned from server');
       }
+      if (formData.restrictedPages && formData.restrictedPages.length > 0) {
+        await adminService.updateUser(newUser.id, {
+          custom_pages_mode: "restrict",
+          custom_pages: normalizeRolePagePaths(formData.restrictedPages),
+        });
+      }
       toast.success(`${formData.lastName}${formData.firstName ? ` ${formData.firstName}` : ''} has been added`);
       setIsCreateDialogOpen(false);
       setFormData(emptyStaff);
-      await loadStaff(); // Reload staff list
+      await loadStaff();
     } catch (err: any) {
       toast.error(err.message || 'Failed to create staff member');
       console.error('Error creating staff:', err);
@@ -577,12 +436,11 @@ export default function UserManagementPage() {
         last_name: formData.lastName,
         email: formData.email,
         phone: formData.phone,
-        system_role: formData.systemRole,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
         department: formData.departmentId || undefined,
         custom_pages_mode: (formData.restrictedPages && formData.restrictedPages.length > 0) ? "restrict" : "",
-        custom_pages: formData.restrictedPages || [],
+        custom_pages: normalizeRolePagePaths(formData.restrictedPages || []),
         clinics: formData.clinics || [],
       });
 
@@ -599,6 +457,10 @@ export default function UserManagementPage() {
         if (!hasDesired) {
           await adminService.assignRoleToUser(userId, desiredRoleId);
         }
+      }
+
+      if (currentUser && selectedStaff.id === currentUser.id) {
+        await refreshCurrentUser();
       }
       
       toast.success(`${formData.lastName}${formData.firstName ? ` ${formData.firstName}` : ''}'s profile has been updated`);
@@ -799,10 +661,11 @@ export default function UserManagementPage() {
               <div className="flex flex-wrap items-center gap-2">
                 {showRoleFilter && (
                   <Select value={roleFilter} onValueChange={setRoleFilter}>
-                    <SelectTrigger className="w-[150px]"><SelectValue placeholder="Role" /></SelectTrigger>
+                    <SelectTrigger className="w-[180px]"><SelectValue placeholder="Access role" /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="all">All Access Roles</SelectItem>
                       {roleFilterOptions.map((r) => (
-                        <SelectItem key={r} value={r === "All Roles" ? "all" : r}>{r}</SelectItem>
+                        <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -852,7 +715,7 @@ export default function UserManagementPage() {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Staff</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Role</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Access Role</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Department</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Login</th>
@@ -878,10 +741,15 @@ export default function UserManagementPage() {
                           </div>
                         </td>
                         <td className="p-4">
-                          <Badge variant="outline" className={`${getRoleBadgeColor(s.systemRole || '')} flex items-center gap-1 w-fit`}>
-                            {getRoleIcon(s.systemRole || '')}
-                            {s.systemRole || "—"}
-                      </Badge>
+                          {(() => {
+                            const { name, type } = getStaffAccessRole(s);
+                            return (
+                              <Badge variant="outline" className={`${getAccessRoleBadgeClass(type, name)} flex items-center gap-1 w-fit`}>
+                                {getAccessRoleIcon(type, name)}
+                                {name || "—"}
+                              </Badge>
+                            );
+                          })()}
                         </td>
                         <td className="p-4 text-sm text-muted-foreground">{s.departmentName || "—"}</td>
                         <td className="p-4">
@@ -969,10 +837,9 @@ export default function UserManagementPage() {
             </DialogHeader>
             
             <Tabs defaultValue="basic" className="mt-4">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="basic">Basic Info</TabsTrigger>
-                <TabsTrigger value="professional">Professional</TabsTrigger>
-                <TabsTrigger value="assignment">Assignment</TabsTrigger>
+                <TabsTrigger value="access">Access</TabsTrigger>
               </TabsList>
               
               <TabsContent value="basic" className="space-y-4 mt-4">
@@ -1033,48 +900,42 @@ export default function UserManagementPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              </TabsContent>
-
-              <TabsContent value="professional" className="space-y-4 mt-4">
-                <div className="space-y-2">
-                  <Label>System Role</Label>
-                  <Select value={formData.systemRole || ''} onValueChange={(v) => setFormData(prev => ({ ...prev, systemRole: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
-                    <SelectContent>
-                      {formSystemRoleOptions.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Employee ID</Label>
-                  <Input value={formData.employeeId || ''} onChange={(e) => setFormData(prev => ({ ...prev, employeeId: e.target.value }))} placeholder="e.g., NPA-2024-001" />
-                  <p className="text-xs text-muted-foreground">Optional unique employee identifier</p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Department</Label>
-                  <Select
-                    value={formData.departmentId?.toString() || 'none'}
-                    onValueChange={(v) => setFormData(prev => ({ ...prev, departmentId: v === 'none' ? undefined : Number(v) }))}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                    <SelectContent>
-                      {headedDepartments.length !== 1 && (
-                        <SelectItem value="none">None</SelectItem>
-                      )}
-                      {formDepartmentOptions.map((d) => (
-                        <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Employee ID</Label>
+                    <Input value={formData.employeeId || ''} onChange={(e) => setFormData(prev => ({ ...prev, employeeId: e.target.value }))} placeholder="e.g., NPA-2024-001" />
+                    <p className="text-xs text-muted-foreground">Optional unique employee identifier</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <Select
+                      value={formData.departmentId?.toString() || 'none'}
+                      onValueChange={(v) => setFormData(prev => ({ ...prev, departmentId: v === 'none' ? undefined : Number(v) }))}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                      <SelectContent>
+                        {headedDepartments.length !== 1 && (
+                          <SelectItem value="none">None</SelectItem>
+                        )}
+                        {formDepartmentOptions.map((d) => (
+                          <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </TabsContent>
 
-              <TabsContent value="assignment" className="space-y-4 mt-4">
+              <TabsContent value="access" className="space-y-4 mt-4">
                 <div className="space-y-2">
                   <Label>Access Role *</Label>
                   <Select
                     value={formData.accessRoleId?.toString() || ''}
-                    onValueChange={(v) => setFormData(prev => ({ ...prev, accessRoleId: parseInt(v) }))}
+                    onValueChange={(v) => setFormData(prev => ({
+                      ...prev,
+                      accessRoleId: parseInt(v, 10),
+                      restrictedPages: [],
+                    }))}
                   >
                     <SelectTrigger><SelectValue placeholder="Select access role" /></SelectTrigger>
                     <SelectContent>
@@ -1129,7 +990,9 @@ export default function UserManagementPage() {
                   <div className="rounded-md border p-3 max-h-[360px] overflow-y-auto space-y-4">
                     {(() => {
                       const selectedRole = accessRoles.find((r) => r.id === formData.accessRoleId);
-                      const pages = Array.isArray((selectedRole as any)?.permissions) ? ((selectedRole as any).permissions as string[]) : [];
+                      const pages = normalizeRolePagePaths(
+                        convertPermissionsFromBackend(selectedRole?.permissions),
+                      );
                       if (!selectedRole) {
                         return <p className="text-sm text-muted-foreground">Select an access role to see its pages.</p>;
                       }
@@ -1138,14 +1001,12 @@ export default function UserManagementPage() {
                       }
 
                       const restricted = new Set(formData.restrictedPages || []);
-                      const modules = Array.from(new Set(ALL_PAGE_PERMISSIONS.map((p) => p.module)));
                       const grouped = groupPagePermissionsByModule(pages);
 
                       return (
                         <div className="space-y-4">
-                          {Object.entries(grouped)
-                            .sort(([a], [b]) => modules.indexOf(a) - modules.indexOf(b))
-                            .map(([module, perms]) => {
+                          {sortPageModules(Object.keys(grouped)).map((module) => {
+                              const perms = grouped[module];
                               const selectedCount = perms.filter((p) => !restricted.has(p.id)).length;
                               return (
                                 <div key={module} className="space-y-2">
@@ -1214,8 +1075,8 @@ export default function UserManagementPage() {
                   <div>
                     <h3 className="text-xl font-semibold">{selectedStaff.firstName} {selectedStaff.lastName}</h3>
                     <p className="text-muted-foreground">{selectedStaff.employeeId || selectedStaff.username}</p>
-                    <Badge variant="outline" className={`${getRoleBadgeColor(selectedStaff.systemRole || '')} mt-1`}>
-                      {getRoleIcon(selectedStaff.systemRole || '')} {selectedStaff.systemRole || "—"}
+                    <Badge variant="outline" className={`${getAccessRoleBadgeClass(getStaffAccessRole(selectedStaff).type, selectedStaff.accessRoleName)} mt-1`}>
+                      {getAccessRoleIcon(getStaffAccessRole(selectedStaff).type, selectedStaff.accessRoleName)} {selectedStaff.accessRoleName || "—"}
                     </Badge>
               </div>
                 </div>

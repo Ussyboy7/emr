@@ -13,6 +13,9 @@ from permissions.user_management import CanManageRoles, CanManageUsers, filter_u
 from common.openapi import document_viewset
 from .models import Role, UserRole
 from .serializers import RoleSerializer, UserRoleSerializer
+from .access_role import sync_system_role_from_access_role
+from .session_version import bump_user_permissions_version, bump_users_for_role
+from .user_capabilities import build_effective_access_for_role
 from audit.services import AuditService
 from django.db.models import Count, Q
 
@@ -62,6 +65,7 @@ class RoleViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Create role and log audit."""
         role = serializer.save()
+        bump_users_for_role(role.id)
         AuditService.log_activity(
             user=self.request.user,
             action='create',
@@ -83,6 +87,7 @@ class RoleViewSet(viewsets.ModelViewSet):
             'is_active': old_instance.is_active,
         }
         role = serializer.save()
+        bump_users_for_role(role.id)
         new_values = {
             'name': role.name,
             'type': role.type,
@@ -118,6 +123,12 @@ class RoleViewSet(viewsets.ModelViewSet):
         )
         instance.delete()
     
+    @extend_schema(tags=["Permissions"], summary="Effective access", description="Preview pages, capabilities, and API families for a role.")
+    @action(detail=True, methods=["get"], url_path="effective-access")
+    def effective_access(self, request, pk=None):
+        role = self.get_object()
+        return Response(build_effective_access_for_role(role))
+
     @extend_schema(tags=["Permissions"], summary="Users", description="Get all users with this role.")
     @action(detail=True, methods=['get'])
     def users(self, request, pk=None):
@@ -183,6 +194,8 @@ class UserRoleViewSet(viewsets.ModelViewSet):
         if user is not None:
             assert_user_in_managed_departments(self.request.user, user)
         user_role = serializer.save(assigned_by=self.request.user)
+        sync_system_role_from_access_role(user_role.user)
+        bump_user_permissions_version(user_role.user_id)
         
         # Log audit
         AuditService.log_activity(
@@ -200,6 +213,7 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         """Remove user role and log audit."""
         assert_user_in_managed_departments(self.request.user, instance.user)
+        user = instance.user
         user_role_id = instance.id
         user_name = instance.user.get_full_name() or instance.user.username
         role_name = instance.role.name
@@ -216,4 +230,6 @@ class UserRoleViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
         instance.delete()
+        sync_system_role_from_access_role(user)
+        bump_user_permissions_version(user.pk)
 
