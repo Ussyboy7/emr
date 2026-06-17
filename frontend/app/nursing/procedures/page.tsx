@@ -681,6 +681,9 @@ export default function ProceduresQueuePage() {
         }
         patientDbId = exact.id;
       }
+      if (!patientDbId) {
+        throw new Error('Patient not found. Cannot complete procedure.');
+      }
       
       // Create procedure record with all form data
       let description = '';

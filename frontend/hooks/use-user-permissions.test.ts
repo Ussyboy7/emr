@@ -19,7 +19,8 @@ vi.mock('react', () => ({
 }));
 
 vi.mock('@/lib/permissions', () => ({
-  getPermissionProfile: (...args: any[]) => mockGetPermissionProfile(...args),
+  getPermissionProfile: (...args: unknown[]) =>
+    mockGetPermissionProfile(...(args as Parameters<typeof mockGetPermissionProfile>)),
 }));
 
 vi.mock('@/contexts/OrganizationContext', () => ({

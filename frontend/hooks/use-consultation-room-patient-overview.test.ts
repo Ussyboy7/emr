@@ -20,8 +20,10 @@ const mockMapClinicalOverview = vi.fn(() => ({
 const mockMedicalHistoryForm = vi.fn(() => ({}));
 
 vi.mock('@/lib/clinical-overview-utils', () => ({
-  mapClinicalOverviewToPatientHistory: (...args: any[]) => mockMapClinicalOverview(...args),
-  medicalHistoryFormFromRecord: (...args: any[]) => mockMedicalHistoryForm(...args),
+  mapClinicalOverviewToPatientHistory: (...args: unknown[]) =>
+    mockMapClinicalOverview(...(args as Parameters<typeof mockMapClinicalOverview>)),
+  medicalHistoryFormFromRecord: (...args: unknown[]) =>
+    mockMedicalHistoryForm(...(args as Parameters<typeof mockMedicalHistoryForm>)),
 }));
 
 const mockGetClinicalOverview = vi.fn(() => Promise.resolve({
@@ -31,7 +33,10 @@ const mockGetClinicalOverview = vi.fn(() => Promise.resolve({
 }));
 
 vi.mock('@/lib/services', () => ({
-  patientService: { getClinicalOverview: (...args: any[]) => mockGetClinicalOverview(...args) },
+  patientService: {
+    getClinicalOverview: (...args: unknown[]) =>
+      mockGetClinicalOverview(...(args as Parameters<typeof mockGetClinicalOverview>)),
+  },
 }));
 vi.mock('@/lib/consultation/room-helpers', () => ({
   processVitals: vi.fn((v: any) => v),

@@ -117,10 +117,10 @@ describe('pharmacyService', () => {
 
   describe('dispense', () => {
     it('posts dispense action', async () => {
-      mockApiFetch.mockResolvedValue({ id: 1, dispensed_quantity: 10 });
+      mockApiFetch.mockResolvedValue({ id: 1, quantity: 10 });
 
       const res = await pharmacyService.dispense(5, 10, 10);
-      expect(res.dispensed_quantity).toBe(10);
+      expect(res.quantity).toBe(10);
       expect(mockApiFetch).toHaveBeenCalledWith(
         '/v1/pharmacy/prescriptions/5/dispense/',
         expect.objectContaining({ method: 'POST' }),
