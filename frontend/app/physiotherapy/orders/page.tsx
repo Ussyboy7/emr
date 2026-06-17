@@ -14,6 +14,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
+import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
+import { countOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
@@ -912,6 +914,8 @@ export default function PhysioPoolQueuePage() {
 
   // Order Card component - matches Lab Orders style
   const OrderCard = ({ order }: { order: PhysioOrder }) => {
+    const diagnosisCount = countOrderDiagnoses({ diagnosisText: order.diagnosis });
+
     return (
       <Card
         className={`border-l-4 hover:shadow-md transition-shadow cursor-pointer ${
@@ -945,8 +949,10 @@ export default function PhysioPoolQueuePage() {
                             }`}>
                               {order.sessions_completed || 0} sessions completed
                             </Badge>
-                            {order.diagnosis && (
-                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{order.diagnosis}</Badge>
+                            {diagnosisCount > 0 && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+                                {diagnosisCount} diagnosis{diagnosisCount === 1 ? '' : 'es'}
+                              </Badge>
                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
@@ -1238,15 +1244,9 @@ export default function PhysioPoolQueuePage() {
                     </div>
                   </div>
 
-                  {/* Diagnosis - Highlighted */}
-                  {selectedOrder.diagnosis && (
-                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                      <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                        <FileText className="h-3 w-3" /> Diagnosis
-                      </p>
-                      <p className="text-sm font-medium">{selectedOrder.diagnosis}</p>
-                    </div>
-                  )}
+                  {selectedOrder.diagnosis ? (
+                    <OrderDiagnosesBlock diagnosisText={selectedOrder.diagnosis} />
+                  ) : null}
 
                   {/* History/Clinical Findings */}
                   {selectedOrder.history_clinical_findings && (

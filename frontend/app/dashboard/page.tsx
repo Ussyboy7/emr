@@ -19,7 +19,7 @@ import { getOperationalDashboard } from '@/lib/services/dashboard-service';
 import { useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
-import { getHomeRouteForUser } from '@/lib/home-route';
+import { getHomeRouteForUser, isPathAllowedByPages } from '@/lib/home-route';
 import { getServerToday } from '@/lib/utils/serverTime';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
@@ -37,7 +37,7 @@ export default function DashboardPage() {
       return;
     }
     if (currentUser.isSuperuser) return;
-    if (currentUser.permissions?.includes("/dashboard")) return;
+    if (isPathAllowedByPages("/dashboard", currentUser.permissions ?? [])) return;
     router.replace(homeRoute || "/no-access");
   }, [currentUser, hydrated, homeRoute, router]);
 

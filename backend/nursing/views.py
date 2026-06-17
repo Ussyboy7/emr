@@ -206,10 +206,17 @@ class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         'procedure_id',
         'description',
         'notes',
+        'medication_name',
+        'dosage',
+        'route',
+        'site',
         'patient__first_name',
         'patient__surname',
         'patient__patient_id',
         'patient__personal_number',
+        'performed_by__first_name',
+        'performed_by__last_name',
+        'performed_by__username',
     ]
     ordering_fields = ['performed_at']
     ordering = ['-performed_at']
@@ -220,7 +227,8 @@ class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             if clinic_id is not None:
                 qs = qs.filter(
                     Q(nursing_order__location_clinic=clinic_id) |
-                    Q(visit__location_clinic=clinic_id)
+                    Q(visit__location_clinic=clinic_id) |
+                    Q(patient__location_clinic=clinic_id)
                 )
         return qs
     
@@ -292,8 +300,15 @@ class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         nursing_order_id = request.query_params.get('nursing_order')
         if not nursing_order_id:
             return Response({'detail': 'nursing_order is required'}, status=status.HTTP_400_BAD_REQUEST)
-        qs = self.filter_queryset(self.get_queryset()).filter(nursing_order_id=nursing_order_id)
-        procedure = qs.first()
+        qs = Procedure.objects.filter(nursing_order_id=nursing_order_id).select_related(
+            'patient',
+            'patient__medical_history',
+            'nursing_order',
+            'nursing_order__ordered_by',
+            'visit',
+            'performed_by',
+        )
+        procedure = self.scope_queryset(qs).order_by('-performed_at').first()
         if not procedure:
             return Response({'detail': 'Procedure not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(self.get_serializer(procedure).data)

@@ -11,6 +11,7 @@ import { adminService, type Department, type User as ApiUser } from '@/lib/servi
 import { Loader2, Search, UserPlus, UserMinus, Star, UserCog, X } from 'lucide-react';
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { isPathAllowedByPages } from '@/lib/home-route';
 
 interface DepartmentStaffDialogProps {
   department: {
@@ -41,15 +42,16 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
   const deputyUserId = department?.deputyUserId ?? null;
   const deputyHeadName = department?.deputyHeadName ?? null;
 
+  const allowedPages = currentUser?.permissions ?? [];
   const canManageStructure =
     Boolean(currentUser?.isSuperuser) ||
-    Boolean(currentUser?.permissions?.includes('/admin/clinics'));
+    isPathAllowedByPages('/admin/clinics', allowedPages);
 
   const canManageStaff =
     canManageStructure ||
     Boolean(currentUser?.isStaff) ||
     (Boolean(currentUser?.isDepartmentHead) &&
-      Boolean(currentUser?.permissions?.includes('/admin/users')) &&
+      isPathAllowedByPages('/admin/users', allowedPages) &&
       Boolean(department?.id) &&
       (currentUser?.headedDepartments ?? []).some((d) => d.id === department?.id));
 

@@ -123,6 +123,7 @@ class Procedure(models.Model):
         ('injection', 'Injection'),
         ('dressing', 'Dressing'),
         ('wound_care', 'Wound Care'),
+        ('medication', 'Medication'),
         ('catheterization', 'Catheterization'),
         ('iv_insertion', 'IV Insertion'),
         ('ward_admission', 'Ward Admission'),

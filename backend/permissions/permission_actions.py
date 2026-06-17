@@ -29,6 +29,7 @@ PAGE_TO_PERMISSION_MAP: dict[str, str] = {
     "/nursing/requests": "nursing_vitals",
     "/consultation": "consultation_view",
     "/consultation/start": "consultation_start",
+    "/consultation/room": "consultation_start",
     "/consultation/history": "consultation_view",
     "/consultation/wards": "consultation_view",
     "/consultation/referrals": "consultation_referral",

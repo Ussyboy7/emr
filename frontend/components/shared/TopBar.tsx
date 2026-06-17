@@ -11,7 +11,7 @@ import { useClinic } from "@/hooks/use-clinic";
 import { NPA_LOGO_URL, NPA_EMR_TITLE } from "@/lib/branding";
 import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates-core";
 import { hasTokens, logout } from "@/lib/api-client";
-import { getHomeRouteForUser } from "@/lib/home-route";
+import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +33,8 @@ export const TopBar = () => {
   const [mounted, setMounted] = useState(false);
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
   const canViewOverviewDashboard =
-    Boolean(currentUser?.isSuperuser) || Boolean(currentUser?.permissions?.includes("/dashboard"));
+    Boolean(currentUser?.isSuperuser) ||
+    isPathAllowedByPages("/dashboard", currentUser?.permissions ?? []);
   const authenticated = useMemo(() => hydrated && !!currentUser && hasTokens(), [currentUser, hydrated]);
 
   useEffect(() => {

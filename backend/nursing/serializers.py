@@ -65,6 +65,8 @@ class NursingOrderSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'status': ['Only pending or in-progress orders can be cancelled.']}
             )
+        if new_status == 'completed' and not instance.completed_at:
+            validated_data['completed_at'] = timezone.now()
         return super().update(instance, validated_data)
 
 
@@ -97,6 +99,21 @@ class ProcedureSerializer(serializers.ModelSerializer):
         if order and order.ordered_by_id:
             return order.ordered_by.get_full_name() or ''
         return ''
+
+    def validate(self, attrs):
+        nursing_order = attrs.get('nursing_order')
+        patient = attrs.get('patient')
+        if nursing_order is None and self.instance:
+            nursing_order = self.instance.nursing_order
+        if patient is None and self.instance:
+            patient = self.instance.patient
+        if nursing_order and patient and nursing_order.patient_id != patient.id:
+            raise serializers.ValidationError(
+                {'patient': ['Procedure patient must match the linked nursing order patient.']}
+            )
+        if nursing_order and patient is None:
+            attrs['patient'] = nursing_order.patient
+        return attrs
 
     class Meta:
         model = Procedure

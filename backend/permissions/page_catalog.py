@@ -44,6 +44,7 @@ ALL_PAGE_IDS: tuple[str, ...] = (
     "/nursing/analytics",
     "/consultation",
     "/consultation/start",
+    "/consultation/room",
     "/consultation/history",
     "/consultation/wards",
     "/consultation/referrals",

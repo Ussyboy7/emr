@@ -24,6 +24,10 @@ import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDi
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
+  formatCompletedProcedureDescription,
+  parseProcedureDetails,
+} from '@/lib/nursing/procedure-description';
+import {
   Syringe, Bandage, Pill, Search, Users, Clock, CheckCircle2, AlertTriangle,
   Eye, Calendar, Loader2, Save, Activity, ArrowRight, User, Stethoscope, DoorOpen, Plus, Building2
 } from 'lucide-react';
@@ -50,6 +54,7 @@ const isInvalidAdmissionTypeError = (error: any) => {
 // ==================== TYPES ====================
 interface Procedure {
   id: string;
+  patientDbId?: number;
   visitId?: number;
   consultationSessionId?: number;
   /** True when a new nursing_procedure visit was created for this queue item. */
@@ -208,87 +213,6 @@ function formatAdministrationNote(timeHm: string): string {
   return `Time of administration: ${t} on ${formatDisplayDate(new Date())}`;
 }
 
-/** Parse nursing order descriptions produced by the consultation room (and legacy text). */
-function parseProcedureDetails(
-  procedureType: Procedure['type'],
-  description: string,
-  orderFrequency: string
-): Procedure['details'] {
-  const details: Procedure['details'] = {};
-  const d = (description || '').trim();
-  if (!d) return details;
-
-  if (procedureType === 'dressing') {
-    // "Laceration dressing at Left forearm. …" (consultation room)
-    const at = d.match(/^(.+?)\s+dressing\s+at\s+([^.]+?)(?:\.|\s*$)/i);
-    if (at) {
-      details.woundType = at[1].trim();
-      details.woundLocation = at[2].trim();
-    } else {
-      const dash = d.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      if (dash && dash[1].length > 1) {
-        details.woundType = dash[1].trim();
-        details.woundLocation = dash[2].trim();
-      }
-    }
-    details.instructions = d;
-    return details;
-  }
-
-  if (procedureType === 'injection' || procedureType === 'medication') {
-    // "IV Infusion: Fluid — rate. …"
-    if (/^IV\s+Infusion:/i.test(d)) {
-      const body = d.replace(/^IV\s+Infusion:\s*/i, '').trim();
-      const parts = body.split(/\s+[—-]\s+/);
-      details.medication = parts[0]?.replace(/[.,]\s*$/, '').trim() || body;
-      if (parts[1]) details.dosage = parts[1].split(/\./)[0]?.trim() || parts[1].trim();
-      if (orderFrequency) details.frequency = orderFrequency;
-      return details;
-    }
-    // "Name - dose via Route. …" — split on first " - " and " via " (avoid +? on one char)
-    const hy = d.indexOf(' - ');
-    if (hy > 0 && /\bvia\b/i.test(d)) {
-      const med = d.slice(0, hy).trim();
-      const afterHy = d.slice(hy + 3);
-      const vi = afterHy.split(/\bvia\b/i);
-      const dosePart = (vi[0] || '').replace(/[.,]\s*$/, '').trim();
-      const routePart = vi[1] ? vi[1].replace(/^\s+/i, '').replace(/[.,]\s*$/, '').trim().split(/\./)[0] : '';
-      if (med.length >= 2) {
-        details.medication = med;
-        if (dosePart) details.dosage = dosePart;
-        if (routePart) details.route = routePart;
-        if (orderFrequency) details.frequency = orderFrequency;
-        return details;
-      }
-    }
-    const hyphen = d.match(/^(.{2,})\s*-\s+(.+)$/);
-    if (hyphen) {
-      details.medication = hyphen[1].trim();
-      const rest = hyphen[2].trim();
-      const viaIdx = rest.search(/\bvia\b/i);
-      if (viaIdx >= 0) {
-        details.dosage = rest.slice(0, viaIdx).replace(/[.,]\s*$/, '').trim();
-        details.route = rest
-          .slice(viaIdx)
-          .replace(/^\s*via\s+/i, '')
-          .replace(/[.,]\s*$/, '')
-          .split(/\./)[0]
-          ?.trim() || '';
-      } else {
-        details.dosage = rest.split(/[.•]/)[0]?.trim() || rest;
-      }
-      if (orderFrequency) details.frequency = orderFrequency;
-      return details;
-    }
-    const firstSentence = d.split(/[.\n]/)[0]?.trim() || d;
-    details.medication = firstSentence.length >= 2 ? firstSentence : d;
-    if (orderFrequency) details.frequency = orderFrequency;
-    return details;
-  }
-
-  return details;
-}
-
 function procedureSummaryLine(procedure: Procedure): string {
   const desc = (procedure.description || '').trim();
   if (procedure.type === 'injection' || procedure.type === 'medication') {
@@ -365,6 +289,13 @@ function nursingOrderToProcedure(order: any): Procedure {
       : visitRaw && typeof visitRaw === 'object' && visitRaw.id != null
         ? Number(visitRaw.id)
         : undefined;
+  const patientRaw = order.patient;
+  const patientDbId =
+    typeof patientRaw === 'number'
+      ? patientRaw
+      : patientRaw && typeof patientRaw === 'object' && patientRaw.id != null
+        ? Number(patientRaw.id)
+        : undefined;
   const sessionRaw = order.consultation_session;
   const consultationSessionId =
     typeof sessionRaw === 'number'
@@ -375,6 +306,7 @@ function nursingOrderToProcedure(order: any): Procedure {
 
   return {
     id: String(order.id),
+    patientDbId: patientDbId != null && Number.isFinite(patientDbId) ? patientDbId : undefined,
     visitId: visitId != null && Number.isFinite(visitId) ? visitId : undefined,
     consultationSessionId:
       consultationSessionId != null && Number.isFinite(consultationSessionId)
@@ -732,34 +664,31 @@ export default function ProceduresQueuePage() {
       const typeMap: Record<string, string> = {
         'injection': 'injection',
         'dressing': 'dressing',
-        'medication': 'other',
+        'medication': 'medication',
         'ward_admission': 'ward_admission',
       };
       
-      // Get the correct patient database ID (needed for all procedures)
-      const patientsResponse = await apiFetch<{ results: any[] }>(`/patients/?patient_id=${selectedProcedure.patientId}`);
-      const patients = patientsResponse.results || [];
-      if (patients.length === 0) {
-        throw new Error('Patient not found. Cannot complete procedure.');
+      // Use the nursing order's patient FK — do not re-resolve via ?patient_id= (not a backend filter).
+      let patientDbId = selectedProcedure.patientDbId;
+      if (!patientDbId) {
+        const patientsResponse = await apiFetch<{ results: any[] }>(
+          `/patients/?search=${encodeURIComponent(selectedProcedure.patientId)}`,
+        );
+        const patients = patientsResponse.results || [];
+        const exact = patients.find((p) => p.patient_id === selectedProcedure.patientId);
+        if (!exact) {
+          throw new Error('Patient not found. Cannot complete procedure.');
+        }
+        patientDbId = exact.id;
       }
-      const patientDbId = patients[0].id;
       
       // Create procedure record with all form data
       let description = '';
       let notes = '';
       
       if (selectedProcedure.type === 'injection') {
-        // Build comprehensive description for injection
-        const injectionDetails = [
-          selectedProcedure.details.medication || 'Injection',
-          selectedProcedure.details.dosage && `Dose: ${selectedProcedure.details.dosage}`,
-          selectedProcedure.details.route && `Route: ${selectedProcedure.details.route}`,
-          selectedProcedure.details.frequency && `Frequency: ${selectedProcedure.details.frequency}`,
-        ].filter(Boolean).join(' • ');
+        description = formatCompletedProcedureDescription('injection', selectedProcedure.details, selectedProcedure.description);
         
-        description = `Injection: ${injectionDetails}`;
-        
-        // Include all form fields in notes
         const injectionNotes = [
           formatAdministrationNote(injectionForm.administeredTime),
           injectionSiteNeedsLaterality(injectionForm.site) && injectionForm.laterality && `Laterality: ${injectionForm.laterality}`,
@@ -772,16 +701,8 @@ export default function ProceduresQueuePage() {
         
         notes = injectionNotes || injectionForm.notes || '';
       } else if (selectedProcedure.type === 'dressing') {
-        // Build comprehensive description for dressing
-        const dressingDetails = [
-          selectedProcedure.details.woundType || 'Wound',
-          selectedProcedure.details.woundLocation && `Location: ${selectedProcedure.details.woundLocation}`,
-          selectedProcedure.details.instructions && `Instructions: ${selectedProcedure.details.instructions}`,
-        ].filter(Boolean).join(' • ');
+        description = formatCompletedProcedureDescription('dressing', selectedProcedure.details, selectedProcedure.description);
         
-        description = `Dressing: ${dressingDetails}`;
-        
-        // Include all form fields in notes
         const dressingNotes = [
           dressingForm.dressingType && `Type: ${dressingForm.dressingType}`,
           dressingForm.woundCondition && `Condition: ${dressingForm.woundCondition}`,
@@ -914,14 +835,7 @@ export default function ProceduresQueuePage() {
           throw admissionError;
         }
       } else {
-        // Medication
-        const medicationDetails = [
-          selectedProcedure.details.medication || 'Medication',
-          selectedProcedure.details.route && `Route: ${selectedProcedure.details.route}`,
-          selectedProcedure.details.scheduledTime && `Scheduled: ${selectedProcedure.details.scheduledTime}`,
-        ].filter(Boolean).join(' • ');
-
-        description = `Medication: ${medicationDetails}`;
+        description = formatCompletedProcedureDescription('medication', selectedProcedure.details, selectedProcedure.description);
 
         const medicationNotes = [
           medicationForm.administeredTime && `Administered at: ${medicationForm.administeredTime}`,
@@ -957,10 +871,17 @@ export default function ProceduresQueuePage() {
             ? (selectedProcedure.details.medication || '').slice(0, 200)
             : selectedProcedure.type === 'dressing'
               ? (selectedProcedure.details.woundType || '').slice(0, 200)
-              : '',
+              : selectedProcedure.type === 'medication'
+                ? (selectedProcedure.details.medication || '').slice(0, 200)
+                : '',
         dosage:
-          selectedProcedure.type === 'injection' ? (selectedProcedure.details.dosage || '').slice(0, 200) : '',
-        route: selectedProcedure.type === 'injection' ? (selectedProcedure.details.route || '').slice(0, 100) : '',
+          selectedProcedure.type === 'injection' || selectedProcedure.type === 'medication'
+            ? (selectedProcedure.details.dosage || '').slice(0, 200)
+            : '',
+        route:
+          selectedProcedure.type === 'injection' || selectedProcedure.type === 'medication'
+            ? (selectedProcedure.details.route || '').slice(0, 100)
+            : '',
         wound_intervention:
           selectedProcedure.type === 'dressing'
             ? DRESSING_INTERVENTION_MAP[dressingForm.dressingType] || ''

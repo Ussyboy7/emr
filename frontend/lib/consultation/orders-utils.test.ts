@@ -339,6 +339,26 @@ describe('buildPhysioCreateOrderPayloads', () => {
     expect(payloads[1].special_instructions).toBeUndefined();
   });
 
+  it('formats diagnoses array for API payload', () => {
+    const payloads = buildPhysioCreateOrderPayloads(
+      [
+        {
+          historyClinicalFindings: 'Back pain',
+          diagnoses: [
+            { type: 'Primary', code: 'M54.5', description: 'Low back pain' },
+            { type: 'Secondary', code: 'M25.511', description: 'Pain in right shoulder' },
+          ],
+          drugHistory: 'None',
+          priority: 'high',
+        },
+      ],
+      { patientId: 42, visitId: 7, sessionId: 99 },
+    );
+    expect(payloads[0].diagnosis).toBe(
+      '[Primary] M54.5 - Low back pain\n[Secondary] M25.511 - Pain in right shoulder',
+    );
+  });
+
   it('omits visit when visit id is invalid', () => {
     const payloads = buildPhysioCreateOrderPayloads(
       [{ historyClinicalFindings: '', diagnosis: 'Test', drugHistory: '', priority: 'low' }],

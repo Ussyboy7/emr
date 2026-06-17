@@ -1,7 +1,8 @@
 'use client';
 
 import { Badge } from '@/components/ui/badge';
-import { Stethoscope } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Stethoscope, X } from 'lucide-react';
 
 export interface Icd10DiagnosisRow {
   code: string;
@@ -15,11 +16,27 @@ export interface Icd10DiagnosesBlockProps {
   className?: string;
   /** Smaller padding for dense dialogs (lab/radiology manage order). */
   compact?: boolean;
+  /** When set, shows remove control per row (consultation order picker). */
+  onRemove?: (index: number) => void;
+  emptyMessage?: string;
 }
 
-export function Icd10DiagnosesBlock({ diagnoses, className = '', compact }: Icd10DiagnosesBlockProps) {
+export function Icd10DiagnosesBlock({
+  diagnoses,
+  className = '',
+  compact,
+  onRemove,
+  emptyMessage,
+}: Icd10DiagnosesBlockProps) {
   const rows = (diagnoses || []).filter((d) => d && (d.code || d.name));
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    if (!emptyMessage) return null;
+    return (
+      <div className={`rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground ${className}`}>
+        {emptyMessage}
+      </div>
+    );
+  }
 
   const cell = compact ? 'p-2' : 'p-3';
 
@@ -47,7 +64,21 @@ export function Icd10DiagnosesBlock({ diagnoses, className = '', compact }: Icd1
               <tr key={`${d.code}-${i}`} className="border-t border-red-200/60 dark:border-red-900/30">
                 <td className={`${cell} font-mono text-xs text-red-900 dark:text-red-100`}>{d.code || ''}</td>
                 <td className={`${cell} text-red-950 dark:text-red-50`}>
-                  <div className="font-medium">{d.name || ''}</div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 font-medium">{d.name || ''}</div>
+                    {onRemove ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 shrink-0 rounded-full p-0"
+                        onClick={() => onRemove(i)}
+                        title="Remove diagnosis"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
+                  </div>
                   {d.notes?.trim() ? (
                     <div className="text-xs text-muted-foreground mt-0.5">{d.notes}</div>
                   ) : null}

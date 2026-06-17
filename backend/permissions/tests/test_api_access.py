@@ -14,6 +14,20 @@ class PagePathMatchingTests(SimpleTestCase):
         allowed = {"/medical-records/patient-records"}
         self.assertTrue(is_path_allowed_by_pages("/medical-records/patients/abc", allowed))
 
+    def test_consultation_start_grants_room_workspace(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(is_path_allowed_by_pages("/consultation/room/12", allowed))
+
+    def test_consultation_room_denied_without_consultation_access(self):
+        allowed = {"/nursing"}
+        self.assertFalse(is_path_allowed_by_pages("/consultation/room/12", allowed))
+
+    def test_consultation_referrals_grants_consultation_api_pages(self):
+        from permissions.page_paths import user_has_consultation_access
+
+        allowed = {"/consultation/referrals"}
+        self.assertTrue(user_has_consultation_access(allowed))
+
 
 class ApiAccessTests(SimpleTestCase):
     def test_nursing_api_requires_nursing_page(self):
@@ -73,6 +87,26 @@ class ApiAccessTests(SimpleTestCase):
     def test_nursing_order_create_allowed_for_consultation_pages(self):
         allowed = {"/consultation/start"}
         self.assertTrue(check_api_page_access("nursing/orders/", "POST", allowed))
+
+    def test_nursing_order_create_allowed_for_consultation_room_page(self):
+        allowed = {"/consultation/room"}
+        self.assertTrue(check_api_page_access("nursing/orders/", "POST", allowed))
+
+    def test_patient_update_history_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("patients/42/update_history/", "PATCH", allowed))
+
+    def test_admissions_discharge_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("admissions/9/discharge/", "POST", allowed))
+
+    def test_annual_checkups_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("annual-checkups/1/", "GET", allowed))
+
+    def test_clinical_overview_allowed_for_consultation_referrals_only(self):
+        allowed = {"/consultation/referrals"}
+        self.assertTrue(check_api_page_access("patients/42/clinical-overview/", "GET", allowed))
 
     def test_nursing_order_create_denied_without_nursing_or_consultation(self):
         allowed = {"/laboratory"}

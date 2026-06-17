@@ -24,6 +24,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { FacilityPartnerSelect } from '@/components/referrals/FacilityPartnerSelect';
 import { PrescriptionOrderModal } from '@/components/consultation/orders/PrescriptionOrderModal';
 import { PrescriptionRefillDialog } from '@/components/consultation/orders/PrescriptionRefillDialog';
+import { Icd10DiagnosisMultiPicker } from '@/components/medical/Icd10DiagnosisMultiPicker';
+import { validateOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
 import { prescriptionModalCopy } from '@/lib/consultation/prescription-refill';
 import { debugConsultationRoom } from '@/lib/consultation/room-helpers';
 import { getNursingOrderIcon } from '@/lib/consultation/room-nursing-helpers';
@@ -1284,7 +1286,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
         setShowAddPhysio(open);
         if (!open) {
           setEditingPhysioIndex(null);
-          setNewPhysio({ historyClinicalFindings: "", diagnosis: "", drugHistory: "", specialInstructions: "", priority: "normal" });
+          setNewPhysio({ historyClinicalFindings: "", diagnoses: [], drugHistory: "", specialInstructions: "", priority: "normal" });
         }
       }}>
         <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -1296,7 +1298,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
             <DialogDescription>
               {editingPhysioIndex !== null 
                 ? 'Update the physiotherapy treatment order details'
-                : 'Create a physiotherapy treatment order - will be sent to Physiotherapy pool queue'}
+                : 'Create a physiotherapy treatment order - will be sent to Physiotherapy pool queue. Choose diagnosis type, search ICD-10, and add one or more diagnoses.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -1312,15 +1314,10 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Diagnosis *</Label>
-              <Textarea
-                value={newPhysio.diagnosis}
-                onChange={(e) => setNewPhysio({ ...newPhysio, diagnosis: e.target.value })}
-                placeholder="Primary diagnosis requiring physiotherapy"
-                rows={2}
-              />
-            </div>
+            <Icd10DiagnosisMultiPicker
+              diagnoses={newPhysio.diagnoses}
+              onChange={(diagnoses) => setNewPhysio({ ...newPhysio, diagnoses })}
+            />
 
             <div className="space-y-2">
               <Label>Drug History</Label>
@@ -1362,7 +1359,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
             <Button variant="outline" onClick={() => setShowAddPhysio(false)}>Cancel</Button>
             <Button
               onClick={addPhysioOrder}
-              disabled={!newPhysio.diagnosis.trim()}
+              disabled={validateOrderDiagnoses(newPhysio.diagnoses) !== null}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               {editingPhysioIndex !== null ? (
@@ -1388,7 +1385,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           setEditingEyeIndex(null);
           setNewEye({
             chiefComplaint: "",
-            diagnosis: "",
+            diagnoses: [],
             treatmentPlan: "",
             specialInstructions: "",
             visualAcuityOd: "",
@@ -1407,7 +1404,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
             <DialogDescription>
               {editingEyeIndex !== null
                 ? 'Update the eye care order details'
-                : 'Create an eye care evaluation order - will be sent to Eye Care pool queue'}
+                : 'Create an eye care evaluation order - will be sent to Eye Care pool queue. Choose diagnosis type, search ICD-10, and add one or more diagnoses.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -1457,15 +1454,10 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
               </div>
             ) : null}
 
-            <div className="space-y-2">
-              <Label>Diagnosis *</Label>
-              <Textarea
-                value={newEye.diagnosis}
-                onChange={(e) => setNewEye({ ...newEye, diagnosis: e.target.value })}
-                placeholder="Primary diagnosis or clinical impression"
-                rows={2}
-              />
-            </div>
+            <Icd10DiagnosisMultiPicker
+              diagnoses={newEye.diagnoses}
+              onChange={(diagnoses) => setNewEye({ ...newEye, diagnoses })}
+            />
 
             <div className="space-y-2">
               <Label>Treatment Plan</Label>
@@ -1507,7 +1499,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
             <Button variant="outline" onClick={() => setShowAddEye(false)}>Cancel</Button>
             <Button
               onClick={addEyeOrder}
-              disabled={!newEye.diagnosis.trim()}
+              disabled={validateOrderDiagnoses(newEye.diagnoses) !== null}
               className="bg-cyan-600 hover:bg-cyan-700"
             >
               {editingEyeIndex !== null ? (

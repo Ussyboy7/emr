@@ -29,6 +29,12 @@ import {
 } from "@/lib/consultation/prescription-refill";
 import { debugConsultationRoom } from "@/lib/consultation/room-helpers";
 import {
+  formatOrderDiagnoses,
+  parseOrderDiagnoses,
+  validateOrderDiagnoses,
+  type OrderDiagnosisEntry,
+} from "@/lib/consultation/order-diagnoses";
+import {
   buildInjectionOrderSummary,
   buildLabDraftOrders,
   buildLabOrderPayloadFromDrafts,
@@ -301,6 +307,7 @@ export function useConsultationRoomOrders({
   const [physioOrders, setPhysioOrders] = useState<{
     id: string;
     historyClinicalFindings: string;
+    diagnoses: OrderDiagnosisEntry[];
     diagnosis: string;
     drugHistory: string;
     specialInstructions?: string;
@@ -312,7 +319,7 @@ export function useConsultationRoomOrders({
   const [editingPhysioIndex, setEditingPhysioIndex] = useState<number | null>(null);
   const [newPhysio, setNewPhysio] = useState({
     historyClinicalFindings: "",
-    diagnosis: "",
+    diagnoses: [] as OrderDiagnosisEntry[],
     drugHistory: "",
     specialInstructions: "",
     priority: "normal" as 'low' | 'normal' | 'high' | 'urgent'
@@ -324,6 +331,7 @@ export function useConsultationRoomOrders({
   const [eyeOrders, setEyeOrders] = useState<{
     id: string;
     chiefComplaint: string;
+    diagnoses: OrderDiagnosisEntry[];
     diagnosis: string;
     treatmentPlan: string;
     specialInstructions?: string;
@@ -338,7 +346,7 @@ export function useConsultationRoomOrders({
   const [editingEyeIndex, setEditingEyeIndex] = useState<number | null>(null);
   const [newEye, setNewEye] = useState({
     chiefComplaint: "",
-    diagnosis: "",
+    diagnoses: [] as OrderDiagnosisEntry[],
     treatmentPlan: "",
     specialInstructions: "",
     visualAcuityOd: "",
@@ -1431,10 +1439,12 @@ export function useConsultationRoomOrders({
 
   // Physiotherapy order functions
   const addPhysioOrder = () => {
-    if (!newPhysio.diagnosis.trim()) {
-      toast.error('Diagnosis is required');
+    const diagnosisError = validateOrderDiagnoses(newPhysio.diagnoses);
+    if (diagnosisError) {
+      toast.error(diagnosisError);
       return;
     }
+    const diagnosisText = formatOrderDiagnoses(newPhysio.diagnoses);
 
     if (editingPhysioIndex !== null) {
       // Editing existing order
@@ -1443,7 +1453,8 @@ export function useConsultationRoomOrders({
           ? {
               ...order,
               historyClinicalFindings: newPhysio.historyClinicalFindings.trim(),
-              diagnosis: newPhysio.diagnosis.trim(),
+              diagnoses: [...newPhysio.diagnoses],
+              diagnosis: diagnosisText,
               drugHistory: newPhysio.drugHistory.trim(),
               specialInstructions: newPhysio.specialInstructions.trim() || undefined,
               priority: newPhysio.priority,
@@ -1456,7 +1467,8 @@ export function useConsultationRoomOrders({
       const newOrder = {
         id: `physio-${Date.now()}`,
         historyClinicalFindings: newPhysio.historyClinicalFindings?.trim() || '',
-        diagnosis: newPhysio.diagnosis.trim(),
+        diagnoses: [...newPhysio.diagnoses],
+        diagnosis: diagnosisText,
         drugHistory: newPhysio.drugHistory?.trim() || '',
         specialInstructions: newPhysio.specialInstructions?.trim() || undefined,
         priority: newPhysio.priority,
@@ -1468,7 +1480,7 @@ export function useConsultationRoomOrders({
 
     setNewPhysio({
       historyClinicalFindings: "",
-      diagnosis: "",
+      diagnoses: [],
       drugHistory: "",
       specialInstructions: "",
       priority: "normal"
@@ -1481,7 +1493,9 @@ export function useConsultationRoomOrders({
     const orderToEdit = physioOrders[index];
     setNewPhysio({
       historyClinicalFindings: orderToEdit.historyClinicalFindings || "",
-      diagnosis: orderToEdit.diagnosis,
+      diagnoses: orderToEdit.diagnoses?.length
+        ? [...orderToEdit.diagnoses]
+        : parseOrderDiagnoses(orderToEdit.diagnosis),
       drugHistory: orderToEdit.drugHistory || "",
       specialInstructions: orderToEdit.specialInstructions || "",
       priority: orderToEdit.priority
@@ -1539,10 +1553,12 @@ export function useConsultationRoomOrders({
 
   // Eye Care order functions
   const addEyeOrder = () => {
-    if (!newEye.diagnosis.trim()) {
-      toast.error('Diagnosis is required');
+    const diagnosisError = validateOrderDiagnoses(newEye.diagnoses);
+    if (diagnosisError) {
+      toast.error(diagnosisError);
       return;
     }
+    const diagnosisText = formatOrderDiagnoses(newEye.diagnoses);
 
     if (editingEyeIndex !== null) {
       setEyeOrders(prev => prev.map((order, i) =>
@@ -1550,7 +1566,8 @@ export function useConsultationRoomOrders({
           ? {
               ...order,
               chiefComplaint: newEye.chiefComplaint.trim(),
-              diagnosis: newEye.diagnosis.trim(),
+              diagnoses: [...newEye.diagnoses],
+              diagnosis: diagnosisText,
               treatmentPlan: newEye.treatmentPlan.trim(),
               specialInstructions: newEye.specialInstructions.trim() || undefined,
               visualAcuityOd: newEye.visualAcuityOd.trim(),
@@ -1565,7 +1582,8 @@ export function useConsultationRoomOrders({
       const newOrder = {
         id: `eye-${Date.now()}`,
         chiefComplaint: newEye.chiefComplaint?.trim() || '',
-        diagnosis: newEye.diagnosis.trim(),
+        diagnoses: [...newEye.diagnoses],
+        diagnosis: diagnosisText,
         treatmentPlan: newEye.treatmentPlan?.trim() || '',
         specialInstructions: newEye.specialInstructions?.trim() || undefined,
         visualAcuityOd: newEye.visualAcuityOd?.trim() || '',
@@ -1580,7 +1598,7 @@ export function useConsultationRoomOrders({
 
     setNewEye({
       chiefComplaint: "",
-      diagnosis: "",
+      diagnoses: [],
       treatmentPlan: "",
       specialInstructions: "",
       visualAcuityOd: "",
@@ -1594,7 +1612,9 @@ export function useConsultationRoomOrders({
 
   const defaultEyeOrderForm = (annual = false) => ({
     chiefComplaint: annual ? "Annual vision screening" : "",
-    diagnosis: annual ? "Annual visual acuity screening" : "",
+    diagnoses: annual
+      ? [{ type: 'Primary' as const, code: '', description: 'Annual visual acuity screening' }]
+      : ([] as OrderDiagnosisEntry[]),
     treatmentPlan: "",
     specialInstructions: "",
     visualAcuityOd: "",
@@ -1613,7 +1633,9 @@ export function useConsultationRoomOrders({
     const orderToEdit = eyeOrders[index];
     setNewEye({
       chiefComplaint: orderToEdit.chiefComplaint || "",
-      diagnosis: orderToEdit.diagnosis,
+      diagnoses: orderToEdit.diagnoses?.length
+        ? [...orderToEdit.diagnoses]
+        : parseOrderDiagnoses(orderToEdit.diagnosis),
       treatmentPlan: orderToEdit.treatmentPlan || "",
       specialInstructions: orderToEdit.specialInstructions || "",
       visualAcuityOd: orderToEdit.visualAcuityOd || "",

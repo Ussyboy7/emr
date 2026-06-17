@@ -281,7 +281,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Support file uploads
     pagination_class = PatientPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location', 'principal_staff', 'location_clinic']
+    filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location', 'principal_staff', 'location_clinic', 'patient_id']
     # List search: names, patient ID, personal number (not phone/email — fewer false positives).
     search_fields = ['patient_id', 'surname', 'first_name', 'middle_name', 'personal_number']
     ordering_fields = ['created_at', 'surname', 'first_name']

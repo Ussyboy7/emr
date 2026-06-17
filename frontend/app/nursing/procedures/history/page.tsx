@@ -21,6 +21,11 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import {
+  resolveOrderedByName,
+  resolveProcedureHistoryDetails,
+  type ProcedureKind,
+} from '@/lib/nursing/procedure-description';
 
 // ==================== TYPES ====================
 interface CompletedProcedure {
@@ -151,72 +156,14 @@ const PATIENT_CATEGORY_LABELS: Record<string, string> = {
   nonnpa: 'Non-NPA',
 };
 
-const WOUND_INTERVENTION_LABELS: Record<string, string> = {
-  dressing: 'Dressing',
-  sutures: 'Suturing',
-  suture_removal: 'Suture removal',
-  i_and_d: 'Incision and drainage',
-};
-
 function formatCategoryLabel(category?: string): string {
   const key = String(category || '').trim().toLowerCase();
   if (!key) return '—';
   return PATIENT_CATEGORY_LABELS[key] || key.charAt(0).toUpperCase() + key.slice(1);
 }
 
-function parseDressingNotes(notes: string): Pick<CompletedProcedure['record'], 'dressingType' | 'woundCondition' | 'notes'> {
-  const raw = String(notes || '').trim();
-  if (!raw) return {};
-
-  const dressingType = raw.match(/Type:\s*([^|]+)/i)?.[1]?.trim();
-  const woundCondition = raw.match(/Condition:\s*([^|]+)/i)?.[1]?.trim();
-  const observations = raw.match(/Observations:\s*(.+)$/i)?.[1]?.trim();
-
-  if (!dressingType && !woundCondition && !observations) {
-    return { notes: raw };
-  }
-
-  return { dressingType, woundCondition, notes: observations };
-}
-
-function parseDressingDescription(description: string): {
-  woundType?: string;
-  woundLocation?: string;
-  orderInstructions?: string;
-} {
-  const body = String(description || '').replace(/^Dressing:\s*/i, '').trim();
-  if (!body) return {};
-
-  const parts = body.split(/\s*•\s*/).map((s) => s.trim()).filter(Boolean);
-  const out: { woundType?: string; woundLocation?: string; orderInstructions?: string } = {};
-  let woundType = '';
-
-  for (const part of parts) {
-    const loc = part.match(/^Location:\s*(.+)$/i);
-    const instr = part.match(/^Instructions:\s*(.+)$/i);
-    if (loc) out.woundLocation = loc[1].trim();
-    else if (instr) out.orderInstructions = instr[1].trim();
-    else if (!woundType) woundType = part;
-  }
-  if (woundType) out.woundType = woundType;
-
-  const at = body.match(/^(.+?)\s+dressing\s+at\s+([^.]+)/i);
-  if (at && !out.woundType) {
-    out.woundType = at[1].trim();
-    out.woundLocation = at[2].trim();
-  }
-
-  const dash = body.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-  if (dash && !out.woundType && dash[1].length > 1) {
-    out.woundType = dash[1].trim();
-    out.woundLocation = dash[2].trim();
-  }
-
-  return out;
-}
-
 function nursingProcedureToHistory(proc: any): CompletedProcedure {
-  const typeMap: Record<string, CompletedProcedure['type']> = {
+  const typeMap: Record<string, ProcedureKind> = {
     injection: 'injection',
     dressing: 'dressing',
     wound_care: 'dressing',
@@ -235,53 +182,12 @@ function nursingProcedureToHistory(proc: any): CompletedProcedure {
     proc.ward?.name ||
     wardFromDescription ||
     (procedureType === 'ward_admission' ? 'Observation Ward' : '');
-  const orderedByLabel =
-    proc.ordered_by_name ||
-    proc.ordered_by_user_name ||
-    proc.ordered_by?.full_name ||
-    proc.ordered_by?.username ||
-    proc.requested_by_name ||
-    proc.requested_by?.full_name ||
-    proc.recorded_by_name ||
-    proc.performed_by_name ||
-    '';
+  const orderedByLabel = resolveOrderedByName(proc);
 
-  const details: CompletedProcedure['details'] = {};
-  let orderInstructions: string | undefined;
-  const record: CompletedProcedure['record'] = {
-    site: proc.site || '',
-    notes: proc.notes || '',
-  };
+  const { details, orderInstructions, record } = resolveProcedureHistoryDetails(procedureType, proc);
 
-  if (description) {
-    if (procedureType === 'injection') {
-      const match = description.match(/([^:]+):\s*(.+)/);
-      if (match) {
-        details.medication = match[1].trim();
-        const rest = match[2].trim();
-        const parts = rest.split(' • ');
-        details.dosage = parts[0] || '';
-        details.route = parts[1] || '';
-      }
-    } else if (procedureType === 'dressing') {
-      const parsed = parseDressingDescription(description);
-      details.woundType = parsed.woundType;
-      details.woundLocation = parsed.woundLocation || proc.site || '';
-      orderInstructions = parsed.orderInstructions;
-      const parsedNotes = parseDressingNotes(proc.notes || '');
-      record.dressingType =
-        WOUND_INTERVENTION_LABELS[String(proc.wound_intervention || '')] ||
-        parsedNotes.dressingType;
-      record.woundCondition = parsedNotes.woundCondition;
-      record.notes = parsedNotes.notes || '';
-    } else {
-      const match = description.match(/([^:]+):\s*(.+)/);
-      if (match) {
-        details.medication = match[1].trim();
-      } else if (procedureType === 'ward_admission') {
-        details.medication = 'Observation Admission';
-      }
-    }
+  if (procedureType === 'ward_admission' && !details.medication) {
+    details.medication = 'Observation Admission';
   }
 
   const age = resolvePatientAge({
@@ -318,7 +224,7 @@ export default function ProceduresHistoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [typeFilter, setTypeFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });

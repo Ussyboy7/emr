@@ -6,6 +6,7 @@ Fix legacy role.permissions shape and page paths in the database.
   - /consultation/dashboard  -> /consultation
   - /physiotherapy/pool-queue -> /physiotherapy/orders
   - /nursing/patient-vitals -> /nursing/vitals-history
+  - roles with /consultation/start gain /consultation/room (consultation workspace)
 
 Usage:
   python manage.py fix_role_permission_paths          # dry run
@@ -76,6 +77,13 @@ class Command(BaseCommand):
                 ):
                     if required not in deduped:
                         deduped.append(required)
+
+            has_consultation_start = any(
+                isinstance(p, str) and p in ("/consultation/start", "/consultation/room")
+                for p in deduped
+            )
+            if has_consultation_start and "/consultation/room" not in deduped:
+                deduped.append("/consultation/room")
 
             shape_mismatch = not isinstance(raw, list)
             path_changed = deduped != pages

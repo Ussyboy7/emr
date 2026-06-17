@@ -251,6 +251,59 @@ class ProcedureAPITest(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["id"], proc.id)
 
+    def test_create_procedure_rejects_wrong_patient_for_order(self):
+        other = Patient.objects.create(
+            patient_id="PROC-PT-OTHER",
+            surname="Other",
+            first_name="Pat",
+            gender="male",
+            date_of_birth=date(1990, 1, 1),
+        )
+        order = NursingOrder.objects.create(
+            patient=self.patient,
+            order_type="Injection",
+            description="Give injection",
+            ordered_by=self.nurse,
+            created_by=self.nurse,
+        )
+        resp = self.client.post("/api/v1/nursing/procedures/", {
+            "patient": other.id,
+            "nursing_order": order.id,
+            "procedure_type": "injection",
+            "description": "IM Artesunate 60mg",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_search_by_medication_name(self):
+        Procedure.objects.create(
+            patient=self.patient,
+            procedure_type="injection",
+            description="legacy",
+            medication_name="Artesunate",
+            performed_by=self.nurse,
+        )
+        resp = self.client.get("/api/v1/nursing/procedures/?search=Artesunate")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        results = resp.data.get("results", resp.data)
+        self.assertTrue(any(r.get("medication_name") == "Artesunate" for r in results))
+
+    def test_nursing_order_completed_sets_completed_at(self):
+        order = NursingOrder.objects.create(
+            patient=self.patient,
+            order_type="Injection",
+            description="Give injection",
+            ordered_by=self.nurse,
+            created_by=self.nurse,
+        )
+        resp = self.client.patch(
+            f"/api/v1/nursing/orders/{order.id}/",
+            {"status": "completed"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        self.assertIsNotNone(order.completed_at)
+
     def test_resolve_missing_order_param(self):
         resp = self.client.get("/api/v1/nursing/procedures/resolve/")
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

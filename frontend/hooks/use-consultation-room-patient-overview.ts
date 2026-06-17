@@ -7,6 +7,7 @@ import {
 } from '@/lib/clinical-overview-utils';
 import { patientService } from '@/lib/services';
 import { processVitals } from '@/lib/consultation/room-helpers';
+import { toast } from 'sonner';
 import type { ConsultationRoomPatient, WardAdmissionRow } from '@/lib/consultation/room-types';
 
 type UseConsultationRoomPatientOverviewArgs = {
@@ -52,6 +53,7 @@ export function useConsultationRoomPatientOverview({
         applyPatientOverview(overview);
       } catch (error) {
         console.error('Error loading patient overview:', error);
+        toast.error('Could not load patient history (labs, vitals, referrals). Check your permissions or try again.');
         setWardAdmissions([]);
         setPatientHistorySnapshot(null);
       }

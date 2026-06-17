@@ -12,6 +12,7 @@ from .models import Procedure
 INJECTION_TYPES = ("injection",)
 DRESSING_TYPES = ("dressing", "wound_care")
 OBSERVATION_TYPES = ("ward_admission",)
+MEDICATION_TYPES = ("medication", "other", "catheterization", "iv_insertion")
 NON_MEDICATION_TYPES = INJECTION_TYPES + DRESSING_TYPES + OBSERVATION_TYPES
 
 

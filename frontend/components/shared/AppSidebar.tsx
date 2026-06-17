@@ -191,6 +191,7 @@ const menuSections: MenuSection[] = [
       { label: "Results Verification", href: "/radiology/verification", icon: ShieldCheck },
       { label: "Completed Studies", href: "/radiology/completed", icon: FileBarChart },
       { label: "Study Templates", href: "/radiology/templates", icon: FileText },
+      { label: "Image Viewer", href: "/radiology/viewer", icon: ImageIcon },
       { label: "Analysis", href: "/radiology/analytics", icon: TrendingUp },
     ],
   },
@@ -240,6 +241,7 @@ const menuSections: MenuSection[] = [
     basePath: "/analytics",
     items: [
       { label: "Clinical Reports", href: "/analytics", icon: BarChart3 },
+      { label: "Executive Analytics", href: "/analytics/executive", icon: Target },
     ],
   },
   {
@@ -253,6 +255,7 @@ const menuSections: MenuSection[] = [
       { label: "User Management", href: "/admin/users", icon: UserCog },
       { label: "Roles & Permissions", href: "/admin/roles", icon: Shield },
       { label: "Clinics & Departments", href: "/admin/clinics", icon: Building2 },
+      { label: "Room Management", href: "/admin/rooms", icon: DoorOpen },
       { label: "System Settings", href: "/admin/settings", icon: Settings },
       { label: "System Health", href: "/admin/health", icon: Activity },
       { label: "Annual Check-up", href: "/admin/annual-checkup-programme", icon: ClipboardCheck },
@@ -269,7 +272,8 @@ export function AppSidebar() {
   const { clinics: userClinics } = useClinic();
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
   const canViewOverviewDashboard =
-    Boolean(currentUser?.isSuperuser) || Boolean(currentUser?.permissions?.includes("/dashboard"));
+    Boolean(currentUser?.isSuperuser) ||
+    isPathAllowedByPages("/dashboard", currentUser?.permissions ?? []);
 
 
   // Track which sections are open

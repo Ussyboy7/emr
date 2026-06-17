@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
 import type { PhysioSession } from '@/lib/services';
 import { formatDisplayDateTime } from '@/lib/dates';
 import {
@@ -83,10 +84,14 @@ export function ConsultationRoomPhysioOrderViewDialog({ open, onOpenChange, sele
 
               {/* Clinical Information */}
               <div className="space-y-3">
-                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                  <p className="text-xs text-muted-foreground mb-1">Diagnosis</p>
-                  <p className="text-sm font-medium">{selectedPhysioOrder.diagnosis || 'N/A'}</p>
-                </div>
+                {selectedPhysioOrder.diagnosis ? (
+                  <OrderDiagnosesBlock diagnosisText={selectedPhysioOrder.diagnosis} />
+                ) : (
+                  <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                    <p className="text-xs text-muted-foreground mb-1">Diagnosis</p>
+                    <p className="text-sm font-medium">N/A</p>
+                  </div>
+                )}
 
                 {selectedPhysioOrder.chief_complaint && (
                   <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">

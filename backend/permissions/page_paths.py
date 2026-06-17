@@ -57,6 +57,12 @@ def is_path_allowed_by_pages(pathname: str, allowed_pages: set[str]) -> bool:
     if normalized_path.startswith("/medical-records/patients/") and "/medical-records/patient-records" in normalized_allowed:
         return True
 
+    if normalized_path == "/consultation/room" or normalized_path.startswith("/consultation/room/"):
+        if normalized_allowed & {"/consultation", "/consultation/start", "/consultation/room"}:
+            return True
+        if any(p.startswith("/consultation/room/") for p in normalized_allowed):
+            return True
+
     return False
 
 
@@ -70,4 +76,13 @@ def user_has_clinical_module_access(allowed_pages: set[str]) -> bool:
         for prefix in CLINICAL_MODULE_PREFIXES:
             if normalized == prefix or normalized.startswith(prefix + "/"):
                 return True
+    return False
+
+
+def user_has_consultation_access(allowed_pages: set[str]) -> bool:
+    """True when the user holds any consultation module page (room, start, referrals, etc.)."""
+    for page in allowed_pages:
+        normalized = normalize_role_page_path(page)
+        if normalized == "/consultation" or normalized.startswith("/consultation/"):
+            return True
     return False

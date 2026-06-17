@@ -53,10 +53,12 @@ export function isPathAllowedByPages(pathname: string, allowedPages: string[]): 
   // Exact match
   if (normalizedAllowed.includes(normalizedPath)) return true;
 
-  // Prefix match for nested routes (e.g. /medical-records/patients/123 allowed by /medical-records/patients)
+  // Prefix match: parent grant allows child routes; child grant allows module dashboard (mirrors backend page_paths.py)
   if (normalizedAllowed.some((p) => {
     if (!p || p === "/") return false;
-    return normalizedPath === p || normalizedPath.startsWith(p + "/");
+    if (normalizedPath === p || normalizedPath.startsWith(p + "/")) return true;
+    if (p.startsWith(normalizedPath + "/")) return true;
+    return false;
   })) {
     return true;
   }
@@ -65,6 +67,20 @@ export function isPathAllowedByPages(pathname: string, allowedPages: string[]): 
   if (
     normalizedPath.startsWith("/medical-records/patients/") &&
     normalizedAllowed.includes("/medical-records/patient-records")
+  ) {
+    return true;
+  }
+
+  // Consultation room workspace: /consultation/start implies access to /consultation/room/[id]
+  if (
+    (normalizedPath === "/consultation/room" || normalizedPath.startsWith("/consultation/room/")) &&
+    normalizedAllowed.some(
+      (p) =>
+        p === "/consultation" ||
+        p === "/consultation/start" ||
+        p === "/consultation/room" ||
+        p.startsWith("/consultation/room/"),
+    )
   ) {
     return true;
   }

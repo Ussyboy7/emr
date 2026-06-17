@@ -1,4 +1,5 @@
 import type { PrescriptionOrderSubmitInput } from '@/components/consultation/orders/PrescriptionOrderModal';
+import { formatOrderDiagnoses, type OrderDiagnosisEntry } from '@/lib/consultation/order-diagnoses';
 
 export type PrescriptionDraft = {
   id: string;
@@ -502,11 +503,20 @@ export function pickEyeBatchApiPriority(
 
 export type PhysioSendDraftLike = {
   historyClinicalFindings: string;
-  diagnosis: string;
+  diagnoses?: OrderDiagnosisEntry[];
+  diagnosis?: string;
   drugHistory: string;
   specialInstructions?: string;
   priority: string;
 };
+
+function resolveOrderDiagnosisText(order: {
+  diagnoses?: OrderDiagnosisEntry[];
+  diagnosis?: string;
+}): string {
+  if (order.diagnoses?.length) return formatOrderDiagnoses(order.diagnoses);
+  return (order.diagnosis || '').trim();
+}
 
 export type PhysioCreateOrderPayload = {
   patient: number;
@@ -541,7 +551,7 @@ export function buildPhysioCreateOrderPayloads(
     patient: context.patientId,
     visit,
     history_clinical_findings: order.historyClinicalFindings,
-    diagnosis: order.diagnosis,
+    diagnosis: resolveOrderDiagnosisText(order),
     drug_history: order.drugHistory,
     special_instructions: order.specialInstructions || undefined,
     priority: order.priority,
@@ -552,7 +562,8 @@ export function buildPhysioCreateOrderPayloads(
 
 export type EyeSendDraftLike = {
   chiefComplaint: string;
-  diagnosis: string;
+  diagnoses?: OrderDiagnosisEntry[];
+  diagnosis?: string;
   treatmentPlan: string;
   specialInstructions?: string;
   visualAcuityOd?: string;
@@ -585,7 +596,7 @@ export function buildEyeCreateOrderPayloads(
     patient: context.patientId,
     visit,
     chief_complaint: order.chiefComplaint,
-    diagnosis: order.diagnosis,
+    diagnosis: resolveOrderDiagnosisText(order),
     treatment_plan: order.treatmentPlan,
     special_instructions: order.specialInstructions || undefined,
     visual_acuity_od: order.visualAcuityOd || undefined,

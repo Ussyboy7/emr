@@ -237,7 +237,7 @@ class Command(BaseCommand):
                     "/admin", "/admin/annual-checkup-programme", "/admin/audit", "/admin/clinics", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
                     "/analytics", "/analytics/executive",
                     "/hr", "/hr/annual-checkups", "/hr/exemptions",
-                    "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/start", "/consultation/wards",
+                    "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/room", "/consultation/start", "/consultation/wards",
                     "/laboratory", "/laboratory/completed", "/laboratory/orders", "/laboratory/templates", "/laboratory/verification",
                     "/medical-records", "/medical-records/appointments", "/medical-records/coding", "/medical-records/patient-records", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/referrals", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
                     "/nursing", "/nursing/analytics", "/nursing/vitals-history", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
@@ -262,7 +262,7 @@ class Command(BaseCommand):
                     '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
                     '/medical-records/patient-records', '/medical-records/reports',
                     # Consultation - All pages (referrals & forms live under /consultation/referrals)
-                    '/consultation', '/consultation/start', '/consultation/history',
+                    '/consultation', '/consultation/start', '/consultation/room', '/consultation/history',
                     '/consultation/wards', '/consultation/referrals',
                     # Nursing - Limited access
                     '/nursing', '/nursing/analytics', '/nursing/vitals-history', '/nursing/pool-queue', '/nursing/room-queue',
