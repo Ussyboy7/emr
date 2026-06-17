@@ -52,6 +52,8 @@ export type {
   ConsultationSession,
   ConsultationQueueItem,
   ICD10Code,
+  ICD10Category,
+  ICD10Stats,
   Diagnosis,
   PresentingComplaintCategory,
   PresentingComplaint,

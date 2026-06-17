@@ -412,8 +412,9 @@ class Prescription(models.Model):
         """Recalculate and update prescription status based on medication items."""
         from django.utils import timezone
 
-        # Get all medication items
-        all_items = self.medications.all()
+        # Query items directly — the related manager cache can be stale after
+        # dispense updates items via prescription.medications.get().
+        all_items = self.medications.model.objects.filter(prescription_id=self.pk)
 
         if not all_items.exists():
             # No items, keep current status or set to pending

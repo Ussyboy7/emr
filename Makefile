@@ -1,4 +1,4 @@
-.PHONY: backend-install backend-migrate backend-seed backend-run backend-reset db-bootstrap docs-schema docs-check
+.PHONY: backend-install backend-migrate backend-seed backend-run backend-reset db-bootstrap docs-schema docs-check test test-backend test-frontend test-backend-coverage
 
 VENV=backend/.venv
 PYTHON=$(VENV)/bin/python
@@ -33,4 +33,19 @@ docs-schema:
 # Fail if frontend page-permissions.ts and backend page_catalog.py diverge
 docs-check:
 	python3 scripts/docs/check_page_catalog_sync.py
+
+# Local postgres defaults match docker-compose.local.yml (port 5435)
+TEST_DB_ENV=DB_HOST=localhost DB_PORT=5435 DB_NAME=emr_db_local DB_USER=emradmin DB_PASSWORD=emradmin DJANGO_SETTINGS_MODULE=emr_backend.settings_test
+
+test-backend:
+	cd backend && $(TEST_DB_ENV) $(PYTHON) manage.py test accounts analytics.tests appointments audit.tests consultation common dashboard.tests eyecare hr.tests laboratory notifications nursing organization.tests patients permissions pharmacy physiotherapy radiology reports.tests wards --verbosity=1
+
+test-backend-coverage:
+	cd backend && $(TEST_DB_ENV) $(PYTHON) -m coverage run --source=. manage.py test --verbosity=0
+	cd backend && $(PYTHON) -m coverage report --skip-covered --show-missing
+
+test-frontend:
+	cd frontend && npm test
+
+test: test-backend test-frontend docs-check
 

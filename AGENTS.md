@@ -27,7 +27,7 @@ Run from `backend/` with the venv active.
 - **Install**: `pip install -r requirements.txt`
 - **Migrate**: `python manage.py migrate`
 - **Dev server**: `python manage.py runserver 8001`
-- **Tests**: `DJANGO_SETTINGS_MODULE=emr_backend.settings_test python manage.py test`
+- **Tests**: `make test` (backend + frontend + docs-check), or `make test-backend` / `make test-frontend`
 - **Deploy checks**: `python manage.py check --deploy` (must pass with `DJANGO_ENV=prod`)
 
 ## Frontend Commands

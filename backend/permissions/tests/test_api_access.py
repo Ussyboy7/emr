@@ -90,3 +90,12 @@ class ApiAccessTests(SimpleTestCase):
     def test_vitals_write_allowed_for_nursing_vitals(self):
         allowed = {"/nursing/patient-vitals"}
         self.assertTrue(check_api_page_access("vitals/", "POST", allowed))
+
+    def test_admissions_api_allowed_for_ward_pages(self):
+        allowed = {"/nursing/wards"}
+        self.assertTrue(check_api_page_access("admissions/", "GET", allowed))
+        self.assertTrue(check_api_page_access("admissions/123/", "PATCH", allowed))
+
+    def test_admissions_api_denied_without_ward_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertFalse(check_api_page_access("admissions/", "GET", allowed))

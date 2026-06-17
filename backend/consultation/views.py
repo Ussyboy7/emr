@@ -2018,6 +2018,57 @@ class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({'detail': 'ICD-10 code not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(ICD10CodeSerializer(row).data)
 
+    @extend_schema(tags=["Consultation"], summary="Stats", description="Aggregate statistics for the ICD-10 code catalog.")
+    @action(detail=False, methods=['get'], url_path='stats')
+    def stats(self, request):
+        """Aggregate ICD-10 catalog statistics."""
+        total = ICD10Code.objects.count()
+        active = ICD10Code.objects.filter(is_active=True).count()
+        total_diagnoses = Diagnosis.objects.count()
+
+        categories = list(
+            ICD10Code.objects.filter(is_active=True)
+            .values('category')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+
+        top_used_raw = list(
+            Diagnosis.objects.filter(icd10_code__isnull=False)
+            .values('icd10_code', 'icd10_code__code', 'icd10_code__description')
+            .annotate(usage_count=Count('id'))
+            .order_by('-usage_count')[:10]
+        )
+        top_used_clean = [
+            {
+                'code': row['icd10_code__code'],
+                'description': row['icd10_code__description'],
+                'usage_count': row['usage_count'],
+            }
+            for row in top_used_raw
+        ]
+
+        return Response({
+            'total_codes': total,
+            'active_codes': active,
+            'inactive_codes': total - active,
+            'total_diagnoses': total_diagnoses,
+            'categories': categories,
+            'top_used_codes': top_used_clean,
+        })
+
+    @extend_schema(tags=["Consultation"], summary="Categories", description="Distinct ICD-10 categories with code counts.")
+    @action(detail=False, methods=['get'], url_path='categories')
+    def categories(self, request):
+        """List distinct categories with their code counts."""
+        cats = list(
+            ICD10Code.objects.filter(is_active=True)
+            .values('category')
+            .annotate(count=Count('id'))
+            .order_by('category')
+        )
+        return Response({'results': cats, 'count': len(cats)})
+
 
 @document_viewset(tag="Consultation", resource="diagnoses")
 class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):

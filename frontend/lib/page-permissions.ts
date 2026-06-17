@@ -38,6 +38,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/medical-records/reports/weekend-duty", name: "Weekend Duty", description: "Weekend duty roster report", module: "Medical Records" },
   { id: "/medical-records/reports/visit-statistics", name: "Visit Statistics", description: "Visit statistics report", module: "Medical Records" },
   { id: "/medical-records/referrals", name: "Referral queue (records)", description: "Review referrals for stamping and records workflow (same data as consultation referrals)", module: "Medical Records" },
+  { id: "/medical-records/coding", name: "ICD-10 Coding", description: "Browse and search the ICD-10 code catalog", module: "Medical Records" },
   { id: "/medical-records/settings/referral-facilities", name: "Referral Facilities", description: "Manage referral facilities and contacts", module: "Medical Records" },
 
   // Nursing

@@ -242,9 +242,11 @@ export default function LoginPage() {
             </div>
             
             <div className="space-y-4">
-              <h2 className="text-4xl font-bold leading-tight text-white max-w-lg">
+              <h2 className="text-4xl font-bold leading-tight text-white max-w-lg text-balance">
+                <span className="text-slate-200">Electronic Medical Records</span>{" "}
+                for{" "}
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-cyan-400">
-                  NPA Clinical Operations
+                  NPA Medical Operations
                 </span>
               </h2>
               <p className="text-lg text-slate-400 max-w-md leading-relaxed">
@@ -326,7 +328,7 @@ export default function LoginPage() {
                 Sign in to EMR
               </CardTitle>
               <CardDescription className="text-slate-400">
-                Sign in to continue to the NPA EMR workspace.
+                Enter your credentials to access the NPA Electronic Medical Records system.
               </CardDescription>
             </CardHeader>
             <CardContent>

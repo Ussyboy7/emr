@@ -5,6 +5,18 @@ import { toast } from 'sonner';
 import type { Notification } from '@/lib/notifications-storage';
 import { getNotificationPreferences } from '@/lib/notifications-storage';
 import { logDebug } from '@/lib/client-logger';
+import {
+  buildCoalesceKey,
+  buildCoalescedToastCopy,
+  COALESCE_WINDOW_MS,
+  isHigherPriority,
+  shouldBypassCoalescing,
+  shouldPlayNotificationSound,
+  tabIsFocused as tabIsFocusedUtil,
+  toastDurationForPriority,
+  URGENT_REPEAT_MS,
+  type NotificationPriority,
+} from '@/lib/notification-alerter-utils';
 
 /**
  * Live alerter: receives newly-arrived notifications (from the
@@ -27,29 +39,7 @@ import { logDebug } from '@/lib/client-logger';
  * its WS ``onNotification`` handler.
  */
 
-type Priority = Notification['priority'];
-
-const PRIORITY_PRIMACY: Record<Priority, number> = {
-  urgent: 0,
-  high: 1,
-  normal: 2,
-  low: 3,
-};
-
-const COALESCE_WINDOW_MS = 2500;
-const SOUND_MIN_INTERVAL_MS = 5000;
-const URGENT_REPEAT_MS = 10_000;
-
-const TYPE_LABELS: Record<Notification['notification_type'], string> = {
-  workflow: 'Workflow',
-  lab_result: 'Lab result',
-  radiology_result: 'Radiology result',
-  prescription: 'Prescription',
-  appointment: 'Appointment',
-  system: 'System',
-  alert: 'Alert',
-  reminder: 'Reminder',
-};
+type Priority = NotificationPriority;
 
 interface AlerterPrefs {
   desktopAlertsEnabled: boolean;
@@ -120,11 +110,11 @@ const playChime = (priority: Priority) => {
 
 const tabIsFocused = (): boolean => {
   if (typeof document === 'undefined') return true;
-  if (document.visibilityState !== 'visible') return false;
-  // ``hasFocus`` returns false when the tab is visible but the user is
-  // working in another window — still worth alerting in that case.
-  if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
-  return true;
+  const focused = tabIsFocusedUtil(
+    document.visibilityState,
+    typeof document.hasFocus === 'function' ? document.hasFocus() : true,
+  );
+  return focused;
 };
 
 interface CoalesceEntry {
@@ -168,15 +158,17 @@ export const useNotificationAlerter = () => {
   const maybePlaySound = useCallback(
     (priority: Priority, overrides?: Partial<AlerterPrefs>) => {
       const prefs = { ...prefsRef.current, ...(overrides ?? {}) };
-      if (!prefs.soundEnabled) return;
-      if (prefs.soundUrgentOnly && priority !== 'urgent') return;
-      if (priority === 'low') return;
-      // Don't chime when the user is already focused on the app — the
-      // visible toast is enough; the sound would be intrusive.
-      if (tabIsFocused()) return;
-      const now = Date.now();
-      if (now - lastSoundAtRef.current < SOUND_MIN_INTERVAL_MS) return;
-      lastSoundAtRef.current = now;
+      if (
+        !shouldPlayNotificationSound(
+          priority,
+          { soundEnabled: prefs.soundEnabled, soundUrgentOnly: prefs.soundUrgentOnly },
+          tabIsFocused(),
+          lastSoundAtRef.current,
+        )
+      ) {
+        return;
+      }
+      lastSoundAtRef.current = Date.now();
       playChime(priority);
     },
     [],
@@ -190,21 +182,11 @@ export const useNotificationAlerter = () => {
       if (entry.timer) clearTimeout(entry.timer);
       coalesceRef.current.delete(key);
       const { count, highest } = entry;
-      const typeLabel = TYPE_LABELS[highest.notification_type] ?? 'Notification';
-      const title =
-        count > 1 ? `${count} new ${typeLabel.toLowerCase()}s` : highest.title;
-      const description = count > 1 ? highest.title : highest.message;
+      const { title, description } = buildCoalescedToastCopy(count, highest);
 
       const toastOptions: Parameters<typeof toast>[1] = {
         description,
-        duration:
-          highest.priority === 'urgent'
-            ? Infinity
-            : highest.priority === 'high'
-            ? 8000
-            : highest.priority === 'low'
-            ? 3000
-            : 4000,
+        duration: toastDurationForPriority(highest.priority),
         action: highest.actionUrl
           ? { label: 'View', onClick: () => onClick?.(highest) }
           : undefined,
@@ -264,11 +246,11 @@ export const useNotificationAlerter = () => {
         return;
       }
 
-      const key = `${notification.notification_type}|${notification.actionUrl ?? ''}`;
+      const key = buildCoalesceKey(notification);
 
       // Urgent priority bypasses coalescing — show it immediately,
       // including a 10s re-prompt so it's hard to miss.
-      if (notification.priority === 'urgent') {
+      if (shouldBypassCoalescing(notification.priority)) {
         const immediateKey = `__urgent_${notification.id}`;
         coalesceRef.current.set(immediateKey, { count: 1, highest: notification });
         flushKey(immediateKey, onClick);
@@ -282,9 +264,7 @@ export const useNotificationAlerter = () => {
         clearTimeout(existing.timer);
         existing.count += 1;
         // Keep the highest-priority instance as the canonical display.
-        if (
-          PRIORITY_PRIMACY[notification.priority] < PRIORITY_PRIMACY[existing.highest.priority]
-        ) {
+        if (isHigherPriority(notification.priority, existing.highest.priority)) {
           existing.highest = notification;
         }
         existing.timer = setTimeout(() => flushKey(key, onClick), COALESCE_WINDOW_MS);

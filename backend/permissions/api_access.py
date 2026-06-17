@@ -32,12 +32,13 @@ MEDICAL_RECORDS_PAGES = (
     "/medical-records/visits/new",
     "/medical-records/appointments",
     "/medical-records/referrals",
+    "/medical-records/coding",
     "/medical-records/reports",
 )
 
 MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("nursing/", ("/nursing",)),
-    ("consultation/", ("/consultation", "/medical-records/referrals")),
+    ("consultation/", ("/consultation", "/medical-records/referrals", "/medical-records/coding")),
     ("laboratory/", ("/laboratory",)),
     ("pharmacy/", ("/pharmacy",)),
     ("radiology/", ("/radiology",)),
@@ -50,6 +51,8 @@ MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dashboard/", ("/dashboard", "/admin")),
     ("audit/", ("/admin/audit",)),
     ("permissions/", ("/admin/roles",)),
+    # Wards app exposes admission routes under top-level `admissions/` paths.
+    ("admissions/", ("/nursing/wards", "/consultation/wards")),
 )
 
 ADMIN_API_PREFIXES = (

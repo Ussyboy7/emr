@@ -29,6 +29,16 @@ import {
 } from "@/lib/consultation/prescription-refill";
 import { debugConsultationRoom } from "@/lib/consultation/room-helpers";
 import {
+  buildInjectionOrderSummary,
+  buildLabDraftOrders,
+  buildLabOrderPayloadFromDrafts,
+  buildRadiologyDraftOrders,
+  buildRadiologyOrderPayloadFromDrafts,
+  buildPrescriptionDrafts,
+  buildPhysioCreateOrderPayloads,
+  buildEyeCreateOrderPayloads,
+} from "@/lib/consultation/orders-utils";
+import {
   INJECTION_ROUTES,
   REFERRAL_REASONS,
   REFERRAL_SPECIALTIES,
@@ -126,7 +136,7 @@ export function useConsultationRoomOrders({
   const [labOrders, setLabOrders] = useState<{ 
     id: string;
     test: string; 
-    testId?: number; // Template ID
+    testId?: number | string;
     code?: string;
     sampleType?: string;
     priority: string; 
@@ -763,50 +773,8 @@ export function useConsultationRoomOrders({
       return;
     }
 
-    const createdAt = Date.now();
-    // Strict generic-only: every item from PrescriptionOrderModal carries a
-    // GenericMedication PK in `item.generic`. No brand is selected at prescribing
-    // time — the pharmacist chooses the brand from dispensary inventory later.
-    const nextPrescriptions: Array<ReturnType<typeof buildDraft>> = [];
-    const rejected: string[] = [];
-
-    function buildDraft(item: PrescriptionOrderSubmitInput['items'][number], index: number, genericPk: number) {
-      const unit = (item.unit || 'tablet').trim();
-      const doseValue = (item.dosage || '').trim();
-      const normalizedDose = doseValue ? `${doseValue} ${unit}`.trim() : `1 ${unit}`.trim();
-      return {
-        id: `RX-${createdAt}-${genericPk}-${index}`,
-        medication: item.medication_name || 'Medication',
-        genericId: genericPk,
-        brandMedicationId: undefined as number | undefined,
-        medicationId: genericPk,
-        genericName: item.medication_name || 'Medication',
-        unit,
-        strength: item.strength || '',
-        form: item.dosage_form || '',
-        dose: normalizedDose,
-        dosage: normalizedDose,
-        frequency: item.frequency || 'Once daily (OD)',
-        duration: item.duration || 'As directed',
-        quantity: item.quantity || 1,
-        route: item.route || 'Oral',
-        instructions: (item.instructions || payload.clinicalIndication || '').trim(),
-        priority: payload.priority,
-        status: 'Draft' as const,
-      };
-    }
-
-    payload.items.forEach((item, index) => {
-      const genericPk =
-        typeof item.generic === 'number' && Number.isFinite(item.generic) && item.generic > 0
-          ? item.generic
-          : null;
-      if (!genericPk) {
-        rejected.push(item.medication_name || `item #${index + 1}`);
-        return;
-      }
-      nextPrescriptions.push(buildDraft(item, index, genericPk));
-    });
+    const { drafts: nextPrescriptions, rejectedLabels: rejected } =
+      buildPrescriptionDrafts(payload);
 
     if (rejected.length > 0) {
       toast.error(
@@ -836,54 +804,34 @@ export function useConsultationRoomOrders({
     });
   };
 
-  const slugLabCodeFromName = (name: string) =>
-    name
-      .trim()
-      .substring(0, 24)
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, "_")
-      .replace(/^_|_$/g, "") || "LAB";
-
   // Add selected lab templates to draft order (like prescriptions)
   const addLabOrder = () => {
     if (selectedLabTemplates.size === 0) {
       toast.error('Please select at least one test');
       return;
     }
-    
-    // Resolve selected rows from full list or pinned "Other" template
-    const selectedTemplates = Array.from(selectedLabTemplates)
-      .map((id) =>
-        labTemplates.find((t) => t.id === id) ||
-        (otherLabPinnedTemplate?.id === id ? otherLabPinnedTemplate : null)
-      )
-      .filter((t): t is ServiceLabTemplate => !!t);
-    const hasOther = selectedTemplates.some(
-      (t) => (t.code || "").toUpperCase() === LAB_OTHER_TEMPLATE_CODE
-    );
-    if (hasOther && !newLabOrder.notes?.trim()) {
-      toast.error('Clinical indication is required when you select "Other". Describe the exact test for the laboratory.');
+
+    const { orders: newOrders, error } = buildLabDraftOrders({
+      selectedTemplateIds: selectedLabTemplates,
+      labTemplates,
+      otherPinnedTemplate: otherLabPinnedTemplate,
+      otherTemplateCode: LAB_OTHER_TEMPLATE_CODE,
+      otherClinicalNotes: newLabOrder.notes,
+      priority: newLabOrder.priority,
+      createdAtMs: Date.now(),
+    });
+
+    if (error) {
+      toast.error(error);
       return;
     }
-    
-    // Add to draft lab orders (not sent yet)
-    const newOrders = selectedTemplates.map(template => ({
-      id: `LAB-${Date.now()}-${template.id}`,
-      test: template.name,
-      testId: template.id,
-      code: template.code,
-      sampleType: template.sample_type || 'Blood',
-      priority: newLabOrder.priority,
-      notes: newLabOrder.notes,
-      status: 'Draft' as const,
-    }));
-    
-    setLabOrders([...labOrders, ...newOrders]);
+
+    setLabOrders([...labOrders, ...newOrders as typeof labOrders]);
     setSelectedLabTemplates(new Set());
     setLabTemplateSearch("");
     setNewLabOrder({ test: "", priority: "Routine", notes: "" });
     setShowAddLabOrder(false);
-    toast.success(`${selectedTemplates.length} test(s) added to order`);
+    toast.success(`${newOrders.length} test(s) added to order`);
   };
 
   // Send all draft lab orders to lab (like sendPrescriptionsToPharmacy)
@@ -910,32 +858,7 @@ export function useConsultationRoomOrders({
         return;
       }
       
-      // Group tests by priority (use the most urgent priority for the order)
-      const priorityOrder: Record<string, number> = { 'STAT': 0, 'Urgent': 1, 'Routine': 2 };
-      const orderPriority = draftOrders.reduce((highest, order) => {
-        const currentPriority = priorityOrder[order.priority] ?? 2;
-        const highestPriority = priorityOrder[highest] ?? 2;
-        return currentPriority < highestPriority ? order.priority : highest;
-      }, 'Routine');
-      
-      // Combine all notes (or use the first one)
-      const combinedNotes = draftOrders.map(o => o.notes).filter(n => n).join('; ') || undefined;
-      
-      // Create lab order in backend with all selected tests
-      const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
-        'Routine': 'routine',
-        'Urgent': 'urgent',
-        'STAT': 'stat',
-      };
-      
-      const testsData = draftOrders.map(order => ({
-        name: order.test,
-        code: order.code || slugLabCodeFromName(order.test),
-        sample_type: order.sampleType || 'Blood',
-        template: order.testId != null ? order.testId : null,
-        status: 'pending',
-        notes: order.notes || '',
-      }));
+      const labPayload = buildLabOrderPayloadFromDrafts(draftOrders);
       
       const clinicFromVisit =
         Array.isArray((currentPatient as any).clinics) && (currentPatient as any).clinics.length > 0
@@ -946,10 +869,10 @@ export function useConsultationRoomOrders({
         patient: numericPatientId as any,
         visit: numericVisitId || undefined,
         consultation_session: sessionId,
-        priority: priorityMap[orderPriority] || 'routine',
-        clinical_notes: combinedNotes,
+        priority: labPayload.priority,
+        clinical_notes: labPayload.clinical_notes,
         ...(clinicFromVisit ? { clinic: clinicFromVisit } : {}),
-        tests_data: testsData as any,
+        tests_data: labPayload.tests_data as any,
       } as any);
       
       // Update status of sent orders
@@ -1096,38 +1019,17 @@ export function useConsultationRoomOrders({
     let instructions: string = newNursingOrder.instructions;
 
     if (newNursingOrder.type === 'Injection' && injectionSelectedIds.size > 0) {
-      const selectedMeds = injectionMedicationResults.filter((m) => injectionSelectedIds.has(m.id.toString()));
-      medication = selectedMeds.map((m) => {
-        const name = m.name || "";
-        const strength = (m.strength || "").toString().trim();
-        const dosageForm = (m.dosage_form || "").toString().trim();
-        const label = strength && dosageForm
-          ? `${name} (${strength}, ${dosageForm})`
-          : strength
-            ? `${name} (${strength})`
-            : dosageForm
-              ? `${name} (${dosageForm})`
-              : name;
-        return label;
-      }).join(" + ");
-      const doses: string[] = [];
-      const freqParts: string[] = [];
-      const durParts: string[] = [];
-      const instrParts: string[] = [];
-      injectionSelectedIds.forEach((id) => {
-        const cfg = injectionConfigs.get(id);
-        if (!cfg) return;
-        const doseText = cfg.dose ? `${cfg.dose} ${cfg.doseUnit}` : "";
-        if (doseText) doses.push(doseText);
-        if (cfg.frequency) freqParts.push(cfg.frequency);
-        if (cfg.durationDays !== "") durParts.push(`${cfg.durationDays} days`);
-        if (cfg.instructions?.trim()) instrParts.push(cfg.instructions.trim());
+      const summary = buildInjectionOrderSummary({
+        selectedIds: injectionSelectedIds,
+        medications: injectionMedicationResults,
+        configs: injectionConfigs,
+        fallbackRoute: route,
+        fallbackInstructions: instructions,
       });
-      dosage = doses.join(" + ") || undefined;
-      const lastRoute = injectionConfigs.get(Array.from(injectionSelectedIds).pop()!)?.route;
-      route = lastRoute || route;
-      const combinedInstr = [...instrParts, ...(durParts.length ? [`Duration: ${durParts.join(", ")}`] : []), ...(freqParts.length ? [`Frequency: ${freqParts.join(", ")}`] : [])].filter(Boolean).join(". ");
-      instructions = combinedInstr || instructions;
+      medication = summary.medication || medication;
+      dosage = summary.dosage || dosage;
+      route = summary.route || route;
+      instructions = summary.instructions;
     }
 
     // Add to draft nursing orders (not sent yet)
@@ -1374,41 +1276,25 @@ export function useConsultationRoomOrders({
       return;
     }
 
-    const selectedTemplates = Array.from(selectedRadiologyTemplates)
-      .map((templateId) =>
-        radiologyTemplates.find((t) => t.id === templateId) ||
-        (otherRadiologyPinnedTemplate?.id === templateId ? otherRadiologyPinnedTemplate : null)
-      )
-      .filter((t): t is NonNullable<typeof t> => !!t);
-
-    const hasOther = selectedTemplates.some(
-      (t) => (t.code || '').toUpperCase() === RAD_OTHER_TEMPLATE_CODE
-    );
-    if (hasOther && newRadiology.clinicalIndication.trim().length < 8) {
-      toast.error(
-        'You selected "Other". Add more detail in clinical indication (exact study, region, modality, clinical question).'
-      );
-      return;
-    }
-    
-    // Add each selected template as a separate order
-    const newOrders = selectedTemplates.map((template) => {
-      const orderId = `RAD-${template.id}-${Date.now()}`;
-      return {
-      id: orderId,
-        procedure: template.name,
-        templateId: template.id,
-        category: template.modality || template.category,
-        bodyPart: template.body_part || '',
+    const { orders: newOrders, error } = buildRadiologyDraftOrders({
+      selectedTemplateIds: selectedRadiologyTemplates,
+      radiologyTemplates,
+      otherPinnedTemplate: otherRadiologyPinnedTemplate,
+      otherTemplateCode: RAD_OTHER_TEMPLATE_CODE,
       clinicalIndication: newRadiology.clinicalIndication,
+      otherClinicalIndicationMinLen: 8,
       priority: newRadiology.priority as 'Routine' | 'Urgent' | 'STAT',
       provisionalDiagnosis: newRadiology.provisionalDiagnosis || undefined,
       lmp: newRadiology.lmp || undefined,
-        status: 'Draft' as const
-      };
+      createdAtMs: Date.now(),
     });
-    
-    setRadiologyOrders([...radiologyOrders, ...newOrders]);
+
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
+    setRadiologyOrders([...radiologyOrders, ...newOrders as typeof radiologyOrders]);
 
     // Reset form
     setSelectedRadiologyTemplates(new Set());
@@ -1442,58 +1328,24 @@ export function useConsultationRoomOrders({
         return;
       }
       
-      // Group studies by priority (use the most urgent priority for the order)
-      const priorityOrder: Record<string, number> = { 'STAT': 0, 'Urgent': 1, 'Routine': 2 };
-      const orderPriority = draftOrders.reduce((highest, order) => {
-        const currentPriority = priorityOrder[order.priority] ?? 2;
-        const highestPriority = priorityOrder[highest] ?? 2;
-        return currentPriority < highestPriority ? order.priority : highest;
-      }, 'Routine');
-      
-      // Use the first clinical indication only (simplified)
-      const combinedClinicalNotes = draftOrders.find(o => o.clinicalIndication)?.clinicalIndication || '';
-      const combinedProvisionalDiagnosis = draftOrders.find(o => o.provisionalDiagnosis)?.provisionalDiagnosis || '';
-      const combinedLmp = draftOrders.find(o => o.lmp)?.lmp || '';
-      
-      const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
-        'Routine': 'routine',
-        'Urgent': 'urgent',
-        'STAT': 'stat',
-      };
-      
-      // Create all studies for the order
-      const studiesData = draftOrders.map(order => {
-        const template =
-          order.templateId != null
-            ? radiologyTemplates.find((t) => t.id === order.templateId)
-            : radiologyTemplates.find((t) => t.name === order.procedure);
-        const studyData: Record<string, unknown> = {
-          procedure: order.procedure,
-          body_part: template?.body_part || order.bodyPart || '',
-          modality: template?.modality || order.category || 'X-Ray',
-          status: 'pending',
-        };
-        const tid = order.templateId ?? template?.id;
-        if (tid != null) {
-          studyData.template = tid;
-        }
-        return studyData;
-      });
-      
-      // Create radiology order in backend with all selected studies
+      const radiologyPayload = buildRadiologyOrderPayloadFromDrafts(
+        draftOrders,
+        radiologyTemplates,
+      );
+
       const orderData: any = {
         patient: numericPatientId,
-        priority: priorityMap[orderPriority] || 'routine',
-        studies_data: studiesData as any,
+        priority: radiologyPayload.priority,
+        studies_data: radiologyPayload.studies_data as any,
         visit: numericVisitId,
         consultation_session: sessionId,
-        clinical_notes: combinedClinicalNotes,
+        clinical_notes: radiologyPayload.clinical_notes,
       };
-      if (combinedProvisionalDiagnosis) {
-        orderData.provisional_diagnosis = combinedProvisionalDiagnosis;
+      if (radiologyPayload.provisional_diagnosis) {
+        orderData.provisional_diagnosis = radiologyPayload.provisional_diagnosis;
       }
-      if (combinedLmp) {
-        orderData.lmp = combinedLmp;
+      if (radiologyPayload.lmp) {
+        orderData.lmp = radiologyPayload.lmp;
       }
 
       // Security: Removed console.log to prevent data leakage in production
@@ -1597,32 +1449,13 @@ export function useConsultationRoomOrders({
         return;
       }
 
-      // Get the highest priority from draft orders
-      const priorityOrder: Record<string, number> = { 'stat': 0, 'urgent': 1, 'routine': 2 };
-      const orderPriority = draftOrders.reduce((highest, order) => {
-        const currentPriority = priorityOrder[order.priority] ?? 2;
-        const highestPriority = priorityOrder[highest] ?? 2;
-        return currentPriority < highestPriority ? order.priority : highest;
-      }, 'routine');
-
-      // Combine all clinical notes
-      const combinedClinicalNotes = draftOrders.map(order =>
-        `${order.diagnosis}${order.historyClinicalFindings ? ` - ${order.historyClinicalFindings}` : ''}${order.specialInstructions ? ` (${order.specialInstructions})` : ''}`
-      ).join('; ');
-
-      // Create separate physiotherapy orders for each draft order
-      for (const order of draftOrders) {
-        await physioService.createOrder({
-          patient: numericPatientId,
-          visit: numericVisitId && !isNaN(numericVisitId) ? numericVisitId : undefined,
-          history_clinical_findings: order.historyClinicalFindings,
-          diagnosis: order.diagnosis,
-          drug_history: order.drugHistory,
-          special_instructions: order.specialInstructions || undefined,
-          priority: order.priority,
-          consultation_session: sessionId,
-          referral_source: 'doctor',
-        } as any);
+      const physioPayloads = buildPhysioCreateOrderPayloads(draftOrders, {
+        patientId: numericPatientId,
+        visitId: numericVisitId,
+        sessionId,
+      });
+      for (const payload of physioPayloads) {
+        await physioService.createOrder(payload as any);
       }
 
       // Remove sent drafts from local state and refetch from API so doctor sees real status (pending, scheduled, etc.)
@@ -1751,27 +1584,13 @@ export function useConsultationRoomOrders({
         return;
       }
 
-      const priorityOrder: Record<string, number> = { 'stat': 0, 'urgent': 1, 'routine': 2 };
-      const orderPriority = draftOrders.reduce((highest, order) => {
-        const currentPriority = priorityOrder[order.priority] ?? 2;
-        const highestPriority = priorityOrder[highest] ?? 2;
-        return currentPriority < highestPriority ? order.priority : highest;
-      }, 'routine');
-
-      for (const order of draftOrders) {
-        await eyeCareService.createOrder({
-          patient: numericPatientId,
-          visit: numericVisitId && !isNaN(numericVisitId) ? numericVisitId : undefined,
-          chief_complaint: order.chiefComplaint,
-          diagnosis: order.diagnosis,
-          treatment_plan: order.treatmentPlan,
-          special_instructions: order.specialInstructions || undefined,
-          visual_acuity_od: order.visualAcuityOd || undefined,
-          visual_acuity_os: order.visualAcuityOs || undefined,
-          visual_acuity_ou: order.visualAcuityOu || undefined,
-          priority: orderPriority,
-          consultation_session: sessionId,
-        } as any);
+      const eyePayloads = buildEyeCreateOrderPayloads(draftOrders, {
+        patientId: numericPatientId,
+        visitId: numericVisitId,
+        sessionId,
+      });
+      for (const payload of eyePayloads) {
+        await eyeCareService.createOrder(payload as any);
       }
 
       setEyeOrders(prev => prev.filter(o => !draftOrders.some(d => d.id === o.id)));

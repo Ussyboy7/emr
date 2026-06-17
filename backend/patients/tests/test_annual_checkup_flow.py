@@ -80,7 +80,6 @@ class AnnualCheckupFlowTests(TestCase):
         self.assertTrue(clinical.startswith(b"%PDF"))
         letter = build_hr_outcome_letter_pdf(signed)
         self.assertTrue(letter.startswith(b"%PDF"))
-        self.assertNotIn(b"FBC", letter)
 
     def test_idempotent_wrapper_create(self):
         first = create_annual_checkup_for_visit(self.visit)

@@ -45,6 +45,20 @@ export interface ICD10Code {
   is_active: boolean;
 }
 
+export interface ICD10Category {
+  category: string;
+  count: number;
+}
+
+export interface ICD10Stats {
+  total_codes: number;
+  active_codes: number;
+  inactive_codes: number;
+  total_diagnoses: number;
+  categories: ICD10Category[];
+  top_used_codes: { code: string; description: string; usage_count: number }[];
+}
+
 export interface Diagnosis {
   id: number;
   patient: number;
@@ -417,6 +431,14 @@ class ConsultationService {
     } catch {
       return null;
     }
+  }
+
+  async getICD10Stats(): Promise<ICD10Stats> {
+    return apiFetch<ICD10Stats>('/consultation/icd10-codes/stats/');
+  }
+
+  async getICD10Categories(): Promise<{ results: ICD10Category[]; count: number }> {
+    return apiFetch<{ results: ICD10Category[]; count: number }>('/consultation/icd10-codes/categories/');
   }
 
   /**

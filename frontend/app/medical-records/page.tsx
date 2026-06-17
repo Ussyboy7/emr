@@ -274,7 +274,7 @@ export default function MedicalRecordsPage() {
             <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
             Quick Actions
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <Button
               onClick={() => router.push("/medical-records/patients/new")}
               className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white border-l-4 border-l-white/20"
@@ -300,6 +300,15 @@ export default function MedicalRecordsPage() {
               <Plus className="h-5 w-5 sm:h-6 sm:w-6 text-green-500 dark:text-green-400" />
               <span className="text-xs sm:text-sm font-medium">Start New Visit</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Create patient consultations</span>
+            </Button>
+            <Button
+              onClick={() => router.push("/medical-records/coding")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-amber-500"
+            >
+              <FileText className="h-5 w-5 sm:h-6 sm:w-6 text-amber-500 dark:text-amber-400" />
+              <span className="text-xs sm:text-sm font-medium">ICD-10 Codes</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Browse diagnosis coding</span>
             </Button>
             <Button
               onClick={() => router.push("/medical-records/reports")}

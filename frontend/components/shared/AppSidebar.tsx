@@ -106,6 +106,7 @@ const menuSections: MenuSection[] = [
       { label: "Manage Visits", href: "/medical-records/visits", icon: Calendar },
       { label: "Appointments", href: "/medical-records/appointments", icon: CalendarDays },
       { label: "Referrals", href: "/medical-records/referrals", icon: ArrowRight },
+      { label: "ICD-10 Coding", href: "/medical-records/coding", icon: Database },
       { label: "Reports", href: "/medical-records/reports", icon: FolderOpen },
     ],
   },

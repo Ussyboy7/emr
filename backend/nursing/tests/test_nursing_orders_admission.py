@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 from nursing.models import NursingOrder
 from patients.models import Patient, Visit
 from wards.models import Ward, PatientAdmission
+from common.tests.support import grant_pages
 
 User = get_user_model()
 
@@ -25,6 +26,7 @@ class NursingOrderAdmissionApiTests(TestCase):
         )
         self.user.system_role = "Medical Doctor"
         self.user.save(update_fields=["system_role"])
+        grant_pages(self.user, ["/nursing", "/consultation/wards"])
 
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
