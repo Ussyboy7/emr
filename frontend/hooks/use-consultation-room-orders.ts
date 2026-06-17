@@ -150,6 +150,8 @@ export function useConsultationRoomOrders({
   const [labTemplateSearch, setLabTemplateSearch] = useState("");
   const [showLabTemplateDropdown, setShowLabTemplateDropdown] = useState(false);
   const [selectedLabTemplates, setSelectedLabTemplates] = useState<Set<number>>(new Set());
+  const [selectedLabTemplateDetails, setSelectedLabTemplateDetails] = useState<Map<number, ServiceLabTemplate>>(new Map());
+  const labTemplateSearchRef = useRef(0);
   const [otherLabPinnedTemplate, setOtherLabPinnedTemplate] = useState<ServiceLabTemplate | null>(null);
 
   // Radiology templates
@@ -291,6 +293,8 @@ export function useConsultationRoomOrders({
   const [radiologyTemplatesError, setRadiologyTemplatesError] = useState<string | null>(null);
   const [radiologyTemplateSearch, setRadiologyTemplateSearch] = useState("");
   const [showRadiologyTemplateDropdown, setShowRadiologyTemplateDropdown] = useState(false);
+  const [selectedRadiologyTemplateDetails, setSelectedRadiologyTemplateDetails] = useState<Map<number, any>>(new Map());
+  const radiologyTemplateSearchRef = useRef(0);
   const [otherRadiologyPinnedTemplate, setOtherRadiologyPinnedTemplate] = useState<any | null>(null);
 
   // Physiotherapy state
@@ -434,23 +438,36 @@ export function useConsultationRoomOrders({
 
   useEffect(() => {
     if (!showAddLabOrder && !showLabTemplateDropdown) return;
-    if (labTemplates.length > 0) return;
-    const loadLabTemplates = async () => {
+    const searchTerm = labTemplateSearch.trim();
+    if (!searchTerm) {
+      setLabTemplates([]);
+      return;
+    }
+    const requestId = ++labTemplateSearchRef.current;
+    const timeout = setTimeout(async () => {
       try {
         setLoadingLabTemplates(true);
-        const response = await labService.getTemplates();
-        setLabTemplates(response.results || []);
-        debugConsultationRoom(`[Consultation] Loaded ${response.results?.length || 0} lab templates from API`);
+        const response = await labService.getTemplates({
+          search: searchTerm,
+          page_size: CATALOG_SEARCH_PAGE_SIZE,
+        });
+        if (requestId === labTemplateSearchRef.current) {
+          setLabTemplates(response.results || []);
+        }
       } catch (err) {
-        debugConsultationRoom('Failed to load lab templates:', err);
-          toast.error('Failed to load lab templates. Some tests may not be available.');
+        if (requestId === labTemplateSearchRef.current) {
+          debugConsultationRoom('Failed to search lab templates:', err);
+          toast.error('Failed to load lab templates. Try another search term.');
+          setLabTemplates([]);
+        }
       } finally {
-        setLoadingLabTemplates(false);
+        if (requestId === labTemplateSearchRef.current) {
+          setLoadingLabTemplates(false);
+        }
       }
-    };
-    
-    loadLabTemplates();
-  }, [showAddLabOrder, showLabTemplateDropdown, labTemplates.length]);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [showAddLabOrder, showLabTemplateDropdown, labTemplateSearch]);
 
   useEffect(() => {
     if (!showAddLabOrder) return;
@@ -486,44 +503,43 @@ export function useConsultationRoomOrders({
 
   useEffect(() => {
     if (!showAddRadiology && !showRadiologyTemplateDropdown) return;
-    if (radiologyTemplates.length > 0) return;
-    const loadRadiologyTemplates = async () => {
+    const searchTerm = radiologyTemplateSearch.trim();
+    if (!searchTerm) {
+      setRadiologyTemplates([]);
+      return;
+    }
+    const requestId = ++radiologyTemplateSearchRef.current;
+    const timeout = setTimeout(async () => {
       try {
         setLoadingRadiologyTemplates(true);
         setRadiologyTemplatesError(null);
-        const templates = await radiologyService.getTemplates();
-        setRadiologyTemplates(templates.results || []);
-      } catch (err: any) {
-        debugConsultationRoom('Failed to load radiology templates:', err);
-
-        // Check for authentication errors
-        if (isAuthenticationError(err) || err.status === 401 || err.status === 403) {
-          debugConsultationRoom('[Consultation] Authentication error loading radiology templates');
-          toast.error('Authentication required. Please log in again.');
-          setRadiologyTemplatesError('Authentication required. Please log in again.');
-        } else if (err.status === 500) {
-          debugConsultationRoom('[Consultation] Server error loading radiology templates');
-          toast.error('Server error. Please try again later.');
-          setRadiologyTemplatesError('Server error. Please try again later.');
-        } else {
-          // Show error toast to inform user
-          toast.error('Failed to load radiology templates. Some imaging studies may not be available.');
-          setRadiologyTemplatesError('Failed to load radiology templates.');
+        const templates = await radiologyService.getTemplates({
+          search: searchTerm,
+          page_size: CATALOG_SEARCH_PAGE_SIZE,
+        });
+        if (requestId === radiologyTemplateSearchRef.current) {
+          setRadiologyTemplates(templates.results || []);
         }
-        // Fall back to empty array
-        setRadiologyTemplates([]);
+      } catch (err: any) {
+        if (requestId === radiologyTemplateSearchRef.current) {
+          debugConsultationRoom('Failed to search radiology templates:', err);
+          if (isAuthenticationError(err) || err.status === 401 || err.status === 403) {
+            setRadiologyTemplatesError('You do not have permission to load radiology templates.');
+            toast.error('You do not have permission to load radiology templates.');
+          } else {
+            setRadiologyTemplatesError('Failed to load radiology templates. Try another search term.');
+            toast.error('Failed to load radiology templates. Try another search term.');
+          }
+          setRadiologyTemplates([]);
+        }
       } finally {
-        setLoadingRadiologyTemplates(false);
+        if (requestId === radiologyTemplateSearchRef.current) {
+          setLoadingRadiologyTemplates(false);
+        }
       }
-    };
-
-    // Only load if radiologyService.getTemplates is available
-    if (typeof radiologyService.getTemplates === 'function') {
-      loadRadiologyTemplates();
-    } else {
-      setLoadingRadiologyTemplates(false);
-    }
-  }, [showAddRadiology, showRadiologyTemplateDropdown, radiologyTemplates.length]);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [showAddRadiology, showRadiologyTemplateDropdown, radiologyTemplateSearch]);
 
   // Load physio orders from API for this consultation session so doctor sees real status (pending/scheduled/in_progress/completed)
   useEffect(() => {
@@ -790,19 +806,71 @@ export function useConsultationRoomOrders({
   };
 
   // Toggle lab template selection
-  const toggleLabTemplateSelection = (template: any) => {
+  const toggleLabTemplateSelection = (template: ServiceLabTemplate) => {
     const templateId = template.id;
     setSelectedLabTemplates(prev => {
       const newSet = new Set(prev);
       if (newSet.has(templateId)) {
         newSet.delete(templateId);
+        setSelectedLabTemplateDetails((details) => {
+          const next = new Map(details);
+          next.delete(templateId);
+          return next;
+        });
       } else {
         newSet.add(templateId);
-        // Keep dropdown open and search so user can multi-select
+        setSelectedLabTemplateDetails((details) => new Map(details).set(templateId, template));
       }
       return newSet;
     });
   };
+
+  const toggleRadiologyTemplateSelection = (template: { id: number }) => {
+    const templateId = template.id;
+    setSelectedRadiologyTemplates((prev) => {
+      const next = new Set(prev);
+      if (next.has(templateId)) {
+        next.delete(templateId);
+        setSelectedRadiologyTemplateDetails((details) => {
+          const updated = new Map(details);
+          updated.delete(templateId);
+          return updated;
+        });
+      } else {
+        next.add(templateId);
+        setSelectedRadiologyTemplateDetails((details) => new Map(details).set(templateId, template));
+      }
+      return next;
+    });
+  };
+
+  const labTemplatesCatalog = useMemo(() => {
+    const byId = new Map<number, ServiceLabTemplate>();
+    for (const template of selectedLabTemplateDetails.values()) {
+      byId.set(template.id, template);
+    }
+    for (const template of labTemplates) {
+      byId.set(template.id, template);
+    }
+    if (otherLabPinnedTemplate) {
+      byId.set(otherLabPinnedTemplate.id, otherLabPinnedTemplate);
+    }
+    return Array.from(byId.values());
+  }, [selectedLabTemplateDetails, labTemplates, otherLabPinnedTemplate]);
+
+  const radiologyTemplatesCatalog = useMemo(() => {
+    const byId = new Map<number, any>();
+    for (const template of selectedRadiologyTemplateDetails.values()) {
+      byId.set(template.id, template);
+    }
+    for (const template of radiologyTemplates) {
+      byId.set(template.id, template);
+    }
+    if (otherRadiologyPinnedTemplate) {
+      byId.set(otherRadiologyPinnedTemplate.id, otherRadiologyPinnedTemplate);
+    }
+    return Array.from(byId.values());
+  }, [selectedRadiologyTemplateDetails, radiologyTemplates, otherRadiologyPinnedTemplate]);
 
   // Add selected lab templates to draft order (like prescriptions)
   const addLabOrder = () => {
@@ -813,7 +881,7 @@ export function useConsultationRoomOrders({
 
     const { orders: newOrders, error } = buildLabDraftOrders({
       selectedTemplateIds: selectedLabTemplates,
-      labTemplates,
+      labTemplates: labTemplatesCatalog,
       otherPinnedTemplate: otherLabPinnedTemplate,
       otherTemplateCode: LAB_OTHER_TEMPLATE_CODE,
       otherClinicalNotes: newLabOrder.notes,
@@ -825,9 +893,14 @@ export function useConsultationRoomOrders({
       toast.error(error);
       return;
     }
+    if (newOrders.length === 0) {
+      toast.error('Could not resolve selected tests. Search again and re-select.');
+      return;
+    }
 
     setLabOrders([...labOrders, ...newOrders as typeof labOrders]);
     setSelectedLabTemplates(new Set());
+    setSelectedLabTemplateDetails(new Map());
     setLabTemplateSearch("");
     setNewLabOrder({ test: "", priority: "Routine", notes: "" });
     setShowAddLabOrder(false);
@@ -906,9 +979,12 @@ export function useConsultationRoomOrders({
 
     // Pre-populate the modal with existing order data
     // For lab orders, we need to find the template ID from the test name
-    const template = labTemplates.find(t => t.name === orderToEdit.test);
+    const template =
+      labTemplatesCatalog.find((t) => t.id === orderToEdit.testId) ||
+      labTemplatesCatalog.find((t) => t.name === orderToEdit.test);
     if (template) {
       setSelectedLabTemplates(new Set([template.id]));
+      setSelectedLabTemplateDetails(new Map([[template.id, template]]));
     }
 
     // Pre-populate clinical indication and priority
@@ -925,46 +1001,28 @@ export function useConsultationRoomOrders({
     toast.info(`Editing lab order for ${orderToEdit.test}`);
   };
 
-  // Filter lab templates; pin "Other" (OTHER) at top when not already in matches
+  // Lab template dropdown: server search results, pin "Other" when relevant
   const filteredLabTemplates = useMemo(() => {
-    const q = labTemplateSearch.trim().toLowerCase();
-    let list = labTemplates.filter((template) => {
-      if (!q) return true;
-      return (
-        template.name?.toLowerCase().includes(q) ||
-        template.code?.toLowerCase().includes(q) ||
-        template.sample_type?.toLowerCase().includes(q) ||
-        (template.description && template.description.toLowerCase().includes(q))
-      );
-    });
+    let list = [...labTemplates];
     if (
       otherLabPinnedTemplate &&
       !list.some((t) => t.id === otherLabPinnedTemplate.id)
     ) {
       list = [otherLabPinnedTemplate, ...list];
     }
-    return list.slice(0, 20);
-  }, [labTemplates, labTemplateSearch, otherLabPinnedTemplate]);
+    return list.slice(0, 50);
+  }, [labTemplates, otherLabPinnedTemplate]);
 
   const roomRadiologyDropdownList = useMemo(() => {
-    const q = radiologyTemplateSearch.trim().toLowerCase();
-    let list = radiologyTemplates.filter((template: any) => {
-      if (!q) return true;
-      return (
-        (template.name && template.name.toLowerCase().includes(q)) ||
-        (template.code && template.code.toLowerCase().includes(q)) ||
-        (template.body_part && template.body_part.toLowerCase().includes(q)) ||
-        (template.modality && template.modality.toLowerCase().includes(q))
-      );
-    });
+    let list = [...radiologyTemplates];
     if (
       otherRadiologyPinnedTemplate &&
       !list.some((t: any) => t.id === otherRadiologyPinnedTemplate.id)
     ) {
       list = [otherRadiologyPinnedTemplate, ...list];
     }
-    return list.slice(0, 20);
-  }, [radiologyTemplates, radiologyTemplateSearch, otherRadiologyPinnedTemplate]);
+    return list.slice(0, 50);
+  }, [radiologyTemplates, otherRadiologyPinnedTemplate]);
 
   // Add nursing order to draft (like prescriptions, lab orders, and radiology orders)
   const addNursingOrder = () => {
@@ -1278,7 +1336,7 @@ export function useConsultationRoomOrders({
 
     const { orders: newOrders, error } = buildRadiologyDraftOrders({
       selectedTemplateIds: selectedRadiologyTemplates,
-      radiologyTemplates,
+      radiologyTemplates: radiologyTemplatesCatalog,
       otherPinnedTemplate: otherRadiologyPinnedTemplate,
       otherTemplateCode: RAD_OTHER_TEMPLATE_CODE,
       clinicalIndication: newRadiology.clinicalIndication,
@@ -1293,11 +1351,16 @@ export function useConsultationRoomOrders({
       toast.error(error);
       return;
     }
+    if (newOrders.length === 0) {
+      toast.error('Could not resolve selected studies. Search again and re-select.');
+      return;
+    }
 
     setRadiologyOrders([...radiologyOrders, ...newOrders as typeof radiologyOrders]);
 
     // Reset form
     setSelectedRadiologyTemplates(new Set());
+    setSelectedRadiologyTemplateDetails(new Map());
     setRadiologyTemplateSearch('');
     setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", provisionalDiagnosis: "", lmp: "" });
     setShowAddRadiology(false);
@@ -1330,7 +1393,7 @@ export function useConsultationRoomOrders({
       
       const radiologyPayload = buildRadiologyOrderPayloadFromDrafts(
         draftOrders,
-        radiologyTemplates,
+        radiologyTemplatesCatalog,
       );
 
       const orderData: any = {
@@ -1612,10 +1675,15 @@ export function useConsultationRoomOrders({
     const orderToEdit = radiologyOrders.find(o => o.id === orderId);
     if (!orderToEdit) return;
 
-    const tid =
-      orderToEdit.templateId ??
-      radiologyTemplates.find((t) => t.name === orderToEdit.procedure)?.id;
+    const template =
+      (tid != null ? radiologyTemplatesCatalog.find((t) => t.id === tid) : undefined) ||
+      radiologyTemplatesCatalog.find((t) => t.name === orderToEdit.procedure);
     setSelectedRadiologyTemplates(new Set(tid != null ? [tid] : []));
+    if (template) {
+      setSelectedRadiologyTemplateDetails(new Map([[template.id, template]]));
+    } else {
+      setSelectedRadiologyTemplateDetails(new Map());
+    }
 
     // Pre-populate the modal with existing order data
     setNewRadiology({
@@ -1677,7 +1745,7 @@ export function useConsultationRoomOrders({
       isSearchingICD10,
       labTemplateDropdownContainerRef,
       labTemplateSearch,
-      labTemplates,
+      selectedLabTemplateDetails,
       loadingInjectionMedications,
       loadingLabTemplates,
       loadingRadiologyTemplates,
@@ -1695,7 +1763,7 @@ export function useConsultationRoomOrders({
       prescriptions,
       radiologyTemplateDropdownContainerRef,
       radiologyTemplateSearch,
-      radiologyTemplates,
+      selectedRadiologyTemplateDetails,
       radiologyTemplatesError,
       referralReasons,
       referralSpecialties,
@@ -1727,7 +1795,9 @@ export function useConsultationRoomOrders({
       setSearchTimeout,
       setSelectedDiagnosisType,
       setSelectedLabTemplates,
+      setSelectedLabTemplateDetails,
       setSelectedRadiologyTemplates,
+      setSelectedRadiologyTemplateDetails,
       setShowAddDiagnosis,
       setShowAddEye,
       setShowAddLabOrder,
@@ -1754,6 +1824,7 @@ export function useConsultationRoomOrders({
       showPrescriptionRefill,
       showRadiologyTemplateDropdown,
       toggleLabTemplateSelection,
+      toggleRadiologyTemplateSelection,
       wards,
     }),
     [
@@ -1781,7 +1852,7 @@ export function useConsultationRoomOrders({
       injectionSelectedIds,
       isSearchingICD10,
       labTemplateSearch,
-      labTemplates,
+      selectedLabTemplateDetails,
       loadingInjectionMedications,
       loadingLabTemplates,
       loadingRadiologyTemplates,
@@ -1798,7 +1869,7 @@ export function useConsultationRoomOrders({
       prescriptionModalIntent,
       prescriptions,
       radiologyTemplateSearch,
-      radiologyTemplates,
+      selectedRadiologyTemplateDetails,
       radiologyTemplatesError,
       roomRadiologyDropdownList,
       searchICD10Codes,
@@ -1807,6 +1878,8 @@ export function useConsultationRoomOrders({
       selectedLabTemplates,
       selectedRadiologyTemplates,
       sessionId,
+      toggleLabTemplateSelection,
+      toggleRadiologyTemplateSelection,
       wards,
     ],
   );

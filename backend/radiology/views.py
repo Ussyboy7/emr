@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.db.models import Count, Q
 from django.http import HttpResponse
 
+from common.pagination import CatalogPageNumberPagination
 from laboratory.pagination import FlexiblePageNumberPagination
 
 from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
@@ -102,7 +103,7 @@ class ImagingPartnerViewSet(viewsets.ModelViewSet):
 class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet for managing radiology investigation templates."""
     serializer_class = RadiologyTemplateSerializer
-    pagination_class = FlexiblePageNumberPagination
+    pagination_class = CatalogPageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['category', 'modality', 'is_active', 'code']
     search_fields = ['name', 'code', 'description', 'body_part']

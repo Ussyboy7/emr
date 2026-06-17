@@ -128,6 +128,7 @@ describe('radiologyService', () => {
       expect(res.results).toHaveLength(1);
       const url = mockApiFetch.mock.calls[0][0] as string;
       expect(url).toContain('/radiology/templates/');
+      expect(url).toContain('page_size=500');
     });
   });
 

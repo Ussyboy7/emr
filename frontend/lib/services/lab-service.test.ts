@@ -88,13 +88,13 @@ describe('labService', () => {
       expect(url).toContain('/laboratory/templates/');
     });
 
-    it('includes default page size when filtering templates', async () => {
+    it('includes default catalog page size when filtering templates', async () => {
       mockApiFetch.mockResolvedValue({ results: [], count: 0 });
 
       await labService.getTemplates({ is_active: true });
       const url = mockApiFetch.mock.calls[0][0] as string;
       expect(url).toContain('is_active=true');
-      expect(url).toContain('page_size=');
+      expect(url).toContain('page_size=500');
     });
   });
 

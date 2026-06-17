@@ -100,7 +100,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   isSearchingICD10,
   labTemplateDropdownContainerRef,
   labTemplateSearch,
-  labTemplates,
+  selectedLabTemplateDetails,
   loadingInjectionMedications,
   loadingLabTemplates,
   loadingRadiologyTemplates,
@@ -118,7 +118,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   prescriptions,
   radiologyTemplateDropdownContainerRef,
   radiologyTemplateSearch,
-  radiologyTemplates,
+  selectedRadiologyTemplateDetails,
   radiologyTemplatesError,
   referralReasons,
   referralSpecialties,
@@ -150,7 +150,9 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   setSearchTimeout,
   setSelectedDiagnosisType,
   setSelectedLabTemplates,
+  setSelectedLabTemplateDetails,
   setSelectedRadiologyTemplates,
+  setSelectedRadiologyTemplateDetails,
   setShowAddDiagnosis,
   setShowAddEye,
   setShowAddLabOrder,
@@ -177,6 +179,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   showPrescriptionRefill,
   showRadiologyTemplateDropdown,
   toggleLabTemplateSelection,
+  toggleRadiologyTemplateSelection,
   wards,
 } = workspace;
 
@@ -397,6 +400,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           setShowAddLabOrder(open);
           if (!open) {
             setSelectedLabTemplates(new Set());
+            setSelectedLabTemplateDetails(new Map());
             setLabTemplateSearch("");
             setShowLabTemplateDropdown(false);
           }
@@ -488,7 +492,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                   <div className="flex flex-wrap gap-2">
                     {Array.from(selectedLabTemplates).map((id) => {
                       const template =
-                        labTemplates.find((t) => t.id === id) ||
+                        selectedLabTemplateDetails.get(id) ||
                         (otherLabPinnedTemplate?.id === id ? otherLabPinnedTemplate : undefined);
                       if (!template) return null;
                       return (
@@ -1088,6 +1092,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           setShowAddRadiology(open);
           if (!open) {
             setSelectedRadiologyTemplates(new Set());
+            setSelectedRadiologyTemplateDetails(new Map());
             setRadiologyTemplateSearch('');
             setShowRadiologyTemplateDropdown(false);
           }
@@ -1144,9 +1149,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                               <div
                                 key={template.id}
                                 className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
-                                onClick={() => {
-                                  setSelectedRadiologyTemplates(prev => new Set([...prev, template.id]));
-                                }}
+                                onClick={() => toggleRadiologyTemplateSelection(template)}
                               >
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
@@ -1187,7 +1190,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                   <div className="space-y-1 max-h-32 overflow-y-auto">
                     {Array.from(selectedRadiologyTemplates).map(templateId => {
                       const template =
-                        radiologyTemplates.find((t) => t.id === templateId) ||
+                        selectedRadiologyTemplateDetails.get(templateId) ||
                         (otherRadiologyPinnedTemplate?.id === templateId ? otherRadiologyPinnedTemplate : undefined);
                       return template ? (
                         <div key={templateId} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
@@ -1204,13 +1207,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                             variant="ghost"
                             size="sm"
                             className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                            onClick={() => {
-                              setSelectedRadiologyTemplates(prev => {
-                                const newSet = new Set(prev);
-                                newSet.delete(templateId);
-                                return newSet;
-                              });
-                            }}
+                            onClick={() => toggleRadiologyTemplateSelection(template)}
                           >
                             <X className="h-3 w-3" />
                           </Button>

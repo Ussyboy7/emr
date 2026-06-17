@@ -2,7 +2,7 @@
  * Radiology API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
-import { DEFAULT_CATALOG_PAGE_SIZE } from '../pagination-constants';
+import { DEFAULT_CATALOG_PAGE_SIZE, MAX_CATALOG_PAGE_SIZE } from '../pagination-constants';
 
 export interface RadiologyOrder {
   id: number;
@@ -458,7 +458,10 @@ class RadiologyService {
     page?: number;
     page_size?: number;
   }): Promise<{ results: RadiologyTemplate[]; count: number }> {
-    const query = buildQueryString(params || {});
+    const query = buildQueryString({
+      page_size: MAX_CATALOG_PAGE_SIZE,
+      ...(params || {}),
+    });
     return apiFetch<{ results: RadiologyTemplate[]; count: number }>(`/radiology/templates/${query}`);
   }
 

@@ -46,7 +46,7 @@ from .serializers import (
 )
 from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_ID_PARAMS, document_viewset
-from .pagination import FlexiblePageNumberPagination
+from .pagination import FlexiblePageNumberPagination, LabCatalogPagination
 from .result_display import dedupe_result_alias_rows, sort_lab_result_rows_for_pdf
 from audit.services import AuditService
 
@@ -118,7 +118,7 @@ class LabTemplateViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'code']
     ordering_fields = ['sort_order', 'name', 'code']
     ordering = ['sort_order', 'name']
-    pagination_class = FlexiblePageNumberPagination  # Allow large page sizes
+    pagination_class = LabCatalogPagination
     
     def get_queryset(self):
         # Return all templates (not just active) to allow status management

@@ -4,7 +4,7 @@
  * Laboratory API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
-import { DEFAULT_CATALOG_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '../pagination-constants';
+import { DEFAULT_CATALOG_PAGE_SIZE, MAX_CATALOG_PAGE_SIZE } from '../pagination-constants';
 
 export interface LabOrder {
   id: number;
@@ -581,7 +581,7 @@ class LabService {
     page_size?: number;
   }): Promise<{ results: LabTemplate[]; count: number }> {
     const query = buildQueryString({
-      page_size: MAX_LIST_PAGE_SIZE,
+      page_size: MAX_CATALOG_PAGE_SIZE,
       ...(params || {}),
     });
     const response = await apiFetch<{ results: LabTemplate[]; count: number }>(`/laboratory/templates/${query}`);
