@@ -65,7 +65,12 @@ class Command(BaseCommand):
 
             # Backfill newer Medical Records pages for older "records" roles.
             if role.type == "records":
-                for required in ("/medical-records/patient-records", "/medical-records/coding"):
+                for required in (
+                    "/medical-records",
+                    "/medical-records/patients",
+                    "/medical-records/patient-records",
+                    "/medical-records/coding",
+                ):
                     if required not in deduped:
                         deduped.append(required)
 

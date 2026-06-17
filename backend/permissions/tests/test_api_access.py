@@ -58,10 +58,30 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/laboratory/orders"}
         self.assertTrue(check_api_page_access("patients/", "GET", allowed))
 
+    def test_lab_order_create_allowed_for_consultation_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("laboratory/orders/", "POST", allowed))
+
+    def test_radiology_order_create_allowed_for_consultation_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("radiology/orders/", "POST", allowed))
+
+    def test_pharmacy_prescription_create_allowed_for_consultation_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("v1/pharmacy/prescriptions/", "POST", allowed))
+
     def test_laboratory_orders_read_allowed_for_physiotherapy(self):
         allowed = {"/physiotherapy/orders"}
         self.assertTrue(check_api_page_access("laboratory/orders/", "GET", allowed))
         self.assertFalse(check_api_page_access("laboratory/orders/", "POST", allowed))
+
+    def test_laboratory_completed_page_allows_lab_module_api(self):
+        allowed = {"/laboratory/completed"}
+        self.assertTrue(check_api_page_access("laboratory/tests/", "GET", allowed))
+
+    def test_radiology_completed_page_allows_radiology_module_api(self):
+        allowed = {"/radiology/completed"}
+        self.assertTrue(check_api_page_access("radiology/orders/", "GET", allowed))
 
     def test_auth_exempt(self):
         self.assertTrue(check_api_page_access("accounts/auth/token/", "POST", set()))
@@ -93,6 +113,7 @@ class ApiAccessTests(SimpleTestCase):
 
     def test_normalize_api_path(self):
         self.assertEqual(normalize_api_path("/api/v1/nursing/orders/"), "nursing/orders/")
+        self.assertEqual(normalize_api_path("v1/pharmacy/prescriptions/"), "pharmacy/prescriptions/")
 
     def test_patient_create_denied_for_consultation_only(self):
         allowed = {"/consultation/start"}

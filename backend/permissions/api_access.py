@@ -105,7 +105,10 @@ def normalize_api_path(path: str) -> str:
         if raw.startswith(prefix):
             raw = raw[len(prefix) :]
             break
-    return raw.lstrip("/")
+    path = raw.lstrip("/")
+    if path.startswith("v1/"):
+        path = path[3:]
+    return path
 
 
 def _is_exempt(api_path: str) -> bool:
@@ -123,6 +126,7 @@ def _is_exempt(api_path: str) -> bool:
 
 
 def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -> bool:
+    api_path = normalize_api_path(api_path)
     method = (method or "GET").upper()
 
     if allowed_pages & (SUPERUSER_PAGES | ADMIN_ROLE_PAGES):
@@ -181,15 +185,6 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
             ),
         )
 
-    # Physiotherapy workflow can read Lab Orders context, but must not mutate lab data.
-    if api_path.startswith("laboratory/orders/"):
-        if method in ("GET", "HEAD", "OPTIONS"):
-            return user_has_any_page(
-                allowed_pages,
-                ("/laboratory/orders", "/laboratory", "/physiotherapy/orders", "/physiotherapy"),
-            )
-        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
-
     # Consultation ordering UIs need to load lab templates for test selection.
     if api_path.startswith("laboratory/templates/"):
         if method in ("GET", "HEAD", "OPTIONS"):
@@ -199,20 +194,57 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
             )
         return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
 
-    # Physiotherapy APIs are mounted at root paths (/orders, /sessions, /templates, /stats).
-    if api_path.startswith("orders/") or api_path.startswith("sessions/") or api_path.startswith("templates/"):
+    # Consultation can create/read lab orders as part of encounter workflow.
+    if api_path.startswith("laboratory/orders/"):
         if method in ("GET", "HEAD", "OPTIONS"):
             return user_has_any_page(
                 allowed_pages,
-                ("/physiotherapy/orders", "/physiotherapy", "/nursing/pool-queue"),
+                (
+                    "/laboratory/orders",
+                    "/laboratory",
+                    "/consultation/start",
+                    "/consultation",
+                    "/physiotherapy/orders",
+                    "/physiotherapy",
+                ),
             )
-        return user_has_any_page(allowed_pages, ("/physiotherapy/orders", "/physiotherapy", "/nursing/pool-queue"))
+        if method == "POST":
+            return user_has_any_page(
+                allowed_pages,
+                ("/laboratory/orders", "/laboratory", "/consultation/start", "/consultation"),
+            )
+        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
 
-    if api_path.startswith("stats/"):
-        return user_has_any_page(allowed_pages, ("/physiotherapy/orders", "/physiotherapy"))
+    # Consultation can create/read radiology orders and browse radiology templates.
+    if api_path.startswith("radiology/orders/"):
+        if method in ("GET", "HEAD", "OPTIONS", "POST"):
+            return user_has_any_page(
+                allowed_pages,
+                ("/radiology/orders", "/radiology", "/consultation/start", "/consultation"),
+            )
+        return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
 
-    if api_path.startswith("patient-tracker/"):
-        return user_has_any_page(allowed_pages, ("/physiotherapy/orders", "/physiotherapy"))
+    if api_path.startswith("radiology/templates/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return user_has_any_page(
+                allowed_pages,
+                ("/radiology/orders", "/radiology", "/consultation/start", "/consultation"),
+            )
+        return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
+
+    # Consultation can create prescriptions and search generics for prescribing.
+    if api_path.startswith("pharmacy/prescriptions/") or api_path.startswith("pharmacy/generics/for_prescription/"):
+        if method in ("GET", "HEAD", "OPTIONS", "POST"):
+            return user_has_any_page(
+                allowed_pages,
+                ("/pharmacy/prescriptions", "/pharmacy", "/consultation/start", "/consultation"),
+            )
+        return user_has_any_page(allowed_pages, ("/pharmacy/prescriptions", "/pharmacy"))
+
+    # Physiotherapy APIs are mounted at root paths (/orders, /sessions, /templates, /stats).
+    _PHYSIO_ROOT_PAGES = ("/physiotherapy/orders", "/physiotherapy", "/nursing/pool-queue")
+    if api_path.startswith(("orders/", "sessions/", "templates/", "stats/", "patient-tracker/")):
+        return user_has_any_page(allowed_pages, _PHYSIO_ROOT_PAGES)
 
     if api_path.startswith("common/"):
         if api_path.startswith("common/dashboard/admin") or api_path.startswith("common/metrics"):
@@ -319,13 +351,7 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
             ("/consultation", "/medical-records/patient-records", "/medical-records"),
         )
 
-    # Nursing pool queue sends/checks patients into Physiotherapy and Eye Clinic queues.
-    if api_path.startswith("orders/checkin-from-visit") or api_path.startswith("orders/checkins-for-visits"):
-        return user_has_any_page(
-            allowed_pages,
-            ("/nursing/pool-queue", "/physiotherapy/orders", "/physiotherapy"),
-        )
-
+    # Nursing pool queue sends patients into Eye Clinic queue (physio check-in uses root /orders/).
     if api_path.startswith("eyecare/orders/checkin-from-visit") or api_path.startswith("eyecare/orders/checkins-for-visits"):
         return user_has_any_page(
             allowed_pages,
