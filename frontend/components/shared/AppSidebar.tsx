@@ -3,7 +3,6 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { normalizeRolePagePath } from "@/lib/page-permissions";
 import { useState } from "react";
 import {
   LayoutDashboard,
@@ -69,7 +68,8 @@ import { Badge } from "@/components/ui/badge";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { getHomeRouteForUser } from "@/lib/home-route";
+import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
+import { canShowCentralStoreNav } from "@/lib/central-store-access";
 import { useClinic } from "@/hooks/use-clinic";
 
 // Types for menu structure
@@ -266,7 +266,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const isCollapsed = state === "collapsed";
   const { currentUser, hydrated } = useCurrentUser();
-  const { activeClinicId } = useClinic();
+  const { clinics: userClinics } = useClinic();
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
   const canViewOverviewDashboard =
     Boolean(currentUser?.isSuperuser) || Boolean(currentUser?.permissions?.includes("/dashboard"));
@@ -326,22 +326,24 @@ export function AppSidebar() {
 
     // Check if user has access to pages from each module
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
-    const allowedSet = new Set(allowedPages.map(normalizeRolePagePath));
 
     const canManageUsers =
       currentUser.isSuperuser ||
       currentUser.isStaff ||
       currentUser.isDepartmentHead;
 
-    return menuSections.filter(section => {
-      return section.items.some(item => {
-        if (item.href === '/admin/users') {
-          const hasPage =
-            allowedSet.has('/admin/users') || allowedSet.has('/admin');
-          return hasPage && canManageUsers;
-        }
-        return allowedSet.has(normalizeRolePagePath(item.href));
-      });
+    const itemAllowed = (href: string) => {
+      if (href === "/admin/users") {
+        const hasPage =
+          isPathAllowedByPages("/admin/users", allowedPages) ||
+          isPathAllowedByPages("/admin", allowedPages);
+        return hasPage && canManageUsers;
+      }
+      return isPathAllowedByPages(href, allowedPages);
+    };
+
+    return menuSections.filter((section) => {
+      return section.items.some((item) => itemAllowed(item.href));
     });
   };
 
@@ -351,10 +353,10 @@ export function AppSidebar() {
       return [];
     }
 
-    // Filter out Central store and Store Requests if not on Bode Thomas (superusers bypass)
-    const storeHrefs = ['/pharmacy/store', '/pharmacy/store/requests'];
-    const baseItems = section.items.filter(item => {
-      if (storeHrefs.includes(item.href) && activeClinicId !== 5 && !currentUser.isSuperuser) {
+    const storeHrefs = ["/pharmacy/store", "/pharmacy/store/requests"];
+    const showCentralStore = canShowCentralStoreNav(currentUser, userClinics);
+    const baseItems = section.items.filter((item) => {
+      if (storeHrefs.includes(item.href) && !showCentralStore) {
         return false;
       }
       return true;
@@ -365,25 +367,25 @@ export function AppSidebar() {
       return baseItems;
     }
 
-    // Check if user has access to specific pages
+    // Check if user has access to specific pages (prefix-aware, matches middleware)
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
-    const allowedSet = new Set(allowedPages.map(normalizeRolePagePath));
 
     const canManageUsers =
       currentUser.isSuperuser ||
       currentUser.isStaff ||
       currentUser.isDepartmentHead;
 
-    return baseItems.filter(item => {
-      if (item.href === '/admin/users') {
+    return baseItems.filter((item) => {
+      if (item.href === "/admin/users") {
         const hasPage =
-          allowedSet.has('/admin/users') || allowedSet.has('/admin');
+          isPathAllowedByPages("/admin/users", allowedPages) ||
+          isPathAllowedByPages("/admin", allowedPages);
         return hasPage && canManageUsers;
       }
-      if (item.href === '/admin/health' && allowedSet.has('/admin')) {
+      if (item.href === "/admin/health" && isPathAllowedByPages("/admin", allowedPages)) {
         return true;
       }
-      return allowedSet.has(normalizeRolePagePath(item.href));
+      return isPathAllowedByPages(item.href, allowedPages);
     });
   };
 

@@ -63,8 +63,11 @@ class Command(BaseCommand):
                 seen.add(key)
                 deduped.append(p)
 
-            # Backfill newer Medical Records pages for older "records" roles.
-            if role.type == "records":
+            # Backfill core Medical Records pages for records roles and legacy MR roles.
+            has_medical_records_access = role.type == "records" or any(
+                isinstance(p, str) and p.startswith("/medical-records") for p in deduped
+            )
+            if has_medical_records_access:
                 for required in (
                     "/medical-records",
                     "/medical-records/patients",

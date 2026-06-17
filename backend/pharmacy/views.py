@@ -450,15 +450,18 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return loc == 'dispensary'
 
     def _validate_store_access(self):
-        """Block store access if active clinic is not Bode Thomas (pk=5)."""
+        """Block store access unless the user's active clinic is the central store site."""
         if self.request.user.is_superuser:
             return
         loc = (self.request.query_params.get('location') or '').strip().lower()
         if loc == 'store':
-            clinic_id = resolve_clinic_id(self.request.user)
-            if clinic_id is not None and clinic_id != 5:
+            from pharmacy.central_store import user_can_operate_central_store
+            if not user_can_operate_central_store(self.request.user):
                 from rest_framework.exceptions import PermissionDenied
-                raise PermissionDenied("Central store is only accessible from Bode Thomas Clinic")
+                raise PermissionDenied(
+                    "Central store is only accessible while Bode Thomas Clinic is your active clinic. "
+                    "Switch clinic in the top bar and try again."
+                )
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -1905,17 +1908,20 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def _validate_store_access(self):
-        """Block store-related operations if active clinic is not Bode Thomas (pk=5)."""
+        """Block store-related operations unless active clinic is the central store site."""
         if self.request.user.is_superuser:
             return
         from_location = (self.request.query_params.get('from_location') or '').strip().lower()
         to_location = (self.request.query_params.get('to_location') or '').strip().lower()
         is_store_op = 'store' in from_location or 'store' in to_location
         if is_store_op:
-            clinic_id = resolve_clinic_id(self.request.user)
-            if clinic_id is not None and clinic_id != 5:
+            from pharmacy.central_store import user_can_operate_central_store
+            if not user_can_operate_central_store(self.request.user):
                 from rest_framework.exceptions import PermissionDenied
-                raise PermissionDenied("Central store operations are only accessible from Bode Thomas Clinic")
+                raise PermissionDenied(
+                    "Central store operations require Bode Thomas Clinic as your active clinic. "
+                    "Switch clinic in the top bar and try again."
+                )
 
     def scope_queryset(self, qs):
         """Superusers bypass scoping on detail routes; list scoped unless show_all=true."""

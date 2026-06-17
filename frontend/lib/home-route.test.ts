@@ -27,6 +27,10 @@ describe('isPathAllowedByPages', () => {
   it('handles special patient-records → patients mapping', () => {
     expect(isPathAllowedByPages('/medical-records/patients/123', ['/medical-records/patient-records'])).toBe(true);
   });
+
+  it('allows manage patients when parent medical-records is granted', () => {
+    expect(isPathAllowedByPages('/medical-records/patients', ['/medical-records'])).toBe(true);
+  });
 });
 
 describe('getHomeRouteFromAllowedPages', () => {
