@@ -36,6 +36,16 @@ class ApiAccessTests(SimpleTestCase):
         self.assertTrue(check_api_page_access("consultation/sessions/", "GET", allowed))
         self.assertTrue(check_api_page_access("consultation/queue/", "GET", allowed))
 
+    def test_physio_checkin_api_allowed_for_nursing_pool_queue_page(self):
+        allowed = {"/nursing/pool-queue"}
+        self.assertTrue(check_api_page_access("orders/checkins-for-visits/", "GET", allowed))
+        self.assertTrue(check_api_page_access("orders/checkin-from-visit/", "POST", allowed))
+
+    def test_eyecare_checkin_api_allowed_for_nursing_pool_queue_page(self):
+        allowed = {"/nursing/pool-queue"}
+        self.assertTrue(check_api_page_access("eyecare/orders/checkins-for-visits/", "GET", allowed))
+        self.assertTrue(check_api_page_access("eyecare/orders/checkin-from-visit/", "POST", allowed))
+
     def test_patient_detail_allowed_for_clinical_modules(self):
         allowed = {"/consultation/start"}
         self.assertTrue(check_api_page_access("patients/42/", "GET", allowed))
@@ -47,6 +57,11 @@ class ApiAccessTests(SimpleTestCase):
     def test_patient_list_allowed_for_laboratory_orders(self):
         allowed = {"/laboratory/orders"}
         self.assertTrue(check_api_page_access("patients/", "GET", allowed))
+
+    def test_laboratory_orders_read_allowed_for_physiotherapy(self):
+        allowed = {"/physiotherapy/orders"}
+        self.assertTrue(check_api_page_access("laboratory/orders/", "GET", allowed))
+        self.assertFalse(check_api_page_access("laboratory/orders/", "POST", allowed))
 
     def test_auth_exempt(self):
         self.assertTrue(check_api_page_access("accounts/auth/token/", "POST", set()))
@@ -71,6 +86,10 @@ class ApiAccessTests(SimpleTestCase):
     def test_system_roles_read_allowed_for_user_management_page(self):
         allowed = {"/admin/users"}
         self.assertTrue(check_api_page_access("accounts/system-roles/", "GET", allowed))
+
+    def test_lab_templates_read_allowed_for_consultation_pages(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("laboratory/templates/", "GET", allowed))
 
     def test_normalize_api_path(self):
         self.assertEqual(normalize_api_path("/api/v1/nursing/orders/"), "nursing/orders/")
@@ -115,6 +134,16 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/nursing/pool-queue"}
         self.assertTrue(check_api_page_access("vitals/latest-by-visits/", "GET", allowed))
         self.assertTrue(check_api_page_access("vitals/", "POST", allowed))
+
+    def test_physio_root_orders_allowed_for_physio_orders_page(self):
+        allowed = {"/physiotherapy/orders"}
+        self.assertTrue(check_api_page_access("orders/", "GET", allowed))
+        self.assertTrue(check_api_page_access("orders/123/", "PATCH", allowed))
+
+    def test_physio_root_sessions_allowed_for_physio_orders_page(self):
+        allowed = {"/physiotherapy/orders"}
+        self.assertTrue(check_api_page_access("sessions/", "GET", allowed))
+        self.assertTrue(check_api_page_access("sessions/99/start_session/", "POST", allowed))
 
     def test_admissions_api_allowed_for_ward_pages(self):
         allowed = {"/nursing/wards"}

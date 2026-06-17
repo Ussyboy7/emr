@@ -181,6 +181,39 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
             ),
         )
 
+    # Physiotherapy workflow can read Lab Orders context, but must not mutate lab data.
+    if api_path.startswith("laboratory/orders/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return user_has_any_page(
+                allowed_pages,
+                ("/laboratory/orders", "/laboratory", "/physiotherapy/orders", "/physiotherapy"),
+            )
+        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
+
+    # Consultation ordering UIs need to load lab templates for test selection.
+    if api_path.startswith("laboratory/templates/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return user_has_any_page(
+                allowed_pages,
+                ("/laboratory/orders", "/laboratory", "/consultation/start", "/consultation"),
+            )
+        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
+
+    # Physiotherapy APIs are mounted at root paths (/orders, /sessions, /templates, /stats).
+    if api_path.startswith("orders/") or api_path.startswith("sessions/") or api_path.startswith("templates/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return user_has_any_page(
+                allowed_pages,
+                ("/physiotherapy/orders", "/physiotherapy", "/nursing/pool-queue"),
+            )
+        return user_has_any_page(allowed_pages, ("/physiotherapy/orders", "/physiotherapy", "/nursing/pool-queue"))
+
+    if api_path.startswith("stats/"):
+        return user_has_any_page(allowed_pages, ("/physiotherapy/orders", "/physiotherapy"))
+
+    if api_path.startswith("patient-tracker/"):
+        return user_has_any_page(allowed_pages, ("/physiotherapy/orders", "/physiotherapy"))
+
     if api_path.startswith("common/"):
         if api_path.startswith("common/dashboard/admin") or api_path.startswith("common/metrics"):
             return user_has_any_page(allowed_pages, ("/admin",))
@@ -284,6 +317,19 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         return user_has_any_page(
             allowed_pages,
             ("/consultation", "/medical-records/patient-records", "/medical-records"),
+        )
+
+    # Nursing pool queue sends/checks patients into Physiotherapy and Eye Clinic queues.
+    if api_path.startswith("orders/checkin-from-visit") or api_path.startswith("orders/checkins-for-visits"):
+        return user_has_any_page(
+            allowed_pages,
+            ("/nursing/pool-queue", "/physiotherapy/orders", "/physiotherapy"),
+        )
+
+    if api_path.startswith("eyecare/orders/checkin-from-visit") or api_path.startswith("eyecare/orders/checkins-for-visits"):
+        return user_has_any_page(
+            allowed_pages,
+            ("/nursing/pool-queue", "/eyecare/orders", "/eyecare"),
         )
 
     if api_path.startswith("annual-checkups/"):

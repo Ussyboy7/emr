@@ -580,7 +580,10 @@ class LabService {
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabTemplate[]; count: number }> {
-    const query = buildQueryString(params || { page_size: MAX_LIST_PAGE_SIZE });
+    const query = buildQueryString({
+      page_size: MAX_LIST_PAGE_SIZE,
+      ...(params || {}),
+    });
     const response = await apiFetch<{ results: LabTemplate[]; count: number }>(`/laboratory/templates/${query}`);
     return response;
   }
