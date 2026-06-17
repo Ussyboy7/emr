@@ -139,8 +139,13 @@ class Command(BaseCommand):
         self.stdout.write(f'Completed orders missing completed_at: {count}')
         if apply and count:
             updated = 0
-            for order in qs.select_related('procedures').iterator(chunk_size=200):
-                proc = order.procedures.order_by('-performed_at').first()
+            for order in qs.iterator(chunk_size=200):
+                proc = (
+                    Procedure.objects.filter(nursing_order_id=order.pk)
+                    .order_by('-performed_at')
+                    .only('performed_at')
+                    .first()
+                )
                 completed_at = proc.performed_at if proc else order.ordered_at or timezone.now()
                 NursingOrder.objects.filter(pk=order.pk).update(completed_at=completed_at)
                 updated += 1
