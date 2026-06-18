@@ -92,7 +92,7 @@ export function transformApiRadiologyReportToCompleted(apiReport: Record<string,
     : reportText;
 
   const sd = apiReportAny.study_details || {};
-  const rawFileUrl = sd.report_file_url as string | undefined;
+  const rawFileUrl = (sd.report_file_url || sd.report_file) as string | undefined;
   const fileUrl = rawFileUrl ? toAbsoluteMediaUrl(rawFileUrl) : undefined;
   const rf = sd.report_file;
   const rawName =

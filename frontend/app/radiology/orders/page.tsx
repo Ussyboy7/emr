@@ -2587,15 +2587,15 @@ export default function RadiologyOrdersPage() {
                                 size="sm"
                                 className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700"
                                 onClick={() => {
-                                  const fileUrl = study.report_file_url || (study.report_file && typeof study.report_file === 'string' ? study.report_file : null);
+                                  const fileUrl =
+                                    study.report_file_url ||
+                                    (study.report_file && typeof study.report_file === 'string'
+                                      ? study.report_file
+                                      : null);
                                   if (fileUrl) {
-                                    const link = document.createElement('a');
-                                    link.href = fileUrl;
-                                    link.target = '_blank';
-                                    link.rel = 'noopener noreferrer';
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
+                                    void openMediaInNewTab(fileUrl).catch((err: unknown) =>
+                                      toast.error(err instanceof Error ? err.message : 'Failed to open file'),
+                                    );
                                   } else {
                                     toast.error('File URL not available');
                                   }

@@ -163,11 +163,9 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_report_file_url(self, obj):
-        """Get the URL for the uploaded report file."""
+        """Storage-relative path for the uploaded report (served via protected media API)."""
         if obj.report_file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.report_file.url)
+            return obj.report_file.name
         return None
     
     class Meta:

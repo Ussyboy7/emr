@@ -14,12 +14,28 @@ function getApiRoot(): string {
   return `${normalized}/api`;
 }
 
+function isRewriteableMediaUrl(input: string): boolean {
+  if (input.startsWith("http://") || input.startsWith("https://")) {
+    try {
+      const { pathname } = new URL(input);
+      return pathname.includes("/common/media/") || pathname.startsWith("/media/");
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function normalizeMediaRelativePath(relativePath: string): string {
   let p = relativePath.trim();
   if (!p) return "";
 
   if (p.startsWith("http://") || p.startsWith("https://")) {
-    return p;
+    try {
+      p = new URL(p).pathname;
+    } catch {
+      return relativePath.trim();
+    }
   }
 
   const apiRoot = getApiRoot();
@@ -43,12 +59,19 @@ export function getMediaUrl(relativePath: string | null | undefined): string | n
   if (!relativePath) return null;
 
   const trimmed = relativePath.trim();
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+  if (!trimmed) return null;
+
+  if (
+    (trimmed.startsWith("http://") || trimmed.startsWith("https://")) &&
+    !isRewriteableMediaUrl(trimmed)
+  ) {
     return trimmed;
   }
 
   const rel = normalizeMediaRelativePath(trimmed);
-  if (!rel || rel.startsWith("http")) return rel || null;
+  if (!rel || rel.startsWith("http://") || rel.startsWith("https://")) {
+    return rel || null;
+  }
 
   return `${getApiRoot()}/common/media/${encodeURI(rel)}`;
 }

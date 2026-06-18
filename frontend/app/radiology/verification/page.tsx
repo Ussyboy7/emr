@@ -169,11 +169,11 @@ const transformReport = (apiReport: any): RadiologyReport => {
       customReports,
       critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
       reportAttachments: reportAttachments.length > 0 ? reportAttachments : undefined,
-      reportFile: studyObj.report_file_url ? {
+      reportFile: studyObj.report_file_url || studyObj.report_file ? {
         name: String(studyObj.report_file ? studyObj.report_file.split('/').pop() : 'Report File'),
         type: 'application/pdf',
         uploadedAt: String(studyObj.reported_at || new Date().toISOString()),
-        url: String(studyObj.report_file_url)
+        url: getRadiologyReportFileUrl(studyObj.report_file_url || studyObj.report_file),
       } as any : undefined,
       reportedBy: studyObj.reported_by_name || (studyObj.reported_by ? String(studyObj.reported_by) : undefined),
       reportedAt: studyObj.reported_at ? String(studyObj.reported_at) : undefined,
@@ -837,14 +837,11 @@ export default function RadiologyVerificationPage() {
                                     {report.study.reportFile && (
                                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => {
                                         e.stopPropagation();
-                                        if ((report.study.reportFile as any)?.url) {
-                                          const link = document.createElement('a');
-                                          link.href = (report.study.reportFile as any).url;
-                                          link.target = '_blank';
-                                          link.rel = 'noopener noreferrer';
-                                          document.body.appendChild(link);
-                                          link.click();
-                                          document.body.removeChild(link);
+                                        const url = (report.study.reportFile as { url?: string })?.url;
+                                        if (url) {
+                                          void openMediaInNewTab(url).catch((err: unknown) =>
+                                            toast.error(err instanceof Error ? err.message : 'Failed to open file'),
+                                          );
                                         }
                                       }}>
                                         <Eye className="h-4 w-4 text-muted-foreground hover:text-emerald-500" />
@@ -983,14 +980,11 @@ export default function RadiologyVerificationPage() {
                       size="sm"
                       className="text-indigo-600"
                       onClick={() => {
-                        if ((selectedReport?.study.reportFile as any)?.url) {
-                          const link = document.createElement('a');
-                          link.href = (selectedReport.study.reportFile as any).url;
-                          link.target = '_blank';
-                          link.rel = 'noopener noreferrer';
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
+                        const url = (selectedReport?.study.reportFile as { url?: string })?.url;
+                        if (url) {
+                          void openMediaInNewTab(url).catch((err: unknown) =>
+                            toast.error(err instanceof Error ? err.message : 'Failed to open file'),
+                          );
                         } else {
                           toast.error('File URL not available');
                         }
@@ -1013,13 +1007,9 @@ export default function RadiologyVerificationPage() {
                           size="sm"
                           className="h-6 px-2 text-xs text-indigo-600 shrink-0"
                           onClick={() => {
-                            const link = document.createElement('a');
-                            link.href = att.url;
-                            link.target = '_blank';
-                            link.rel = 'noopener noreferrer';
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
+                            void openMediaInNewTab(att.url).catch((err: unknown) =>
+                              toast.error(err instanceof Error ? err.message : 'Failed to open file'),
+                            );
                           }}
                         >
                           <Eye className="h-3 w-3 mr-1" />View
