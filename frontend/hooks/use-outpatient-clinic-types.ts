@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { adminService, type OutpatientClinicType } from "@/lib/services";
 import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 
@@ -38,6 +38,6 @@ export function useOutpatientClinicTypes(options?: { includeInactive?: boolean }
     load();
   }, [options?.includeInactive]);
 
-  const names = types.map((t) => t.name);
+  const names = useMemo(() => types.map((t) => t.name), [types]);
   return { types, names, loading, error, refetch: load };
 }

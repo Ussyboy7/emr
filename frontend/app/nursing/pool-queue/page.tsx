@@ -38,6 +38,7 @@ import {
   joinDisplayParts,
 } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { useServerToday } from '@/hooks/use-server-today';
 import { localWeekToTodayBounds } from '@/lib/dates';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
@@ -207,18 +208,12 @@ export default function NursingPoolQueuePage() {
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
-  const currentPageRef = useRef(currentPage);
-  const loadGenerationRef = useRef(0);
-
-  useEffect(() => {
-    currentPageRef.current = currentPage;
-  }, [currentPage]);
 
   const loadData = useCallback(async (opts?: { silent?: boolean }): Promise<NursingPatient[] | null> => {
       const silent = opts?.silent;
-      const generation = ++loadGenerationRef.current;
-      const isStale = () => generation !== loadGenerationRef.current;
+      const isStale = silent ? () => false : beginLoad();
       try {
         if (!silent) {
           setLoading(true);
@@ -557,14 +552,13 @@ export default function NursingPoolQueuePage() {
     itemsPerPage,
     serverToday,
     opdClinicNames,
+    beginLoad,
+    currentPageRef,
   ]);
 
-  // Reset to page 1 before fetch when filters change (must run before load effect).
-  useEffect(() => {
-    currentPageRef.current = 1;
-    setCurrentPage(1);
-    loadGenerationRef.current += 1;
-  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to, itemsPerPage,
+  ]);
 
   // Load data when filters or pagination change
   useEffect(() => {
