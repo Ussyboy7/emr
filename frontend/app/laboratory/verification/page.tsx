@@ -24,7 +24,6 @@ import { transformPriority, transformToBackendPriority } from '@/lib/services/tr
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import {
   isValidLabVerificationTab,
   LAB_VERIFICATION_TAB_LABELS,
@@ -268,13 +267,7 @@ export default function ResultsVerificationPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [verifiedCurrentPage, setVerifiedCurrentPage] = useState(1);
-  const {
-    currentPageRef: verifiedCurrentPageRef,
-    resetToFirstPage: resetVerifiedToFirstPage,
-    beginLoad: beginVerifiedLoad,
-  } = usePaginatedListGuard(verifiedCurrentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [verifiedTotalCount, setVerifiedTotalCount] = useState(0);
@@ -321,13 +314,15 @@ export default function ResultsVerificationPage() {
   // Verified tab: filters applied server-side in loadVerifiedResults
   const verifiedPaginatedResults = verifiedResults;
 
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage,
-  ]);
+  // Reset to page 1 when filters change or items per page changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
 
-  useResetPageOnFilterChange(resetVerifiedToFirstPage, setVerifiedCurrentPage, [
-    debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage,
-  ]);
+  // Reset verified page to 1 when filters change or items per page changes
+  useEffect(() => {
+    setVerifiedCurrentPage(1);
+  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
 
   const ensureTemplateRangesMap = useCallback(async (): Promise<Record<string, any>> => {
     if (Object.keys(templateNormalRangesByCode).length > 0) return templateNormalRangesByCode;
@@ -347,7 +342,6 @@ export default function ResultsVerificationPage() {
 
   // Load results function - memoized to prevent infinite loops
   const loadResults = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
@@ -355,7 +349,7 @@ export default function ResultsVerificationPage() {
       const templatesMap = await ensureTemplateRangesMap();
 
       const params: any = {
-        page: currentPageRef.current,
+        page: currentPage,
         page_size: itemsPerPage,
       };
       if (statusFilter !== 'all') {
@@ -373,7 +367,6 @@ export default function ResultsVerificationPage() {
       }
 
       const response = await labService.getPendingVerifications(params);
-      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
       const transformedResults = response.results.map((r) => transformResult(r, templatesMap));
       setResults(transformedResults);
@@ -384,10 +377,9 @@ export default function ResultsVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, serverToday, ensureTemplateRangesMap, beginLoad, currentPageRef]);
+  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, serverToday, ensureTemplateRangesMap]);
 
   const loadVerifiedResults = useCallback(async () => {
-    const isStale = beginVerifiedLoad();
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
@@ -395,7 +387,7 @@ export default function ResultsVerificationPage() {
       const templatesMap = await ensureTemplateRangesMap();
 
       const params: any = {
-        page: verifiedCurrentPageRef.current,
+        page: verifiedCurrentPage,
         page_size: itemsPerPage,
         status: 'verified',
       };
@@ -415,7 +407,6 @@ export default function ResultsVerificationPage() {
       }
 
       const response = await labService.getVerifiedResults(params);
-      if (isStale()) return;
       setVerifiedTotalCount(response.count || response.results.length);
       const transformedResults = response.results.map((r) => transformResult(r, templatesMap));
       setVerifiedResults(transformedResults);
@@ -425,7 +416,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter, ensureTemplateRangesMap, beginVerifiedLoad, verifiedCurrentPageRef]);
+  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter, ensureTemplateRangesMap]);
 
   const loadVerificationCounts = useCallback(async () => {
     const searching = Boolean(debouncedSearch);
@@ -449,8 +440,8 @@ export default function ResultsVerificationPage() {
 
   // Load results from API when page or filters change
   useEffect(() => {
-    void loadResults();
-  }, [loadResults, currentPage]);
+    loadResults();
+  }, [loadResults]);
 
   useEffect(() => {
     loadVerificationCounts();
@@ -459,9 +450,9 @@ export default function ResultsVerificationPage() {
   // Load verified results when tab changes or filters change
   useEffect(() => {
     if (activeTab === 'verified') {
-      void loadVerifiedResults();
+      loadVerifiedResults();
     }
-  }, [activeTab, loadVerifiedResults, verifiedCurrentPage]);
+  }, [activeTab, loadVerifiedResults]);
 
   // When searching, switch tab if the current one has no matches but the other does.
   useEffect(() => {

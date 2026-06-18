@@ -20,7 +20,6 @@ import { RADIOLOGY_VERIFICATION_POLL_INTERVAL } from '@/lib/constants/ui';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import {
   isValidRadiologyVerificationTab,
   RADIOLOGY_VERIFICATION_TAB_LABELS,
@@ -206,13 +205,7 @@ export default function RadiologyVerificationPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [verifiedCurrentPage, setVerifiedCurrentPage] = useState(1);
-  const {
-    currentPageRef: verifiedCurrentPageRef,
-    resetToFirstPage: resetVerifiedToFirstPage,
-    beginLoad: beginVerifiedLoad,
-  } = usePaginatedListGuard(verifiedCurrentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [verifiedTotalCount, setVerifiedTotalCount] = useState(0);
@@ -271,22 +264,19 @@ export default function RadiologyVerificationPage() {
   const paginatedReports = reports;
   const verifiedPaginatedReports = verifiedReports;
 
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage,
-  ]);
-
-  useResetPageOnFilterChange(resetVerifiedToFirstPage, setVerifiedCurrentPage, [
-    searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage,
-  ]);
+  // Reset to page 1 when filters change or items per page changes
+  useEffect(() => {
+    setCurrentPage(1);
+    setVerifiedCurrentPage(1);
+  }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
 
   const loadReports = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const searching = Boolean(searchQuery.trim());
       const params: any = {
-        page: currentPageRef.current,
+        page: currentPage,
         page_size: itemsPerPage,
         search: searching ? searchQuery.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
@@ -298,7 +288,6 @@ export default function RadiologyVerificationPage() {
       }
 
       const response = await radiologyService.getPendingVerifications(params);
-      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
       const transformedReports = response.results.map(transformReport);
       setReports(transformedReports);
@@ -309,17 +298,16 @@ export default function RadiologyVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday, beginLoad, currentPageRef]);
+  }, [currentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday]);
 
   const loadVerifiedReports = useCallback(async () => {
-    const isStale = beginVerifiedLoad();
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
       const searching = Boolean(searchQuery.trim());
       const params: any = {
         status: 'verified',
-        page: verifiedCurrentPageRef.current,
+        page: verifiedCurrentPage,
         page_size: itemsPerPage,
         search: searching ? searchQuery.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
@@ -331,7 +319,6 @@ export default function RadiologyVerificationPage() {
       }
 
       const response = await radiologyService.getPendingVerifications(params);
-      if (isStale()) return;
       setVerifiedTotalCount(response.count || response.results.length);
       const transformedReports = response.results.map(transformReport);
       setVerifiedReports(transformedReports);
@@ -342,7 +329,7 @@ export default function RadiologyVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday, beginVerifiedLoad, verifiedCurrentPageRef]);
+  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday]);
 
   const loadVerificationCounts = useCallback(async () => {
     const searching = Boolean(searchQuery.trim());
@@ -406,13 +393,13 @@ export default function RadiologyVerificationPage() {
 
   useEffect(() => {
     void loadReports();
-  }, [loadReports, currentPage]);
+  }, [loadReports]);
 
   useEffect(() => {
     if (activeTab === 'verified') {
       void loadVerifiedReports();
     }
-  }, [activeTab, loadVerifiedReports, verifiedCurrentPage]);
+  }, [activeTab, loadVerifiedReports]);
 
   useEffect(() => {
     const interval = setInterval(() => {

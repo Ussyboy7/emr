@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useStaleRequestGuard } from '@/hooks/use-paginated-list-guard';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import {
   AnalyticsReportLayout,
@@ -66,7 +65,6 @@ export default function ClinicalAnalyticsPage() {
 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ClinicalDashboardData | null>(null);
-  const { beginLoad } = useStaleRequestGuard();
 
   const range = useMemo(
     () => reportRange,
@@ -85,24 +83,18 @@ export default function ClinicalAnalyticsPage() {
       if (viewMode === 'range') toast.error('Please select start and end dates');
       return;
     }
-    const isStale = beginLoad();
     setLoading(true);
     try {
       const res = await apiFetch<ClinicalDashboardData>(`/analytics/dashboard/?${params.toString()}`);
-      if (isStale()) return;
       setData(res);
     } catch (e: unknown) {
       console.error(e);
-      if (!isStale()) {
-        toast.error(getReadableApiError(e));
-        setData(null);
-      }
+      toast.error(getReadableApiError(e));
+      setData(null);
     } finally {
-      if (!isStale()) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
-  }, [reportRange, viewMode, beginLoad]);
+  }, [reportRange]);
 
   useEffect(() => {
     if (canFetchReportPeriod(viewMode, reportRange)) {

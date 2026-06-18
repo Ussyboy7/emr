@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { useSearchParams } from 'next/navigation';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -59,7 +58,6 @@ export default function PhysioCompletedPage() {
 
   // Pagination / totals (server-side)
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   // Dialogs
@@ -87,7 +85,6 @@ export default function PhysioCompletedPage() {
   }, [searchQuery]);
 
   const loadSessions = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
@@ -96,7 +93,7 @@ export default function PhysioCompletedPage() {
         debouncedSearch: debouncedSearchQuery,
         dateFilter,
         dateRange,
-        currentPage: currentPageRef.current,
+        currentPage,
         itemsPerPage,
       });
       const { page, page_size, ...statsBase } = listParams;
@@ -105,8 +102,6 @@ export default function PhysioCompletedPage() {
         physioService.getSessions(listParams),
         fetchCompletedSessionStats(physioService.getCompletedStats.bind(physioService), statsBase),
       ]);
-
-      if (isStale()) return;
 
       setSessions(response?.results ?? []);
       setTotalCount(response?.count ?? 0);
@@ -122,15 +117,15 @@ export default function PhysioCompletedPage() {
     } finally {
       setLoading(false);
     }
-  }, [itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to, beginLoad, currentPageRef]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearchQuery, dateFilter, itemsPerPage, dateRange.from, dateRange.to,
-  ]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
 
   useEffect(() => {
-    void loadSessions();
-  }, [loadSessions, currentPage]);
+    loadSessions();
+  }, [loadSessions]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   // When Session Report opens: load all sessions for the same order so user can switch Session 1, 2, 3...
   useEffect(() => {

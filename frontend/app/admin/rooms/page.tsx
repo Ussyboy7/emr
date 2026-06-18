@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -82,7 +81,6 @@ export default function RoomManagementPage() {
   const [locationFilter, setLocationFilter] = useState('all');
 
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   /** Total rows matching list filters (status + search + clinic + type) — server count */
   const [totalCount, setTotalCount] = useState(0);
@@ -145,55 +143,53 @@ export default function RoomManagementPage() {
     loadStats();
   }, [loadStats]);
 
-  const loadRooms = useCallback(async () => {
-    const isStale = beginLoad();
-    try {
-      setLoading(true);
-      setError(null);
-      const base = buildStatsBaseFilters();
-      const result = await roomService.getRooms({
-        ...base,
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        page: currentPageRef.current,
-        page_size: itemsPerPage,
-      });
-      if (isStale()) return;
-      setTotalCount(result.count ?? result.results.length);
+  useEffect(() => {
+    const loadRooms = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const base = buildStatsBaseFilters();
+        const result = await roomService.getRooms({
+          ...base,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          page: currentPage,
+          page_size: itemsPerPage,
+        });
+        setTotalCount(result.count ?? result.results.length);
 
-      const transformedRooms: Room[] = result.results.map((room: ApiRoom) => ({
-        id: room.id,
-        name: room.name,
-        room_number: room.room_number,
-        location: room.location || '',
-        floor: room.floor || '',
-        specialty: room.specialty || '',
-        type: displayRoomType(room.room_type),
-        capacity: room.capacity || 1,
-        status: (room.status.charAt(0).toUpperCase() + room.status.slice(1)) as Room['status'],
-        createdAt: toApiDateFromInstant(room.created_at),
-        lastModified: toApiDateFromInstant(room.updated_at),
-      }));
+        const transformedRooms: Room[] = result.results.map((room: ApiRoom) => ({
+          id: room.id,
+          name: room.name,
+          room_number: room.room_number,
+          location: room.location || '',
+          floor: room.floor || '',
+          specialty: room.specialty || '',
+          type: displayRoomType(room.room_type),
+          capacity: room.capacity || 1,
+          status: (room.status.charAt(0).toUpperCase() + room.status.slice(1)) as Room['status'],
+          createdAt: toApiDateFromInstant(room.created_at),
+          lastModified: toApiDateFromInstant(room.updated_at),
+        }));
 
-      setRooms(transformedRooms);
-    } catch (err) {
-      console.error('Error loading rooms:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError('Failed to load rooms. Please try again.');
+        setRooms(transformedRooms);
+      } catch (err) {
+        console.error('Error loading rooms:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load rooms. Please try again.');
+        }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [itemsPerPage, debouncedSearch, statusFilter, typeFilter, locationFilter, buildStatsBaseFilters, beginLoad, currentPageRef]);
+    };
 
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearch, statusFilter, typeFilter, locationFilter, itemsPerPage,
-  ]);
+    loadRooms();
+  }, [currentPage, itemsPerPage, debouncedSearch, statusFilter, typeFilter, locationFilter, buildStatsBaseFilters, refreshToken]);
 
   useEffect(() => {
-    void loadRooms();
-  }, [loadRooms, currentPage, refreshToken]);
+    setCurrentPage(1);
+  }, [debouncedSearch, statusFilter, typeFilter, locationFilter, itemsPerPage]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {

@@ -28,7 +28,6 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { toApiDateString, formatDisplayDate, formatDisplayTime, localWeekToTodayBounds } from '@/lib/dates';
@@ -213,7 +212,6 @@ export default function ConsultationHistoryPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [statsData, setStatsData] = useState({
@@ -340,165 +338,160 @@ export default function ConsultationHistoryPage() {
     return { date, start_date, end_date };
   }, [dateFilter]);
 
-  const loadConsultations = useCallback(async () => {
-    const isStale = beginLoad();
-    try {
-      setLoading(true);
+  useEffect(() => {
+    const loadConsultations = async () => {
+      try {
+        setLoading(true);
 
-      const { date, start_date, end_date } = buildDateParams();
+        const { date, start_date, end_date } = buildDateParams();
+        
+        // Backend expects status: 'active' | 'completed' | 'cancelled' (not 'in-progress')
+        const apiStatus = statusFilter === 'all' ? undefined : statusFilter === 'in-progress' ? 'active' : statusFilter === 'completed' ? 'completed' : statusFilter;
+        const sessionsResult = await consultationService.getSessions({
+          page: currentPage,
+          page_size: itemsPerPage,
+          status: apiStatus,
+          clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+          date,
+          start_date,
+          end_date,
+          search: debouncedSearchQuery.trim() || undefined,
+          ordering: '-started_at',
+        });
+        const sessions = sessionsResult.results || [];
+        setTotalCount(typeof sessionsResult.count === 'number' ? sessionsResult.count : sessions.length);
+        
+        // Transform sessions to consultation records
+        const transformedConsultations = await Promise.all(sessions.map(async (session: any) => {
+          try {
+            // IMPORTANT: keep this list page light.
+            // Avoid N+1 requests (patients, visits, diagnoses, orders, vitals).
+            const startedAt = session.started_at ? new Date(session.started_at) : new Date();
+            const visitDate = toApiDateString(startedAt);
+            const visitTime = startedAt.toTimeString().slice(0, 5);
+            const visitDisplayId: string | undefined = undefined;
 
-      const apiStatus = statusFilter === 'all' ? undefined : statusFilter === 'in-progress' ? 'active' : statusFilter === 'completed' ? 'completed' : statusFilter;
-      const sessionsResult = await consultationService.getSessions({
-        page: currentPageRef.current,
-        page_size: itemsPerPage,
-        status: apiStatus,
-        clinic: clinicFilter !== "all" ? clinicFilter : undefined,
-        date,
-        start_date,
-        end_date,
-        search: debouncedSearchQuery.trim() || undefined,
-        ordering: '-started_at',
-      });
-      if (isStale()) return;
-      const sessions = sessionsResult.results || [];
-      setTotalCount(typeof sessionsResult.count === 'number' ? sessionsResult.count : sessions.length);
+            const diagnosis = '';
+            const diagnosisCodes: { code: string; description: string; type: 'Primary' | 'Secondary' | 'Differential' }[] = [];
+            const assessment = cleanClinicalText(session.assessment || '');
+            const plan = cleanClinicalText(session.plan || '');
+            const historyOfPresentIllness = session.history_of_presenting_illness || '';
+            const physicalExamination = session.physical_examination || '';
+            
+            // Calculate session duration
+            let sessionDuration = 0;
+            if (session.started_at && session.ended_at) {
+              sessionDuration = Math.floor((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60));
+            }
+            const vitals: ConsultationRecord['vitals'] = [];
+            const prescriptions: ConsultationRecord['prescriptions'] = [];
+            const labOrders: ConsultationRecord['labOrders'] = [];
+            const nursingOrders: ConsultationRecord['nursingOrders'] = [];
 
-      const transformedConsultations = await Promise.all(sessions.map(async (session: any) => {
-        try {
-          const startedAt = session.started_at ? new Date(session.started_at) : new Date();
-          const visitDate = toApiDateString(startedAt);
-          const visitTime = startedAt.toTimeString().slice(0, 5);
-          const visitDisplayId: string | undefined = undefined;
+            const doctorName = (session.doctor_name && String(session.doctor_name).trim()) ? String(session.doctor_name).trim() : 'Unknown';
+            const doctorId = String(session.doctor || '');
 
-          const diagnosis = '';
-          const diagnosisCodes: { code: string; description: string; type: 'Primary' | 'Secondary' | 'Differential' }[] = [];
-          const assessment = cleanClinicalText(session.assessment || '');
-          const plan = cleanClinicalText(session.plan || '');
-          const historyOfPresentIllness = session.history_of_presenting_illness || '';
-          const physicalExamination = session.physical_examination || '';
+            const presentationComplaint = session.presentation_complaint || '';
 
-          let sessionDuration = 0;
-          if (session.started_at && session.ended_at) {
-            sessionDuration = Math.floor((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60));
+            return {
+              id: String(session.id),
+              patient: session.patient_name ?? '',
+              patientId: session.patient_id || '',
+              patientIdNumeric: session.patient,
+              visitId: session.visit,
+              visitType: session.visit_type || undefined,
+              visitDisplayId,
+              patientGender: session.patient_gender || undefined, // Store gender for filtering
+              doctor: doctorName,
+              doctorId: doctorId,
+              date: visitDate,
+              time: visitTime,
+              clinic: getVisitServiceClinicsDisplay({
+                clinic: session.clinic_name,
+                clinics: session.visit_clinics,
+              }),
+              room: session.room_name || '',
+              diagnosis,
+              diagnosisCodes,
+              presentationComplaint,
+              status: session.status === 'completed' ? 'Completed' as const : 'In Progress' as const,
+              priority: (() => {
+                const p = session.priority;
+                if (typeof p === 'number') {
+                  return p === 0 ? 'Emergency' : p === 1 ? 'High' : p === 2 ? 'Medium' : 'Low';
+                }
+                return String(p || 'Medium');
+              })(),
+              sessionDuration,
+              historyOfPresentIllness,
+              physicalExamination,
+              assessment,
+              plan,
+              vitals,
+              prescriptions,
+              labOrders,
+              nursingOrders,
+              timeline: generateTimeline(session, vitals, prescriptions, labOrders, nursingOrders),
+            } as ConsultationRecord;
+          } catch (err) {
+            console.error(`Error loading consultation ${session.id}:`, err);
+            return null;
           }
-          const vitals: ConsultationRecord['vitals'] = [];
-          const prescriptions: ConsultationRecord['prescriptions'] = [];
-          const labOrders: ConsultationRecord['labOrders'] = [];
-          const nursingOrders: ConsultationRecord['nursingOrders'] = [];
-
-          const doctorName = (session.doctor_name && String(session.doctor_name).trim()) ? String(session.doctor_name).trim() : 'Unknown';
-          const doctorId = String(session.doctor || '');
-
-          const presentationComplaint = session.presentation_complaint || '';
-
-          return {
-            id: String(session.id),
-            patient: session.patient_name ?? '',
-            patientId: session.patient_id || '',
-            patientIdNumeric: session.patient,
-            visitId: session.visit,
-            visitType: session.visit_type || undefined,
-            visitDisplayId,
-            patientGender: session.patient_gender || undefined,
-            doctor: doctorName,
-            doctorId: doctorId,
-            date: visitDate,
-            time: visitTime,
-            clinic: getVisitServiceClinicsDisplay({
-              clinic: session.clinic_name,
-              clinics: session.visit_clinics,
-            }),
-            room: session.room_name || '',
-            diagnosis,
-            diagnosisCodes,
-            presentationComplaint,
-            status: session.status === 'completed' ? 'Completed' as const : 'In Progress' as const,
-            priority: (() => {
-              const p = session.priority;
-              if (typeof p === 'number') {
-                return p === 0 ? 'Emergency' : p === 1 ? 'High' : p === 2 ? 'Medium' : 'Low';
-              }
-              return String(p || 'Medium');
-            })(),
-            sessionDuration,
-            historyOfPresentIllness,
-            physicalExamination,
-            assessment,
-            plan,
-            vitals,
-            prescriptions,
-            labOrders,
-            nursingOrders,
-            timeline: generateTimeline(session, vitals, prescriptions, labOrders, nursingOrders),
-          } as ConsultationRecord;
-        } catch (err) {
-          console.error(`Error loading consultation ${session.id}:`, err);
-          return null;
+        }));
+        
+        const validConsultations = transformedConsultations.filter((c): c is ConsultationRecord => c !== null);
+        setConsultations(validConsultations);
+      } catch (err) {
+        console.error('Error loading consultations:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          toast.error('Failed to load consultation history. Please try again.');
         }
-      }));
-
-      if (isStale()) return;
-      const validConsultations = transformedConsultations.filter((c): c is ConsultationRecord => c !== null);
-      setConsultations(validConsultations);
-    } catch (err) {
-      console.error('Error loading consultations:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        toast.error('Failed to load consultation history. Please try again.');
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    buildDateParams,
-    statusFilter,
-    clinicFilter,
-    itemsPerPage,
-    debouncedSearchQuery,
-    beginLoad,
-    currentPageRef,
-  ]);
-
-  const loadStats = useCallback(async () => {
-    try {
-      const { date, start_date, end_date } = buildDateParams();
-      const todayDate = toApiDateString(new Date());
-      const thisWeekStart = localWeekToTodayBounds().start;
-
-      const stats = await consultationService.getHistoryStats({
-        clinic: clinicFilter !== "all" ? clinicFilter : undefined,
-        date,
-        start_date,
-        end_date,
-        search: debouncedSearchQuery.trim() || undefined,
-        calendar_today: todayDate,
-        week_start: thisWeekStart,
-        week_end: todayDate,
-      });
-
-      setStatsData({
-        today: stats.today,
-        thisWeek: stats.thisWeek,
-        inProgress: stats.inProgress,
-        completed: stats.completed,
-      });
-    } catch (err) {
-      console.error("Error loading consultation stats:", err);
-    }
-  }, [clinicFilter, buildDateParams, debouncedSearchQuery]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage,
-  ]);
+    };
+    
+    loadConsultations();
+  }, [statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, debouncedSearchQuery]);
 
   useEffect(() => {
-    void loadConsultations();
-  }, [loadConsultations, currentPage]);
+    const loadStats = async () => {
+      try {
+        const { date, start_date, end_date } = buildDateParams();
+        const todayDate = toApiDateString(new Date());
+        const thisWeekStart = localWeekToTodayBounds().start;
 
+        const stats = await consultationService.getHistoryStats({
+          clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+          date,
+          start_date,
+          end_date,
+          search: debouncedSearchQuery.trim() || undefined,
+          calendar_today: todayDate,
+          week_start: thisWeekStart,
+          week_end: todayDate,
+        });
+
+        setStatsData({
+          today: stats.today,
+          thisWeek: stats.thisWeek,
+          inProgress: stats.inProgress,
+          completed: stats.completed,
+        });
+      } catch (err) {
+        console.error("Error loading consultation stats:", err);
+      }
+    };
+
+    loadStats();
+  }, [clinicFilter, buildDateParams]);
+
+  // Reset to page 1 when filters change (same pattern as Lab Orders)
   useEffect(() => {
-    void loadStats();
-  }, [loadStats]);
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
 
   const stats = statsData;
 

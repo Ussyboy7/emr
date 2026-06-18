@@ -31,7 +31,6 @@ import {
   NIGERIA_STATES_AND_LGAS,
 } from '@/lib/constants/patient';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { canManagePatientLifecycle, isSystemAdminUser } from '@/lib/patient-permissions';
@@ -297,9 +296,9 @@ function PatientsListPageContent() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const loadReqId = useRef(0);
   const [counts, setCounts] = useState<{ total: number; employees: number; retirees: number; dependents: number; nonnpa: number } | null>(null);
   const [principalBannerName, setPrincipalBannerName] = useState<string | null>(null);
   const [principalDepsOpen, setPrincipalDepsOpen] = useState<{
@@ -382,13 +381,23 @@ function PatientsListPageContent() {
     };
   }, [searchQuery]);
 
-  const loadPatients = useCallback(async () => {
-    const isStale = beginLoad();
+  // Load patients from API when page, page size, or server-side filters change
+  useEffect(() => {
+    loadPatients();
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, principalIdFromUrl]);
+
+  // Reset to page 1 when filters or items per page change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage, principalIdFromUrl]);
+
+  const loadPatients = async () => {
+    const reqId = ++loadReqId.current;
     try {
       setLoading(true);
       setError(null);
       const params: any = {
-        page: currentPageRef.current,
+        page: currentPage,
         page_size: itemsPerPage,
       };
       if (principalIdFromUrl != null) {
@@ -403,9 +412,10 @@ function PatientsListPageContent() {
       if (searchTerm) params.search = searchTerm;
 
       const response = await patientService.getPatients(params);
-      if (isStale()) return;
+      if (reqId !== loadReqId.current) return;
       setTotalCount(Math.max(response.count, response.results.length));
-
+      
+      // Transform patients (visit counts, employment, principal come from list serializer)
       const transformedPatients = response.results.map(apiPatient => transformPatient(apiPatient));
 
       if (principalIdFromUrl == null) {
@@ -425,7 +435,6 @@ function PatientsListPageContent() {
         if (employeeIds.length > 0) {
           try {
             const depCounts = await patientService.getDependentsCounts(employeeIds);
-            if (isStale()) return;
             transformedPatients.forEach((patient, index) => {
               const apiPatient = response.results[index];
               if (
@@ -440,17 +449,19 @@ function PatientsListPageContent() {
           }
         }
       }
-
-      if (isStale()) return;
+      
+      if (reqId !== loadReqId.current) return;
       setPatients(transformedPatients);
-      setAuthError(null);
+      setAuthError(null); // Clear any previous auth errors
     } catch (err: any) {
+      // Handle authentication errors separately
       if (isAuthenticationError(err)) {
         setAuthError(err);
         setError('Authentication required. Redirecting to login...');
+        // Don't show toast for auth errors as we're redirecting
         return;
       }
-
+      
       setError(err.message || 'Failed to load patients');
       toast.error('Failed to load patients. Please try again.');
       console.error('Error loading patients:', err);
@@ -458,24 +469,7 @@ function PatientsListPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [
-    itemsPerPage,
-    principalIdFromUrl,
-    categoryFilter,
-    genderFilter,
-    locationFilter,
-    debouncedSearchQuery,
-    beginLoad,
-    currentPageRef,
-  ]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, ageRange.min, ageRange.max, itemsPerPage, principalIdFromUrl,
-  ]);
-
-  useEffect(() => {
-    void loadPatients();
-  }, [loadPatients, currentPage]);
+  };
 
   const stats = useMemo(() => [
     { label: 'Total Patients', value: counts?.total ?? 0, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },

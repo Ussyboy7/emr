@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -135,7 +134,6 @@ export default function VitalsHistoryPage() {
   });
 
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [isVitalsDialogOpen, setIsVitalsDialogOpen] = useState(false);
@@ -188,18 +186,16 @@ export default function VitalsHistoryPage() {
   }, [debouncedSearch, genderFilter, dateFilter, dateRange.from, dateRange.to]);
 
   const loadPatientsPage = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const qs = new URLSearchParams();
-      qs.set('page', String(currentPageRef.current));
+      qs.set('page', String(currentPage));
       qs.set('page_size', String(itemsPerPage));
       appendHistoryFilters(qs);
       const res = await apiFetch<{ results: VitalsPatientSummary[]; count?: number }>(
         `/vitals/history-patients/?${qs.toString()}`
       );
-      if (isStale()) return;
       setPatients(res.results || []);
       setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
     } catch (err) {
@@ -212,11 +208,7 @@ export default function VitalsHistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [appendHistoryFilters, itemsPerPage, beginLoad, currentPageRef]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearch, dateFilter, genderFilter, dateRange.from, dateRange.to, itemsPerPage,
-  ]);
+  }, [appendHistoryFilters, currentPage, itemsPerPage]);
 
   const loadPatientVitals = useCallback(async (patient: VitalsPatientSummary) => {
     try {
@@ -243,7 +235,11 @@ export default function VitalsHistoryPage() {
 
   useEffect(() => {
     void loadPatientsPage();
-  }, [loadPatientsPage, currentPage]);
+  }, [loadPatientsPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, dateFilter, genderFilter, dateRange.from, dateRange.to, itemsPerPage]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

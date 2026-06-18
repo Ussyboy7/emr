@@ -4,7 +4,6 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { formatDisplayDate, formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -360,7 +359,6 @@ export default function ProceduresQueuePage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const hasActiveFilters =
@@ -502,13 +500,12 @@ export default function ProceduresQueuePage() {
   };
 
   const loadOrders = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const qs = new URLSearchParams();
       qs.set('procedures_queue', '1');
-      qs.set('page', String(currentPageRef.current));
+      qs.set('page', String(currentPage));
       if (statusFilter !== 'all') {
         qs.set('status', statusFilter);
       }
@@ -533,7 +530,6 @@ export default function ProceduresQueuePage() {
       const ordersResult = await apiFetch<{ results: any[]; count?: number }>(
         `/nursing/orders/?${qs.toString()}`
       );
-      if (isStale()) return;
       const rows = (ordersResult.results || []).map(nursingOrderToProcedure);
       setProcedures(rows);
       setTotalCount(typeof ordersResult.count === 'number' ? ordersResult.count : rows.length);
@@ -548,6 +544,7 @@ export default function ProceduresQueuePage() {
       setLoading(false);
     }
   }, [
+    currentPage,
     itemsPerPage,
     debouncedSearch,
     typeFilter,
@@ -555,11 +552,15 @@ export default function ProceduresQueuePage() {
     priorityFilter,
     genderFilter,
     appendQueueDateFilters,
-    beginLoad,
-    currentPageRef,
   ]);
 
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+  useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
     debouncedSearch,
     typeFilter,
     statusFilter,
@@ -570,10 +571,6 @@ export default function ProceduresQueuePage() {
     dateRange.to,
     itemsPerPage,
   ]);
-
-  useEffect(() => {
-    void loadOrders();
-  }, [loadOrders, currentPage]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

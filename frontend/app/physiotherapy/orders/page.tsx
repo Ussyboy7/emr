@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -103,7 +102,6 @@ export default function PhysioPoolQueuePage() {
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -223,7 +221,6 @@ export default function PhysioPoolQueuePage() {
 
   const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
-    const isStale = silent ? () => false : beginLoad();
     try {
       if (!silent) {
         setLoading(true);
@@ -231,7 +228,7 @@ export default function PhysioPoolQueuePage() {
       }
 
       const params: Record<string, any> = {
-        page: currentPageRef.current,
+        page: currentPage,
         page_size: itemsPerPage,
       };
 
@@ -247,7 +244,6 @@ export default function PhysioPoolQueuePage() {
       }
 
       const response = await physioService.getOrders(params);
-      if (isStale()) return;
       setTotalCount(response.count);
       setOrders(response.results);
     } catch (err: any) {
@@ -263,15 +259,11 @@ export default function PhysioPoolQueuePage() {
         setLoading(false);
       }
     }
-  }, [itemsPerPage, debouncedSearch, activeTab, buildDateFilterParams, beginLoad, currentPageRef]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearch, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to,
-  ]);
+  }, [currentPage, itemsPerPage, debouncedSearch, activeTab, buildDateFilterParams]);
 
   useEffect(() => {
-    void loadOrders();
-  }, [loadOrders, currentPage]);
+    loadOrders();
+  }, [loadOrders]);
 
   // Stats: scoped by the same date filter as the list so the cards match
   // the visible rows.
@@ -339,6 +331,11 @@ export default function PhysioPoolQueuePage() {
     })();
     return () => { cancelled = true; };
   }, [isViewDialogOpen, selectedOrder?.id]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

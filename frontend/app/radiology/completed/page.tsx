@@ -23,7 +23,6 @@ import {
 import { downloadRadiologyReportFile, printRadiologyReport } from '@/lib/radiology/radiologyReportActions';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle,
@@ -51,7 +50,6 @@ export default function CompletedReportsPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ total: 0, normal: 0, abnormal: 0, critical: 0 });
@@ -108,12 +106,11 @@ export default function CompletedReportsPage() {
 
   // Load completed reports function - memoized to prevent infinite loops
   const loadReports = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const params: any = {
-        page: currentPageRef.current,
+        page: currentPage,
         page_size: itemsPerPage,
         search: searchQuery.trim() || undefined,
         clinic: !isMultiClinic && clinicFilter !== 'all' ? clinicFilter : undefined,
@@ -151,9 +148,6 @@ export default function CompletedReportsPage() {
               }),
         }),
       ]);
-
-      if (isStale()) return;
-
       setTotalCount(response.count || response.results.length);
       setStats({
         total: statsResponse.total || 0,
@@ -174,21 +168,22 @@ export default function CompletedReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [itemsPerPage, statusFilter, searchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to, buildDateQuery, isMultiClinic, beginLoad, currentPageRef]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to, buildDateQuery]);
 
   // Load clinics on component mount
   useEffect(() => {
     loadClinics();
   }, [loadClinics]);
 
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    searchQuery, statusFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to,
-  ]);
-
   // Load reports from API when page or filters change
   useEffect(() => {
-    void loadReports();
-  }, [loadReports, currentPage]);
+    loadReports();
+  }, [loadReports]);
+
+  // Reset to page 1 when filters change or items per page changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

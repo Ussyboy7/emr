@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { UI_TRANSITION_DELAY } from '@/lib/constants/ui';
 import { formatDisplayDateTime } from '@/lib/dates';
@@ -129,7 +128,6 @@ export default function UserManagementPage() {
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -170,8 +168,11 @@ export default function UserManagementPage() {
     loadRoles();
   }, [loadRoles]);
 
+  // Use a ref to track current page to avoid dependency loops
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+  
   const loadStaff = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
@@ -184,7 +185,6 @@ export default function UserManagementPage() {
         department: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
       });
-      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
 
       // Transform API users to frontend format
@@ -214,16 +214,39 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [itemsPerPage, searchQuery, roleFilter, statusFilter, departmentFilter, beginLoad, currentPageRef]);
+  }, [currentPage, itemsPerPage, searchQuery, roleFilter, statusFilter, departmentFilter]);
 
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    searchQuery, roleFilter, statusFilter, departmentFilter, itemsPerPage,
-  ]);
+
+
+  // Track previous filters and reset page to 1 when filters change
+  const prevFiltersRef = useRef<{ searchQuery: string; roleFilter: string; statusFilter: string; departmentFilter: string } | null>(null);
+
+  useEffect(() => {
+    if (prevFiltersRef.current === null) {
+      // First render - just store current values
+      prevFiltersRef.current = { searchQuery, roleFilter, statusFilter, departmentFilter };
+    }
+    const filtersChanged =
+      !prevFiltersRef.current ||
+      prevFiltersRef.current.searchQuery !== searchQuery ||
+      prevFiltersRef.current.roleFilter !== roleFilter ||
+      prevFiltersRef.current.statusFilter !== statusFilter ||
+      prevFiltersRef.current.departmentFilter !== departmentFilter;
+    if (filtersChanged) {
+      setCurrentPage(1);
+    }
+    prevFiltersRef.current = { searchQuery, roleFilter, statusFilter, departmentFilter };
+  }, [searchQuery, roleFilter, statusFilter, departmentFilter]);
+  
+  // Also update ref when currentPage changes (for use in loadStaff)
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
 
   // Load staff from API
   useEffect(() => {
     loadStaff();
-  }, [loadStaff, currentPage]);
+  }, [loadStaff]);
 
   // Load clinics for multi-select
   useEffect(() => {

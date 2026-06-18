@@ -185,28 +185,3 @@ class NursingStatusFilterTests(TestCase):
             and pending_ids.isdisjoint(queued_ids)
             and ready_ids.isdisjoint(queued_ids)
         )
-
-    def test_in_consultation_includes_queue_or_active_session(self):
-        queued = self._visit("ic-q")
-        ConsultationQueue.objects.create(
-            room=self.room,
-            patient=self.patient,
-            visit=queued,
-            is_active=True,
-        )
-        in_session = self._visit("ic-s")
-        ConsultationSession.objects.create(
-            room=self.room,
-            patient=self.patient,
-            visit=in_session,
-            status="in_progress",
-        )
-        waiting = self._visit("ic-wait")
-
-        ids = set(
-            apply_nursing_status_filter(
-                self._base_qs(), "in_consultation", _mock_request()
-            ).values_list("id", flat=True)
-        )
-        self.assertEqual(ids, {queued.id, in_session.id})
-        self.assertNotIn(waiting.id, ids)

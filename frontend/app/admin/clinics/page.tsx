@@ -2,7 +2,6 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -119,7 +118,6 @@ export default function ClinicDepartmentPage() {
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [clinicsTotalCount, setClinicsTotalCount] = useState(0);
   const [departmentsTotalCount, setDepartmentsTotalCount] = useState(0);
@@ -170,29 +168,27 @@ export default function ClinicDepartmentPage() {
     is_active: true,
   });
 
-  const loadData = useCallback(async (
+  const loadData = async (
     roleCounts: Record<string, number> = {},
     clinicalRoles: Set<string> = clinicalSystemRoleNames,
   ) => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const [clinicsResponse, deptsResponse] = await Promise.all([
         adminService.getClinics({
-          page: currentPageRef.current,
+          page: currentPage,
           page_size: itemsPerPage,
           search: debouncedSearch.trim() || undefined,
           is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
         }),
         adminService.getDepartments({
-          page: currentPageRef.current,
+          page: currentPage,
           page_size: itemsPerPage,
           search: debouncedSearch.trim() || undefined,
           is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
         }),
       ]);
-      if (isStale()) return;
       setClinicsTotalCount(typeof clinicsResponse.count === "number" ? clinicsResponse.count : (clinicsResponse.results || []).length);
       setDepartmentsTotalCount(typeof deptsResponse.count === "number" ? deptsResponse.count : (deptsResponse.results || []).length);
 
@@ -237,7 +233,7 @@ export default function ClinicDepartmentPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, statusFilter, itemsPerPage, beginLoad, currentPageRef, clinicalSystemRoleNames]);
+  };
 
   const loadKpiStats = useCallback(async () => {
     try {
@@ -284,11 +280,7 @@ export default function ClinicDepartmentPage() {
     loadAllData();
     // clinicalSystemRoleNames intentionally omitted: we read & set it inside.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadData, currentPage]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearch, statusFilter, activeTab, itemsPerPage,
-  ]);
+  }, [currentPage, itemsPerPage, debouncedSearch, statusFilter]);
 
   useEffect(() => {
     void loadKpiStats();
@@ -320,6 +312,8 @@ export default function ClinicDepartmentPage() {
         t.code.toLowerCase().includes(q)
     );
   }, [visitTypesList, searchQuery, statusFilter]);
+
+  useEffect(() => { setCurrentPage(1); }, [debouncedSearch, statusFilter, activeTab, itemsPerPage]);
 
   const stats = useMemo(() => {
     if (!kpiStats) {

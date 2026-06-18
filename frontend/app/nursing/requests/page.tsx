@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
@@ -95,7 +94,6 @@ export default function NursingRequestsPage() {
   const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, confirmed: 0, awaitingConfirmation: 0 });
 
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const buildDateParams = useCallback(() => {
@@ -117,13 +115,13 @@ export default function NursingRequestsPage() {
   }, [dateFilter]);
 
   useEffect(() => { loadStats(); }, [debouncedSearchQuery, dateFilter]);
+  useEffect(() => { loadRequests(); }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter]);
 
-  const loadRequests = useCallback(async () => {
-    const isStale = beginLoad();
+  const loadRequests = async () => {
     try {
       setLoading(true);
       const params: Record<string, string | number> = {
-        page: currentPageRef.current,
+        page: currentPage,
         page_size: itemsPerPage,
         to_location: PHARMACY_LOCATIONS.WARD_CARE,
       };
@@ -131,7 +129,6 @@ export default function NursingRequestsPage() {
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       Object.assign(params, buildDateParams());
       const response = await pharmacyService.getStockRequests(params);
-      if (isStale()) return;
       setRequests(response.results || []);
       setTotalRequests(response.count ?? response.results?.length ?? 0);
     } catch (err) {
@@ -140,15 +137,7 @@ export default function NursingRequestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, buildDateParams, beginLoad, currentPageRef]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    statusFilter, debouncedSearchQuery, dateFilter, itemsPerPage,
-  ]);
-
-  useEffect(() => {
-    void loadRequests();
-  }, [loadRequests, currentPage]);
+  };
 
   const loadStats = async () => {
     try {

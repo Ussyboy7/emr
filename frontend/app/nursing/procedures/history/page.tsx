@@ -3,7 +3,6 @@ import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -239,7 +238,6 @@ export default function ProceduresHistoryPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   // Dialog states
@@ -291,16 +289,14 @@ export default function ProceduresHistoryPage() {
   }, [debouncedSearch, genderFilter, dateFilter, dateRange.from, dateRange.to]);
 
   const loadHistoryPage = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const qs = new URLSearchParams();
-      qs.set('page', String(currentPageRef.current));
+      qs.set('page', String(currentPage));
       qs.set('page_size', String(itemsPerPage));
       appendHistoryFilters(qs);
       const res = await apiFetch<{ results: any[]; count?: number }>(`/nursing/procedures/?${qs.toString()}`);
-      if (isStale()) return;
       setHistory((res.results || []).map(nursingProcedureToHistory));
       setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
     } catch (err) {
@@ -313,11 +309,7 @@ export default function ProceduresHistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [appendHistoryFilters, itemsPerPage, beginLoad, currentPageRef]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearch, typeFilter, dateFilter, genderFilter, dateRange.from, dateRange.to, itemsPerPage,
-  ]);
+  }, [appendHistoryFilters, currentPage, itemsPerPage]);
 
   useEffect(() => {
     void loadHistoryStats();
@@ -325,7 +317,11 @@ export default function ProceduresHistoryPage() {
 
   useEffect(() => {
     void loadHistoryPage();
-  }, [loadHistoryPage, currentPage]);
+  }, [loadHistoryPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, typeFilter, dateFilter, genderFilter, dateRange.from, dateRange.to, itemsPerPage]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

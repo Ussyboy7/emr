@@ -25,7 +25,6 @@ import {
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import {
   Loader2,
@@ -68,7 +67,6 @@ export default function HRExemptionsPage() {
   const [patientSearch, setPatientSearch] = useState("");
   const [patients, setPatients] = useState<{ id: number; label: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const { resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [form, setForm] = useState({
     patient: "",
@@ -79,14 +77,12 @@ export default function HRExemptionsPage() {
   useAuthRedirect(authError);
 
   const load = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       const data = await hrService.listExemptions({
         programme_year: year,
         page_size: MAX_LIST_PAGE_SIZE,
       });
-      if (isStale()) return;
       setRows(data.results);
       setTotalCount(data.count ?? data.results.length);
     } catch (err) {
@@ -94,15 +90,11 @@ export default function HRExemptionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [year, beginLoad]);
+  }, [year]);
 
   useEffect(() => {
-    void load();
+    load();
   }, [load]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    year, debouncedSearch, itemsPerPage,
-  ]);
 
   useEffect(() => {
     if (!patientSearch.trim()) {
@@ -135,6 +127,10 @@ export default function HRExemptionsPage() {
         row.reason_display.toLowerCase().includes(q)
     );
   }, [rows, debouncedSearch]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [year, debouncedSearch, itemsPerPage]);
 
   const paginatedRows = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;

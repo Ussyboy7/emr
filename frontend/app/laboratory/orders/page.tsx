@@ -27,7 +27,6 @@ import { transformLabTestStatus, transformPriority, transformToBackendPriority, 
 import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
 import {
   findLabOrdersTabForOrders,
@@ -356,7 +355,6 @@ export default function LabOrdersPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({
@@ -740,9 +738,10 @@ export default function LabOrdersPage() {
   // With server-side pagination, orders array contains only current page results
   const paginatedOrders = filteredOrders;
 
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to,
-  ]);
+  // Reset to page 1 when filters change or items per page changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -752,7 +751,6 @@ export default function LabOrdersPage() {
   // Load orders function - memoized to prevent infinite loops
   const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
-    const isStale = beginLoad();
     try {
       if (!silent) {
         setLoading(true);
@@ -760,7 +758,7 @@ export default function LabOrdersPage() {
       }
 
       const params: any = {
-        page: currentPageRef.current,
+        page: currentPage,
         page_size: itemsPerPage,
       };
       if (priorityFilter !== 'all') {
@@ -815,7 +813,6 @@ export default function LabOrdersPage() {
         }),
       ]);
 
-      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
       const transformedOrders = response.results.map(transformOrder);
       setOrders(transformedOrders);
@@ -861,12 +858,12 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab, beginLoad, currentPageRef]);
+  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
     loadOrders();
-  }, [loadOrders, currentPage]);
+  }, [loadOrders]);
 
   // When searching, switch to the tab that actually contains matches.
   useEffect(() => {

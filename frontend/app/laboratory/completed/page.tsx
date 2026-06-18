@@ -21,7 +21,6 @@ import {
 } from '@/lib/laboratory/completedLabReport';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
@@ -55,7 +54,6 @@ export default function CompletedTestsPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -81,7 +79,6 @@ export default function CompletedTestsPage() {
 
   // Load completed tests function - memoized to prevent infinite loops
   const loadTests = useCallback(async () => {
-    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
@@ -132,7 +129,7 @@ export default function CompletedTestsPage() {
       const [listResult, statsResult] = await Promise.all([
         labService.getVerifiedResults({
           ...baseParams,
-          page: currentPageRef.current,
+          page: currentPage,
           page_size: itemsPerPage,
         }),
         labService.getVerificationStats({
@@ -147,8 +144,6 @@ export default function CompletedTestsPage() {
           end_date,
         }),
       ]);
-
-      if (isStale()) return;
 
       setTotalCount(listResult.count || (listResult.results || []).length);
       setStats({
@@ -169,19 +164,20 @@ export default function CompletedTestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday, beginLoad, currentPageRef]);
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, processingFilter, itemsPerPage, dateRange.from, dateRange.to,
-  ]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday]);
 
   // Load completed tests from API when page changes
   useEffect(() => {
-    void loadTests();
-  }, [loadTests, currentPage]);
+    loadTests();
+  }, [loadTests]);
 
   // Server-side filtered list (already matches current filters)
   const paginatedTests = tests;
+
+  // Reset to page 1 when filters change or items per page changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, processingFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

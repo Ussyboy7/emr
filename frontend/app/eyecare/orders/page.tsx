@@ -17,7 +17,6 @@ import { toast } from 'sonner';
 import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
 import { countOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
@@ -195,7 +194,6 @@ export default function EyeClinicOrdersPage() {
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [currentPage, setCurrentPage] = useState(1);
-  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [selectedOrder, setSelectedOrder] = useState<EyeOrder | null>(null);
@@ -239,7 +237,7 @@ export default function EyeClinicOrdersPage() {
   const buildOrdersListParams = useCallback((): Parameters<typeof eyeCareService.getOrders>[0] => {
     const searching = Boolean(debouncedSearchQuery.trim());
     const params: Parameters<typeof eyeCareService.getOrders>[0] = {
-      page: currentPageRef.current,
+      page: currentPage,
       page_size: itemsPerPage,
       search: searching ? debouncedSearchQuery.trim() : undefined,
     };
@@ -257,13 +255,13 @@ export default function EyeClinicOrdersPage() {
     }
     return params;
   }, [
+    currentPage,
     itemsPerPage,
     debouncedSearchQuery,
     activeTab,
     dateFilter,
     dateRange.from,
     dateRange.to,
-    currentPageRef,
   ]);
 
   const buildOrdersStatsBase = useCallback((): Parameters<typeof eyeCareService.getOrders>[0] => {
@@ -309,7 +307,6 @@ export default function EyeClinicOrdersPage() {
   const loadOrders = useCallback(
     async (opts?: { silent?: boolean }) => {
       const silent = opts?.silent;
-      const isStale = silent ? () => false : beginLoad();
       try {
         if (!silent) {
           setLoading(true);
@@ -319,7 +316,6 @@ export default function EyeClinicOrdersPage() {
           eyeCareService.getOrders(buildOrdersListParams()),
           eyeCareService.getOrderStats(buildOrdersStatsBase()),
         ]);
-        if (isStale()) return;
         setOrders(res.results || []);
         setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
         setStats({
@@ -340,16 +336,12 @@ export default function EyeClinicOrdersPage() {
         if (!silent) setLoading(false);
       }
     },
-    [buildOrdersListParams, buildOrdersStatsBase, beginLoad]
+    [buildOrdersListParams, buildOrdersStatsBase]
   );
-
-  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
-    debouncedSearchQuery, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to,
-  ]);
 
   useEffect(() => {
     void loadOrders();
-  }, [loadOrders, currentPage]);
+  }, [loadOrders]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -357,6 +349,10 @@ export default function EyeClinicOrdersPage() {
     }, 15000);
     return () => clearInterval(id);
   }, [loadOrders]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   useEffect(() => {
     if ((!isViewDialogOpen && !isSessionDialogOpen) || !selectedOrder?.id) {
