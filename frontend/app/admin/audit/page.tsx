@@ -1,7 +1,8 @@
 "use client";
 import { todayApiDateString, toApiDateFromInstant, formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -51,6 +52,7 @@ export default function AuditTrailPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -84,19 +86,15 @@ export default function AuditTrailPage() {
     loadModules();
   }, []);
 
-  // Load audit logs from API
-  useEffect(() => {
-    loadLogs();
-  }, [currentPage, itemsPerPage, searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo]);
-
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       
       // Build filter params
       const params: any = {
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
       };
       
@@ -133,6 +131,7 @@ export default function AuditTrailPage() {
       }
       
       const response = await adminService.getAuditLogs(params);
+      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
       
       // Transform API logs to frontend format
@@ -167,17 +166,18 @@ export default function AuditTrailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [itemsPerPage, searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo, itemsPerPage,
+  ]);
+
+  useEffect(() => {
+    void loadLogs();
+  }, [loadLogs, currentPage]);
 
   // Server-side filtering is now handled in loadLogs, so we use logs directly
   const paginatedLogs = logs;
-
-  // Reset to page 1 when filters change or items per page changes
-  useEffect(() => {
-    if (currentPage !== 1) {
-      setCurrentPage(1);
-    }
-  }, [searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo, itemsPerPage]);
 
   const stats = useMemo(() => {
     const today = new Date().toDateString();

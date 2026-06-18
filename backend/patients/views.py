@@ -125,7 +125,7 @@ def apply_nursing_status_filter(
 ):
     """
     Narrow visits for nursing pool queue (expects queryset already limited, e.g. in_progress + date).
-    nursing_status: pending | vitals_incomplete | ready | sent_to_room | completed
+    nursing_status: pending | vitals_incomplete | ready | sent_to_room | in_consultation | completed
 
     Stages are mutually exclusive (the three nursing cards on the dashboard
     should sum to Today's Visits, modulo 'Completed'):
@@ -225,6 +225,25 @@ def apply_nursing_status_filter(
             q_items = q_items.filter(queued_at__date__lte=end_date)
         visit_ids = q_items.values('visit_id')
         return queryset.filter(id__in=visit_ids).exclude(status='completed')
+
+    if ns == 'in_consultation':
+        return queryset.filter(
+            Q(
+                Exists(
+                    ConsultationQueue.objects.filter(
+                        is_active=True,
+                        visit_id=OuterRef('pk'),
+                    )
+                )
+            )
+            | Q(
+                Exists(
+                    ConsultationSession.objects.filter(visit_id=OuterRef('pk')).exclude(
+                        status__in=['cancelled']
+                    )
+                )
+            )
+        ).exclude(status='completed')
 
     return queryset
 

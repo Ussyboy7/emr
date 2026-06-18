@@ -48,6 +48,7 @@ import { appointmentService, type Appointment } from "@/lib/services/appointment
 import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
 import { useOutpatientClinicTypes } from "@/hooks/use-outpatient-clinic-types";
 import { useClinic } from "@/hooks/use-clinic";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 
 /** Deep link to New Visit with patient + appointment date/time/type prefilled */
 function buildScheduleVisitHref(a: Appointment): string {
@@ -96,6 +97,7 @@ export default function AppointmentsPage() {
   const { isMultiClinic } = useClinic();
   const [clinicOptions, setClinicOptions] = useState<{ id: number; name: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [pageSize] = useState(DEFAULT_LIST_PAGE_SIZE);
@@ -168,9 +170,9 @@ export default function AppointmentsPage() {
     };
   }, [createPatientSearch, showCreateDialog]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, typeFilter, datePreset, dateRange.from, dateRange.to, clinicFilter]);
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearchQuery, statusFilter, typeFilter, datePreset, dateRange.from, dateRange.to, clinicFilter,
+  ]);
 
   const buildAppointmentDateParams = useCallback(() => {
     let appointment_date: string | undefined;
@@ -216,10 +218,11 @@ export default function AppointmentsPage() {
   }, []);
 
   const fetchAppointments = useCallback(async () => {
+    const isStale = beginLoad();
     setIsLoading(true);
     try {
       const params: Record<string, string | number | undefined> = {
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: pageSize,
       };
 
@@ -234,6 +237,7 @@ export default function AppointmentsPage() {
       if (end_date) params.end_date = end_date;
 
       const response = await appointmentService.getAppointments(params);
+      if (isStale()) return;
       setAppointments(response.results || []);
       const count = response.count ?? 0;
       setTotalCount(count);
@@ -245,13 +249,15 @@ export default function AppointmentsPage() {
       setIsLoading(false);
     }
   }, [
-    currentPage,
     pageSize,
     debouncedSearchQuery,
     statusFilter,
     typeFilter,
     clinicFilter,
     buildAppointmentDateParams,
+    beginLoad,
+    currentPageRef,
+    isMultiClinic,
   ]);
 
   const loadStats = useCallback(async () => {
@@ -284,7 +290,7 @@ export default function AppointmentsPage() {
 
   useEffect(() => {
     fetchAppointments();
-  }, [fetchAppointments]);
+  }, [fetchAppointments, currentPage]);
 
   const resetCreatePatientPicker = () => {
     setCreatePatientSearch("");

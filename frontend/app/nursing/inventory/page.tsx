@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -60,6 +61,7 @@ export default function NursingInventoryPage() {
   const [stockFilter, setStockFilter] = useState('all');
 
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -135,13 +137,14 @@ export default function NursingInventoryPage() {
   }, [location]);
 
   const loadInventory = useCallback(async (opts: { silent?: boolean } = {}) => {
+    const isStale = opts.silent ? () => false : beginLoad();
     try {
       if (!opts.silent) {
         setLoading(true);
         setError(null);
       }
       const params: any = {
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
         search: searchQuery || undefined,
         location,
@@ -149,6 +152,7 @@ export default function NursingInventoryPage() {
       if (categoryFilter !== 'All Categories') params.medication__category = categoryFilter;
       if (stockFilter !== 'all') params.stock_status = stockFilter;
       const response = await pharmacyService.getInventory(params);
+      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
       setInventory(transformInventoryItems(response.results));
     } catch (err: any) {
@@ -159,7 +163,7 @@ export default function NursingInventoryPage() {
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, categoryFilter, stockFilter, location]);
+  }, [itemsPerPage, searchQuery, categoryFilter, stockFilter, location, beginLoad, currentPageRef]);
 
   const silentRefresh = useCallback(() => {
     void loadWardCareStats();
@@ -170,13 +174,13 @@ export default function NursingInventoryPage() {
     void loadWardCareStats();
   }, [loadWardCareStats]);
 
-  useEffect(() => {
-    void loadInventory();
-  }, [loadInventory]);
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    searchQuery, categoryFilter, stockFilter, itemsPerPage,
+  ]);
 
   useEffect(() => {
-    if (currentPage !== 1) setCurrentPage(1);
-  }, [searchQuery, categoryFilter, stockFilter]);
+    void loadInventory();
+  }, [loadInventory, currentPage]);
 
   useReloadOnFocus(silentRefresh);
 

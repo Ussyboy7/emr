@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,7 @@ export default function RolesPermissionsPage() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [roleStats, setRoleStats] = useState({
@@ -168,17 +170,19 @@ export default function RolesPermissionsPage() {
   }, []);
 
   const loadRoles = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const typeGroup = mapTypeFilterToTypeGroup(typeFilter);
       const response = await adminService.getRoles({
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
         search: debouncedSearch.trim() || undefined,
         type_group: typeGroup,
         is_active: statusFilter !== 'all' ? statusFilter === 'Active' : undefined,
       });
+      if (isStale()) return;
       setTotalCount(response.count ?? response.results.length);
 
       const transformedRoles: Role[] = response.results.map((role: ApiRole) => ({
@@ -202,7 +206,11 @@ export default function RolesPermissionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, typeFilter, statusFilter]);
+  }, [itemsPerPage, debouncedSearch, typeFilter, statusFilter, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearch, typeFilter, statusFilter, itemsPerPage,
+  ]);
 
   useEffect(() => {
     void loadRoleStats();
@@ -210,11 +218,7 @@ export default function RolesPermissionsPage() {
 
   useEffect(() => {
     void loadRoles();
-  }, [loadRoles]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearch, typeFilter, statusFilter, itemsPerPage]);
+  }, [loadRoles, currentPage]);
 
   const getRoleIcon = (type: string) => {
     switch (type) {

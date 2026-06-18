@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -282,6 +283,7 @@ export default function PrescriptionsPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [queueStats, setQueueStats] = useState<{
@@ -293,7 +295,6 @@ export default function PrescriptionsPage() {
   const [queueStatsLoading, setQueueStatsLoading] = useState(true);
   const [isLoadingPrescriptions, setIsLoadingPrescriptions] = useState(false);
   const silentPollLockRef = useRef(false);
-  const userLoadInFlightRef = useRef(false);
 
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDispenseModal, setShowDispenseModal] = useState(false);
@@ -462,18 +463,12 @@ export default function PrescriptionsPage() {
 
   const loadPrescriptions = async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
+    const isStale = silent ? () => false : beginLoad();
     if (!silent) {
-      if (userLoadInFlightRef.current) {
-        return;
-      }
-      userLoadInFlightRef.current = true;
       setIsLoadingPrescriptions(true);
       setLoading(true);
       setError(null);
     } else {
-      if (userLoadInFlightRef.current) {
-        return;
-      }
       if (silentPollLockRef.current) {
         return;
       }
@@ -483,12 +478,13 @@ export default function PrescriptionsPage() {
     try {
       const response = await pharmacyService.getPrescriptions({
         status: statusFilter !== 'all' ? statusFilter : undefined,
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
         search: searchQuery || undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         date_preset: dateFilter !== 'all' ? dateFilter : undefined,
       });
+      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
       // Transform API data - extract patient and visit details
       const transformed = await Promise.all(response.results.map(async (rx: any) => {
@@ -627,6 +623,7 @@ export default function PrescriptionsPage() {
           visitNotes, // Notes / Special Instructions from visit
         };
       }));
+      if (isStale()) return;
       setPrescriptions(transformed as Prescription[]);
     } catch (err: any) {
       if (!silent) {
@@ -635,7 +632,6 @@ export default function PrescriptionsPage() {
       console.error('Error loading prescriptions:', err);
     } finally {
       if (!silent) {
-        userLoadInFlightRef.current = false;
         setLoading(false);
         setIsLoadingPrescriptions(false);
       } else {
@@ -643,6 +639,10 @@ export default function PrescriptionsPage() {
       }
     }
   };
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    searchQuery, statusFilter, dateFilter, priorityFilter, genderFilter, itemsPerPage,
+  ]);
 
   const loadQueueStats = async () => {
     setQueueStatsLoading(true);
@@ -697,9 +697,6 @@ export default function PrescriptionsPage() {
     showSubstitutionModal,
   ]);
 
-  // Status update functionality
-
-  // Helper functions for filtering
   const normalizeGender = (value: unknown): string => {
     const v = String(value || '').trim().toLowerCase();
     if (v === 'm') return 'male';
@@ -900,11 +897,6 @@ export default function PrescriptionsPage() {
   }, [prescriptions, priorityFilter]);
 
   const paginatedPrescriptions = filteredPrescriptions;
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, priorityFilter, genderFilter]);
 
   const stats = useMemo(
     () => ({

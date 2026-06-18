@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useStaleRequestGuard } from "@/hooks/use-paginated-list-guard";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
@@ -37,6 +38,7 @@ export default function NursingAnalyticsPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>("year");
+  const { beginLoad } = useStaleRequestGuard();
 
   const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
   const serverToday = useServerDateAnchor();
@@ -65,31 +67,38 @@ export default function NursingAnalyticsPage() {
     setViewMode("year");
   };
 
-  const loadAnalytics = async () => {
+  const loadAnalytics = useCallback(async () => {
     const params = buildReportPeriodQuery(viewMode, reportRange, "start");
     if (!params) {
       toast.error("Please select a valid date range");
       return;
     }
 
+    const isStale = beginLoad();
+
     setLoading(true);
     try {
       const data = await nursingService.getAnalyticsSummary(params);
+      if (isStale()) return;
       setAnalyticsData(data);
     } catch (error: any) {
       console.error("Error loading analytics:", error);
-      toast.error(error?.message || "Failed to load nursing analytics");
-      emptyState();
+      if (!isStale()) {
+        toast.error(error?.message || "Failed to load nursing analytics");
+        emptyState();
+      }
     } finally {
-      setLoading(false);
+      if (!isStale()) {
+        setLoading(false);
+      }
     }
-  };
+  }, [viewMode, reportRange, beginLoad]);
 
   useEffect(() => {
     if (canFetchReportPeriod(viewMode, reportRange)) {
       void loadAnalytics();
     }
-  }, [reportRange, viewMode]);
+  }, [reportRange, viewMode, loadAnalytics]);
 
   const periodBreakdown = useMemo(() => {
     if (!analyticsData) return [];

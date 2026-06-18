@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -55,6 +56,7 @@ export default function EyeClinicCompletedSessionsPage() {
   });
 
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -78,6 +80,7 @@ export default function EyeClinicCompletedSessionsPage() {
   }, [searchQuery]);
 
   const loadSessions = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
@@ -86,7 +89,7 @@ export default function EyeClinicCompletedSessionsPage() {
         debouncedSearch: debouncedSearchQuery,
         dateFilter,
         dateRange,
-        currentPage,
+        currentPage: currentPageRef.current,
         itemsPerPage,
       });
       const { page, page_size, ...statsBase } = listParams;
@@ -95,6 +98,8 @@ export default function EyeClinicCompletedSessionsPage() {
         eyeCareService.getSessions(listParams),
         fetchCompletedSessionStats(eyeCareService.getCompletedStats.bind(eyeCareService), statsBase),
       ]);
+
+      if (isStale()) return;
 
       setSessions(listResult?.results ?? []);
       setTotalCount(listResult?.count ?? 0);
@@ -110,15 +115,15 @@ export default function EyeClinicCompletedSessionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
+  }, [itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearchQuery, dateFilter, itemsPerPage, dateRange.from, dateRange.to,
+  ]);
 
   useEffect(() => {
     void loadSessions();
-  }, [loadSessions]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearchQuery, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [loadSessions, currentPage]);
 
   const openSessionReport = (session: EyeSession) => {
     const orderId = typeof session.order === 'number' ? session.order : session.order_details?.id;

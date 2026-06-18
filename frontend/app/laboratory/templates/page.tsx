@@ -3,6 +3,7 @@ import { todayApiDateString } from "@/lib/dates";
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -113,6 +114,7 @@ export default function TestTemplatesPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [stats, setStats] = useState({
@@ -187,6 +189,7 @@ export default function TestTemplatesPage() {
   }, [loadTemplateStats]);
 
   const loadTemplates = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
@@ -194,12 +197,13 @@ export default function TestTemplatesPage() {
       if (statusFilter === 'active') is_active = true;
       else if (statusFilter === 'inactive') is_active = false;
       const response = await labService.getTemplates({
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
         search: debouncedSearch.trim() || undefined,
         category: categoryFilter !== 'All' ? categoryFilter : undefined,
         is_active,
       });
+      if (isStale()) return;
       const transformed = (response.results || []).map(transformTemplate);
       setTemplates(transformed);
       setTotalCount(typeof response.count === 'number' ? response.count : transformed.length);
@@ -210,15 +214,15 @@ export default function TestTemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, statusFilter]);
+  }, [itemsPerPage, debouncedSearch, categoryFilter, statusFilter, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearch, categoryFilter, statusFilter, itemsPerPage,
+  ]);
 
   useEffect(() => {
     void loadTemplates();
-  }, [loadTemplates]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearch, categoryFilter, statusFilter, itemsPerPage]);
+  }, [loadTemplates, currentPage]);
 
   const getCategoryBadge = (category: string) => {
     switch (category) {

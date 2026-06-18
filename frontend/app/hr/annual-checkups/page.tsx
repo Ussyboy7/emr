@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import {
   Download,
   Loader2,
@@ -58,10 +59,12 @@ export default function HRAnnualCheckupsPage() {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<unknown>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const { resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   useAuthRedirect(authError);
 
   const load = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       const data = await hrService.getCompliance({
@@ -69,6 +72,7 @@ export default function HRAnnualCheckupsPage() {
         status: status !== "all" ? status : undefined,
         search: debouncedSearch.trim() || undefined,
       });
+      if (isStale()) return;
       setRows(data.results);
       setTotalCount(data.count ?? data.results.length);
       setSummary(data.summary);
@@ -78,15 +82,15 @@ export default function HRAnnualCheckupsPage() {
     } finally {
       setLoading(false);
     }
-  }, [year, status, debouncedSearch]);
+  }, [year, status, debouncedSearch, beginLoad]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [year, status, debouncedSearch, itemsPerPage]);
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    year, status, debouncedSearch, itemsPerPage,
+  ]);
 
   const paginatedRows = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;

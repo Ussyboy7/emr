@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import {
   findRadiologyOrdersTabForOrders,
   isValidRadiologyOrdersTab,
@@ -146,6 +147,7 @@ export default function RadiologyOrdersPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({
@@ -841,6 +843,7 @@ export default function RadiologyOrdersPage() {
 
   const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
+    const isStale = beginLoad();
     try {
       if (!silent) {
         setLoading(true);
@@ -880,13 +883,14 @@ export default function RadiologyOrdersPage() {
 
       const [response, statsResponse] = await Promise.all([
         radiologyService.getOrders({
-          page: currentPage,
+          page: currentPageRef.current,
           page_size: itemsPerPage,
           ...listFilters,
         }),
         radiologyService.getOrderStats(commonFilters),
       ]);
 
+      if (isStale()) return;
       setOrders(response.results || []);
       setTotalCount(response.count || response.results.length);
       setStats({
@@ -907,7 +911,7 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery]);
+  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, itemsPerPage, buildDateQuery, beginLoad, currentPageRef]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -916,7 +920,7 @@ export default function RadiologyOrdersPage() {
 
   useEffect(() => {
     loadOrders();
-  }, [loadOrders]);
+  }, [loadOrders, currentPage]);
 
   const pollingPaused = useMemo(
     () =>
@@ -1230,10 +1234,9 @@ export default function RadiologyOrdersPage() {
     }
   }, [debouncedSearch, orders, activeTab, loading]);
 
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, dateRange.from, dateRange.to]);
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearch, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, dateRange.from, dateRange.to, itemsPerPage,
+  ]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

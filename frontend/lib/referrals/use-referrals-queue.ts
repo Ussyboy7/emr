@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { referralService } from "@/lib/services/referral-service";
 import type { ReferralWithPatient } from "@/lib/referrals/referral-helpers";
@@ -119,6 +120,7 @@ export function useReferralsQueue(
   useAuthRedirect(authError);
 
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -170,15 +172,17 @@ export function useReferralsQueue(
   ]);
 
   const fetchReferrals = useCallback(async () => {
+    const isStale = beginLoad();
     setIsLoading(true);
     try {
       const params: ReferralListParams = {
         ...baseFilterParams(),
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
       };
       if (statusFilter !== "all") params.status = statusFilter;
       const response = await getReferralsWithStatusFallback(params);
+      if (isStale()) return;
       setReferrals(response.results || []);
       setTotalCount(response.count || 0);
     } catch (error: unknown) {
@@ -191,7 +195,7 @@ export function useReferralsQueue(
     } finally {
       setIsLoading(false);
     }
-  }, [baseFilterParams, currentPage, itemsPerPage, statusFilter]);
+  }, [baseFilterParams, itemsPerPage, statusFilter, beginLoad, currentPageRef]);
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
@@ -215,23 +219,20 @@ export function useReferralsQueue(
 
   useEffect(() => {
     void fetchReferrals();
-  }, [fetchReferrals]);
+  }, [fetchReferrals, currentPage]);
 
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
 
-  // Reset to page 1 whenever the filter shape changes — otherwise the user can
-  // be stuck on an out-of-range page after narrowing results.
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
     statusFilter,
     specialtyFilter,
     facilityFilter,
     urgencyFilter,
     dateFilter,
     debouncedSearchQuery,
+    itemsPerPage,
   ]);
 
   const specialties = useMemo(

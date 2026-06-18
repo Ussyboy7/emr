@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
@@ -61,6 +62,7 @@ export default function DispensaryRequestsPage() {
   const [requestTab, setRequestTab] = useState<"dispensary" | "ward">("dispensary");
 
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const buildDateParams = useCallback(() => {
@@ -89,14 +91,11 @@ export default function DispensaryRequestsPage() {
     loadStats();
   }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab]);
 
-  useEffect(() => {
-    loadRequests();
-  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, requestTab]);
-
-  const loadRequests = async () => {
+  const loadRequests = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
-      const params: Record<string, string | number> = { page: currentPage, page_size: itemsPerPage };
+      const params: Record<string, string | number> = { page: currentPageRef.current, page_size: itemsPerPage };
       if (statusFilter !== "all") params.status = statusFilter;
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       Object.assign(params, buildDateParams());
@@ -106,6 +105,7 @@ export default function DispensaryRequestsPage() {
         params.to_location = PHARMACY_LOCATIONS.WARD_CARE;
       }
       const response = await pharmacyService.getStockRequests(params);
+      if (isStale()) return;
       setRequests(response.results || []);
       setTotalRequests(response.count ?? response.results?.length ?? 0);
     } catch (err) {
@@ -114,7 +114,15 @@ export default function DispensaryRequestsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, itemsPerPage, debouncedSearchQuery, dateFilter, requestTab, buildDateParams, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    statusFilter, debouncedSearchQuery, dateFilter, requestTab, itemsPerPage,
+  ]);
+
+  useEffect(() => {
+    void loadRequests();
+  }, [loadRequests, currentPage]);
 
   const loadStats = async () => {
     try {

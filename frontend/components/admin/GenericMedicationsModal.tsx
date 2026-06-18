@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +57,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
   const [routeFilter, setRouteFilter] = useState(ANY);
   const [formFilter, setFormFilter] = useState(ANY);
   const [currentPage, setCurrentPage] = useState(1);
+  const { resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_LIST_PAGE_SIZE);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -74,19 +76,15 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
     is_active: true,
   });
 
-  useEffect(() => {
-    if (open) {
-      loadGenerics();
-    }
-  }, [open]);
-
-  const loadGenerics = async () => {
+  const loadGenerics = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       const response = await pharmacyService.getGenerics({
         page: 1,
         page_size: DEFAULT_CATALOG_PAGE_SIZE,
       });
+      if (isStale()) return;
       setGenerics(response.results || []);
     } catch (err) {
       console.error("Error loading generics:", err);
@@ -94,7 +92,17 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
     } finally {
       setLoading(false);
     }
-  };
+  }, [beginLoad]);
+
+  useEffect(() => {
+    if (open) {
+      void loadGenerics();
+    }
+  }, [open, loadGenerics]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    searchQuery, routeFilter, formFilter, itemsPerPage,
+  ]);
 
   const filteredGenerics = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

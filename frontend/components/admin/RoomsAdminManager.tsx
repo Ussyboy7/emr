@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo, useImperativeHandle, forwardRef } from 'react';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -80,6 +81,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
   const [locationFilter, setLocationFilter] = useState('all');
 
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ total: 0, active: 0, inactive: 0, maintenance: 0 });
@@ -100,17 +102,19 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
   })), [locationOptions]);
 
   const fetchRooms = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const params: Record<string, string | number> = {
-        page: currentPage, page_size: itemsPerPage,
+        page: currentPageRef.current, page_size: itemsPerPage,
       };
       if (searchQuery.trim()) params.search = searchQuery.trim();
       if (statusFilter !== 'all') params.status = statusFilter;
       if (typeFilter !== 'all') params.room_type = typeFilter;
       if (locationFilter !== 'all') params.clinic = locationFilter;
       const res = await roomService.getRooms(params);
+      if (isStale()) return;
       const mapped = (res.results || []).map((r: ApiRoom) => {
         const clinicLabel = clinicOptions.find(o => String(o.value) === String(r.clinic))?.label || r.location || '';
         return mapRoom(r, clinicLabel);
@@ -123,7 +127,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, locationFilter, clinicOptions]);
+  }, [itemsPerPage, searchQuery, statusFilter, typeFilter, locationFilter, clinicOptions, beginLoad, currentPageRef]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -141,9 +145,12 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
     } catch { /* ignore */ }
   }, [searchQuery, typeFilter, locationFilter]);
 
-  useEffect(() => { fetchRooms(); }, [fetchRooms, refreshToken]);
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    searchQuery, statusFilter, typeFilter, locationFilter, itemsPerPage,
+  ]);
+
+  useEffect(() => { void fetchRooms(); }, [fetchRooms, currentPage, refreshToken]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, typeFilter, locationFilter]);
 
   function mapRoom(api: ApiRoom, clinicLabel: string): Room {
     const s = (api.status || 'active').toLowerCase();

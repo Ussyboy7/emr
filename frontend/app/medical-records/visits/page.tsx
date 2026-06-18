@@ -47,6 +47,9 @@ import { useServerToday } from '@/hooks/use-server-today';
 import { localWeekToTodayBounds } from '@/lib/dates';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
+import { mapTypeFilterToVisitType, VISIT_TYPE_FILTER_OPTIONS } from '@/lib/nursing/pool-queue-filters';
+import { getVisitTypeBadgeClass, getVisitTypeLabel, normalizeVisitTypeKey } from '@/lib/utils/priority';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 
@@ -94,6 +97,7 @@ export default function VisitsPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -177,7 +181,7 @@ export default function VisitsPage() {
 
       const stats = await visitService.getListStats({
         search: debouncedSearchQuery || undefined,
-        visit_type: typeFilter !== 'all' ? typeFilter : undefined,
+        visit_type: mapTypeFilterToVisitType(typeFilter),
         clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         date: dateParam,
         start_date: startDate,
@@ -199,6 +203,7 @@ export default function VisitsPage() {
   // Load visits from API - extracted as a reusable function
   const loadVisits = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
+    const isStale = beginLoad();
     try {
       if (!silent) {
         setLoading(true);
@@ -208,11 +213,11 @@ export default function VisitsPage() {
       const { dateParam, startDate, endDate } = buildDateParams();
 
       const filterParams = {
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
         search: debouncedSearchQuery || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
-        visit_type: typeFilter !== 'all' ? typeFilter : undefined,
+        visit_type: mapTypeFilterToVisitType(typeFilter),
         clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         date: dateParam,
         start_date: startDate,
@@ -221,6 +226,8 @@ export default function VisitsPage() {
       };
 
       const result = await visitService.getVisits(filterParams);
+      if (isStale()) return;
+
       setTotalCount(result.count || result.results.length);
       
       // Transform visits to match frontend structure
@@ -230,6 +237,7 @@ export default function VisitsPage() {
         const bTime = new Date(`${b.date}T${b.time}`).getTime();
         return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
       });
+      if (isStale()) return;
       setVisits(newestFirst);
     } catch (err) {
       console.error('Error loading visits:', err);
@@ -243,12 +251,16 @@ export default function VisitsPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams]);
+  }, [itemsPerPage, debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, dateFilter, dateRange.from, dateRange.to,
+  ]);
 
   // Load visits when filters change
   useEffect(() => {
     loadVisits();
-  }, [loadVisits]);
+  }, [loadVisits, currentPage]);
 
   // Load stats when filters change (except status filter and pagination)
   useEffect(() => {
@@ -284,11 +296,6 @@ export default function VisitsPage() {
 
   // With server-side pagination, visits array contains only current page results
   const paginatedVisits = visits;
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, dateFilter, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -539,37 +546,11 @@ export default function VisitsPage() {
     return styles[status] || 'border-muted-foreground/50 text-muted-foreground';
   };
 
-  // Helper to get display label for visit type
-  const getVisitTypeLabel = (type: string) => {
-    const typeMap: Record<string, string> = {
-      'consultation': 'Consultation',
-      'follow_up': 'Follow-up',
-      'emergency': 'Emergency',
-      'routine': 'Routine Checkup',
-      'annual_checkup': 'Annual Check-up',
-      'nursing_procedure': 'Nursing Procedure',
-      'responsility_form': 'Responsility Form',
-      'responsibility_form': 'Responsibility Form',
-    };
-    return typeMap[type] || type;
-  };
-
-  const getTypeBadge = (type: string) => {
-    const styles: Record<string, string> = {
-      'consultation': 'border-teal-500/50 text-teal-600 dark:text-teal-400',
-      'follow_up': 'border-blue-500/50 text-blue-600 dark:text-blue-400',
-      'emergency': 'border-rose-500/50 text-rose-600 dark:text-rose-400',
-      'routine': 'border-violet-500/50 text-violet-600 dark:text-violet-400',
-      'annual_checkup': 'border-amber-500/50 text-amber-600 dark:text-amber-400',
-      'nursing_procedure': 'border-rose-500/50 text-rose-600 dark:text-rose-400',
-      'responsility_form': 'border-yellow-500/50 text-yellow-600 dark:text-yellow-400',
-      'responsibility_form': 'border-yellow-500/50 text-yellow-600 dark:text-yellow-400',
-    };
-    return styles[type] || 'border-muted-foreground/50 text-muted-foreground';
-  };
+  const visitTypeLabel = (type: string) => getVisitTypeLabel(normalizeVisitTypeKey(type));
+  const visitTypeBadgeClass = (type: string) => getVisitTypeBadgeClass(normalizeVisitTypeKey(type));
 
   const getTypeColor = (type: string) => {
-    switch (type) {
+    switch (normalizeVisitTypeKey(type)) {
       case 'emergency': return 'border-l-rose-500';
       case 'follow_up': return 'border-l-blue-500';
       case 'routine': return 'border-l-violet-500';
@@ -688,13 +669,11 @@ export default function VisitsPage() {
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="consultation">Consultation</SelectItem>
-                    <SelectItem value="follow_up">Follow-up</SelectItem>
-                    <SelectItem value="emergency">Emergency</SelectItem>
-                    <SelectItem value="routine">Routine Checkup</SelectItem>
-                    <SelectItem value="annual_checkup">Annual Check-up</SelectItem>
-                    <SelectItem value="nursing_procedure">Nursing Procedure</SelectItem>
+                    {VISIT_TYPE_FILTER_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                     <SelectItem value="responsility_form">Responsility Form</SelectItem>
                   </SelectContent>
                 </Select>
@@ -769,7 +748,7 @@ export default function VisitsPage() {
                     {/* Row 1: Name + Badges */}
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium text-foreground text-sm truncate">{visit.patient}</h3>
-                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getTypeBadge(visit.type)}`}>{getVisitTypeLabel(visit.type)}</Badge>
+                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${visitTypeBadgeClass(visit.type)}`}>{visitTypeLabel(visit.type)}</Badge>
                       <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadge(visit.status)}`}>
                         {visit.status === 'Scheduled' ? 'Pending' : visit.status}
                       </Badge>
@@ -1111,7 +1090,7 @@ export default function VisitsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-muted-foreground">Visit Type</Label>
-                    <p className="font-medium">{getVisitTypeLabel(selectedVisit.type)}</p>
+                    <p className="font-medium">{visitTypeLabel(selectedVisit.type)}</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-muted-foreground">Status</Label>

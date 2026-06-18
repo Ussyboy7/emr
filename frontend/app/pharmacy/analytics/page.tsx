@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useStaleRequestGuard } from '@/hooks/use-paginated-list-guard';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import {
   AnalyticsReportLayout,
@@ -177,6 +178,7 @@ export default function PharmacyAnalyticsPage() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PharmacyAnalyticsSummary | null>(null);
   const [dispensedItems, setDispensedItems] = useState<DispensedItemRow[]>([]);
+  const { beginLoad } = useStaleRequestGuard();
 
   const range = useMemo(
     () => reportRange,
@@ -195,9 +197,11 @@ export default function PharmacyAnalyticsPage() {
       if (viewMode === 'range') toast.error('Please select start and end dates');
       return;
     }
+    const isStale = beginLoad();
     setLoading(true);
     try {
       const res = await pharmacyService.getAnalyticsSummary(params);
+      if (isStale()) return;
       setData(res);
 
       const dispensedParams = buildReportPeriodQuery(viewMode, reportRange, 'start_date');
@@ -206,16 +210,21 @@ export default function PharmacyAnalyticsPage() {
       const dispensedResponse = await apiFetch<{
         dispensed_items: DispensedItemRow[];
       }>(url);
+      if (isStale()) return;
       setDispensedItems(dispensedResponse.dispensed_items || []);
     } catch (e: unknown) {
       console.error(e);
-      toast.error(getReadableApiError(e));
-      setData(null);
-      setDispensedItems([]);
+      if (!isStale()) {
+        toast.error(getReadableApiError(e));
+        setData(null);
+        setDispensedItems([]);
+      }
     } finally {
-      setLoading(false);
+      if (!isStale()) {
+        setLoading(false);
+      }
     }
-  }, [reportRange, viewMode]);
+  }, [reportRange, viewMode, beginLoad]);
 
   useEffect(() => {
     if (canFetchReportPeriod(viewMode, reportRange)) {

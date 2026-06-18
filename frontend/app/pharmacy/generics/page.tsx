@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { pharmacyService, type GenericMedication } from "@/lib/services";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 import { DOSAGE_FORMS as DOSAGE_FORM_OPTIONS, MEDICATION_STRENGTHS, MEDICATION_CATEGORIES } from "@/lib/constants/pharmacy";
 import { Plus, Search, Edit, Eye, Trash2, Loader2 } from "lucide-react";
 
@@ -54,6 +55,7 @@ export default function GenericsPage() {
   const [routeFilter, setRouteFilter] = useState(ANY);
   const [formFilter, setFormFilter] = useState(ANY);
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -73,15 +75,17 @@ export default function GenericsPage() {
   });
 
   const loadGenerics = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       const response = await pharmacyService.getGenerics({
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
         search: debouncedSearch.trim() || undefined,
         route: routeFilter !== ANY ? routeFilter : undefined,
         dosage_form: formFilter !== ANY ? formFilter : undefined,
       });
+      if (isStale()) return;
       setGenerics(response.results || []);
       setTotalCount(typeof response.count === "number" ? response.count : (response.results || []).length);
     } catch (err) {
@@ -90,15 +94,15 @@ export default function GenericsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, routeFilter, formFilter]);
+  }, [itemsPerPage, debouncedSearch, routeFilter, formFilter, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearch, routeFilter, formFilter, itemsPerPage,
+  ]);
 
   useEffect(() => {
     void loadGenerics();
-  }, [loadGenerics]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearch, routeFilter, formFilter, itemsPerPage]);
+  }, [loadGenerics, currentPage]);
 
   const openCreate = () => {
     setFormData({

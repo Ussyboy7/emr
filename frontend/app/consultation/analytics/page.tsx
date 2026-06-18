@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useStaleRequestGuard } from "@/hooks/use-paginated-list-guard";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
@@ -35,6 +36,7 @@ export default function ConsultationAnalyticsPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>("year");
+  const { beginLoad } = useStaleRequestGuard();
 
   const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
   const serverToday = useServerDateAnchor();
@@ -70,19 +72,25 @@ export default function ConsultationAnalyticsPage() {
       return;
     }
 
+    const isStale = beginLoad();
     setLoading(true);
     try {
       const path = `/consultation/sessions/comprehensive-analytics/?${params.toString()}`;
       const data = await apiFetch<ConsultationAnalytics>(path);
+      if (isStale()) return;
       setAnalyticsData(data);
     } catch (error: any) {
       console.error("Error loading analytics:", error);
-      toast.error(error?.message || "Failed to load consultation analytics");
-      emptyState();
+      if (!isStale()) {
+        toast.error(error?.message || "Failed to load consultation analytics");
+        emptyState();
+      }
     } finally {
-      setLoading(false);
+      if (!isStale()) {
+        setLoading(false);
+      }
     }
-  }, [reportRange]);
+  }, [reportRange, viewMode, beginLoad]);
 
   useEffect(() => {
     if (canFetchReportPeriod(viewMode, reportRange)) {

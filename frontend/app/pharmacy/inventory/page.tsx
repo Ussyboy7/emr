@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { useClinic } from '@/hooks/use-clinic';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
@@ -70,6 +71,7 @@ export default function InventoryPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({
@@ -108,12 +110,13 @@ export default function InventoryPage() {
   }, [loadStats]);
 
   const loadInventory = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
 
       const inventoryResponse = await pharmacyService.getInventory({
-        page: currentPage,
+        page: currentPageRef.current,
         page_size: itemsPerPage,
         location,
         search: debouncedSearch.trim() || undefined,
@@ -121,6 +124,8 @@ export default function InventoryPage() {
           categoryFilter !== 'All Categories' ? categoryFilter : undefined,
         stock_status: stockFilter !== 'all' ? stockFilter : undefined,
       });
+
+      if (isStale()) return;
 
       const transformed = transformInventoryItems(inventoryResponse.results);
       setTotalCount(typeof inventoryResponse.count === 'number' ? inventoryResponse.count : transformed.length);
@@ -131,11 +136,15 @@ export default function InventoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, stockFilter, location]);
+  }, [itemsPerPage, debouncedSearch, categoryFilter, stockFilter, location, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearch, categoryFilter, stockFilter, itemsPerPage,
+  ]);
 
   useEffect(() => {
     void loadInventory();
-  }, [loadInventory]);
+  }, [loadInventory, currentPage]);
 
   // Transform inventory items helper function
   const transformInventoryItems = (results: any[]): MedicationInventoryItem[] => {
@@ -190,13 +199,6 @@ export default function InventoryPage() {
   // Use filtered inventory directly (no client-side pagination - backend handles it)
   const paginatedInventory = filteredInventory;
 
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    if (currentPage !== 1) {
-      setCurrentPage(1);
-    }
-  }, [debouncedSearch, categoryFilter, stockFilter]);
-  
   const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
     if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
     const packs = Math.floor(units / packSize);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { usePaginatedListGuard, useResetPageOnFilterChange } from '@/hooks/use-paginated-list-guard';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -50,6 +51,7 @@ export default function DispenseHistoryPage() {
   const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentPageRef, resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [summaryStats, setSummaryStats] = useState<{
@@ -62,10 +64,6 @@ export default function DispenseHistoryPage() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<DispenseHistoryRecord | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-
-  useEffect(() => {
-    loadHistory();
-  }, [currentPage, itemsPerPage, searchQuery, genderFilter, dateFilter]);
 
   const loadSummaryStats = async () => {
     setSummaryLoading(true);
@@ -89,14 +87,15 @@ export default function DispenseHistoryPage() {
     void loadSummaryStats();
   }, [searchQuery, genderFilter, dateFilter]);
 
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async () => {
+    const isStale = beginLoad();
     try {
       setLoading(true);
       setError(null);
       const [, response] = await Promise.all([
         getServerToday(),
         pharmacyService.getDispenseHistory({
-          page: currentPage,
+          page: currentPageRef.current,
           page_size: itemsPerPage,
           search: searchQuery.trim() || undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
@@ -107,6 +106,7 @@ export default function DispenseHistoryPage() {
       if (!serverTz) {
         throw new Error('Server timezone unavailable. Check /common/server-time/.');
       }
+      if (isStale()) return;
       setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format
       const transformed = await Promise.all(response.results.map(async (dispense: any) => {
@@ -180,7 +180,15 @@ export default function DispenseHistoryPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [itemsPerPage, searchQuery, genderFilter, dateFilter, beginLoad, currentPageRef]);
+
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    searchQuery, genderFilter, dateFilter, itemsPerPage,
+  ]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory, currentPage]);
 
   const stats = useMemo(() => {
     if (!summaryStats) return null;

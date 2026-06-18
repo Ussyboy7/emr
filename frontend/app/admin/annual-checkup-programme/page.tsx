@@ -77,6 +77,7 @@ import { DEFAULT_CATALOG_PAGE_SIZE } from "@/lib/pagination-constants";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { canEditAnnualCheckupProgramme } from "@/lib/patient-permissions";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePaginatedListGuard, useResetPageOnFilterChange } from "@/hooks/use-paginated-list-guard";
 
 function codesToString(codes?: string[]) {
   return (codes || []).join(", ");
@@ -221,6 +222,7 @@ export default function AnnualCheckupProgrammePage() {
   const [tierFilter, setTierFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const { resetToFirstPage, beginLoad } = usePaginatedListGuard(currentPage);
   const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -236,9 +238,11 @@ export default function AnnualCheckupProgrammePage() {
   const isAdmin = canEditAnnualCheckupProgramme(currentUser);
 
   const load = useCallback(async () => {
+    const isStale = beginLoad();
     setLoading(true);
     try {
       const data = await annualCheckupService.getProgramme(year);
+      if (isStale()) return;
       setCatalog(data.catalog || []);
       setSelected(data.default_selected_codes || []);
     } catch {
@@ -246,15 +250,15 @@ export default function AnnualCheckupProgrammePage() {
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, [year, beginLoad]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearch, tierFilter, statusFilter, activeTab]);
+  useResetPageOnFilterChange(resetToFirstPage, setCurrentPage, [
+    debouncedSearch, tierFilter, statusFilter, activeTab, itemsPerPage,
+  ]);
 
   const loadTemplates = useCallback(async () => {
     setTemplatesLoading(true);

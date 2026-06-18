@@ -44,6 +44,12 @@ import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
+import {
+  buildNursingPoolQueryParams,
+  clientStageNursingStatus,
+  POOL_VISIT_TYPE_OPTIONS,
+  usesClientStageFilter,
+} from '@/lib/nursing/pool-queue-filters';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 
@@ -202,9 +208,17 @@ export default function NursingPoolQueuePage() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+  const currentPageRef = useRef(currentPage);
+  const loadGenerationRef = useRef(0);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
 
   const loadData = useCallback(async (opts?: { silent?: boolean }): Promise<NursingPatient[] | null> => {
       const silent = opts?.silent;
+      const generation = ++loadGenerationRef.current;
+      const isStale = () => generation !== loadGenerationRef.current;
       try {
         if (!silent) {
           setLoading(true);
@@ -238,33 +252,25 @@ export default function NursingPoolQueuePage() {
           start_date: startDate,
           end_date: endDate,
           search: searchQuery || undefined,
-          visit_type: typeFilter !== 'all' ? typeFilter : undefined,
-          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+          typeFilter,
+          clinicFilter,
+          statusFilter,
         };
 
-        const nursingStatusApi =
-          statusFilter === 'pending'
-            ? ('pending' as const)
-            : statusFilter === 'vitals-recorded'
-              ? ('vitals_incomplete' as const)
-              : statusFilter === 'ready-for-consultation'
-                ? ('ready' as const)
-                : statusFilter === 'sent-to-room'
-                  ? ('sent_to_room' as const)
-                  : statusFilter === 'completed'
-                    ? ('completed' as const)
-                    : undefined;
-
-        const usePhysioClientFilter = statusFilter === 'sent-to-physiotherapy';
+        const poolQuery = buildNursingPoolQueryParams(metricsParams);
+        const useClientStageFilter = usesClientStageFilter(statusFilter);
+        const clientStageStatus = clientStageNursingStatus(statusFilter);
+        const pageToLoad = useClientStageFilter ? 1 : currentPageRef.current;
 
         const visitFetch = visitService.getVisits({
-          ...metricsParams,
-          nursing_status: usePhysioClientFilter ? undefined : nursingStatusApi,
-          page: usePhysioClientFilter ? 1 : currentPage,
-          page_size: usePhysioClientFilter ? MAX_LIST_PAGE_SIZE : itemsPerPage,
+          ...poolQuery,
+          nursing_status: useClientStageFilter ? undefined : poolQuery.nursing_status,
+          page: pageToLoad,
+          page_size: useClientStageFilter ? MAX_LIST_PAGE_SIZE : itemsPerPage,
         });
 
         const result = await visitFetch;
+        if (isStale()) return null;
 
         // Fire metrics and enrichment in parallel — none depend on each other,
         // only on the visit IDs from the main query.
@@ -272,11 +278,12 @@ export default function NursingPoolQueuePage() {
           (async () => {
             if (silent) return;
             try {
+              const { nursing_status: _omitNursingStatus, ...metricsQuery } = poolQuery;
               const metrics = await visitService.getNursingPoolMetrics({
-                ...metricsParams,
+                ...metricsQuery,
                 search: undefined,
               });
-              setPoolMetrics(metrics);
+              if (!isStale()) setPoolMetrics(metrics);
             } catch (me: unknown) {
               console.warn('Nursing pool metrics failed', me);
             }
@@ -388,6 +395,7 @@ export default function NursingPoolQueuePage() {
         ]);
 
         const { nursingVisits, queueVisitToRoom, queueVisitToSentAt, physioCheckedInByVisitId, eyeCheckedInByVisitId, vitalsMap } = enrichmentPromise;
+        if (isStale()) return null;
 
         debugLog('Starting transformation of', nursingVisits.length, 'visits to nursing patients');
         const transformedPatients: NursingPatient[] = nursingVisits.map((visit: Visit) => {
@@ -508,19 +516,21 @@ export default function NursingPoolQueuePage() {
           return va - vb;
         });
 
-        if (usePhysioClientFilter) {
-          const physioRows = sortedByStage.filter((p) => p.nursingStatus === 'Sent to Physiotherapy');
-          setPhysioClientBuffer(physioRows);
-          setTotalVisitCount(physioRows.length);
+        if (useClientStageFilter && clientStageStatus) {
+          const stageRows = sortedByStage.filter((p) => p.nursingStatus === clientStageStatus);
+          if (isStale()) return null;
+          setPhysioClientBuffer(stageRows);
+          setTotalVisitCount(stageRows.length);
           setPatients([]);
         } else {
+          if (isStale()) return null;
           setPhysioClientBuffer(null);
           setPatients(sortedByStage);
-          setTotalVisitCount(result.count ?? transformedPatients.length);
+          setTotalVisitCount(result.count ?? sortedByStage.length);
         }
 
-        return usePhysioClientFilter
-          ? sortedByStage.filter((p) => p.nursingStatus === 'Sent to Physiotherapy')
+        return useClientStageFilter && clientStageStatus
+          ? sortedByStage.filter((p) => p.nursingStatus === clientStageStatus)
           : sortedByStage;
       } catch (err) {
         console.error('Error loading nursing pool data:', err);
@@ -544,26 +554,22 @@ export default function NursingPoolQueuePage() {
     searchQuery,
     typeFilter,
     clinicFilter,
-    currentPage,
     itemsPerPage,
     serverToday,
+    opdClinicNames,
   ]);
 
-  // Load data when filters change
+  // Reset to page 1 before fetch when filters change (must run before load effect).
+  useEffect(() => {
+    currentPageRef.current = 1;
+    setCurrentPage(1);
+    loadGenerationRef.current += 1;
+  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
+
+  // Load data when filters or pagination change
   useEffect(() => {
     loadData();
-  }, [
-    dateFilter,
-    statusFilter,
-    dateRange.from,
-    dateRange.to,
-    searchQuery,
-    typeFilter,
-    clinicFilter,
-    currentPage,
-    itemsPerPage,
-    serverToday,
-  ]);
+  }, [loadData, currentPage]);
 
   // Dialog states
   const [isVitalsDialogOpen, setIsVitalsDialogOpen] = useState(false);
@@ -675,10 +681,6 @@ export default function NursingPoolQueuePage() {
     }
     return patients;
   }, [physioClientBuffer, patients, currentPage, itemsPerPage]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -1167,17 +1169,20 @@ export default function NursingPoolQueuePage() {
                     <SelectItem value="vitals-recorded">Vitals Recorded</SelectItem>
                     <SelectItem value="ready-for-consultation">Ready for Consultation</SelectItem>
                     <SelectItem value="sent-to-room">Sent to Room</SelectItem>
+                    <SelectItem value="in-consultation">In Consultation</SelectItem>
                     <SelectItem value="sent-to-physiotherapy">Checked in to Physiotherapy</SelectItem>
+                    <SelectItem value="sent-to-eye-clinic">Checked in to Eye Clinic</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="emergency">Emergency</SelectItem>
-                    <SelectItem value="consultation">Consultation</SelectItem>
-                    <SelectItem value="follow-up">Follow-up</SelectItem>
+                    {POOL_VISIT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
