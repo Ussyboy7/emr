@@ -231,6 +231,34 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
             )
         return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
 
+    # Consultation patient history — read completed lab results (values + PDF).
+    if api_path.startswith("laboratory/tests/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
+                allowed_pages,
+                ("/laboratory/completed", "/laboratory/verification", "/laboratory"),
+            )
+        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
+
+    if api_path.startswith("laboratory/verification/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
+                allowed_pages,
+                ("/laboratory/completed", "/laboratory/verification", "/laboratory"),
+            )
+        return user_has_any_page(allowed_pages, ("/laboratory/verification", "/laboratory"))
+
+    # Consultation patient history — read verified radiology reports / studies.
+    if api_path.startswith("radiology/verification/") or api_path.startswith("radiology/studies/"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
+                allowed_pages,
+                ("/radiology/completed", "/radiology/verification", "/radiology"),
+            )
+        if api_path.startswith("radiology/verification/"):
+            return user_has_any_page(allowed_pages, ("/radiology/verification", "/radiology"))
+        return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
+
     if api_path.startswith("radiology/templates/"):
         if method in ("GET", "HEAD", "OPTIONS"):
             return _consultation_clinical_access(allowed_pages) or user_has_any_page(

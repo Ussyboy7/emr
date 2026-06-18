@@ -12,6 +12,10 @@ How users sign in, how the frontend gates pages, and how the backend enforces th
 | Activity | `JWTAuthenticationWithActivity` updates `last_activity` for presence |
 | Stale access | If `pv` on token ≠ `User.permissions_version` → 401 `permissions_stale` → re-login |
 
+**Production JWT defaults** (`backend/env/prod.env`): access token **60 minutes**, refresh **24 hours**. Restart backend after changing env. Users still re-login when roles change (`permissions_stale`).
+
+**Consultation patient history:** doctors with consultation pages can read completed lab/radiology results via `patients/{id}/clinical-overview/` and `laboratory/verification/…` / `radiology/verification/…` GET (including report PDF download) without holding the full Laboratory/Radiology module roles.
+
 Frontend stores session markers in cookies (`lib/auth-cookie-names.ts`). `middleware.ts` redirects unauthenticated users to `/login`.
 
 ## Page permissions (frontend)

@@ -82,6 +82,60 @@ export function mapImagingOrdersFromOverview(orders: any[]): any[] {
   return imagingItems;
 }
 
+/** Map verified radiology report rows (clinical-overview) for history View dialogs. */
+export function mapRadiologyReportsToImagingItems(reports: any[]): any[] {
+  return (reports || []).map((report: any) => {
+    const study = report.study_details || {};
+    return {
+      ...report,
+      id: study.id ?? report.id,
+      order: report.order ?? study.order,
+      order_id: report.order_id,
+      patient: report.patient,
+      patient_name: report.patient_name,
+      patient_details: report.patient_details,
+      created_at: study.verified_at ?? study.reported_at ?? study.created_at ?? report.created_at,
+      location_clinic_name:
+        report.location_clinic_name ??
+        study.location_clinic_name ??
+        report.order_details?.location_clinic_name,
+      order_details: report.order_details,
+      study_details: study,
+    };
+  });
+}
+
+function mergeImagingHistoryItems(reports: any[], orders: any[]): any[] {
+  const byStudyId = new Map<string, any>();
+  for (const item of mapImagingOrdersFromOverview(orders)) {
+    const studyId = String(item.study_details?.id ?? item.id);
+    byStudyId.set(studyId, item);
+  }
+  for (const item of mapRadiologyReportsToImagingItems(reports)) {
+    const studyId = String(item.study_details?.id ?? item.id);
+    byStudyId.set(studyId, item);
+  }
+  const merged = Array.from(byStudyId.values());
+  merged.sort((a: any, b: any) => {
+    const aDate = new Date(
+      a?.study_details?.verified_at ||
+        a?.study_details?.reported_at ||
+        a?.study_details?.created_at ||
+        a?.created_at ||
+        0,
+    ).getTime();
+    const bDate = new Date(
+      b?.study_details?.verified_at ||
+        b?.study_details?.reported_at ||
+        b?.study_details?.created_at ||
+        b?.created_at ||
+        0,
+    ).getTime();
+    return bDate - aDate;
+  });
+  return merged;
+}
+
 export function mapClinicalOverviewToPatientHistory(
   overview: ClinicalOverviewPayload,
 ): PatientHistoryData {
@@ -108,7 +162,10 @@ export function mapClinicalOverviewToPatientHistory(
   return {
     consultations: consultationRows,
     labResults: overview.lab_results?.results || [],
-    imagingOrders: mapImagingOrdersFromOverview(overview.radiology_orders?.results || []),
+    imagingOrders: mergeImagingHistoryItems(
+      overview.radiology_reports?.results || [],
+      overview.radiology_orders?.results || [],
+    ),
     prescriptions: overview.prescriptions?.results || [],
     vitals: overview.vitals?.results || [],
     physioOrders: overview.physio_orders?.results || [],

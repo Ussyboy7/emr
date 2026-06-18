@@ -108,6 +108,21 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/consultation/referrals"}
         self.assertTrue(check_api_page_access("patients/42/clinical-overview/", "GET", allowed))
 
+    def test_lab_results_read_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("laboratory/tests/42/", "GET", allowed))
+        self.assertTrue(check_api_page_access("laboratory/verification/9/", "GET", allowed))
+        self.assertTrue(check_api_page_access("laboratory/verification/9/download_report/", "GET", allowed))
+
+    def test_radiology_reports_read_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("radiology/verification/3/", "GET", allowed))
+        self.assertTrue(check_api_page_access("radiology/studies/5/", "GET", allowed))
+
+    def test_lab_verification_write_denied_for_consultation_only(self):
+        allowed = {"/consultation/start"}
+        self.assertFalse(check_api_page_access("laboratory/verification/9/", "PATCH", allowed))
+
     def test_nursing_order_create_denied_without_nursing_or_consultation(self):
         allowed = {"/laboratory"}
         self.assertFalse(check_api_page_access("nursing/orders/", "POST", allowed))

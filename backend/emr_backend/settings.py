@@ -363,7 +363,9 @@ SIMPLE_JWT = {
         minutes=int(os.getenv("JWT_ACCESS_MINUTES", "60"))
     ),
     "REFRESH_TOKEN_LIFETIME": (
-        timedelta(minutes=int(os.getenv("JWT_REFRESH_MINUTES")))
+        timedelta(days=int(os.getenv("JWT_REFRESH_DAYS")))
+        if os.getenv("JWT_REFRESH_DAYS")
+        else timedelta(minutes=int(os.getenv("JWT_REFRESH_MINUTES")))
         if os.getenv("JWT_REFRESH_MINUTES")
         else timedelta(hours=int(os.getenv("JWT_REFRESH_HOURS", "8")))
     ),
