@@ -33,7 +33,7 @@ import {
   YAxis,
 } from 'recharts';
 
-import { BarChart3, Package, Pill, Users, RefreshCw } from 'lucide-react';
+import { BarChart3, Package, Pill, Users, RefreshCw, Warehouse } from 'lucide-react';
 
 const CHART_COLORS = {
   primary: "#3b82f6",
@@ -151,6 +151,23 @@ function pharmacyAnalyticsToCsv(
       lines.push(
         [row.halfyear, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
       )
+    );
+  }
+  if (d.hod_store) {
+    lines.push('');
+    lines.push(['HOD Store metric', 'Value'].map(esc).join(','));
+    lines.push(['issue_events', String(d.hod_store.issue_events)].map(esc).join(','));
+    lines.push(['total_quantity_all_units', String(d.hod_store.total_quantity_all_units)].map(esc).join(','));
+    lines.push([esc('note'), esc(d.hod_store.note)].join(','));
+    lines.push('');
+    lines.push(['Day', 'Issue events', 'Total qty'].map(esc).join(','));
+    (d.hod_store.by_day || []).forEach((row) =>
+      lines.push([row.date || '', String(row.issue_events), String(row.total_quantity)].map(esc).join(','))
+    );
+    lines.push('');
+    lines.push(['Medication', 'Total quantity', 'Issue events'].map(esc).join(','));
+    (d.hod_store.top_medications_by_quantity || []).forEach((m) =>
+      lines.push([m.name, String(m.total_quantity), String(m.issue_events)].map(esc).join(','))
     );
   }
   return lines.join('\n');
@@ -280,6 +297,24 @@ export default function PharmacyAnalyticsPage() {
     }));
   }, [data]);
 
+  const hodDayTrend = useMemo(() => {
+    if (!data?.hod_store?.by_day?.length) return [];
+    return data.hod_store.by_day.map((d) => ({
+      date: d.date?.slice(5) ?? '',
+      events: d.issue_events,
+      qty: Number(d.total_quantity),
+    }));
+  }, [data]);
+
+  const hodTopByQty = useMemo(() => {
+    if (!data?.hod_store?.top_medications_by_quantity?.length) return [];
+    return data.hod_store.top_medications_by_quantity.slice(0, 12).map((m) => ({
+      name: m.name.length > 18 ? `${m.name.slice(0, 18)}…` : m.name,
+      qty: Number(m.total_quantity),
+      events: m.issue_events,
+    }));
+  }, [data]);
+
   const periodBreakdown = useMemo(() => {
     if (!data) return [];
     let source: any[] = [];
@@ -322,7 +357,7 @@ export default function PharmacyAnalyticsPage() {
     <DashboardLayout>
       <AnalyticsReportLayout
         reportTitle="Pharmacy analytics"
-        reportDescription="Dispensing activity, top brands, new prescriptions, and patient mix."
+        reportDescription="Dispensing activity, HOD store issues, top brands, new prescriptions, and patient mix."
         ReportIcon={Pill}
         reportIconClassName="text-violet-600 dark:text-violet-400"
         loading={loading}
@@ -395,6 +430,86 @@ export default function PharmacyAnalyticsPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {data.hod_store && (
+              <>
+                <p className="text-xs text-muted-foreground">{data.hod_store.note}</p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Card className="border-l-4 border-l-violet-500">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">HOD Issue Events</p>
+                          <p className="text-2xl sm:text-3xl font-bold">{data.hod_store.issue_events}</p>
+                        </div>
+                        <Warehouse className="h-10 w-10 text-violet-500 opacity-50" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-l-4 border-l-fuchsia-500">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">HOD Total Quantity</p>
+                          <p className="text-2xl sm:text-3xl font-bold">
+                            {Math.round(data.hod_store.total_quantity_all_units)}
+                          </p>
+                        </div>
+                        <BarChart3 className="h-10 w-10 text-fuchsia-500 opacity-50" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid lg:grid-cols-2 gap-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">HOD issues by day</CardTitle>
+                      <CardDescription>Discretionary HOD store issues per day</CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-72">
+                      {hodDayTrend.length === 0 ? (
+                        <EmptyChart />
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={hodDayTrend}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                            <YAxis tick={{ fontSize: 11 }} />
+                            <Tooltip />
+                            <Legend />
+                            <Line type="monotone" dataKey="events" name="Issue events" stroke={CHART_COLORS.secondary} strokeWidth={2} dot={{ r: 3 }} />
+                            <Line type="monotone" dataKey="qty" name="Total qty" stroke={CHART_COLORS.warning} strokeWidth={2} dot={{ r: 3 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Top HOD issues by quantity</CardTitle>
+                      <CardDescription>Medications issued from HOD store (not Rx dispensing)</CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-72">
+                      {hodTopByQty.length === 0 ? (
+                        <EmptyChart />
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={hodTopByQty} layout="vertical" margin={{ left: 8 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis type="number" tick={{ fontSize: 11 }} />
+                            <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 9 }} />
+                            <Tooltip />
+                            <Bar dataKey="qty" name="Total quantity" fill={CHART_COLORS.secondary} radius={[0, 4, 4, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            )}
 
              <div className="grid lg:grid-cols-2 gap-6">
               <Card>

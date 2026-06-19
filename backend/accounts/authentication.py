@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 
+from organization.session_policy import user_idle_session_expired
 from .models import User
 from .presence import ACTIVITY_UPDATE_INTERVAL
 
@@ -24,6 +25,16 @@ def _validate_permissions_version(user, validated_token) -> None:
             {
                 "detail": "Your access permissions changed. Please sign in again.",
                 "code": "permissions_stale",
+            }
+        )
+
+
+def _validate_idle_session(user) -> None:
+    if user_idle_session_expired(user):
+        raise InvalidToken(
+            {
+                "detail": "Session expired due to inactivity.",
+                "code": "idle_timeout",
             }
         )
 
@@ -59,6 +70,7 @@ class JWTCookieAuthentication(JWTAuthentication):
     def get_user(self, validated_token):
         user = super().get_user(validated_token)
         _validate_permissions_version(user, validated_token)
+        _validate_idle_session(user)
         return user
 
 
@@ -74,6 +86,7 @@ class JWTAuthenticationWithActivity(JWTAuthentication):
             return user
 
         _validate_permissions_version(user, validated_token)
+        _validate_idle_session(user)
 
         now = timezone.now()
         threshold = now - ACTIVITY_UPDATE_INTERVAL

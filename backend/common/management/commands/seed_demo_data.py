@@ -365,6 +365,22 @@ class Command(BaseCommand):
             }
         )
         roles['Pharmacist'] = pharmacist_role
+
+        pharmacy_head_role, _ = Role.objects.get_or_create(
+            name='Pharmacy Head',
+            defaults={
+                'type': 'pharmacist',
+                'description': 'Head of Pharmacy — HOD store inventory and discretionary issuing',
+                'permissions': [
+                    '/pharmacy',
+                    '/pharmacy/hod-store',
+                    '/pharmacy/hod-store/requests',
+                    '/pharmacy/hod-store/history',
+                ],
+                'is_active': True,
+            }
+        )
+        roles['Pharmacy Head'] = pharmacy_head_role
         
         # Radiologist - Radiology operations
         radiologist_role, _ = Role.objects.get_or_create(
@@ -858,6 +874,20 @@ class Command(BaseCommand):
                     role=role,
                     defaults={'assigned_by': users.get('admin')}  # Admin assigns roles
                 )
+
+        # Pharmacy department head + HOD store role (primary head only, not deputy)
+        pharmacy_dept = departments.get('Pharmacy')
+        pharm_head = users.get('a.bashir')
+        pharmacy_head_role = roles.get('Pharmacy Head')
+        if pharmacy_dept and pharm_head:
+            pharmacy_dept.head = pharm_head
+            pharmacy_dept.save(update_fields=['head'])
+        if pharm_head and pharmacy_head_role:
+            UserRole.objects.get_or_create(
+                user=pharm_head,
+                role=pharmacy_head_role,
+                defaults={'assigned_by': users.get('admin')},
+            )
 
         self.stdout.write(f"  ✓ Created {len(users)} users with roles assigned")
         return users

@@ -81,6 +81,9 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/pharmacy/drugs", name: "Drug Master", description: "Manage drugs", module: "Pharmacy" },
   { id: "/pharmacy/store", name: "Central Store", description: "Central store", module: "Pharmacy" },
   { id: "/pharmacy/store/requests", name: "Store Requests", description: "Manage store requests", module: "Pharmacy" },
+  { id: "/pharmacy/hod-store", name: "HOD Store", description: "Pharmacy head store inventory and issue", module: "Pharmacy" },
+  { id: "/pharmacy/hod-store/requests", name: "HOD Store Requests", description: "HOD store stock requests", module: "Pharmacy" },
+  { id: "/pharmacy/hod-store/history", name: "HOD Dispense History", description: "HOD store issue history", module: "Pharmacy" },
   { id: "/pharmacy/analytics", name: "Pharmacy Analytics", description: "View pharmacy analytics", module: "Pharmacy" },
 
   // Radiology

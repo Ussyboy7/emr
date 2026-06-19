@@ -105,6 +105,7 @@ export interface Medication {
   category?: string;
   manufacturer?: string;
   pack_size?: number;
+  dispense_mode?: "pack_only" | "units_only" | "pack_or_units";
   prescription_required?: boolean;
   min_stock_level?: number;
   is_active: boolean;
@@ -206,6 +207,27 @@ export interface StockRequest {
   created_at: string;
   updated_at: string;
   items: StockRequestItem[];
+}
+
+export interface HodStockIssue {
+  id: number;
+  issue_id: string;
+  medication: number;
+  medication_name?: string;
+  medication_details?: Medication;
+  inventory_item?: number;
+  quantity: number | string;
+  unit: string;
+  quantity_entry_mode?: "pack" | "units" | "";
+  medication_pack_size?: number | null;
+  batch_number?: string;
+  patient_name?: string;
+  patient_mrn?: string;
+  reason?: string;
+  notes?: string;
+  issued_by?: number;
+  issued_by_name?: string;
+  issued_at: string;
 }
 
 export interface StockIssueLine {
@@ -335,7 +357,7 @@ class PharmacyService {
     batchOrInventoryId?: number,
     notes?: string,
     coverageQuantity?: number,
-    options?: { useReceiptLine?: boolean }
+    options?: { useReceiptLine?: boolean; quantityEntryMode?: "pack" | "units" }
   ): Promise<Dispense> {
     const body: Record<string, unknown> = {
       item_id: itemId,
@@ -343,6 +365,9 @@ class PharmacyService {
       coverage_quantity: coverageQuantity,
       notes: notes || '',
     };
+    if (options?.quantityEntryMode) {
+      body.quantity_entry_mode = options.quantityEntryMode;
+    }
     // Prescription dispensing uses Dispensary batches (DispensaryReceiptLine); send as receipt_line_id
     if (batchOrInventoryId != null) {
       if (options?.useReceiptLine !== false) {
@@ -544,6 +569,7 @@ class PharmacyService {
     category?: string;
     manufacturer?: string;
     pack_size?: number;
+    dispense_mode?: Medication["dispense_mode"];
     prescription_required?: boolean;
     min_stock_level?: number;
     is_active?: boolean;
@@ -560,6 +586,7 @@ class PharmacyService {
         category: data.category || '',
         manufacturer: data.manufacturer || '',
         pack_size: data.pack_size ?? null,
+        dispense_mode: data.dispense_mode || 'pack_or_units',
         prescription_required: !!data.prescription_required,
         min_stock_level: data.min_stock_level ?? 0,
         is_active: data.is_active ?? true,
@@ -987,6 +1014,92 @@ class PharmacyService {
     });
   }
 
+  async createHodFromStoreStockRequest(data: {
+    notes?: string;
+    items: Array<{ medication: number; quantity: number; notes?: string }>;
+  }): Promise<StockRequest> {
+    return apiFetch<StockRequest>('/v1/pharmacy/stock-requests/', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_location: PHARMACY_LOCATIONS.STORE,
+        to_location: PHARMACY_LOCATIONS.HOD_STORE,
+        notes: data.notes || '',
+        items: data.items.map((i) => ({
+          medication: i.medication,
+          quantity: i.quantity,
+          notes: i.notes || '',
+        })),
+      }),
+    });
+  }
+
+  async createHodToStoreStockRequest(data: {
+    notes?: string;
+    items: Array<{ medication: number; quantity: number; notes?: string }>;
+  }): Promise<StockRequest> {
+    return apiFetch<StockRequest>('/v1/pharmacy/stock-requests/', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_location: PHARMACY_LOCATIONS.HOD_STORE,
+        to_location: PHARMACY_LOCATIONS.STORE,
+        notes: data.notes || '',
+        items: data.items.map((i) => ({
+          medication: i.medication,
+          quantity: i.quantity,
+          notes: i.notes || '',
+        })),
+      }),
+    });
+  }
+
+  async getHodStockIssues(params?: {
+    search?: string;
+    date_preset?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: HodStockIssue[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: HodStockIssue[]; count: number }>(
+      `/v1/pharmacy/hod-stock-issues/${query}`
+    );
+  }
+
+  async getHodStockIssueSummaryStats(params?: {
+    search?: string;
+    date_preset?: string;
+  }): Promise<{ total: number; today: number; total_quantity: string }> {
+    const query = buildQueryString(params || {});
+    const path = query
+      ? `/v1/pharmacy/hod-stock-issues/summary-stats/?${query.slice(1)}`
+      : '/v1/pharmacy/hod-stock-issues/summary-stats/';
+    return apiFetch(path);
+  }
+
+  async createHodStockIssue(data: {
+    medication: number;
+    quantity: number;
+    quantity_entry_mode?: "pack" | "units";
+    inventory_item_id?: number;
+    patient_name?: string;
+    patient_mrn?: string;
+    reason?: string;
+    notes?: string;
+  }): Promise<HodStockIssue> {
+    return apiFetch<HodStockIssue>('/v1/pharmacy/hod-stock-issues/', {
+      method: 'POST',
+      body: JSON.stringify({
+        medication: data.medication,
+        quantity: data.quantity,
+        quantity_entry_mode: data.quantity_entry_mode || 'units',
+        inventory_item_id: data.inventory_item_id,
+        patient_name: data.patient_name || '',
+        patient_mrn: data.patient_mrn || '',
+        reason: data.reason || '',
+        notes: data.notes || '',
+      }),
+    });
+  }
+
   /**
    * Stock issues (receipt history from Central Store to Dispensary)
    */
@@ -1284,6 +1397,22 @@ export interface PharmacyAnalyticsSummary {
   prescribing: {
     new_prescriptions: number;
     by_status: Record<string, number>;
+  };
+  hod_store?: {
+    issue_events: number;
+    total_quantity_all_units: number;
+    note: string;
+    by_day: Array<{
+      date: string | null;
+      issue_events: number;
+      total_quantity: number;
+    }>;
+    top_medications_by_quantity: Array<{
+      medication_id: number;
+      name: string;
+      issue_events: number;
+      total_quantity: number;
+    }>;
   };
   patients_by_gender: Record<string, number>;
   patients_by_category: Record<string, number>;

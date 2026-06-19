@@ -5,6 +5,7 @@
 export const ACCESS_TOKEN_COOKIE = "emr_access_token";
 export const REFRESH_TOKEN_COOKIE = "emr_refresh_token";
 export const ACCESS_TOKEN_EXP_COOKIE = "emr_access_exp";
+export const REFRESH_TOKEN_EXP_COOKIE = "emr_refresh_exp";
 
 // Auth context cookies (used by middleware for authorization redirects).
 export const AUTH_ALLOWED_PAGES_COOKIE = "emr_allowed_pages";
@@ -31,4 +32,5 @@ export const LEGACY_AUTH_NEXT_REDIRECT_COOKIE = "npa_emr_next";
 export const LEGACY_ACCESS_TOKEN_COOKIE = "npa_ecm_access_token";
 export const LEGACY_REFRESH_TOKEN_COOKIE = "npa_ecm_refresh_token";
 export const LEGACY_ACCESS_TOKEN_EXP_COOKIE = "npa_ecm_access_exp";
+export const LEGACY_REFRESH_TOKEN_EXP_COOKIE = "npa_ecm_refresh_exp";
 

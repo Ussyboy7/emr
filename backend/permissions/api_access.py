@@ -175,6 +175,11 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
             )
         return user_has_any_page(allowed_pages, ("/admin/roles",))
 
+    if api_path.startswith("organization/security-settings"):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return True
+        return user_has_any_page(allowed_pages, ("/admin/settings", "/admin"))
+
     if api_path.startswith(ADMIN_API_PREFIXES):
         return user_has_any_page(allowed_pages, ("/admin/settings", "/admin/clinics", "/admin"))
 
@@ -267,6 +272,12 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
 
     # Consultation can create prescriptions and search generics for prescribing.
+    if api_path.startswith("pharmacy/hod-stock-issues/"):
+        hod_pages = ("/pharmacy/hod-store", "/pharmacy/hod-store/history")
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return user_has_any_page(allowed_pages, hod_pages)
+        return user_has_any_page(allowed_pages, ("/pharmacy/hod-store",))
+
     if api_path.startswith("pharmacy/prescriptions/") or api_path.startswith("pharmacy/generics/for_prescription/"):
         if method in ("GET", "HEAD", "OPTIONS", "POST"):
             return _consultation_clinical_access(allowed_pages) or user_has_any_page(

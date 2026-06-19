@@ -18,6 +18,13 @@ import {
   AlertTriangle, CheckCircle2, FileText, Lock, Key, Plus, Trash2
 } from "lucide-react";
 import { consultationService, type PresentingComplaint, type PresentingComplaintCategory } from "@/lib/services";
+import {
+  fetchOrgIdleTimeoutMinutes,
+  updateOrgIdleTimeoutMinutes,
+  DEFAULT_IDLE_TIMEOUT_MINUTES,
+  MIN_IDLE_TIMEOUT_MINUTES,
+  MAX_IDLE_TIMEOUT_MINUTES,
+} from "@/lib/auth-session-settings";
 
 export default function SystemSettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
@@ -146,6 +153,12 @@ export default function SystemSettingsPage() {
 
   useEffect(() => {
     loadPresentingComplaintLibrary();
+    void fetchOrgIdleTimeoutMinutes().then((minutes) => {
+      setSecuritySettings((prev) => ({
+        ...prev,
+        sessionTimeout: String(minutes),
+      }));
+    });
   }, []);
 
   const filteredLibraryCategories = useMemo(() => {
@@ -242,13 +255,25 @@ export default function SystemSettingsPage() {
 
   const handleSave = async () => {
     setIsSaving(true);
-    await new Promise(r => setTimeout(r, SAVE_SIMULATION_DELAY));
-    toast.success('Settings saved successfully');
-    setIsSaving(false);
+    try {
+      const idleMinutes = await updateOrgIdleTimeoutMinutes(Number(securitySettings.sessionTimeout));
+      setSecuritySettings((prev) => ({ ...prev, sessionTimeout: String(idleMinutes) }));
+      await new Promise((r) => setTimeout(r, SAVE_SIMULATION_DELAY));
+      toast.success("Settings saved successfully");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to save settings";
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleReset = () => {
-    toast.info('Settings reset to defaults');
+    setSecuritySettings((prev) => ({
+      ...prev,
+      sessionTimeout: String(DEFAULT_IDLE_TIMEOUT_MINUTES),
+    }));
+    toast.info("Security timeout reset to default in the form. Click Save Changes to apply org-wide.");
   };
 
   return (
@@ -524,7 +549,19 @@ export default function SystemSettingsPage() {
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="space-y-2"><Label>Session Timeout (minutes)</Label><Input type="number" value={securitySettings.sessionTimeout} onChange={(e) => setSecuritySettings(p => ({ ...p, sessionTimeout: e.target.value }))} /></div>
+                  <div className="space-y-2">
+                    <Label>Session Timeout (minutes)</Label>
+                    <Input
+                      type="number"
+                      min={MIN_IDLE_TIMEOUT_MINUTES}
+                      max={MAX_IDLE_TIMEOUT_MINUTES}
+                      value={securitySettings.sessionTimeout}
+                      onChange={(e) => setSecuritySettings(p => ({ ...p, sessionTimeout: e.target.value }))}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Org-wide idle logout after no mouse, keyboard, or API activity ({MIN_IDLE_TIMEOUT_MINUTES}–{MAX_IDLE_TIMEOUT_MINUTES} min). Default {DEFAULT_IDLE_TIMEOUT_MINUTES} min. Enforced on the server for all users. Click Save Changes to apply.
+                    </p>
+                  </div>
                   <div className="space-y-2"><Label>Max Login Attempts</Label><Input type="number" value={securitySettings.maxLoginAttempts} onChange={(e) => setSecuritySettings(p => ({ ...p, maxLoginAttempts: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Lockout Duration (minutes)</Label><Input type="number" value={securitySettings.lockoutDuration} onChange={(e) => setSecuritySettings(p => ({ ...p, lockoutDuration: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Password Expiry (days)</Label><Input type="number" value={securitySettings.passwordExpiry} onChange={(e) => setSecuritySettings(p => ({ ...p, passwordExpiry: e.target.value }))} /></div>

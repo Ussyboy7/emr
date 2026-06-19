@@ -5,6 +5,7 @@ import {
   getBaseUrl,
   getReadableApiError,
 } from './api-client';
+import { getJwtRefreshHours } from './auth-session-config';
 
 describe('getBaseUrl', () => {
   const original = process.env.NEXT_PUBLIC_API_URL;
@@ -66,7 +67,8 @@ describe('getReadableApiError', () => {
 });
 
 describe('AUTH_REFRESH_SESSION_MAX_AGE_SECONDS', () => {
-  it('matches eight-hour refresh window', () => {
+  it('defaults to eight-hour refresh window when env unset', () => {
+    expect(getJwtRefreshHours()).toBe(8);
     expect(AUTH_REFRESH_SESSION_MAX_AGE_SECONDS).toBe(60 * 60 * 8);
   });
 });

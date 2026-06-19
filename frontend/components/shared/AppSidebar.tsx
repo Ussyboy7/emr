@@ -70,6 +70,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
 import { canShowCentralStoreNav } from "@/lib/central-store-access";
+import { canShowHodStoreNav } from "@/lib/hod-store-access";
 import { useClinic } from "@/hooks/use-clinic";
 
 // Types for menu structure
@@ -176,6 +177,9 @@ export const menuSections: MenuSection[] = [
       { label: "Drug master", href: "/pharmacy/drugs", icon: Pill },
       { label: "Central store", href: "/pharmacy/store", icon: Package },
       { label: "Store Requests", href: "/pharmacy/store/requests", icon: Send },
+      { label: "HOD Store", href: "/pharmacy/hod-store", icon: Package },
+      { label: "HOD Requests", href: "/pharmacy/hod-store/requests", icon: Send },
+      { label: "HOD Dispense History", href: "/pharmacy/hod-store/history", icon: History },
       { label: "Inventory Analytics", href: "/pharmacy/analytics", icon: BarChart3 },
     ],
   },
@@ -358,9 +362,18 @@ export function AppSidebar() {
     }
 
     const storeHrefs = ["/pharmacy/store", "/pharmacy/store/requests"];
+    const hodStoreHrefs = [
+      "/pharmacy/hod-store",
+      "/pharmacy/hod-store/requests",
+      "/pharmacy/hod-store/history",
+    ];
     const showCentralStore = canShowCentralStoreNav(currentUser, userClinics);
+    const showHodStore = canShowHodStoreNav(currentUser);
     const baseItems = section.items.filter((item) => {
       if (storeHrefs.includes(item.href) && !showCentralStore) {
+        return false;
+      }
+      if (hodStoreHrefs.includes(item.href) && !showHodStore) {
         return false;
       }
       return true;

@@ -247,3 +247,12 @@ class ApiAccessTests(SimpleTestCase):
     def test_admissions_api_denied_without_ward_pages(self):
         allowed = {"/laboratory"}
         self.assertFalse(check_api_page_access("admissions/", "GET", allowed))
+
+    def test_security_settings_get_allowed_for_any_authenticated_pages(self):
+        allowed = {"/nursing"}
+        self.assertTrue(check_api_page_access("organization/security-settings/", "GET", allowed))
+
+    def test_security_settings_patch_requires_admin_settings(self):
+        allowed = {"/nursing"}
+        self.assertFalse(check_api_page_access("organization/security-settings/", "PATCH", allowed))
+        self.assertTrue(check_api_page_access("organization/security-settings/", "PATCH", {"/admin/settings"}))

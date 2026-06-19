@@ -12,6 +12,7 @@ import { ClinicProvider } from "@/contexts/ClinicContext";
 import { ServerDateProvider } from "@/components/providers/ServerDateProvider";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
+import { SessionGuard } from "@/components/shared/SessionGuard";
 
 function AuthzGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -67,7 +68,12 @@ function AuthzGate({ children }: { children: React.ReactNode }) {
   }, [currentUser, hydrated, homeRoute, isPublicRoute, pathname, router]);
 
   if (!canRender) return null;
-  return children;
+  return (
+    <>
+      <SessionGuard />
+      {children}
+    </>
+  );
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

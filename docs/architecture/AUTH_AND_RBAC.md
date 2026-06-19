@@ -12,7 +12,11 @@ How users sign in, how the frontend gates pages, and how the backend enforces th
 | Activity | `JWTAuthenticationWithActivity` updates `last_activity` for presence |
 | Stale access | If `pv` on token ≠ `User.permissions_version` → 401 `permissions_stale` → re-login |
 
-**Production JWT defaults** (`backend/env/prod.env`): access token **60 minutes**, refresh **24 hours**. Restart backend after changing env. Users still re-login when roles change (`permissions_stale`).
+**Production JWT defaults** (`backend/env/prod.env`): access token **60 minutes**, refresh **12 hours**. Restart backend after changing env. Users still re-login when roles change (`permissions_stale`).
+
+**Idle timeout (org-wide):** configurable in **Admin → System Settings → Security → Session Timeout** (stored in `SystemConfig`, default **30 minutes**). Enforced server-side on every API call and token refresh (`last_activity`). Frontend shows a warning 5 minutes before logout. Refresh lifetime is extended on each successful token refresh while the user remains active.
+
+API: `GET/PATCH /api/v1/organization/security-settings/` (read: any authenticated user; write: superuser or `notification_routing_manage`).
 
 **Consultation patient history:** doctors with consultation pages can read completed lab/radiology results via `patients/{id}/clinical-overview/` and `laboratory/verification/…` / `radiology/verification/…` GET (including report PDF download) without holding the full Laboratory/Radiology module roles.
 

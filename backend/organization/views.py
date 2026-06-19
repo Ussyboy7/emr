@@ -8,7 +8,8 @@ from drf_spectacular.utils import extend_schema
 from django.db.models import Count, Q
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import viewsets
+from rest_framework import viewsets, serializers
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -23,6 +24,13 @@ from .serializers import (
     WorkLocationSerializer,
     SystemConfigSerializer,
 )
+from .session_policy import (
+    get_idle_session_timeout_minutes,
+    set_idle_session_timeout_minutes,
+    MAX_IDLE_SESSION_TIMEOUT_MINUTES,
+    MIN_IDLE_SESSION_TIMEOUT_MINUTES,
+)
+from permissions.user_capabilities import user_has_capability
 from audit.services import AuditService
 from common.openapi import document_viewset
 
@@ -405,4 +413,57 @@ class SystemConfigViewSet(viewsets.ReadOnlyModelViewSet):
             return SystemConfig.objects.none()
         
         return SystemConfig.objects.all()
+
+
+class SecuritySettingsSerializer(serializers.Serializer):
+    idle_session_timeout_minutes = serializers.IntegerField(
+        min_value=MIN_IDLE_SESSION_TIMEOUT_MINUTES,
+        max_value=MAX_IDLE_SESSION_TIMEOUT_MINUTES,
+    )
+
+
+class SecuritySettingsView(APIView):
+    """Org-wide security session policy (readable by all authenticated users)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={200: SecuritySettingsSerializer},
+        tags=["Organization"],
+        summary="Get org security session settings",
+    )
+    def get(self, request):
+        return Response(
+            {
+                "idle_session_timeout_minutes": get_idle_session_timeout_minutes(),
+            }
+        )
+
+    @extend_schema(
+        request=SecuritySettingsSerializer,
+        responses={200: SecuritySettingsSerializer},
+        tags=["Organization"],
+        summary="Update org security session settings",
+    )
+    def patch(self, request):
+        user = request.user
+        if not (
+            getattr(user, "is_superuser", False)
+            or user_has_capability(user, "notification_routing_manage")
+        ):
+            return Response(
+                {"detail": "You do not have permission to update security settings."},
+                status=403,
+            )
+
+        serializer = SecuritySettingsSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        minutes = serializer.validated_data.get("idle_session_timeout_minutes")
+        if minutes is not None:
+            set_idle_session_timeout_minutes(minutes)
+        return Response(
+            {
+                "idle_session_timeout_minutes": get_idle_session_timeout_minutes(),
+            }
+        )
 

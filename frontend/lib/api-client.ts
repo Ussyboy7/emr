@@ -3,9 +3,15 @@
 import { logError, logWarn, logInfo } from '@/lib/client-logger';
 import { AuthenticationError, AuthenticationExpiredError } from './auth-errors';
 import {
+  AUTH_REFRESH_SESSION_MAX_AGE_SECONDS,
+  getRefreshLifetimeMs,
+} from './auth-session-config';
+import { notifySessionActivity } from './session-activity';
+import {
   ACCESS_TOKEN_COOKIE as ACCESS_TOKEN_KEY,
   REFRESH_TOKEN_COOKIE as REFRESH_TOKEN_KEY,
   ACCESS_TOKEN_EXP_COOKIE as ACCESS_TOKEN_EXP_KEY,
+  REFRESH_TOKEN_EXP_COOKIE as REFRESH_TOKEN_EXP_KEY,
   AUTH_ALLOWED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
   AUTH_IS_SUPERUSER_COOKIE,
@@ -18,6 +24,7 @@ import {
   LEGACY_ACCESS_TOKEN_COOKIE,
   LEGACY_REFRESH_TOKEN_COOKIE,
   LEGACY_ACCESS_TOKEN_EXP_COOKIE,
+  LEGACY_REFRESH_TOKEN_EXP_COOKIE,
   LEGACY_AUTH_SESSION_COOKIE,
 } from "@/lib/auth-cookie-names";
 const ORIGINAL_ACCESS_TOKEN_KEY = "emr_original_access";
@@ -28,8 +35,7 @@ const LEGACY_ORIGINAL_REFRESH_TOKEN_KEY = "npa_ecm_original_refresh";
 const LEGACY_ORIGINAL_ACCESS_EXP_KEY = "npa_ecm_original_access_exp";
 const AUTH_REMEMBER_SESSION_KEY = "emr_remember_session";
 
-/** Max-Age (seconds) for refresh + session cookies; align with backend default `JWT_REFRESH_HOURS=8`. */
-export const AUTH_REFRESH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
+export { AUTH_REFRESH_SESSION_MAX_AGE_SECONDS } from './auth-session-config';
 
 /**
  * API root used by fetch() (must hit Django, not the Next.js dev server).
@@ -49,6 +55,42 @@ export const getBaseUrl = (): string => {
 };
 
 const isBrowser = () => typeof window !== "undefined";
+
+let loginRedirectInFlight = false;
+
+const peekAuthFailureCode = async (response: Response): Promise<string | null> => {
+  try {
+    const peek = await response.clone().json();
+    if (typeof peek?.code === "string") return peek.code;
+    if (typeof peek?.detail === "object" && peek?.detail?.code) {
+      return String(peek.detail.code);
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+};
+
+/** Clear stale session and send the user to login (full navigation). */
+export const redirectToLogin = (reason?: string) => {
+  if (!isBrowser()) return;
+  const path = window.location.pathname;
+  if (path === "/login" || path === "/") return;
+  if (loginRedirectInFlight) return;
+  loginRedirectInFlight = true;
+
+  try {
+    sessionStorage.setItem("redirect_after_login", path);
+  } catch {
+    // ignore
+  }
+
+  clearTokens();
+
+  const params = new URLSearchParams({ next: path });
+  if (reason) params.set("reason", reason);
+  window.location.replace(`/login?${params.toString()}`);
+};
 const inFlightGetRequests = new Map<string, Promise<Response>>();
 
 const getCookieDomainSuffix = (): string => {
@@ -206,6 +248,29 @@ export const getStoredRefreshToken = () => {
   return getStorageValue(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
 };
 
+export const getStoredRefreshExpiresAt = (): number | null => {
+  if (!isBrowser()) return null;
+  migrateLegacyStorageKeysIfNeeded();
+  const raw = getStorageValue(REFRESH_TOKEN_EXP_KEY) ?? getCookie(REFRESH_TOKEN_EXP_KEY);
+  if (!raw) return null;
+  const expiresAt = Number(raw);
+  return Number.isFinite(expiresAt) ? expiresAt : null;
+};
+
+const storeRefreshExpiresAt = (
+  tokenStorage: Storage | null,
+  persist: boolean,
+  issuedAtMs: number = Date.now()
+) => {
+  const refreshExpiresAt = issuedAtMs + getRefreshLifetimeMs();
+  tokenStorage?.setItem(REFRESH_TOKEN_EXP_KEY, `${refreshExpiresAt}`);
+  setCookie(
+    REFRESH_TOKEN_EXP_KEY,
+    `${refreshExpiresAt}`,
+    persist ? AUTH_REFRESH_SESSION_MAX_AGE_SECONDS : undefined
+  );
+};
+
 export const storeTokens = (
   accessToken: string,
   refreshToken: string,
@@ -219,11 +284,13 @@ export const storeTokens = (
   removeStorageValueEverywhere(ACCESS_TOKEN_KEY);
   removeStorageValueEverywhere(REFRESH_TOKEN_KEY);
   removeStorageValueEverywhere(ACCESS_TOKEN_EXP_KEY);
+  removeStorageValueEverywhere(REFRESH_TOKEN_EXP_KEY);
   tokenStorage?.setItem(ACCESS_TOKEN_KEY, accessToken);
   tokenStorage?.setItem(REFRESH_TOKEN_KEY, refreshToken);
   const effectiveExpires = typeof expiresInSeconds === "number" ? expiresInSeconds : 60 * 60;
   const expiresAt = Date.now() + effectiveExpires * 1000 - 30 * 1000; // refresh a little early
   tokenStorage?.setItem(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`);
+  storeRefreshExpiresAt(tokenStorage, persist);
   setAuthPersistenceMode(persist);
 
   // Mirror tokens into cookies so middleware can enforce auth on first request.
@@ -249,6 +316,7 @@ export const clearTokens = () => {
   removeStorageValueEverywhere(ACCESS_TOKEN_KEY);
   removeStorageValueEverywhere(REFRESH_TOKEN_KEY);
   removeStorageValueEverywhere(ACCESS_TOKEN_EXP_KEY);
+  removeStorageValueEverywhere(REFRESH_TOKEN_EXP_KEY);
   localStorage.removeItem('demo_user'); // Clear demo user on logout
   localStorage.removeItem(AUTH_REMEMBER_SESSION_KEY);
   clearOriginalTokens();
@@ -256,6 +324,7 @@ export const clearTokens = () => {
   clearCookie(ACCESS_TOKEN_KEY);
   clearCookie(REFRESH_TOKEN_KEY);
   clearCookie(ACCESS_TOKEN_EXP_KEY);
+  clearCookie(REFRESH_TOKEN_EXP_KEY);
   clearCookie(AUTH_SESSION_COOKIE);
   clearCookie(AUTH_ALLOWED_PAGES_COOKIE);
   clearCookie(AUTH_IS_SUPERUSER_COOKIE);
@@ -274,6 +343,7 @@ export const clearTokens = () => {
   clearCookie(LEGACY_ACCESS_TOKEN_COOKIE);
   clearCookie(LEGACY_REFRESH_TOKEN_COOKIE);
   clearCookie(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
+  clearCookie(LEGACY_REFRESH_TOKEN_EXP_COOKIE);
 };
 
 const storeOriginalTokenValues = (accessToken: string, refreshToken: string, expiresInSeconds?: number) => {
@@ -340,6 +410,10 @@ const refreshWithToken = async (refreshToken: string): Promise<LoginResponse | n
     });
 
     if (!response.ok) {
+      const code = await peekAuthFailureCode(response);
+      if (code === "idle_timeout") {
+        redirectToLogin("idle_timeout");
+      }
       return null;
     }
 
@@ -383,6 +457,7 @@ const refreshAccessToken = async (): Promise<string | null> => {
       storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in, {
         persist: shouldPersistAuthSession(),
       });
+      notifySessionActivity();
       return data.access;
     } catch (error: unknown) {
       // Only log non-network errors (network errors are already handled in refreshWithToken)
@@ -427,6 +502,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
   if (!skipAuth) {
     const token = await ensureAccessToken();
     if (!token) {
+      redirectToLogin("session_expired");
       throw new AuthenticationError("Authentication required");
     }
     requestHeaders.set("Authorization", `Bearer ${token}`);
@@ -511,20 +587,17 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       lastError = null;
 
       if (response.status === 401 && !skipAuth) {
-        let permissionsStale = false;
-        try {
-          const peek = await response.clone().json();
-          permissionsStale =
-            peek?.code === "permissions_stale" ||
-            (typeof peek?.detail === "object" && peek?.detail?.code === "permissions_stale");
-        } catch {
-          // ignore parse errors
+        const failureCode = await peekAuthFailureCode(response);
+        if (failureCode === "idle_timeout") {
+          await logout();
+          redirectToLogin("idle_timeout");
+          throw new Error("Session expired due to inactivity.");
         }
+        const permissionsStale =
+          failureCode === "permissions_stale";
         if (permissionsStale) {
           await logout();
-          if (typeof window !== "undefined") {
-            window.location.replace("/login?reason=permissions_stale");
-          }
+          redirectToLogin("permissions_stale");
           throw new Error("Your access permissions changed. Please sign in again.");
         }
 
@@ -540,6 +613,10 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
             credentials: "include",
           });
           if (!retryResponse.ok) {
+            if (retryResponse.status === 401) {
+              redirectToLogin("session_expired");
+              throw new AuthenticationError("Authentication required");
+            }
             throw new Error(`API request failed: ${retryResponse.status}`);
           }
           if (retryResponse.status === 204) {
@@ -551,8 +628,12 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           if (responseType === "text") {
             return (await retryResponse.text()) as T;
           }
+          notifySessionActivity();
           return await retryResponse.json() as T;
         }
+
+        redirectToLogin("session_expired");
+        throw new AuthenticationError("Authentication required");
       }
 
       if (!response.ok) {
@@ -709,15 +790,19 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       }
 
       if (response.status === 204) {
+        if (!skipAuth) notifySessionActivity();
         return undefined as T;
       }
 
       if (responseType === "blob") {
+        if (!skipAuth) notifySessionActivity();
         return (await response.blob()) as T;
       }
       if (responseType === "text") {
+        if (!skipAuth) notifySessionActivity();
         return (await response.text()) as T;
       }
+      if (!skipAuth) notifySessionActivity();
       return await response.json() as T;
 
     } catch (error: unknown) {
@@ -800,6 +885,7 @@ export const login = async (
     storeTokens(data.access, data.refresh, data.expires_in, {
       persist: options?.persist ?? false,
     });
+    notifySessionActivity();
     return data;
   } catch (error: unknown) {
     // Handle network errors (Failed to fetch, CORS, etc.)

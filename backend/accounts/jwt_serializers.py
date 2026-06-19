@@ -4,8 +4,11 @@ the account username or the email (case-insensitive for email).
 """
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
+from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import AccessToken
+
+from organization.session_policy import user_idle_session_expired
 
 User = get_user_model()
 
@@ -57,6 +60,13 @@ class EmailOrUsernameTokenRefreshSerializer(TokenRefreshSerializer):
         user = User.objects.filter(pk=refresh["user_id"]).first()
         if user is None:
             return data
+        if user_idle_session_expired(user):
+            raise InvalidToken(
+                {
+                    "detail": "Session expired due to inactivity.",
+                    "code": "idle_timeout",
+                }
+            )
         access = AccessToken.for_user(user)
         access["pv"] = getattr(user, "permissions_version", 1)
         data["access"] = str(access)

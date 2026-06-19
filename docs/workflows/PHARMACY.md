@@ -84,3 +84,72 @@ python manage.py merge_duplicate_generics --commit     # apply
 # Docker:
 docker exec emr-backend-local python manage.py merge_duplicate_generics --commit
 ```
+
+---
+
+## 5. HOD Store (Head of Pharmacy)
+
+The **HOD Store** is a separate inventory pool at **Bode Thomas Clinic** (`location = "HOD Store"`). It uses the same drug master as Central Store and Dispensary, but stock quantities are tracked independently.
+
+### Who can access
+
+| Role | Access |
+|------|--------|
+| **Primary Head of Pharmacy** at Bode Thomas | Full HOD Store UI (inventory, issue, requests, history) |
+| **Deputy Head of Pharmacy** | No HOD Store access |
+| **Super admin** | Full access (support) |
+| **Central Store operators** | Store Requests → HOD Store tab only (issue to HOD / request from HOD) |
+
+Sidebar visibility uses `is_pharmacy_hod` on the user profile, or the **Pharmacy Head** role pages (`/pharmacy/hod-store`, `/pharmacy/hod-store/requests`, `/pharmacy/hod-store/history`).
+
+### Inventory pools (Bode Thomas)
+
+| Pool | Location | Used for |
+|------|----------|----------|
+| Central Store | `Store` | Warehouse; issues to Dispensary, Ward Care, and HOD Store |
+| Dispensary | `Dispensary` | Prescription dispensing queue |
+| HOD Store | `HOD Store` | Discretionary issues by Pharmacy Head (not Rx queue) |
+
+### HOD → Central Store and Central → HOD transfers
+
+Stock moves between Central Store and HOD Store use the standard **StockRequest** workflow (`fulfill` / confirm receipt).
+
+**Central Store → HOD Store** (restock HOD)
+
+1. **HOD:** HOD Requests → **Orders to HOD store** → **Order from Central Store**
+2. **Central:** Store Requests → HOD Store → **To HOD store** → approve → **Issue to HOD Store**
+3. **HOD:** HOD Requests → open request → **Confirm receipt** when stock arrives
+
+**HOD Store → Central Store** (return stock to warehouse)
+
+1. **Central:** Store Requests → HOD Store → **From HOD store** → **Request from HOD Store**
+2. **Central:** approve → **Issue from HOD Store** (deducts HOD inventory, adds to Store)
+3. Confirm receipt per local policy if the request status requires it
+
+### Discretionary HOD issuing (no prescription)
+
+HOD issues are **not** prescription dispenses. They are recorded as **HodStockIssue** (separate from `Dispense`).
+
+1. **HOD:** HOD Store → **Issue** tab
+2. Search medication, enter quantity (optional patient name/MRN, reason, notes)
+3. Stock is deducted from `HOD Store` using FIFO (or a selected batch)
+4. History appears under **HOD Dispense History**
+
+### Analytics
+
+Pharmacy Analytics includes an **HOD Store** section: issue events, total quantity, daily trend, and top medications. HOD metrics are separate from prescription dispensing counts.
+
+### Related paths
+
+| Task | UI path |
+|------|---------|
+| HOD inventory | `/pharmacy/hod-store` (Inventory tab) |
+| HOD issue (no Rx) | `/pharmacy/hod-store` (Issue tab) |
+| Order from Central | `/pharmacy/hod-store/requests` → Orders to HOD store |
+| Confirm HOD receipt | `/pharmacy/hod-store/requests` → request details |
+| HOD issue audit trail | `/pharmacy/hod-store/history` |
+| Central issue to HOD | `/pharmacy/store/requests` → HOD Store → To HOD store |
+| Central request from HOD | `/pharmacy/store/requests` → HOD Store → From HOD store |
+
+User-facing summary: [ROLE_PHARMACY.md](../user/ROLE_PHARMACY.md).
+

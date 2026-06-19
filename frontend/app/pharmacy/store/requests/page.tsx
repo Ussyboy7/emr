@@ -10,12 +10,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { pharmacyService, type StockRequest, type StockRequestItem } from "@/lib/services";
+import { pharmacyService, type StockRequest, type StockRequestItem, type Medication } from "@/lib/services";
+import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
 import { formatDisplayDate, localMonthBounds, localWeekToTodayBounds, todayApiDateString } from "@/lib/dates";
 import { Send, CheckCircle2, Clock, Loader2, Eye, Zap, Search, Plus, Minus, HelpCircle, Building2 } from "lucide-react";
+
+const MAX_QUANTITY = 100000;
 
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -40,11 +44,29 @@ export default function StoreRequestsPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSavingQuantities, setIsSavingQuantities] = useState(false);
 
-  const [requestTab, setRequestTab] = useState<"dispensary" | "ward">("dispensary");
+  const [requestTab, setRequestTab] = useState<"dispensary" | "ward" | "hod">("dispensary");
+  const [hodDirection, setHodDirection] = useState<"to_hod" | "from_hod">("to_hod");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [statsData, setStatsData] = useState({ total: 0, pending: 0, approved: 0, awaiting: 0 });
+
+  const [showHodRequestModal, setShowHodRequestModal] = useState(false);
+  const [hodRequestItems, setHodRequestItems] = useState<
+    Array<{
+      medication: number;
+      quantity: number;
+      medication_name: string;
+      medication_pack_size?: number | null;
+    }>
+  >([]);
+  const [hodRequestNotes, setHodRequestNotes] = useState("");
+  const [creatingHodRequest, setCreatingHodRequest] = useState(false);
+  const [hodMedSearch, setHodMedSearch] = useState("");
+  const debouncedHodMedSearch = useDebouncedValue(hodMedSearch, 300);
+  const [hodSelectedMed, setHodSelectedMed] = useState<Medication | null>(null);
+  const [hodRequestQty, setHodRequestQty] = useState("1");
+  const [hodMedResults, setHodMedResults] = useState<Medication[]>([]);
 
   const buildDateParams = () => {
     const p: Record<string, string> = {};
@@ -69,7 +91,17 @@ export default function StoreRequestsPage() {
       const baseParams: Record<string, string> = { show_all: 'true' };
       if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
       Object.assign(baseParams, buildDateParams());
-      baseParams.to_location = requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE;
+      baseParams.to_location =
+        requestTab === "dispensary"
+          ? PHARMACY_LOCATIONS.DISPENSARY
+          : requestTab === "ward"
+            ? PHARMACY_LOCATIONS.WARD_CARE
+            : hodDirection === "to_hod"
+              ? PHARMACY_LOCATIONS.HOD_STORE
+              : PHARMACY_LOCATIONS.STORE;
+      if (requestTab === "hod" && hodDirection === "from_hod") {
+        baseParams.from_location = PHARMACY_LOCATIONS.HOD_STORE;
+      }
       const stats = await pharmacyService.getStockRequestListStats(baseParams);
       setStatsData({
         total: stats.total,
@@ -88,9 +120,18 @@ export default function StoreRequestsPage() {
       const params: Record<string, string | number> = {
         page: currentPage,
         page_size: itemsPerPage,
-        to_location: requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE,
         show_all: 'true',
       };
+      if (requestTab === "dispensary") {
+        params.to_location = PHARMACY_LOCATIONS.DISPENSARY;
+      } else if (requestTab === "ward") {
+        params.to_location = PHARMACY_LOCATIONS.WARD_CARE;
+      } else if (hodDirection === "to_hod") {
+        params.to_location = PHARMACY_LOCATIONS.HOD_STORE;
+      } else {
+        params.from_location = PHARMACY_LOCATIONS.HOD_STORE;
+        params.to_location = PHARMACY_LOCATIONS.STORE;
+      }
       if (statusFilter && statusFilter !== "all") params.status = statusFilter;
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       Object.assign(params, buildDateParams());
@@ -107,11 +148,102 @@ export default function StoreRequestsPage() {
 
   useEffect(() => {
     loadRequests();
-  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, requestTab]);
+  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, requestTab, hodDirection]);
 
   useEffect(() => {
     loadStats();
-  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, hodDirection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const term = debouncedHodMedSearch.trim();
+      if (!term) {
+        setHodMedResults([]);
+        return;
+      }
+      try {
+        const res = await pharmacyService.getMedications({
+          search: term,
+          page: 1,
+          page_size: MAX_LIST_PAGE_SIZE,
+        });
+        if (!cancelled) setHodMedResults((res.results || []).slice(0, 20));
+      } catch {
+        if (!cancelled) setHodMedResults([]);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedHodMedSearch]);
+
+  const handleAddHodRequestItem = () => {
+    if (!hodSelectedMed) {
+      toast.error("Select a medication");
+      return;
+    }
+    const packSize = hodSelectedMed.pack_size ?? 1;
+    const inputVal = parseInt(hodRequestQty, 10);
+    if (!Number.isFinite(inputVal) || inputVal < 1) {
+      toast.error("Enter a valid quantity (min 1)");
+      return;
+    }
+    const qty = packSize > 1 ? inputVal * packSize : inputVal;
+    if (qty > MAX_QUANTITY) {
+      toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
+      return;
+    }
+    if (hodRequestItems.find((i) => i.medication === hodSelectedMed.id)) {
+      toast.error("Medication already added");
+      return;
+    }
+    setHodRequestItems([
+      ...hodRequestItems,
+      {
+        medication: hodSelectedMed.id,
+        quantity: qty,
+        medication_name: hodSelectedMed.name,
+        medication_pack_size: hodSelectedMed.pack_size ?? null,
+      },
+    ]);
+    setHodSelectedMed(null);
+    setHodMedSearch("");
+    setHodRequestQty("1");
+  };
+
+  const resetHodRequestModal = () => {
+    setHodRequestItems([]);
+    setHodRequestNotes("");
+    setHodMedSearch("");
+    setHodSelectedMed(null);
+    setHodRequestQty("1");
+    setHodMedResults([]);
+  };
+
+  const handleCreateHodToStoreRequest = async () => {
+    if (hodRequestItems.length === 0) {
+      toast.error("Add at least one medication");
+      return;
+    }
+    try {
+      setCreatingHodRequest(true);
+      await pharmacyService.createHodToStoreStockRequest({
+        items: hodRequestItems,
+        notes: hodRequestNotes,
+      });
+      toast.success("Request submitted — issue from HOD store when approved");
+      setShowHodRequestModal(false);
+      resetHodRequestModal();
+      await loadRequests();
+      await loadStats();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to create request");
+    } finally {
+      setCreatingHodRequest(false);
+    }
+  };
 
   const handleOpenDetails = (req: StockRequest) => {
     setSelectedRequest(req);
@@ -196,7 +328,15 @@ export default function StoreRequestsPage() {
     try {
       setIsProcessing(true);
       await pharmacyService.fulfillStockRequest(requestId);
-      toast.success(requestTab === "dispensary" ? "Request issued — awaiting dispensary confirmation" : "Request issued — awaiting ward nurse confirmation");
+      toast.success(
+        requestTab === "dispensary"
+          ? "Request issued — awaiting dispensary confirmation"
+          : requestTab === "ward"
+            ? "Request issued — awaiting ward nurse confirmation"
+            : hodDirection === "to_hod"
+              ? "Request issued — awaiting HOD confirmation"
+              : "Request issued — stock moved to Central Store"
+      );
       setShowDetailsModal(false);
       setSelectedRequest(null);
       await loadRequests();
@@ -240,7 +380,7 @@ export default function StoreRequestsPage() {
       pending: { label: "Pending Review", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200", tip: "Awaiting store approval" },
       approved: { label: "Approved", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200", tip: "Ready to issue" },
       partially_fulfilled: { label: "Partially Issued", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200", tip: "Some items issued" },
-      fulfilled: { label: "Issued (Awaiting Confirm)", cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200", tip: requestTab === "dispensary" ? "Stock issued; dispensary must confirm receipt" : "Stock issued; ward nurse must confirm receipt" },
+      fulfilled: { label: "Issued (Awaiting Confirm)", cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200", tip: requestTab === "dispensary" ? "Stock issued; dispensary must confirm receipt" : requestTab === "ward" ? "Stock issued; ward nurse must confirm receipt" : hodDirection === "to_hod" ? "Stock issued; HOD must confirm receipt" : "Stock issued from HOD store" },
       received: { label: "Confirmed", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" },
     };
     const cfg = map[status] || { label: status, cls: "" };
@@ -271,9 +411,19 @@ export default function StoreRequestsPage() {
             <p className="text-muted-foreground mt-1">
               {requestTab === "dispensary"
                 ? "Central Store — Bode Thomas Clinic — Review, approve, and issue stock to Dispensary"
-                : "Central Store — Bode Thomas Clinic — Review, approve, and issue stock to Ward Care"}
+                : requestTab === "ward"
+                  ? "Central Store — Bode Thomas Clinic — Review, approve, and issue stock to Ward Care"
+                  : hodDirection === "to_hod"
+                    ? "Central Store — Issue stock to Pharmacy HOD store"
+                    : "Central Store — Request and receive stock from Pharmacy HOD store"}
             </p>
           </div>
+          {requestTab === "hod" && hodDirection === "from_hod" && (
+            <Button onClick={() => setShowHodRequestModal(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Request from HOD Store
+            </Button>
+          )}
         </div>
 
         {/* Tab switcher */}
@@ -300,7 +450,41 @@ export default function StoreRequestsPage() {
             <Building2 className="h-4 w-4" />
             Ward Care
           </button>
+          <button
+            onClick={() => { setRequestTab("hod"); setCurrentPage(1); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              requestTab === "hod"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Send className="h-4 w-4" />
+            HOD Store
+          </button>
         </div>
+
+        {requestTab === "hod" && (
+          <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
+            <button
+              type="button"
+              onClick={() => { setHodDirection("to_hod"); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-md text-sm ${
+                hodDirection === "to_hod" ? "bg-background shadow-sm" : "text-muted-foreground"
+              }`}
+            >
+              To HOD store
+            </button>
+            <button
+              type="button"
+              onClick={() => { setHodDirection("from_hod"); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-md text-sm ${
+                hodDirection === "from_hod" ? "bg-background shadow-sm" : "text-muted-foreground"
+              }`}
+            >
+              From HOD store
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {stats.map((stat, i) => (
@@ -554,7 +738,15 @@ export default function StoreRequestsPage() {
                       )}
                       {selectedRequest.status === "approved" && (
                         <Button onClick={() => handleFulfillRequest(selectedRequest.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700">
-                          {isProcessing ? "Issuing..." : requestTab === "dispensary" ? "Issue to Dispensary" : "Issue to Ward Care"}
+                          {isProcessing
+                            ? "Issuing..."
+                            : requestTab === "dispensary"
+                              ? "Issue to Dispensary"
+                              : requestTab === "ward"
+                                ? "Issue to Ward Care"
+                                : hodDirection === "to_hod"
+                                  ? "Issue to HOD Store"
+                                  : "Issue from HOD Store"}
                         </Button>
                       )}
                     </>
@@ -562,6 +754,134 @@ export default function StoreRequestsPage() {
                 </DialogFooter>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={showHodRequestModal}
+          onOpenChange={(open) => {
+            setShowHodRequestModal(open);
+            if (!open) resetHodRequestModal();
+          }}
+        >
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Request from HOD Store</DialogTitle>
+              <DialogDescription>
+                Request medications from the Pharmacy HOD store back to Central Store
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Search medication</Label>
+                <Input
+                  className="mt-1"
+                  value={hodMedSearch}
+                  onChange={(e) => {
+                    setHodMedSearch(e.target.value);
+                    setHodSelectedMed(null);
+                  }}
+                  placeholder="Drug name or code"
+                />
+                {hodMedResults.length > 0 && !hodSelectedMed && (
+                  <div className="mt-1 border rounded-md max-h-36 overflow-y-auto">
+                    {hodMedResults.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted"
+                        onClick={() => {
+                          setHodSelectedMed(m);
+                          setHodMedSearch(m.name);
+                          setHodMedResults([]);
+                        }}
+                      >
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {hodSelectedMed && (
+                <div>
+                  <Label className="text-xs">
+                    {(hodSelectedMed.pack_size ?? 1) > 1
+                      ? `Packs (×${hodSelectedMed.pack_size} units each, max ${Math.floor(MAX_QUANTITY / (hodSelectedMed.pack_size ?? 1)).toLocaleString()} packs)`
+                      : `Quantity (1–${MAX_QUANTITY.toLocaleString()} units)`}
+                  </Label>
+                  <Input
+                    className="mt-1"
+                    type="number"
+                    min={1}
+                    max={
+                      (hodSelectedMed.pack_size ?? 1) > 1
+                        ? Math.floor(MAX_QUANTITY / (hodSelectedMed.pack_size ?? 1))
+                        : MAX_QUANTITY
+                    }
+                    value={hodRequestQty}
+                    onChange={(e) => setHodRequestQty(e.target.value)}
+                    placeholder={(hodSelectedMed.pack_size ?? 1) > 1 ? "10" : "100"}
+                  />
+                  {(hodSelectedMed.pack_size ?? 1) > 1 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {`${Math.max(0, Number.parseInt(hodRequestQty || "0", 10) || 0).toLocaleString()} packs = ${(Math.max(0, Number.parseInt(hodRequestQty || "0", 10) || 0) * (hodSelectedMed.pack_size ?? 1)).toLocaleString()} units`}
+                    </p>
+                  )}
+                </div>
+              )}
+              {hodSelectedMed && (
+                <Button type="button" variant="secondary" onClick={handleAddHodRequestItem}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add to Request
+                </Button>
+              )}
+              {hodRequestItems.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Items added ({hodRequestItems.length})</p>
+                  {hodRequestItems.map((item, idx) => (
+                    <div
+                      key={`${item.medication}-${idx}`}
+                      className="flex items-center justify-between p-2 bg-muted/50 rounded border"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{item.medication_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatPackDisplay(item.quantity, item.medication_pack_size)}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => setHodRequestItems(hodRequestItems.filter((_, i) => i !== idx))}
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div>
+                <Label>Notes</Label>
+                <Textarea
+                  className="mt-1"
+                  value={hodRequestNotes}
+                  onChange={(e) => setHodRequestNotes(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowHodRequestModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateHodToStoreRequest}
+                disabled={creatingHodRequest || hodRequestItems.length === 0}
+              >
+                {creatingHodRequest ? "Submitting..." : "Submit request"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

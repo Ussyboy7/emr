@@ -39,6 +39,7 @@ import { login, clearTokens, apiFetch, AUTH_REFRESH_SESSION_MAX_AGE_SECONDS } fr
 import { getStoredRedirectPath } from "@/hooks/use-auth-redirect";
 import { getHomeRouteForUser, getHomeRouteFromAllowedPages, isPathAllowedByPages } from "@/lib/home-route";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { getLoginRedirectToastMessage } from "@/lib/auth-session-settings";
 import {
   AUTH_ALLOWED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
@@ -97,6 +98,12 @@ export default function LoginPage() {
       setIsRedirecting(false);
       setIsSubmitting(false);
     }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const reason = searchParams.get("reason");
+    const message = getLoginRedirectToastMessage(reason);
+    if (message) toast.info(message);
   }, [searchParams]);
 
   useEffect(() => {

@@ -16,7 +16,7 @@ from common.module_analytics import (
 )
 from common.openapi import document_api_view
 from patients.models import Patient
-from pharmacy.models import Dispense, Prescription
+from pharmacy.models import Dispense, Prescription, HodStockIssue
 
 
 def _dec_to_float(d) -> float:
@@ -218,6 +218,34 @@ class PharmacyAnalyticsSummaryView(APIView):
             for r in rx_written.values("status").annotate(c=Count("id")).order_by("-c")
         }
 
+        hod_qs = HodStockIssue.objects.filter(
+            issued_at__gte=start_dt, issued_at__lte=end_dt
+        ).select_related("medication")
+        hod_issue_events = hod_qs.count()
+        hod_agg = hod_qs.aggregate(total_qty=Sum("quantity"))
+        hod_total_quantity = _dec_to_float(hod_agg["total_qty"])
+        hod_top_medications = list(
+            hod_qs.values("medication_id", "medication__name")
+            .annotate(
+                issue_events=Count("id"),
+                total_quantity=Sum("quantity"),
+            )
+            .order_by("-total_quantity")[:15]
+        )
+        hod_by_day = [
+            {
+                "date": row["day"].isoformat() if row["day"] else None,
+                "issue_events": row["events"],
+                "total_quantity": _dec_to_float(row["quantity"]),
+            }
+            for row in (
+                hod_qs.annotate(day=TruncDate("issued_at"))
+                .values("day")
+                .annotate(events=Count("id"), quantity=Sum("quantity"))
+                .order_by("day")
+            )
+        ]
+
         report = {
                 "period": {
                     "start": start_dt.date().isoformat(),
@@ -233,6 +261,21 @@ class PharmacyAnalyticsSummaryView(APIView):
                 "prescribing": {
                     "new_prescriptions": new_prescriptions,
                     "by_status": rx_by_status,
+                },
+                "hod_store": {
+                    "issue_events": hod_issue_events,
+                    "total_quantity_all_units": hod_total_quantity,
+                    "note": "HOD store discretionary issues (not prescription dispensing).",
+                    "by_day": hod_by_day,
+                    "top_medications_by_quantity": [
+                        {
+                            "medication_id": r["medication_id"],
+                            "name": r["medication__name"],
+                            "issue_events": r["issue_events"],
+                            "total_quantity": _dec_to_float(r["total_quantity"]),
+                        }
+                        for r in hod_top_medications
+                    ],
                 },
                 "patients_by_gender": gender,
                 "patients_by_category": category,

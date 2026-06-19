@@ -1,0 +1,144 @@
+"""Tests for Pharmacy HOD store access and workflows."""
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from organization.models import Clinic, Department
+from pharmacy.central_store import CENTRAL_STORE_CLINIC_CODE
+from pharmacy.hod_store import (
+    HOD_STORE_LOCATION,
+    user_is_pharmacy_hod,
+)
+from pharmacy.models import HodStockIssue, MedicationInventory
+from pharmacy.tests.test_pharmacy_depth import _make_medication
+from common.tests.support import create_test_user
+
+User = get_user_model()
+
+
+class HodStoreAccessTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.clinic = Clinic.objects.create(
+            name="Bode Thomas Clinic",
+            code=CENTRAL_STORE_CLINIC_CODE,
+        )
+        cls.dept = Department.objects.create(
+            clinic=cls.clinic,
+            name="Pharmacy",
+            code="PHARM",
+        )
+        cls.head = User.objects.create_user(
+            username="pharm_head",
+            email="head@test.com",
+            password="pass",
+        )
+        cls.deputy = User.objects.create_user(
+            username="pharm_deputy",
+            email="deputy@test.com",
+            password="pass",
+        )
+        cls.other = User.objects.create_user(
+            username="other_user",
+            email="other@test.com",
+            password="pass",
+        )
+        cls.dept.head = cls.head
+        cls.dept.deputy_head = cls.deputy
+        cls.dept.save(update_fields=["head", "deputy_head"])
+
+    def test_primary_head_is_pharmacy_hod(self):
+        self.assertTrue(user_is_pharmacy_hod(self.head))
+
+    def test_deputy_is_not_pharmacy_hod(self):
+        self.assertFalse(user_is_pharmacy_hod(self.deputy))
+
+    def test_other_user_is_not_pharmacy_hod(self):
+        self.assertFalse(user_is_pharmacy_hod(self.other))
+
+    def test_superuser_is_pharmacy_hod(self):
+        su = User.objects.create_superuser("su", "su@test.com", "pass")
+        self.assertTrue(user_is_pharmacy_hod(su))
+
+
+class HodStockIssueAPITest(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.clinic = Clinic.objects.create(
+            name="Bode Thomas Clinic",
+            code=CENTRAL_STORE_CLINIC_CODE,
+        )
+        cls.dept = Department.objects.create(
+            clinic=cls.clinic,
+            name="Pharmacy",
+            code="PHARM",
+        )
+        cls.head = create_test_user(
+            "hod_head",
+            pages=["/pharmacy/hod-store", "/pharmacy/hod-store/history"],
+            superuser=False,
+        )
+        cls.dept.head = cls.head
+        cls.dept.save(update_fields=["head"])
+        cls.head.clinic = cls.clinic
+        cls.head.active_clinic = cls.clinic
+        cls.head.save(update_fields=["clinic", "active_clinic"])
+
+        cls.medication, _generic = _make_medication(name="Test Drug HOD", code="TST-HOD-001")
+        cls.batch = MedicationInventory.objects.create(
+            medication=cls.medication,
+            batch_number="HOD-B1",
+            expiry_date="2030-12-31",
+            quantity=Decimal("100"),
+            unit="Tablet",
+            location=HOD_STORE_LOCATION,
+            location_clinic=cls.clinic,
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.head)
+
+    def test_head_can_list_hod_issues(self):
+        resp = self.client.get("/api/v1/pharmacy/hod-stock-issues/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_head_can_issue_from_hod_store(self):
+        resp = self.client.post(
+            "/api/v1/pharmacy/hod-stock-issues/",
+            {
+                "medication": self.medication.pk,
+                "quantity": "5",
+                "reason": "Department use",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(resp.data["issue_id"].startswith("HOD-"))
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.quantity, Decimal("95"))
+        self.assertEqual(HodStockIssue.objects.count(), 1)
+
+    def test_deputy_cannot_access_hod_issues(self):
+        deputy = create_test_user("hod_deputy", pages=["/pharmacy/hod-store"])
+        self.dept.deputy_head = deputy
+        self.dept.save(update_fields=["deputy_head"])
+        self.client.force_authenticate(user=deputy)
+        resp = self.client.get("/api/v1/pharmacy/hod-stock-issues/")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_hod_stock_request_create(self):
+        resp = self.client.post(
+            "/api/v1/pharmacy/stock-requests/",
+            {
+                "from_location": "Store",
+                "to_location": HOD_STORE_LOCATION,
+                "notes": "Restock HOD",
+                "items": [{"medication": self.medication.pk, "quantity": 10}],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["to_location"], HOD_STORE_LOCATION)

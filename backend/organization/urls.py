@@ -10,6 +10,7 @@ from .views import (
     OutpatientClinicTypeViewSet,
     WorkLocationViewSet,
     SystemConfigViewSet,
+    SecuritySettingsView,
 )
 
 router = DefaultRouter()
@@ -25,5 +26,6 @@ router.register(r'work-locations', WorkLocationViewSet, basename='work-location'
 router.register(r'system-config', SystemConfigViewSet, basename='system-config')
 
 urlpatterns = [
+    path('security-settings/', SecuritySettingsView.as_view(), name='security-settings'),
     path('', include(router.urls)),
 ]

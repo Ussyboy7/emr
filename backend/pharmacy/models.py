@@ -240,6 +240,16 @@ class Medication(models.Model):
     pack_size = models.IntegerField(
         null=True, blank=True, help_text="Number of units per pack"
     )
+    dispense_mode = models.CharField(
+        max_length=20,
+        choices=[
+            ("pack_only", "Whole packs only"),
+            ("units_only", "Individual units only"),
+            ("pack_or_units", "Pack or units (choose at issue)"),
+        ],
+        default="pack_or_units",
+        help_text="Whether staff issue whole packs, individual units, or may choose.",
+    )
     min_stock_level = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     prescription_required = models.BooleanField(
         default=False, help_text="Requires prescription"
@@ -626,6 +636,13 @@ class Dispense(models.Model):
         max_digits=10, decimal_places=2, validators=[MinValueValidator(0)]
     )
     unit = models.CharField(max_length=50)
+    quantity_entry_mode = models.CharField(
+        max_length=10,
+        choices=[("pack", "Pack"), ("units", "Units")],
+        blank=True,
+        default="",
+        help_text="How quantity was entered at dispense time (pack vs individual units).",
+    )
     batch_number = models.CharField(max_length=100, blank=True)
     prescribed_generic_name_snapshot = models.CharField(
         max_length=255, blank=True, default=""
@@ -903,3 +920,72 @@ class DispensaryReceiptLine(models.Model):
     @property
     def request_id(self):
         return self.request.request_id if self.request else None
+
+
+class HodStockIssue(models.Model):
+    """
+    Discretionary issue from the Pharmacy HOD store (not tied to a prescription).
+    """
+
+    issue_id = models.CharField(max_length=50, unique=True, db_index=True)
+    medication = models.ForeignKey(
+        Medication, on_delete=models.PROTECT, related_name="hod_stock_issues"
+    )
+    inventory_item = models.ForeignKey(
+        MedicationInventory,
+        on_delete=models.PROTECT,
+        related_name="hod_stock_issues",
+    )
+    quantity = models.DecimalField(
+        max_digits=10, decimal_places=2, validators=[MinValueValidator(0)]
+    )
+    unit = models.CharField(max_length=50)
+    quantity_entry_mode = models.CharField(
+        max_length=10,
+        choices=[("pack", "Pack"), ("units", "Units")],
+        blank=True,
+        default="",
+        help_text="How quantity was entered at issue time (pack vs individual units).",
+    )
+    batch_number = models.CharField(max_length=100, blank=True)
+    patient_name = models.CharField(max_length=200, blank=True)
+    patient_mrn = models.CharField(max_length=100, blank=True)
+    reason = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(blank=True)
+    issued_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="hod_stock_issues",
+    )
+    issued_at = models.DateTimeField(auto_now_add=True)
+    location_clinic = models.ForeignKey(
+        "organization.Clinic",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="hod_stock_issues",
+        help_text="Care facility this HOD issue belongs to",
+    )
+
+    class Meta:
+        db_table = "hod_stock_issues"
+        ordering = ["-issued_at"]
+        indexes = [
+            models.Index(fields=["issue_id"]),
+            models.Index(fields=["-issued_at"]),
+            models.Index(fields=["medication"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.issue_id:
+            from datetime import datetime
+            import random
+
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            suffix = f"{random.randint(1000, 9999)}"
+            self.issue_id = f"HOD-{timestamp}-{suffix}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.issue_id} - {self.medication.name}"

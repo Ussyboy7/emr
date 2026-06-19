@@ -20,6 +20,12 @@ import { MEDICATION_CATEGORIES, MEDICATION_STRENGTHS, MEDICATION_MANUFACTURERS, 
 import { Plus, Search, Edit, Eye, Pill, Loader2 } from "lucide-react";
 import { DEFAULT_CATALOG_PAGE_SIZE } from '@/lib/pagination-constants';
 
+const DISPENSE_MODE_OPTIONS = [
+  { value: "pack_or_units", label: "Pack or units (choose at issue)" },
+  { value: "pack_only", label: "Whole packs only" },
+  { value: "units_only", label: "Individual units only" },
+] as const;
+
 export default function DrugMasterPage() {
   const [medLoading, setMedLoading] = useState(false);
   const [medications, setMedications] = useState<Medication[]>([]);
@@ -52,6 +58,7 @@ export default function DrugMasterPage() {
     form: "",
     category: "",
     pack_size: "",
+    dispense_mode: "pack_or_units",
     manufacturer: "",
     min_stock_level: "0",
   });
@@ -66,6 +73,7 @@ export default function DrugMasterPage() {
     form: "",
     category: "",
     pack_size: "",
+    dispense_mode: "pack_or_units",
     manufacturer: "",
     min_stock_level: "0",
     is_active: true,
@@ -135,6 +143,7 @@ export default function DrugMasterPage() {
         form: formData.form || '',
         category: formData.category,
         pack_size: formData.pack_size ? Number(formData.pack_size) : undefined,
+        dispense_mode: formData.dispense_mode as Medication["dispense_mode"],
         manufacturer: formData.manufacturer,
         min_stock_level: formData.min_stock_level ? Number(formData.min_stock_level) : 0,
       });
@@ -150,6 +159,7 @@ export default function DrugMasterPage() {
         form: "",
         category: "",
         pack_size: "",
+        dispense_mode: "pack_or_units",
         manufacturer: "",
         min_stock_level: "0",
       });
@@ -188,6 +198,7 @@ export default function DrugMasterPage() {
         form: latest.form || "",
         category: (latest.category || "").trim(),
         pack_size: typeof latest.pack_size === "number" ? String(latest.pack_size) : "",
+        dispense_mode: latest.dispense_mode || "pack_or_units",
         manufacturer: latest.manufacturer || "",
         min_stock_level: latest.min_stock_level !== undefined && latest.min_stock_level !== null ? String(Number(latest.min_stock_level)) : "0",
         is_active: latest.is_active ?? true,
@@ -204,6 +215,7 @@ export default function DrugMasterPage() {
         form: med.form || "",
         category: (med.category || "").trim(),
         pack_size: typeof med.pack_size === "number" ? String(med.pack_size) : "",
+        dispense_mode: med.dispense_mode || "pack_or_units",
         manufacturer: med.manufacturer || "",
         min_stock_level: med.min_stock_level !== undefined && med.min_stock_level !== null ? String(Number(med.min_stock_level)) : "0",
         is_active: med.is_active ?? true,
@@ -266,6 +278,7 @@ export default function DrugMasterPage() {
         category: editFormData.category || "",
         manufacturer: editFormData.manufacturer || "",
         pack_size: editFormData.pack_size ? Number(editFormData.pack_size) : null,
+        dispense_mode: editFormData.dispense_mode as Medication["dispense_mode"],
         min_stock_level: editFormData.min_stock_level ? Number(editFormData.min_stock_level) : 0,
         is_active: !!editFormData.is_active,
         generic_id: editFormData.generic_id ? Number(editFormData.generic_id) : undefined,
@@ -630,6 +643,24 @@ export default function DrugMasterPage() {
                 </div>
               </div>
               <div>
+                <Label>Issue / dispense mode</Label>
+                <Select
+                  value={formData.dispense_mode}
+                  onValueChange={(value) => setFormData({ ...formData, dispense_mode: value })}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DISPENSE_MODE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <Label>Minimum Stock Level</Label>
                 <Input
                   type="number"
@@ -814,6 +845,24 @@ export default function DrugMasterPage() {
                 </div>
               </div>
               <div>
+                <Label>Issue / dispense mode</Label>
+                <Select
+                  value={editFormData.dispense_mode}
+                  onValueChange={(value) => setEditFormData({ ...editFormData, dispense_mode: value })}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DISPENSE_MODE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <Label>Minimum Stock Level</Label>
                 <Input type="number" value={editFormData.min_stock_level} onChange={(e) => setEditFormData({ ...editFormData, min_stock_level: e.target.value })} className="mt-1" />
               </div>
@@ -890,6 +939,15 @@ export default function DrugMasterPage() {
                   <div>
                     <p className="text-muted-foreground">Pack Size</p>
                     <p className="font-medium">{selectedDrug.pack_size}</p>
+                  </div>
+                )}
+                {selectedDrug.dispense_mode && (
+                  <div>
+                    <p className="text-muted-foreground">Issue / Dispense Mode</p>
+                    <p className="font-medium">
+                      {DISPENSE_MODE_OPTIONS.find((option) => option.value === selectedDrug.dispense_mode)?.label ||
+                        selectedDrug.dispense_mode}
+                    </p>
                   </div>
                 )}
                 {selectedDrug.min_stock_level !== undefined && selectedDrug.min_stock_level !== null && (

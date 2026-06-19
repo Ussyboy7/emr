@@ -25,6 +25,7 @@ class UserSerializer(serializers.ModelSerializer):
     active_clinic_id = serializers.SerializerMethodField()
     is_department_head = serializers.SerializerMethodField()
     is_department_deputy = serializers.SerializerMethodField()
+    is_pharmacy_hod = serializers.SerializerMethodField()
     headed_departments = serializers.SerializerMethodField()
     access_role_id = serializers.SerializerMethodField()
     access_role_name = serializers.SerializerMethodField()
@@ -59,6 +60,7 @@ class UserSerializer(serializers.ModelSerializer):
             "is_superuser",
             "is_department_head",
             "is_department_deputy",
+            "is_pharmacy_hod",
             "headed_departments",
             "access_role_id",
             "access_role_name",
@@ -111,6 +113,12 @@ class UserSerializer(serializers.ModelSerializer):
     def get_is_department_deputy(self, obj):
         from permissions.user_management import is_department_deputy_only
         return is_department_deputy_only(obj)
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_pharmacy_hod(self, obj):
+        from pharmacy.hod_store import user_is_pharmacy_hod
+
+        return user_is_pharmacy_hod(obj)
 
     @extend_schema_field({
         "type": "array",

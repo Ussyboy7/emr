@@ -36,6 +36,7 @@ export type {
   StockRequestItem,
   StockIssue,
   StockIssueLine,
+  HodStockIssue,
   PharmacyAnalyticsSummary,
 } from './pharmacy-service';
 export type {

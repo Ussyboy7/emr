@@ -20,6 +20,7 @@ from .models import (
     StockIssue,
     StockIssueLine,
     DispensaryReceiptLine,
+    HodStockIssue,
 )
 
 
@@ -148,6 +149,7 @@ class MedicationSerializer(serializers.ModelSerializer):
             "category",
             "manufacturer",
             "pack_size",
+            "dispense_mode",
             "min_stock_level",
             "prescription_required",
             "description",
@@ -453,6 +455,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
                     "strength": getattr(medication, "strength", None),
                     "form": getattr(medication, "form", None),
                     "pack_size": getattr(medication, "pack_size", None),
+                    "dispense_mode": getattr(medication, "dispense_mode", None),
                     "type": "brand",
                     "medication_id": getattr(
                         medication, "id", None
@@ -894,3 +897,69 @@ class StockIssueSerializer(serializers.ModelSerializer):
             "lines",
         ]
         read_only_fields = ["issue_id", "issued_at", "issued_by"]
+
+
+class HodStockIssueSerializer(serializers.ModelSerializer):
+    medication_name = serializers.CharField(source="medication.name", read_only=True)
+    issued_by_name = serializers.CharField(source="issued_by.get_full_name", read_only=True)
+    medication_details = MedicationSerializer(source="medication", read_only=True)
+    medication_pack_size = serializers.IntegerField(source="medication.pack_size", read_only=True)
+    inventory_item_id = serializers.PrimaryKeyRelatedField(
+        queryset=MedicationInventory.objects.all(),
+        source="inventory_item",
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = HodStockIssue
+        fields = [
+            "id",
+            "issue_id",
+            "medication",
+            "medication_name",
+            "medication_details",
+            "inventory_item",
+            "inventory_item_id",
+            "quantity",
+            "quantity_entry_mode",
+            "unit",
+            "batch_number",
+            "patient_name",
+            "patient_mrn",
+            "reason",
+            "notes",
+            "issued_by",
+            "issued_by_name",
+            "issued_at",
+            "location_clinic",
+            "medication_pack_size",
+        ]
+        read_only_fields = [
+            "issue_id",
+            "issued_at",
+            "issued_by",
+            "inventory_item",
+            "batch_number",
+            "unit",
+            "medication_pack_size",
+        ]
+
+    def validate(self, attrs):
+        medication = attrs.get("medication") or getattr(self.instance, "medication", None)
+        quantity = attrs.get("quantity")
+        if medication is not None and quantity is not None:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+
+            from pharmacy.dispense_units import validate_inventory_units
+
+            try:
+                validate_inventory_units(
+                    medication,
+                    quantity,
+                    attrs.get("quantity_entry_mode"),
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"quantity": exc.messages})
+        return attrs

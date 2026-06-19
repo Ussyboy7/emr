@@ -13,6 +13,7 @@ from pharmacy.models import (
     StockRequestItem,
     StockIssue,
     StockIssueLine,
+    HodStockIssue,
 )
 from django.db import connection
 
@@ -61,6 +62,9 @@ class Command(BaseCommand):
             # Delete dependent records first to avoid FK PROTECT/CASCADE issues
             self.stdout.write("Deleting Dispenses...")
             Dispense.objects.all().delete()
+
+            self.stdout.write("Deleting HodStockIssues...")
+            HodStockIssue.objects.all().delete()
 
             self.stdout.write("Deleting StockIssueLines...")
             StockIssueLine.objects.all().delete()

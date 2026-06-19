@@ -102,6 +102,7 @@ export type User = {
   isSuperuser?: boolean;
   isStaff?: boolean;
   isDepartmentHead?: boolean;
+  isPharmacyHod?: boolean;
   headedDepartments?: { id: number; name: string }[];
   clinics_ids?: number[];
   active_clinic_id?: number | null;

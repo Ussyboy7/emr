@@ -5,6 +5,7 @@ import logging
 from datetime import timedelta
 
 from rest_framework import viewsets, status
+from rest_framework.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 from rest_framework.decorators import action
@@ -39,7 +40,7 @@ from decimal import Decimal, InvalidOperation
 from common.mixins import ClinicScopedMixin
 from common.openapi import document_viewset
 from .combo_utils import combo_component_names_from_display_name
-from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine
+from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine, HodStockIssue
 from .serializers import (
     GenericMedicationSerializer,
     MedicationSerializer,
@@ -51,6 +52,7 @@ from .serializers import (
     DispenseSerializer,
     StockRequestSerializer,
     StockIssueSerializer,
+    HodStockIssueSerializer,
 )
 from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
@@ -449,6 +451,25 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         loc = (self.request.query_params.get('location') or '').strip().lower()
         return loc == 'dispensary'
 
+    def _is_hod_store_request(self):
+        from pharmacy.hod_store import is_hod_store_location
+
+        loc = self.request.query_params.get('location')
+        return is_hod_store_location(loc)
+
+    def _validate_hod_store_access(self):
+        """Block HOD store unless user is Head of Pharmacy (or superuser)."""
+        if self.request.user.is_superuser:
+            return
+        from pharmacy.hod_store import user_can_operate_hod_store
+
+        if not user_can_operate_hod_store(self.request.user):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied(
+                "HOD store is only accessible to the Head of Pharmacy at Bode Thomas Clinic."
+            )
+
     def _validate_store_access(self):
         """Block store access unless the user's active clinic is the central store site."""
         if self.request.user.is_superuser:
@@ -467,7 +488,10 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return MedicationInventory.objects.none()
         
-        self._validate_store_access()
+        if self._is_hod_store_request():
+            self._validate_hod_store_access()
+        else:
+            self._validate_store_access()
         if self._is_dispensary_request():
             qs = DispensaryReceiptLine.objects.all().select_related(
                 'medication', 'medication__generic', 'request', 'issue', 'issue__request',
@@ -609,7 +633,10 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='list-stats')
     def list_stats(self, request):
         """Inventory tab counts + total units (replaces parallel COUNT/page fan-out)."""
-        self._validate_store_access()
+        if self._is_hod_store_request():
+            self._validate_hod_store_access()
+        else:
+            self._validate_store_access()
         if self._is_dispensary_request():
             base = self._dispensary_filtered_queryset(request, stock_status='all')
             units_field = 'quantity_remaining'
@@ -642,6 +669,14 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Create inventory item and log audit."""
+        from pharmacy.hod_store import is_hod_store_location
+
+        location = serializer.validated_data.get('location') or ''
+        if is_hod_store_location(location):
+            self._validate_hod_store_access()
+            raise ValidationError(
+                {'location': ['HOD store inventory is updated via stock transfers only.']}
+            )
         inventory = serializer.save()
         AuditService.log_activity(
             user=self.request.user,
@@ -1451,6 +1486,17 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            quantity_entry_mode = (request.data.get('quantity_entry_mode') or '').strip().lower()
+            from pharmacy.dispense_units import validate_inventory_units
+
+            try:
+                validate_inventory_units(dispensed_medication, quantity, quantity_entry_mode)
+            except Exception as exc:
+                from django.core.exceptions import ValidationError as DjangoValidationError
+                if isinstance(exc, DjangoValidationError):
+                    return Response({'error': exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+                raise
+
             # Backward-compatible fallback for liquid prescriptions dispensed as bottles:
             # if coverage_quantity is not provided, infer clinical coverage from bottle pack size.
             if coverage_quantity_raw in (None, ''):
@@ -1489,6 +1535,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 medication=dispensed_medication,
                 dispensary_receipt_line=receipt_line,
                 quantity=quantity,
+                quantity_entry_mode=quantity_entry_mode,
                 unit=getattr(dispensed_medication, 'unit', None) or item.unit,
                 batch_number=batch_number,
                 prescribed_generic_name_snapshot=getattr(item.generic, 'name', '') or '',
@@ -1907,21 +1954,46 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
-    def _validate_store_access(self):
-        """Block store-related operations unless active clinic is the central store site."""
+    def _validate_stock_request_access(self, from_location=None, to_location=None):
+        """Gate stock requests involving Central Store and/or HOD Store."""
         if self.request.user.is_superuser:
             return
-        from_location = (self.request.query_params.get('from_location') or '').strip().lower()
-        to_location = (self.request.query_params.get('to_location') or '').strip().lower()
-        is_store_op = 'store' in from_location or 'store' in to_location
-        if is_store_op:
-            from pharmacy.central_store import user_can_operate_central_store
-            if not user_can_operate_central_store(self.request.user):
-                from rest_framework.exceptions import PermissionDenied
-                raise PermissionDenied(
-                    "Central store operations require Bode Thomas Clinic as your active clinic. "
-                    "Switch clinic in the top bar and try again."
-                )
+        from pharmacy.hod_store import user_can_access_stock_request
+
+        from_loc = from_location
+        to_loc = to_location
+        if from_loc is None:
+            from_loc = self.request.query_params.get('from_location')
+        if to_loc is None:
+            to_loc = self.request.query_params.get('to_location')
+        if from_loc is None and hasattr(self.request, 'data'):
+            from_loc = self.request.data.get('from_location')
+        if to_loc is None and hasattr(self.request, 'data'):
+            to_loc = self.request.data.get('to_location')
+
+        from pharmacy.hod_store import (
+            stock_request_involves_central_store,
+            stock_request_involves_hod_store,
+            user_can_access_stock_request,
+        )
+
+        if not stock_request_involves_hod_store(from_loc, to_loc) and not stock_request_involves_central_store(
+            from_loc, to_loc
+        ):
+            return
+
+        if not user_can_access_stock_request(self.request.user, from_loc, to_loc):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied(
+                "You do not have permission for this stock request. "
+                "Central store operations require Bode Thomas as your active clinic; "
+                "HOD store operations require Head of Pharmacy access."
+            )
+
+    def _validate_store_access(self):
+        """Backward-compatible alias for stock request location checks."""
+        self._validate_stock_request_access()
 
     def scope_queryset(self, qs):
         """Superusers bypass scoping on detail routes; list scoped unless show_all=true."""
@@ -1936,7 +2008,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return StockRequest.objects.none()
         
-        self._validate_store_access()
+        self._validate_stock_request_access()
         from datetime import datetime
         qs = self.scope_queryset(StockRequest.objects.all())
         date_after = self.request.query_params.get('date_after')
@@ -1955,6 +2027,11 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 pass
         return qs
     
+    def get_object(self):
+        obj = super().get_object()
+        self._validate_stock_request_access(obj.from_location, obj.to_location)
+        return obj
+
     @extend_schema(tags=["Pharmacy"], summary="List stats", description="Tab counts for stock requests (replaces 5+ parallel COUNT requests).")
     @action(detail=False, methods=['get'], url_path='list-stats')
     def list_stats(self, request):
@@ -1975,6 +2052,10 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         })
 
     def perform_create(self, serializer):
+        self._validate_stock_request_access(
+            serializer.validated_data.get('from_location'),
+            serializer.validated_data.get('to_location'),
+        )
         self.auto_set_clinic(serializer)
         serializer.save(requested_by=self.request.user)
 
@@ -2346,3 +2427,171 @@ class StockIssueViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         if to_location:
             qs = qs.filter(request__to_location__icontains=to_location)
         return self.scope_queryset(qs).order_by('-issued_at')
+
+
+@document_viewset(tag="Pharmacy", resource="HOD stock issues")
+class HodStockIssueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+    """Discretionary issues from the Pharmacy HOD store."""
+
+    clinic_filter_field = 'location_clinic'
+    serializer_class = HodStockIssueSerializer
+    pagination_class = FlexiblePageNumberPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['medication', 'issued_by']
+    search_fields = [
+        'issue_id',
+        'medication__name',
+        'medication__generic__name',
+        'patient_name',
+        'patient_mrn',
+        'reason',
+        'notes',
+    ]
+    ordering_fields = ['issued_at']
+    ordering = ['-issued_at']
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    def _ensure_hod_access(self):
+        from pharmacy.hod_store import user_can_operate_hod_store
+
+        if not user_can_operate_hod_store(self.request.user):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied(
+                "Only the Head of Pharmacy (or a superuser) can access the HOD store."
+            )
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return HodStockIssue.objects.none()
+        self._ensure_hod_access()
+        qs = self.scope_queryset(
+            HodStockIssue.objects.select_related(
+                'medication', 'medication__generic', 'issued_by', 'inventory_item'
+            )
+        )
+        date_preset = (self.request.query_params.get('date_preset') or 'all').lower()
+        if date_preset != 'all':
+            from common.report_period import apply_date_preset
+
+            qs = apply_date_preset(qs, date_preset, 'issued_at')
+        search = (self.request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(issue_id__icontains=search)
+                | Q(medication__name__icontains=search)
+                | Q(medication__generic__name__icontains=search)
+                | Q(patient_name__icontains=search)
+                | Q(patient_mrn__icontains=search)
+                | Q(reason__icontains=search)
+                | Q(notes__icontains=search)
+            )
+        return qs
+
+    @extend_schema(tags=["Pharmacy"], summary="Summary stats", description="HOD issue KPIs for the current filter set.")
+    @action(detail=False, methods=['get'], url_path='summary-stats')
+    def summary_stats(self, request):
+        qs = self.get_queryset()
+        today = timezone.localdate()
+        return Response({
+            'total': qs.count(),
+            'today': qs.filter(issued_at__date=today).count(),
+            'total_quantity': str(qs.aggregate(s=Sum('quantity'))['s'] or 0),
+        })
+
+    def perform_create(self, serializer):
+        from pharmacy.hod_store import HOD_STORE_LOCATION, user_can_operate_hod_store
+        from accounts.utils import resolve_clinic
+
+        self._ensure_hod_access()
+        medication = serializer.validated_data['medication']
+        quantity = serializer.validated_data['quantity']
+        quantity_entry_mode = serializer.validated_data.get('quantity_entry_mode', '') or ''
+        from pharmacy.dispense_units import validate_inventory_units
+
+        try:
+            validate_inventory_units(medication, quantity, quantity_entry_mode)
+        except Exception as exc:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            if isinstance(exc, DjangoValidationError):
+                raise ValidationError({'quantity': exc.messages})
+            raise
+        if quantity <= 0:
+            raise ValidationError({'quantity': ['Quantity must be greater than zero.']})
+
+        inventory_item = serializer.validated_data.get('inventory_item')
+        remaining = quantity
+
+        with transaction.atomic():
+            if inventory_item is not None:
+                if inventory_item.location != HOD_STORE_LOCATION:
+                    raise ValidationError({'inventory_item_id': ['Batch is not in HOD store.']})
+                if inventory_item.medication_id != medication.id:
+                    raise ValidationError({'inventory_item_id': ['Batch medication does not match.']})
+                if inventory_item.quantity < remaining:
+                    raise ValidationError({'quantity': ['Insufficient stock in selected batch.']})
+                inventory_item.quantity -= remaining
+                inventory_item.save(update_fields=['quantity'])
+                used_item = inventory_item
+            else:
+                batches = list(
+                    MedicationInventory.objects.select_for_update()
+                    .filter(
+                        medication=medication,
+                        location=HOD_STORE_LOCATION,
+                        quantity__gt=0,
+                        expiry_date__gt=timezone.now().date(),
+                    )
+                    .order_by('expiry_date')
+                )
+                if not batches:
+                    raise ValidationError({'medication': ['No unexpired HOD store stock for this medication.']})
+                available = sum((b.quantity for b in batches), Decimal('0'))
+                if available < remaining:
+                    raise ValidationError({'quantity': ['Insufficient HOD store stock.']})
+
+                used_item = None
+                for batch in batches:
+                    if remaining <= 0:
+                        break
+                    take = min(batch.quantity, remaining)
+                    batch.quantity -= take
+                    batch.save(update_fields=['quantity'])
+                    remaining -= take
+                    if used_item is None:
+                        used_item = batch
+
+            clinic = resolve_clinic(self.request.user)
+            issue = HodStockIssue.objects.create(
+                medication=medication,
+                inventory_item=used_item,
+                quantity=quantity,
+                quantity_entry_mode=quantity_entry_mode,
+                unit=getattr(medication, 'unit', '') or used_item.unit,
+                batch_number=used_item.batch_number if used_item else '',
+                patient_name=serializer.validated_data.get('patient_name', ''),
+                patient_mrn=serializer.validated_data.get('patient_mrn', ''),
+                reason=serializer.validated_data.get('reason', ''),
+                notes=serializer.validated_data.get('notes', ''),
+                issued_by=self.request.user,
+                location_clinic=clinic,
+            )
+
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='hod_stock_issue',
+            object_id=str(issue.id),
+            module='pharmacy',
+            object_repr=f'HOD issue {issue.issue_id}',
+            description=(
+                f'Issued {issue.quantity} {issue.unit} of {medication.name} from HOD store'
+            ),
+            new_values={
+                'medication_id': medication.id,
+                'quantity': float(issue.quantity),
+                'batch_number': issue.batch_number,
+            },
+            request=self.request,
+        )
+        serializer.instance = issue

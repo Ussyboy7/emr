@@ -48,6 +48,7 @@ interface ApiUser {
   is_superuser?: boolean;
   is_staff?: boolean;
   is_department_head?: boolean;
+  is_pharmacy_hod?: boolean;
   headed_departments?: { id: number; name: string }[];
   clinics_ids?: number[];
   active_clinic_id?: number | null;
@@ -92,6 +93,7 @@ const mapApiUserToUser = (data: ApiUser): User => {
     isSuperuser: data.is_superuser ?? false,
     isStaff: data.is_staff ?? false,
     isDepartmentHead: data.is_department_head ?? false,
+    isPharmacyHod: data.is_pharmacy_hod ?? false,
     headedDepartments: Array.isArray(data.headed_departments) ? data.headed_departments : [],
     clinics_ids: data.clinics_ids ?? undefined,
     active_clinic_id: data.active_clinic_id ?? undefined,
