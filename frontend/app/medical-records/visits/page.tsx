@@ -15,8 +15,8 @@ import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { consultationService, visitService, type Visit } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth';
 import {
   Search,
   Plus,
@@ -60,13 +60,12 @@ export default function VisitsPage() {
     () => buildVisitClinicFilterOptions(opdClinicNames),
     [opdClinicNames]
   );
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const [visits, setVisits] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(() => searchParams.get('search') || '');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
@@ -104,13 +103,6 @@ export default function VisitsPage() {
     inProgress: 0,
     completed: 0,
   });
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
 
   // Helper function to transform visit from API to frontend format
   const transformVisit = (visit: Visit) => ({
@@ -233,9 +225,8 @@ export default function VisitsPage() {
       setVisits(newestFirst);
     } catch (err) {
       console.error('Error loading visits:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else if (!silent) {
+      if (handleAuthError(err)) return;
+      if (!silent) {
         setError('Failed to load visits. Please try again.');
       }
     } finally {
@@ -243,17 +234,19 @@ export default function VisitsPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams, handleAuthError]);
 
   // Load visits when filters change
   useEffect(() => {
+    if (!ready) return;
     loadVisits();
-  }, [loadVisits]);
+  }, [ready, loadVisits]);
 
   // Load stats when filters change (except status filter and pagination)
   useEffect(() => {
+    if (!ready) return;
     loadStats();
-  }, [loadStats]);
+  }, [ready, loadStats]);
 
   const pollingPaused = useMemo(
     () =>
@@ -274,13 +267,13 @@ export default function VisitsPage() {
   );
 
   useEffect(() => {
-    if (pollingPaused) return;
+    if (!ready || pollingPaused) return;
     const id = setInterval(() => {
       void loadVisits({ silent: true });
       void loadStats();
     }, 15000);
     return () => clearInterval(id);
-  }, [loadVisits, loadStats, pollingPaused]);
+  }, [ready, loadVisits, loadStats, pollingPaused]);
 
   // With server-side pagination, visits array contains only current page results
   const paginatedVisits = visits;
@@ -432,11 +425,8 @@ export default function VisitsPage() {
       toast.success('Visit updated successfully');
     } catch (err: any) {
       console.error('Error updating visit:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        toast.error(err.message || 'Failed to update visit. Please try again.');
-      }
+      if (handleAuthError(err)) return;
+      toast.error(err.message || 'Failed to update visit. Please try again.');
     }
   };
 
@@ -463,11 +453,8 @@ export default function VisitsPage() {
       });
     } catch (err: any) {
       console.error('Error forwarding visit to nursing:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        toast.error(err.message || 'Failed to forward visit. Please try again.');
-      }
+      if (handleAuthError(err)) return;
+      toast.error(err.message || 'Failed to forward visit. Please try again.');
     }
   };
 
@@ -497,11 +484,8 @@ export default function VisitsPage() {
       setReportSession(fullSession);
     } catch (err: any) {
       console.error('Error loading visit report:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        toast.error('Failed to load consultation report.');
-      }
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load consultation report.');
       setIsReportModalOpen(false);
     } finally {
       setReportLoading(false);
@@ -521,11 +505,8 @@ export default function VisitsPage() {
       });
     } catch (err: any) {
       console.error('Error cancelling visit:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        toast.error(err.message || 'Failed to cancel visit. Please try again.');
-      }
+      if (handleAuthError(err)) return;
+      toast.error(err.message || 'Failed to cancel visit. Please try again.');
     }
   };
 

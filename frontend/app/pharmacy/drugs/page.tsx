@@ -16,6 +16,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { toast } from "sonner";
 import { pharmacyService, type Medication } from "@/lib/services";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import { MEDICATION_CATEGORIES, MEDICATION_STRENGTHS, MEDICATION_MANUFACTURERS, DOSAGE_FORMS } from "@/lib/constants/pharmacy";
 import { Plus, Search, Edit, Eye, Pill, Loader2 } from "lucide-react";
 import { DEFAULT_CATALOG_PAGE_SIZE } from '@/lib/pagination-constants';
@@ -27,6 +28,7 @@ const DISPENSE_MODE_OPTIONS = [
 ] as const;
 
 export default function DrugMasterPage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const [medLoading, setMedLoading] = useState(false);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [medicationsTotal, setMedicationsTotal] = useState(0);
@@ -90,16 +92,18 @@ export default function DrugMasterPage() {
       setMedications(response.results || []);
       setMedicationsTotal(typeof response.count === "number" ? response.count : (response.results || []).length);
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error("Error loading medications:", err);
       toast.error("Failed to load medications");
     } finally {
       setMedLoading(false);
     }
-  }, [drugCurrentPage, drugItemsPerPage, debouncedDrugSearch]);
+  }, [drugCurrentPage, drugItemsPerPage, debouncedDrugSearch, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadMedications();
-  }, [loadMedications]);
+  }, [loadMedications, ready]);
 
   useEffect(() => {
     setDrugCurrentPage(1);

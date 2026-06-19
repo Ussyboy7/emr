@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { useAuthenticatedPage } from "@/hooks/use-authenticated-page";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
@@ -50,9 +48,7 @@ import {
 } from "lucide-react";
 
 export default function HodDispenseHistoryPage() {
-  const { ready } = useAuthenticatedPage();
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = usePharmacyPageAuth();
 
   const [history, setHistory] = useState<HodStockIssue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,10 +81,7 @@ export default function HodDispenseHistoryPage() {
       });
       setSummaryStats(s);
     } catch (e: unknown) {
-      if (isAuthenticationError(e)) {
-        setAuthError(e);
-        return;
-      }
+      if (handleAuthError(e)) return;
       setSummaryStats(null);
       setSummaryError(e instanceof Error ? e.message : "Failed to load summary statistics");
     } finally {
@@ -109,10 +102,7 @@ export default function HodDispenseHistoryPage() {
       setHistory(listRes.results || []);
       setTotalCount(listRes.count ?? listRes.results?.length ?? 0);
     } catch (e: unknown) {
-      if (isAuthenticationError(e)) {
-        setAuthError(e);
-        return;
-      }
+      if (handleAuthError(e)) return;
       const message = e instanceof Error ? e.message : "Failed to load HOD dispense history";
       setError(message);
       setHistory([]);

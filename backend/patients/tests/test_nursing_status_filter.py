@@ -185,3 +185,65 @@ class NursingStatusFilterTests(TestCase):
             and pending_ids.isdisjoint(queued_ids)
             and ready_ids.isdisjoint(queued_ids)
         )
+
+    def test_sent_to_physiotherapy_requires_order_and_clinic_line(self):
+        user = User.objects.create_user(username="physio_doc", password="test")
+        visit = self._visit("physio")
+        visit.clinic = "Physiotherapy"
+        visit.clinics = ["Physiotherapy"]
+        visit.save()
+        no_clinic = self._visit("no-clinic")
+
+        from physiotherapy.models import PhysioOrder
+
+        PhysioOrder.objects.create(
+            patient=self.patient,
+            visit=visit,
+            ordered_by=user,
+            diagnosis="Back pain",
+            status="scheduled",
+        )
+        PhysioOrder.objects.create(
+            patient=self.patient,
+            visit=no_clinic,
+            ordered_by=user,
+            diagnosis="Knee pain",
+            status="scheduled",
+        )
+
+        ids = set(
+            apply_nursing_status_filter(
+                self._base_qs(), "sent_to_physiotherapy", _mock_request()
+            ).values_list("id", flat=True)
+        )
+        self.assertEqual(ids, {visit.id})
+
+    def test_sent_to_physiotherapy_excludes_active_room_queue(self):
+        user = User.objects.create_user(username="physio_doc2", password="test")
+        visit = self._visit("physio-queued")
+        visit.clinic = "Physiotherapy"
+        visit.clinics = ["Physiotherapy"]
+        visit.save()
+
+        from physiotherapy.models import PhysioOrder
+
+        PhysioOrder.objects.create(
+            patient=self.patient,
+            visit=visit,
+            ordered_by=user,
+            diagnosis="Shoulder",
+            status="in_progress",
+        )
+        ConsultationQueue.objects.create(
+            room=self.room,
+            patient=self.patient,
+            visit=visit,
+            is_active=True,
+        )
+
+        ids = set(
+            apply_nursing_status_filter(
+                self._base_qs(), "sent_to_physiotherapy", _mock_request()
+            ).values_list("id", flat=True)
+        )
+        self.assertEqual(ids, set())

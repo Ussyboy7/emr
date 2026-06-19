@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { useAuthenticatedPage } from "@/hooks/use-authenticated-page";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
@@ -36,7 +34,10 @@ import {
   PharmacyPackQuantityFields,
 } from "@/components/pharmacy/PharmacyPackQuantityFields";
 import {
+  asPackQuantityMedication,
+  formatPackDisplay,
   getPackSize,
+  resolvePackSize,
   toInventoryUnits,
   type QuantityEntryMode,
 } from "@/lib/pharmacy/dispense-quantity";
@@ -72,6 +73,7 @@ interface MedicationWithStock {
   form?: string;
   category?: string;
   packSize?: number;
+  pack_size?: number;
   dispense_mode?: Medication["dispense_mode"];
   unit?: string;
   storeQuantity: number;
@@ -89,8 +91,7 @@ function mapStoreStockRow(
   }
 ): MedicationWithStock {
   const sq = Number(row.store_quantity ?? 0);
-  const packSize =
-    typeof row.pack_size === "number" && row.pack_size > 0 ? row.pack_size : 10;
+  const packSize = resolvePackSize(row);
   return {
     id: row.id,
     name: row.name || "Unknown",
@@ -100,6 +101,7 @@ function mapStoreStockRow(
     form: row.form || "",
     category: row.category || "",
     packSize,
+    pack_size: packSize,
     dispense_mode: row.dispense_mode,
     unit: row.unit,
     storeQuantity: sq,
@@ -122,9 +124,7 @@ const EXPIRY_WARNING_DAYS = 180;
 const location = PHARMACY_LOCATIONS.HOD_STORE;
 
 export default function HodStorePage() {
-  const { ready } = useAuthenticatedPage();
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = usePharmacyPageAuth();
 
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [storeInventory, setStoreInventory] = useState<MedicationWithStock[]>([]);
@@ -161,11 +161,7 @@ export default function HodStorePage() {
 
   const categories = useMemo(() => MEDICATION_CATEGORIES, []);
 
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
+  const packMed = (med: MedicationWithStock) => asPackQuantityMedication(med);
 
   const loadStoreStats = useCallback(async () => {
     try {
@@ -179,13 +175,10 @@ export default function HodStorePage() {
         totalUnits: Number(s.total_units ?? 0),
       });
     } catch (e) {
-      if (isAuthenticationError(e)) {
-        setAuthError(e);
-        return;
-      }
+      if (handleAuthError(e)) return;
       console.error("Error loading HOD store stats:", e);
     }
-  }, []);
+  }, [handleAuthError]);
 
   const loadStorePage = useCallback(async () => {
     try {
@@ -211,10 +204,7 @@ export default function HodStorePage() {
       );
       setInventoryTotalCount(typeof res.count === "number" ? res.count : (res.results || []).length);
     } catch (err) {
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-        return;
-      }
+      if (handleAuthError(err)) return;
       console.error("Error loading HOD store inventory:", err);
       toast.error("Failed to load HOD store inventory");
     } finally {
@@ -226,6 +216,7 @@ export default function HodStorePage() {
     debouncedInventorySearch,
     categoryFilter,
     stockFilter,
+    handleAuthError,
   ]);
 
   useEffect(() => {
@@ -323,7 +314,7 @@ export default function HodStorePage() {
     }
     setSelectedMedication(med);
     resetIssueForm();
-    setIssueEntryMode(defaultEntryModeForMedication(med));
+    setIssueEntryMode(defaultEntryModeForMedication(packMed(med)));
     setShowIssueModal(true);
     try {
       const batches = await fetchBatchesForMedication(med);
@@ -349,7 +340,7 @@ export default function HodStorePage() {
     }
     let inventoryQty: number;
     try {
-      inventoryQty = toInventoryUnits(displayQty, selectedMedication, issueEntryMode);
+      inventoryQty = toInventoryUnits(displayQty, packMed(selectedMedication), issueEntryMode);
     } catch (err: any) {
       toast.error(err?.message || "Invalid quantity for this medication");
       return;
@@ -949,14 +940,14 @@ export default function HodStorePage() {
                 )}
 
                 <PharmacyPackQuantityFields
-                  medication={selectedMedication}
+                  medication={packMed(selectedMedication)}
                   displayQuantity={issueQty}
                   onDisplayQuantityChange={setIssueQty}
                   entryMode={issueEntryMode}
                   onEntryModeChange={setIssueEntryMode}
                   maxDisplayQuantity={
                     issueEntryMode === "pack"
-                      ? Math.max(1, Math.floor(availableIssueStock / getPackSize(selectedMedication)))
+                      ? Math.max(1, Math.floor(availableIssueStock / getPackSize(packMed(selectedMedication))))
                       : availableIssueStock
                   }
                 />

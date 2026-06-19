@@ -10,7 +10,7 @@ import {
   referralService,
   type ResponsibilityFormIssuance,
 } from "@/lib/services/referral-service";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   type ReferralWithPatient,
@@ -24,6 +24,7 @@ import { ReferralsList } from "@/components/referrals/ReferralsList";
 import { MedicalRecordsReferralDetailModal } from "./MedicalRecordsReferralDetailModal";
 
 export default function MedicalRecordsReferralsPage() {
+  useMedicalRecordsPageAuth();
   const { currentUser } = useCurrentUser();
 
   const queue = useReferralsQueue({ excludeDraft: true });
@@ -53,6 +54,7 @@ export default function MedicalRecordsReferralsPage() {
     facilities,
     refetch,
     refetchStats,
+    handleAuthError,
   } = queue;
 
   const recordsQueueStatusOptions = useMemo(
@@ -80,11 +82,17 @@ export default function MedicalRecordsReferralsPage() {
     setFormsLoading(true);
     try {
       const [fresh, forms] = await Promise.all([
-        referralService.getReferral(referral.id).catch(() => null),
-        referralService.getForms(referral.id).catch(() => []),
+        referralService.getReferral(referral.id),
+        referralService.getForms(referral.id),
       ]);
-      setSelectedReferral((fresh || referral) as ReferralWithPatient);
+      setSelectedReferral(fresh as ReferralWithPatient);
       setSelectedForms(forms || []);
+    } catch (error: unknown) {
+      if (handleAuthError(error)) return;
+      toast.error((error as Error)?.message || "Failed to load referral details");
+      setShowDetailsModal(false);
+      setSelectedReferral(null);
+      setSelectedForms([]);
     } finally {
       setFormsLoading(false);
     }
@@ -102,7 +110,7 @@ export default function MedicalRecordsReferralsPage() {
       void refetch();
       void refetchStats();
     } catch (error: unknown) {
-      if (isAuthenticationError(error)) return;
+      if (handleAuthError(error)) return;
       toast.error((error as Error)?.message || "Action failed");
     }
   };
@@ -132,18 +140,14 @@ export default function MedicalRecordsReferralsPage() {
         form.id
       );
       const [fresh, formsList] = await Promise.all([
-        referralService.getReferral(selectedReferral.id).catch(() => null),
-        referralService.getForms(selectedReferral.id).catch(() => []),
+        referralService.getReferral(selectedReferral.id),
+        referralService.getForms(selectedReferral.id),
       ]);
-      if (fresh) {
-        setSelectedReferral(fresh as ReferralWithPatient);
-        if (fresh.status === "approved_for_forms" || fresh.status === "scheduled") {
-          toast.success(
-            `Form #${form.sequence_number} stamped — referral marked Records acknowledged`
-          );
-        } else {
-          toast.success(`Responsibility form #${form.sequence_number} stamp recorded`);
-        }
+      setSelectedReferral(fresh as ReferralWithPatient);
+      if (fresh.status === "approved_for_forms" || fresh.status === "scheduled") {
+        toast.success(
+          `Form #${form.sequence_number} stamped — referral marked Records acknowledged`
+        );
       } else {
         toast.success(`Responsibility form #${form.sequence_number} stamp recorded`);
       }
@@ -151,7 +155,7 @@ export default function MedicalRecordsReferralsPage() {
       void refetch();
       void refetchStats();
     } catch (error: unknown) {
-      if (isAuthenticationError(error)) return;
+      if (handleAuthError(error)) return;
       toast.error((error as Error)?.message || "Failed to acknowledge form");
     } finally {
       setAcknowledgingFormId(null);

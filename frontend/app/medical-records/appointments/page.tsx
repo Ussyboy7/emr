@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -48,6 +48,8 @@ import { appointmentService, type Appointment } from "@/lib/services/appointment
 import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
 import { useOutpatientClinicTypes } from "@/hooks/use-outpatient-clinic-types";
 import { useClinic } from "@/hooks/use-clinic";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 /** Deep link to New Visit with patient + appointment date/time/type prefilled */
 function buildScheduleVisitHref(a: Appointment): string {
@@ -80,11 +82,12 @@ function formatAppointmentClinics(a: Appointment): string {
 }
 
 export default function AppointmentsPage() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const { names: opdClinicNames } = useOutpatientClinicTypes();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   /** Preset row — same options as Manage Visits */
@@ -124,49 +127,44 @@ export default function AppointmentsPage() {
   });
 
   const [createPatientSearch, setCreatePatientSearch] = useState("");
+  const debouncedCreatePatientSearch = useDebouncedValue(
+    showCreateDialog ? createPatientSearch : "",
+    300
+  );
   const [createPatientResults, setCreatePatientResults] = useState<ApiPatient[]>([]);
   const [createPatientSearching, setCreatePatientSearching] = useState(false);
   const [selectedCreatePatient, setSelectedCreatePatient] = useState<ApiPatient | null>(null);
-  const createPatientSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    if (!showCreateDialog) {
+    if (!ready || !showCreateDialog) {
       return;
     }
-    const q = createPatientSearch.trim();
-    if (createPatientSearchTimeoutRef.current) {
-      clearTimeout(createPatientSearchTimeoutRef.current);
-      createPatientSearchTimeoutRef.current = null;
-    }
+    const q = debouncedCreatePatientSearch.trim();
     if (!q) {
       setCreatePatientResults([]);
       setCreatePatientSearching(false);
       return;
     }
+    let cancelled = false;
     setCreatePatientSearching(true);
-    createPatientSearchTimeoutRef.current = setTimeout(async () => {
-      createPatientSearchTimeoutRef.current = null;
+    void (async () => {
       try {
         const res = await patientService.getPatients({ search: q, page_size: DEFAULT_LIST_PAGE_SIZE });
-        setCreatePatientResults(res.results || []);
-      } catch (e: any) {
-        toast.error(e?.message || "Patient search failed");
-        setCreatePatientResults([]);
+        if (!cancelled) setCreatePatientResults(res.results || []);
+      } catch (e: unknown) {
+        if (handleAuthError(e)) return;
+        if (!cancelled) {
+          toast.error(e instanceof Error ? e.message : "Patient search failed");
+          setCreatePatientResults([]);
+        }
       } finally {
-        setCreatePatientSearching(false);
+        if (!cancelled) setCreatePatientSearching(false);
       }
-    }, 300);
+    })();
     return () => {
-      if (createPatientSearchTimeoutRef.current) {
-        clearTimeout(createPatientSearchTimeoutRef.current);
-      }
+      cancelled = true;
     };
-  }, [createPatientSearch, showCreateDialog]);
+  }, [ready, showCreateDialog, debouncedCreatePatientSearch, handleAuthError]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -200,6 +198,7 @@ export default function AppointmentsPage() {
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
     (async () => {
       try {
@@ -213,7 +212,7 @@ export default function AppointmentsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ready]);
 
   const fetchAppointments = useCallback(async () => {
     setIsLoading(true);
@@ -240,6 +239,7 @@ export default function AppointmentsPage() {
       setTotalPages(Math.max(1, Math.ceil(count / pageSize)));
     } catch (error: any) {
       console.error("Error fetching appointments:", error);
+      if (handleAuthError(error)) return;
       toast.error(error.message || "Failed to load appointments");
     } finally {
       setIsLoading(false);
@@ -252,6 +252,7 @@ export default function AppointmentsPage() {
     typeFilter,
     clinicFilter,
     buildAppointmentDateParams,
+    handleAuthError,
   ]);
 
   const loadStats = useCallback(async () => {
@@ -279,12 +280,14 @@ export default function AppointmentsPage() {
   }, [debouncedSearchQuery, typeFilter, clinicFilter, buildAppointmentDateParams]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadStats();
-  }, [loadStats]);
+  }, [ready, loadStats]);
 
   useEffect(() => {
+    if (!ready) return;
     fetchAppointments();
-  }, [fetchAppointments]);
+  }, [ready, fetchAppointments]);
 
   const resetCreatePatientPicker = () => {
     setCreatePatientSearch("");
@@ -901,7 +904,7 @@ export default function AppointmentsPage() {
             }
           }}
         >
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5 text-blue-500" />
@@ -1127,7 +1130,7 @@ export default function AppointmentsPage() {
 
         {/* Edit Appointment Dialog */}
         <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-blue-500" />
@@ -1271,7 +1274,7 @@ export default function AppointmentsPage() {
 
         {/* View Appointment Dialog */}
         <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Eye className="h-5 w-5 text-blue-500" />

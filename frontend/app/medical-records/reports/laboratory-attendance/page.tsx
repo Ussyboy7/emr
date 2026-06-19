@@ -11,6 +11,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface LabCategoryData {
   sn: number;
@@ -49,6 +50,7 @@ function normalizeSummary(raw?: Partial<LabSummary> & { total_visits?: number } 
 }
 
 export default function LaboratoryAttendanceReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -88,6 +90,7 @@ export default function LaboratoryAttendanceReport() {
       setSummary(normalizeSummary(response.summary));
     } catch (error: unknown) {
       console.error("Error fetching lab report:", error);
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load laboratory report");
       setData([]);
       setSummary(emptySummary);
@@ -97,6 +100,7 @@ export default function LaboratoryAttendanceReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);

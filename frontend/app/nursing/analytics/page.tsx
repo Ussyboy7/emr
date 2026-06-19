@@ -19,6 +19,7 @@ import { localMonthBounds, peekServerTodayMonthPrefix, peekServerTodayYear } fro
 import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { useNursingPageAuth } from "@/hooks/use-nursing-page-auth";
 import { nursingService, type NursingAnalyticsSummary } from '@/lib/services';
 
 type ComprehensiveAnalytics = NursingAnalyticsSummary;
@@ -31,6 +32,7 @@ const CHART_COLORS = {
 };
 
 export default function NursingAnalyticsPage() {
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [loading, setLoading] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<ComprehensiveAnalytics | null>(null);
   const [year, setYear] = useState(new Date().getFullYear().toString());
@@ -76,9 +78,10 @@ export default function NursingAnalyticsPage() {
     try {
       const data = await nursingService.getAnalyticsSummary(params);
       setAnalyticsData(data);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error loading analytics:", error);
-      toast.error(error?.message || "Failed to load nursing analytics");
+      if (handleAuthError(error)) return;
+      toast.error(error instanceof Error ? error.message : "Failed to load nursing analytics");
       emptyState();
     } finally {
       setLoading(false);
@@ -86,10 +89,11 @@ export default function NursingAnalyticsPage() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) {
       void loadAnalytics();
     }
-  }, [reportRange, viewMode]);
+  }, [ready, reportRange, viewMode]);
 
   const periodBreakdown = useMemo(() => {
     if (!analyticsData) return [];

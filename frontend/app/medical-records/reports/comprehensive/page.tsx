@@ -23,6 +23,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface TrendRow {
   month: string;
@@ -91,6 +92,7 @@ function SectionLink({ href, label }: { href: string; label: string }) {
 }
 
 export default function ComprehensiveReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -125,6 +127,7 @@ export default function ComprehensiveReport() {
       setReportData(response);
     } catch (error: unknown) {
       console.error("Error fetching comprehensive report:", error);
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load comprehensive report");
       setReportData(null);
     } finally {
@@ -133,6 +136,7 @@ export default function ComprehensiveReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);

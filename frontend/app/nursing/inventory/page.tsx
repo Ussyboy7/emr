@@ -2,6 +2,9 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { formatPackDisplay, resolvePackSize } from '@/lib/pharmacy/dispense-quantity';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -12,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { MODAL_SIZES, modalNoOverflow } from '@/components/ui/modal-sizes';
 import { pharmacyService } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import {
@@ -20,6 +24,7 @@ import {
 } from 'lucide-react';
 import { toApiDateFromInstant } from '@/lib/dates';
 import { MEDICATION_CATEGORIES } from '@/lib/constants/pharmacy';
+import { toast } from 'sonner';
 
 interface MedicationBatch {
   id: string;
@@ -51,11 +56,13 @@ interface MedicationInventoryItem {
 const categories = MEDICATION_CATEGORIES;
 
 export default function NursingInventoryPage() {
+  const { ready, handleAuthError } = useNursingPageAuth();
   const location = PHARMACY_LOCATIONS.WARD_CARE;
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [stockFilter, setStockFilter] = useState('all');
 
@@ -96,7 +103,7 @@ export default function NursingInventoryPage() {
         category,
         strength,
         dosageForm,
-        packSize: medication.pack_size || 10,
+        packSize: resolvePackSize(medication),
         manufacturer: medication.manufacturer || '',
         currentStock: Number(item.quantity),
         minimumStock: Number(item.min_stock_level),
@@ -131,8 +138,10 @@ export default function NursingInventoryPage() {
       });
     } catch (err) {
       console.error('Error loading ward care inventory stats:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load inventory statistics');
     }
-  }, [location]);
+  }, [location, handleAuthError]);
 
   const loadInventory = useCallback(async (opts: { silent?: boolean } = {}) => {
     try {
@@ -143,7 +152,7 @@ export default function NursingInventoryPage() {
       const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
-        search: searchQuery || undefined,
+        search: debouncedSearch.trim() || undefined,
         location,
       };
       if (categoryFilter !== 'All Categories') params.medication__category = categoryFilter;
@@ -151,15 +160,17 @@ export default function NursingInventoryPage() {
       const response = await pharmacyService.getInventory(params);
       setTotalCount(response.count || response.results.length);
       setInventory(transformInventoryItems(response.results));
-    } catch (err: any) {
+    } catch (err: unknown) {
+      if (handleAuthError(err)) return;
       if (!opts.silent) {
-        setError(err.message || 'Failed to load inventory');
+        const msg = err instanceof Error ? err.message : 'Failed to load inventory';
+        setError(msg);
       }
       console.error('Error loading ward care inventory:', err);
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, categoryFilter, stockFilter, location]);
+  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, stockFilter, location, handleAuthError]);
 
   const silentRefresh = useCallback(() => {
     void loadWardCareStats();
@@ -167,26 +178,20 @@ export default function NursingInventoryPage() {
   }, [loadWardCareStats, loadInventory]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadWardCareStats();
-  }, [loadWardCareStats]);
+  }, [ready, loadWardCareStats]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadInventory();
-  }, [loadInventory]);
+  }, [ready, loadInventory]);
 
   useEffect(() => {
     if (currentPage !== 1) setCurrentPage(1);
-  }, [searchQuery, categoryFilter, stockFilter]);
+  }, [debouncedSearch, categoryFilter, stockFilter]);
 
   useReloadOnFocus(silentRefresh);
-
-  // Stats are loaded from the server (cheap counts) instead of fetching all inventory.
-
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
 
   const getDaysUntilExpiry = (expiryDate: string) => {
     const today = new Date();
@@ -463,7 +468,7 @@ export default function NursingInventoryPage() {
 
         {/* View Details Modal */}
         <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.ml}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3">
                 <Pill className="h-5 w-5 text-teal-500" />
@@ -517,7 +522,7 @@ export default function NursingInventoryPage() {
 
         {/* View Receipts Modal */}
         <Dialog open={showBatchesModal} onOpenChange={setShowBatchesModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogContent className={`${modalNoOverflow('ml')} flex flex-col`}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Layers className="h-5 w-5 text-teal-500" />

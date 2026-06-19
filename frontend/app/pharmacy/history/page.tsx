@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -9,7 +9,10 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
 import { pharmacyService } from '@/lib/services';
+import { formatIssuedQuantityDisplay } from '@/lib/pharmacy/dispense-quantity';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { formatDisplayDate, formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import { getServerToday, peekServerTimezone } from '@/lib/utils/serverTime';
@@ -27,6 +30,7 @@ interface DispenseHistoryRecord {
     prescribed: string;
     dispensed: string;
     quantity: number;
+    quantityDisplay: string;
     unit?: string;
     prescribedUnit?: string;
     isSubstituted: boolean;
@@ -43,10 +47,12 @@ interface DispenseHistoryRecord {
 }
 
 export default function DispenseHistoryPage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const [history, setHistory] = useState<DispenseHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -63,33 +69,31 @@ export default function DispenseHistoryPage() {
   const [selectedRecord, setSelectedRecord] = useState<DispenseHistoryRecord | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
-  useEffect(() => {
-    loadHistory();
-  }, [currentPage, itemsPerPage, searchQuery, genderFilter, dateFilter]);
-
-  const loadSummaryStats = async () => {
+  const loadSummaryStats = useCallback(async () => {
     setSummaryLoading(true);
     setSummaryError(null);
     try {
       const s = await pharmacyService.getDispenseHistorySummaryStats({
-        search: searchQuery.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         date_preset: dateFilter !== 'all' ? dateFilter : undefined,
       });
       setSummaryStats(s);
     } catch (e: unknown) {
+      if (handleAuthError(e)) return;
       setSummaryStats(null);
       setSummaryError(e instanceof Error ? e.message : 'Failed to load summary statistics');
     } finally {
       setSummaryLoading(false);
     }
-  };
+  }, [debouncedSearch, genderFilter, dateFilter, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadSummaryStats();
-  }, [searchQuery, genderFilter, dateFilter]);
+  }, [loadSummaryStats, ready]);
 
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -98,7 +102,7 @@ export default function DispenseHistoryPage() {
         pharmacyService.getDispenseHistory({
           page: currentPage,
           page_size: itemsPerPage,
-          search: searchQuery.trim() || undefined,
+          search: debouncedSearch.trim() || undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
           date_preset: dateFilter !== 'all' ? dateFilter : undefined,
         }),
@@ -129,10 +133,17 @@ export default function DispenseHistoryPage() {
             ? (dispense.prescribed_generic_name || '')
             : (dispense.prescribed_medication_name || '');
         const dispensedName = dispense.medication_name || '';
+        const quantityUnits = Number(dispense.quantity || 0);
+        const quantityDisplay = formatIssuedQuantityDisplay(
+          quantityUnits,
+          { pack_size: dispense.medication_pack_size, unit: dispense.unit },
+          dispense.quantity_entry_mode
+        );
         const medications = [{
           prescribed: prescribedName,
           dispensed: dispensedName,
-          quantity: Number(dispense.quantity || 0),
+          quantity: quantityUnits,
+          quantityDisplay,
           unit: dispense.unit || '',
           prescribedUnit: dispense.prescribed_unit || '',
           isSubstituted: context === 'substituted',
@@ -175,12 +186,18 @@ export default function DispenseHistoryPage() {
       }));
       setHistory(transformed);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load dispense history');
       console.error('Error loading dispense history:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, itemsPerPage, debouncedSearch, genderFilter, dateFilter, handleAuthError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadHistory();
+  }, [loadHistory, ready]);
 
   const stats = useMemo(() => {
     if (!summaryStats) return null;
@@ -525,7 +542,7 @@ export default function DispenseHistoryPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-2 ml-4">
-                            <span className="font-bold text-lg">×{med.quantity}{med.unit ? ` ${med.unit}` : ''}</span>
+                            <span className="font-bold text-lg">×{med.quantityDisplay}</span>
                           </div>
                         </div>
                       </div>

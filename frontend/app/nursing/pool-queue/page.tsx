@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,8 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { visitService, roomService, type Visit } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { apiFetch } from '@/lib/api-client';
 import {
   getQueuePriorityFromVisitType,
@@ -161,8 +162,6 @@ export default function NursingPoolQueuePage() {
     }
   };
   const [patients, setPatients] = useState<NursingPatient[]>([]);
-  /** Client-side buffer when filtering "Checked in to Physiotherapy" (not supported server-side). */
-  const [physioClientBuffer, setPhysioClientBuffer] = useState<NursingPatient[] | null>(null);
   const [totalVisitCount, setTotalVisitCount] = useState(0);
   const [poolMetrics, setPoolMetrics] = useState({
     total: 0,
@@ -184,8 +183,7 @@ export default function NursingPoolQueuePage() {
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [sendingToPhysioVisitId, setSendingToPhysioVisitId] = useState<number | null>(null);
   const [markingLeftVisitId, setMarkingLeftVisitId] = useState<number | null>(null);
   const [markLeftPatient, setMarkLeftPatient] = useState<NursingPatient | null>(null);
@@ -194,6 +192,7 @@ export default function NursingPoolQueuePage() {
   const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [eyeCheckins, setEyeCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -237,7 +236,7 @@ export default function NursingPoolQueuePage() {
           date: dateParam,
           start_date: startDate,
           end_date: endDate,
-          search: searchQuery || undefined,
+          search: debouncedSearchQuery.trim() || undefined,
           visit_type: typeFilter !== 'all' ? typeFilter : undefined,
           clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         };
@@ -251,20 +250,18 @@ export default function NursingPoolQueuePage() {
                 ? ('ready' as const)
                 : statusFilter === 'sent-to-room'
                   ? ('sent_to_room' as const)
-                  : statusFilter === 'completed'
-                    ? ('completed' as const)
-                    : undefined;
+                  : statusFilter === 'sent-to-physiotherapy'
+                    ? ('sent_to_physiotherapy' as const)
+                    : statusFilter === 'completed'
+                      ? ('completed' as const)
+                      : undefined;
 
-        const usePhysioClientFilter = statusFilter === 'sent-to-physiotherapy';
-
-        const visitFetch = visitService.getVisits({
+        const result = await visitService.getVisits({
           ...metricsParams,
-          nursing_status: usePhysioClientFilter ? undefined : nursingStatusApi,
-          page: usePhysioClientFilter ? 1 : currentPage,
-          page_size: usePhysioClientFilter ? MAX_LIST_PAGE_SIZE : itemsPerPage,
+          nursing_status: nursingStatusApi,
+          page: currentPage,
+          page_size: itemsPerPage,
         });
-
-        const result = await visitFetch;
 
         // Fire metrics and enrichment in parallel — none depend on each other,
         // only on the visit IDs from the main query.
@@ -279,6 +276,8 @@ export default function NursingPoolQueuePage() {
               setPoolMetrics(metrics);
             } catch (me: unknown) {
               console.warn('Nursing pool metrics failed', me);
+              if (handleAuthError(me)) return;
+              toast.error('Failed to load pool statistics');
             }
           })(),
 
@@ -508,25 +507,14 @@ export default function NursingPoolQueuePage() {
           return va - vb;
         });
 
-        if (usePhysioClientFilter) {
-          const physioRows = sortedByStage.filter((p) => p.nursingStatus === 'Sent to Physiotherapy');
-          setPhysioClientBuffer(physioRows);
-          setTotalVisitCount(physioRows.length);
-          setPatients([]);
-        } else {
-          setPhysioClientBuffer(null);
-          setPatients(sortedByStage);
-          setTotalVisitCount(result.count ?? transformedPatients.length);
-        }
+        setPatients(sortedByStage);
+        setTotalVisitCount(result.count ?? transformedPatients.length);
 
-        return usePhysioClientFilter
-          ? sortedByStage.filter((p) => p.nursingStatus === 'Sent to Physiotherapy')
-          : sortedByStage;
+        return sortedByStage;
       } catch (err) {
         console.error('Error loading nursing pool data:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else if (!silent) {
+        if (handleAuthError(err)) return null;
+        if (!silent) {
           setError('Failed to load nursing pool queue. Please try again.');
         }
         return null;
@@ -541,23 +529,27 @@ export default function NursingPoolQueuePage() {
     statusFilter,
     dateRange.from,
     dateRange.to,
-    searchQuery,
+    debouncedSearchQuery,
     typeFilter,
     clinicFilter,
     currentPage,
     itemsPerPage,
     serverToday,
+    handleAuthError,
   ]);
 
   // Load data when filters change
   useEffect(() => {
+    if (!ready) return;
     loadData();
   }, [
+    ready,
+    loadData,
     dateFilter,
     statusFilter,
     dateRange.from,
     dateRange.to,
-    searchQuery,
+    debouncedSearchQuery,
     typeFilter,
     clinicFilter,
     currentPage,
@@ -643,9 +635,11 @@ export default function NursingPoolQueuePage() {
     const loadRooms = async () => {
       setRoomsLoading(true);
       try {
-        const roomsResult = await roomService.getRooms({ page_size: MAX_LIST_PAGE_SIZE });
+        const allRooms = await fetchAllPaginatedResults((page, page_size) =>
+          roomService.getRooms({ page, page_size })
+        );
         if (cancelled) return;
-        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
+        const transformedRooms: ConsultationRoom[] = allRooms.map((room: any) => ({
           id: String(room.id),
           name: room.name,
           status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
@@ -657,6 +651,9 @@ export default function NursingPoolQueuePage() {
         setRooms(transformedRooms);
       } catch (err) {
         console.error('Error loading rooms:', err);
+        if (cancelled) return;
+        if (handleAuthError(err)) return;
+        toast.error('Failed to load consultation rooms');
       } finally {
         if (!cancelled) setRoomsLoading(false);
       }
@@ -665,20 +662,11 @@ export default function NursingPoolQueuePage() {
     return () => {
       cancelled = true;
     };
-  }, [isRoomPickerOpen, rooms.length]);
-
-  /** Server returns one page; physiotherapy filter uses client buffer + slice. */
-  const displayedPatients = useMemo(() => {
-    if (physioClientBuffer) {
-      const start = (currentPage - 1) * itemsPerPage;
-      return physioClientBuffer.slice(start, start + itemsPerPage);
-    }
-    return patients;
-  }, [physioClientBuffer, patients, currentPage, itemsPerPage]);
+  }, [isRoomPickerOpen, rooms.length, handleAuthError]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -1212,7 +1200,7 @@ export default function NursingPoolQueuePage() {
               <p className="text-sm text-muted-foreground">
                 Showing{' '}
                 <span className="font-medium text-foreground">
-                  {physioClientBuffer ? physioClientBuffer.length : totalVisitCount}
+                  {totalVisitCount}
                 </span>{' '}
                 patients
               </p>
@@ -1220,7 +1208,7 @@ export default function NursingPoolQueuePage() {
 
         {/* Patient Queue */}
         <div className="space-y-3">
-          {displayedPatients.length === 0 ? (
+          {patients.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Users className="h-12 w-12 text-muted-foreground mb-4" />
@@ -1233,7 +1221,7 @@ export default function NursingPoolQueuePage() {
               </CardContent>
             </Card>
           ) : (
-            displayedPatients.map((patient) => {
+            patients.map((patient) => {
               const hasPhysio = patient.clinics?.some((c: string) =>
                 clinicMatches(c, 'Physiotherapy', opdClinicNames)
               ) ?? false;
@@ -1565,11 +1553,11 @@ export default function NursingPoolQueuePage() {
         </div>
 
         {/* Pagination */}
-        {(physioClientBuffer ? physioClientBuffer.length > 0 : totalVisitCount > 0) && (
+        {totalVisitCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={physioClientBuffer ? physioClientBuffer.length : totalVisitCount}
+              totalItems={totalVisitCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
@@ -1590,7 +1578,7 @@ export default function NursingPoolQueuePage() {
             }
           }
         }}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto" onInteractOutside={(e) => {
+          <DialogContent className={MODAL_SIZES.ml} onInteractOutside={(e) => {
             // Prevent closing while submitting
             if (isSubmitting) {
               e.preventDefault();
@@ -1772,7 +1760,7 @@ export default function NursingPoolQueuePage() {
 
         {/* Room Picker Dialog */}
         <Dialog open={isRoomPickerOpen} onOpenChange={setIsRoomPickerOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowRight className="h-5 w-5 text-emerald-500" />
@@ -1838,7 +1826,7 @@ export default function NursingPoolQueuePage() {
         </Dialog>
 
         <Dialog open={isMarkLeftDialogOpen} onOpenChange={setIsMarkLeftDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[520px]">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle>Mark Patient as Left</DialogTitle>
               <DialogDescription>

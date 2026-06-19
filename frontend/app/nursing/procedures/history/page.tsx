@@ -17,10 +17,11 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { nursingService } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
+import { toast } from 'sonner';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   resolveOrderedByName,
   resolveProcedureHistoryDetails,
@@ -216,11 +217,11 @@ function nursingProcedureToHistory(proc: any): CompletedProcedure {
 }
 
 export default function ProceduresHistoryPage() {
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [history, setHistory] = useState<CompletedProcedure[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [typeFilter, setTypeFilter] = useState('all');
@@ -243,8 +244,6 @@ export default function ProceduresHistoryPage() {
   // Dialog states
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedProcedure, setSelectedProcedure] = useState<CompletedProcedure | null>(null);
-
-  useAuthRedirect(authError);
 
   const appendHistoryFilters = useCallback(
     (qs: URLSearchParams, opts?: { skipDate?: boolean }) => {
@@ -285,8 +284,10 @@ export default function ProceduresHistoryPage() {
       });
     } catch (e) {
       console.error('Failed to load procedure history stats:', e);
+      if (handleAuthError(e)) return;
+      toast.error('Failed to load procedure history statistics');
     }
-  }, [debouncedSearch, genderFilter, dateFilter, dateRange.from, dateRange.to]);
+  }, [debouncedSearch, genderFilter, dateFilter, dateRange.from, dateRange.to, handleAuthError]);
 
   const loadHistoryPage = useCallback(async () => {
     try {
@@ -301,23 +302,22 @@ export default function ProceduresHistoryPage() {
       setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
     } catch (err) {
       console.error('Error loading procedures history:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError('Failed to load procedures history. Please try again.');
-      }
+      if (handleAuthError(err)) return;
+      setError('Failed to load procedures history. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [appendHistoryFilters, currentPage, itemsPerPage]);
+  }, [appendHistoryFilters, currentPage, itemsPerPage, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadHistoryStats();
-  }, [loadHistoryStats]);
+  }, [ready, loadHistoryStats]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadHistoryPage();
-  }, [loadHistoryPage]);
+  }, [ready, loadHistoryPage]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -577,7 +577,7 @@ export default function ProceduresHistoryPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {selectedProcedure && (() => {

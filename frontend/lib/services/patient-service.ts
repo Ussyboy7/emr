@@ -188,6 +188,10 @@ class PatientService {
     ordering?: string;
     page?: number;
     page_size?: number;
+    age_min?: number;
+    age_max?: number;
+    last_visit_after?: string;
+    last_visit_before?: string;
   }): Promise<{ results: Patient[]; count: number; next?: string; previous?: string }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Patient[]; count: number; next?: string; previous?: string }>(

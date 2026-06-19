@@ -203,7 +203,16 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     serializer_class = PatientAdmissionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'ward', 'bed', 'status', 'admission_type', 'admitting_doctor']
-    search_fields = ['admission_id', 'admission_diagnosis', 'presenting_complaint']
+    search_fields = [
+        'admission_id',
+        'admission_diagnosis',
+        'presenting_complaint',
+        'patient__patient_id',
+        'patient__personal_number',
+        'patient__surname',
+        'patient__first_name',
+        'patient__middle_name',
+    ]
     ordering_fields = ['admission_date', 'created_at']
     ordering = ['-admission_date']
 

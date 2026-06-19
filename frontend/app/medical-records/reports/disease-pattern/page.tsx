@@ -11,6 +11,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface DiseaseData {
   sn: number;
@@ -63,6 +64,7 @@ function normalizeSummary(raw?: Partial<DiseaseSummary> | null): DiseaseSummary 
 }
 
 export default function DiseasePatternReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -102,6 +104,7 @@ export default function DiseasePatternReport() {
       setSummary(normalizeSummary(response.summary));
     } catch (error: unknown) {
       console.error("Error fetching disease pattern:", error);
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load disease pattern report");
       setData([]);
       setSummary(emptySummary);
@@ -111,6 +114,7 @@ export default function DiseasePatternReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);

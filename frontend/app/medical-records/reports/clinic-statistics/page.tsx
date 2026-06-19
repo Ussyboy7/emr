@@ -8,6 +8,7 @@ import {
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
 import { useReportDateRange } from "@/hooks/use-report-date-range";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
 import { formatDisplayDateRange } from "@/lib/dates";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +39,7 @@ interface ClinicStatisticsReport {
 }
 
 function ClinicStatisticsContent() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const searchParams = useSearchParams();
   const { names: clinicNames, loading: clinicsLoading } = useOutpatientClinicTypes();
   const [selectedClinic, setSelectedClinic] = useState("");
@@ -87,17 +89,18 @@ function ClinicStatisticsContent() {
       );
       setReport(data);
     } catch (error: unknown) {
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load clinic statistics");
       setReport(null);
     } finally {
       setIsLoading(false);
     }
-  }, [buildQuery]);
+  }, [buildQuery, handleAuthError]);
 
   useEffect(() => {
-    if (!selectedClinic) return;
+    if (!ready || !selectedClinic) return;
     if (canFetchReportPeriod(viewMode, reportRange)) void fetchReport();
-  }, [fetchReport, selectedClinic, reportRange, metric, viewMode]);
+  }, [ready, fetchReport, selectedClinic, reportRange, metric, viewMode]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);

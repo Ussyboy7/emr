@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { useAuthenticatedPage } from "@/hooks/use-authenticated-page";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
+import { formatPackDisplay, packSizeForStockItem, requestInputToUnits } from "@/lib/pharmacy/stock-request-quantity";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,19 +65,8 @@ type RequestLine = {
   medication_pack_size?: number | null;
 };
 
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
-}
-
 export default function HodStoreRequestsPage() {
-  const { ready } = useAuthenticatedPage();
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = usePharmacyPageAuth();
 
   const [requestTab, setRequestTab] = useState<RequestTab>("incoming");
   const [loading, setLoading] = useState(true);
@@ -169,8 +158,7 @@ export default function HodStoreRequestsPage() {
       setRequests(response.results || []);
       setTotalRequests(response.count ?? response.results?.length ?? 0);
     } catch (err) {
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
+      if (handleAuthError(err)) {
         return;
       }
       console.error(err);
@@ -191,9 +179,7 @@ export default function HodStoreRequestsPage() {
         awaitingConfirmation: s.awaitingConfirmation,
       });
     } catch (err) {
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      }
+      handleAuthError(err);
     }
   };
 
@@ -232,15 +218,6 @@ export default function HodStoreRequestsPage() {
     };
   }, [debouncedMedSearch]);
 
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
-
-  const packSizeForItem = (item: { medication_pack_size?: number | null; medication?: number }) =>
-    item.medication_pack_size ?? null;
-
   const handleAddItem = () => {
     if (!selectedMedication) {
       toast.error("Select a medication");
@@ -252,7 +229,7 @@ export default function HodStoreRequestsPage() {
       toast.error("Enter a valid quantity (min 1)");
       return;
     }
-    const qty = packSize > 1 ? inputVal * packSize : inputVal;
+    const qty = requestInputToUnits(inputVal, packSize);
     if (qty > MAX_QUANTITY) {
       toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
       return;
@@ -886,7 +863,7 @@ export default function HodStoreRequestsPage() {
                           <p className="font-medium">{item.medication_name || "Unknown"}</p>
                           <p className="text-xs text-muted-foreground">
                             Requested:{" "}
-                            {formatPackDisplay(Number(item.quantity), packSizeForItem(item))}
+                            {formatPackDisplay(Number(item.quantity), packSizeForStockItem(item))}
                           </p>
                         </div>
                         {Number(item.fulfilled_quantity) > 0 && (
@@ -894,7 +871,7 @@ export default function HodStoreRequestsPage() {
                             ✓{" "}
                             {formatPackDisplay(
                               Number(item.fulfilled_quantity),
-                              packSizeForItem(item)
+                              packSizeForStockItem(item)
                             )}
                           </span>
                         )}
@@ -941,7 +918,7 @@ export default function HodStoreRequestsPage() {
                         <span className="font-medium">
                           {formatPackDisplay(
                             Number(item.fulfilled_quantity || item.quantity),
-                            packSizeForItem(item)
+                            packSizeForStockItem(item)
                           )}
                         </span>
                       </div>

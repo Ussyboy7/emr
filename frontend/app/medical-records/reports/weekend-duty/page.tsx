@@ -11,6 +11,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface WeekendSummary {
   total_weekend_visits: number;
@@ -58,6 +59,7 @@ function normalizeSummary(raw?: Partial<WeekendSummary> | null): WeekendSummary 
 }
 
 export default function WeekendDutyReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -103,6 +105,7 @@ export default function WeekendDutyReport() {
       setMonthlyData(response.monthly_data ?? []);
     } catch (error: unknown) {
       console.error("Error fetching weekend duty report:", error);
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load weekend duty report");
       setSummary(emptySummary);
       setCategoryRows([]);
@@ -113,6 +116,7 @@ export default function WeekendDutyReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);

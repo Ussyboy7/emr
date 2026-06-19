@@ -309,6 +309,7 @@ class WardService {
     /** "Recently discharged" view scope — discharge_date >= this date. */
     discharged_after?: string;
     discharged_before?: string;
+    search?: string;
   }): Promise<{ results: PatientAdmission[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: PatientAdmission[]; count: number }>(`/admissions/${query}`);

@@ -7,6 +7,7 @@ import {
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
 import { useReportDateRange } from "@/hooks/use-report-date-range";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
 import { formatDisplayDateRange } from "@/lib/dates";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +40,7 @@ interface AttendanceStatisticsReport {
 }
 
 export default function AttendanceStatisticsPage() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const [report, setReport] = useState<AttendanceStatisticsReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [metric, setMetric] = useState<Metric>("attendance_count");
@@ -75,6 +77,7 @@ export default function AttendanceStatisticsPage() {
       setReport(data);
     } catch (error: unknown) {
       console.error(error);
+      if (handleAuthError(error)) return;
       const msg = error instanceof Error ? error.message : "Failed to load report";
       toast.error(msg);
       setReport(null);
@@ -84,6 +87,7 @@ export default function AttendanceStatisticsPage() {
   }, [buildQuery]);
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) void fetchReport();
   }, [fetchReport, reportRange, metric, viewMode]);
 

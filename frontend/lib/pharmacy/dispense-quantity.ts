@@ -34,6 +34,30 @@ export function getPackSize(med?: PackQuantityMedication | null): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
+/** Resolve pack_size from API rows (number|string) or camelCase packSize. */
+export function resolvePackSize(
+  source?: (PackQuantityMedication & { packSize?: unknown }) | null
+): number {
+  if (!source) return 1;
+  const raw = source.pack_size ?? (source as { packSize?: unknown }).packSize;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return n;
+  return getPackSize(source);
+}
+
+/** Normalize UI medication rows for pack/units helpers. */
+export function asPackQuantityMedication(
+  med?: (PackQuantityMedication & { packSize?: number | null }) | null
+): PackQuantityMedication {
+  if (!med) return {};
+  return {
+    unit: med.unit,
+    form: med.form,
+    pack_size: resolvePackSize(med),
+    dispense_mode: med.dispense_mode,
+  };
+}
+
 export function canChooseQuantityEntryMode(mode: DispenseMode): boolean {
   return mode === "pack_or_units";
 }

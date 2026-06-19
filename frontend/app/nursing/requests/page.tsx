@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -19,6 +20,13 @@ import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
 import { formatDisplayDate, localMonthBounds, localWeekToTodayBounds, todayApiDateString, formatDisplayDateTime } from "@/lib/dates";
 import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye, HelpCircle, Package, ArrowLeft } from "lucide-react";
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import {
+  formatPackDisplay,
+  packSizeForRequestItem,
+  requestInputToUnits,
+} from '@/lib/pharmacy/stock-request-quantity';
 
 const MEDICATION_SEARCH_LIMIT = 20;
 const MAX_QUANTITY = 100000;
@@ -58,16 +66,8 @@ function medicationMatchesCatalog(m: Medication, tab: CatalogTab): boolean {
   return true;
 }
 
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
-}
-
 export default function NursingRequestsPage() {
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalRequests, setTotalRequests] = useState(0);
@@ -114,8 +114,15 @@ export default function NursingRequestsPage() {
     return p;
   }, [dateFilter]);
 
-  useEffect(() => { loadStats(); }, [debouncedSearchQuery, dateFilter]);
-  useEffect(() => { loadRequests(); }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter]);
+  useEffect(() => {
+    if (!ready) return;
+    void loadStats();
+  }, [ready, debouncedSearchQuery, dateFilter]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadRequests();
+  }, [ready, currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter]);
 
   const loadRequests = async () => {
     try {
@@ -133,6 +140,7 @@ export default function NursingRequestsPage() {
       setTotalRequests(response.count ?? response.results?.length ?? 0);
     } catch (err) {
       console.error("Error loading nursing requests:", err);
+      if (handleAuthError(err)) return;
       toast.error("Failed to load requests");
     } finally {
       setLoading(false);
@@ -154,8 +162,10 @@ export default function NursingRequestsPage() {
         confirmed: stats.confirmed,
         awaitingConfirmation: stats.awaitingConfirmation,
       });
-    } catch {
-      // ignore stats errors
+    } catch (err) {
+      console.error("Error loading nursing request stats:", err);
+      if (handleAuthError(err)) return;
+      toast.error("Failed to load request statistics");
     }
   };
 
@@ -164,7 +174,7 @@ export default function NursingRequestsPage() {
     const packSize = selectedMedication.pack_size ?? 1;
     const inputVal = parseInt(requestQuantity, 10);
     if (isNaN(inputVal) || inputVal < 1) { toast.error("Please enter a valid quantity (min 1)"); return; }
-    const qty = packSize > 1 ? inputVal * packSize : inputVal;
+    const qty = requestInputToUnits(inputVal, packSize);
     if (qty > MAX_QUANTITY) { toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`); return; }
     if (requestItems.find((i) => i.medication === selectedMedication.id)) { toast.error("This medication is already added"); return; }
     setRequestItems([...requestItems, { medication: selectedMedication.id, quantity: qty }]);
@@ -237,24 +247,21 @@ export default function NursingRequestsPage() {
             return next;
           });
         }
-      } catch {
-        if (!cancelled) setFilteredMedications([]);
+      } catch (err) {
+        if (cancelled) return;
+        if (handleAuthError(err)) return;
+        toast.error('Medication search failed');
+        setFilteredMedications([]);
       } finally {
         if (!cancelled) setIsSearchingMedications(false);
       }
     };
     void run();
     return () => { cancelled = true; };
-  }, [debouncedMedSearch, catalogTab]);
+  }, [debouncedMedSearch, catalogTab, handleAuthError]);
 
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
-
-  const packSizeForItem = (item: any) =>
-    item.medication_pack_size ?? medicationLookup[item.medication]?.pack_size ?? null;
+  const packSizeForItem = (item: { medication_pack_size?: number | null; medication?: number }) =>
+    packSizeForRequestItem(item, Object.values(medicationLookup));
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string; tip?: string }> = {
@@ -472,7 +479,7 @@ export default function NursingRequestsPage() {
 
         {/* New Request Modal */}
         <Dialog open={showNewRequestModal} onOpenChange={setShowNewRequestModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.ml}>
             <DialogHeader>
               <DialogTitle>Request Drugs from Central Store</DialogTitle>
               <DialogDescription>Request medications from Central Store to Ward Care stock</DialogDescription>
@@ -617,7 +624,7 @@ export default function NursingRequestsPage() {
 
         {/* Details Modal */}
         <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle>{selectedRequest?.request_id}</DialogTitle>
               <DialogDescription>Central Store → Ward Care</DialogDescription>
@@ -679,7 +686,7 @@ export default function NursingRequestsPage() {
 
         {/* Confirm Receipt Modal */}
         <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle>Confirm Stock Receipt</DialogTitle>
               <DialogDescription>Verify you have received the issued medications into the ward</DialogDescription>

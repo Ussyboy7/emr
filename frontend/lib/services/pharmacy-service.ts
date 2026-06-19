@@ -167,12 +167,20 @@ export interface Dispense {
   prescription: number;
   medication: number;
   medication_name?: string;
+  medication_pack_size?: number | null;
   quantity: number;
   unit: string;
+  quantity_entry_mode?: 'pack' | 'units' | '';
+  dispense_context?: string;
+  prescribed_generic_name?: string;
+  prescribed_medication_name?: string;
+  prescribed_unit?: string;
+  prescription_details?: Record<string, unknown>;
   batch_number?: string;
   dispensed_by?: number;
   dispensed_by_name?: string;
   dispensed_at: string;
+  location_clinic_name?: string;
 }
 
 export interface StockRequestItem {

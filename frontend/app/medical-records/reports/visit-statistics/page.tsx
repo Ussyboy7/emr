@@ -7,6 +7,7 @@ import {
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
 import { useReportDateRange } from "@/hooks/use-report-date-range";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RefreshCw, Activity, CheckCircle, XCircle, Clock, Calendar } from "lucide-react";
@@ -61,6 +62,7 @@ const statusStyles: Record<string, { label: string; color: string }> = {
 };
 
 export default function VisitStatisticsReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -110,6 +112,7 @@ export default function VisitStatisticsReport() {
       setHasLoaded(true);
     } catch (error: unknown) {
       console.error("Error fetching visit statistics:", error);
+      if (handleAuthError(error)) return;
       const msg = error instanceof Error ? error.message : "Failed to load visit statistics";
       toast.error(msg);
       setData([]);
@@ -121,8 +124,9 @@ export default function VisitStatisticsReport() {
   }, [buildQuery]);
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) void fetchReport();
-  }, [fetchReport, reportRange, viewMode]);
+  }, [ready, fetchReport, reportRange, viewMode]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);

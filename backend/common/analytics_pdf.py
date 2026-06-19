@@ -93,6 +93,7 @@ def build_nursing_analytics_pdf(report: dict, *, generated_by: str = "", departm
 def build_pharmacy_analytics_pdf(report: dict, *, generated_by: str = "", department: str = "PHARMACY") -> bytes:
     dispensing = report.get("dispensing") or {}
     prescribing = report.get("prescribing") or {}
+    hod_store = report.get("hod_store") or {}
     summary_pairs = [
         ("Dispense events", dispensing.get("dispense_events", 0)),
         ("Total quantity dispensed", dispensing.get("total_quantity_all_units", 0)),
@@ -100,6 +101,11 @@ def build_pharmacy_analytics_pdf(report: dict, *, generated_by: str = "", depart
         ("Unique patients dispensed", dispensing.get("unique_patients", 0)),
         ("New prescriptions written", prescribing.get("new_prescriptions", 0)),
     ]
+    if hod_store:
+        summary_pairs.extend([
+            ("HOD issue events", hod_store.get("issue_events", 0)),
+            ("HOD total quantity issued", hod_store.get("total_quantity_all_units", 0)),
+        ])
     top_qty = [
         [r.get("name", ""), r.get("total_quantity", 0), r.get("dispense_events", 0)]
         for r in (report.get("top_medications_by_quantity") or [])[:15]
@@ -112,6 +118,19 @@ def build_pharmacy_analytics_pdf(report: dict, *, generated_by: str = "", depart
         ("Top medications (quantity)", ["Medication", "Quantity", "Events"], top_qty),
         ("Monthly dispensing", ["Month", "Events", "Prescriptions"], month_rows),
     ]
+    if hod_store:
+        hod_top = [
+            [r.get("name", ""), r.get("total_quantity", 0), r.get("issue_events", 0)]
+            for r in (hod_store.get("top_medications_by_quantity") or [])[:15]
+        ]
+        hod_by_day = [
+            [r.get("date", ""), r.get("issue_events", 0), r.get("total_quantity", 0)]
+            for r in (hod_store.get("by_day") or [])
+        ]
+        sections.extend([
+            ("HOD store — top medications", ["Medication", "Quantity", "Events"], hod_top),
+            ("HOD store — daily issues", ["Date", "Events", "Quantity"], hod_by_day),
+        ])
     return _module_pdf(
         report,
         title="Pharmacy Analytics",

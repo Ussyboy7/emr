@@ -8,42 +8,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { patientService, formatPatientGenderLabel, type Patient as ApiPatient } from "@/lib/services";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
+import { formatPatientCategoryLabel, getPatientCategoryBadgeClass } from "@/lib/medical-records/patient-category";
 import { Search, FileBarChart, Loader2, Users, ChevronRight, Stethoscope, Activity, FlaskConical, Pill, Heart } from "lucide-react";
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 
-const categoryMap: Record<string, string> = {
-  employee: "Employee",
-  retiree: "Retiree",
-  dependent: "Dependent",
-  nonnpa: "NonNPA",
-};
-
-const getCategoryColor = (category: string) => {
-  switch (category) {
-    case "employee":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-    case "retiree":
-      return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
-    case "dependent":
-      return "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300";
-    case "nonnpa":
-      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
-    default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300";
-  }
-};
-
 export default function PatientRecordsPage() {
   const router = useRouter();
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ApiPatient[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
   const [recentSearches, setRecentSearches] = useState<ApiPatient[]>([]);
   const [recentSearchesReady, setRecentSearchesReady] = useState(false);
 
@@ -51,12 +29,11 @@ export default function PatientRecordsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(50);
-  
-  useAuthRedirect(authError);
 
   // Recent list is cached in localStorage (browser-only), not from the server.
   // Re-validate against the API so deleted / DB-reset patients disappear.
   useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
 
     (async () => {
@@ -128,7 +105,7 @@ export default function PatientRecordsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ready]);
 
   const search = useCallback(async (page = 1) => {
     const q = query.trim();
@@ -150,19 +127,15 @@ export default function PatientRecordsPage() {
       setResults(res.results || []);
       setTotalCount(res.count || res.results?.length || 0);
       setCurrentPage(page);
-      setAuthError(null);
     } catch (err: unknown) {
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError(err instanceof Error ? err.message : "Search failed");
-      }
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : "Search failed");
       setResults([]);
       setTotalCount(0);
     } finally {
       setLoading(false);
     }
-  }, [query, itemsPerPage]);
+  }, [query, itemsPerPage, handleAuthError]);
 
   const openRecords = (p: ApiPatient) => {
     // Save to recent searches
@@ -332,8 +305,8 @@ export default function PatientRecordsPage() {
                           <h3 className="font-semibold text-foreground truncate">
                             {p.full_name ?? ""}
                           </h3>
-                          <Badge className={`text-[10px] px-1.5 py-0 ${getCategoryColor(p.category)}`}>
-                            {categoryMap[p.category] || p.category}
+                          <Badge className={`text-[10px] px-1.5 py-0 ${getPatientCategoryBadgeClass(p.category)}`}>
+                            {formatPatientCategoryLabel(p.category)}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground flex-wrap">

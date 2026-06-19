@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -11,11 +10,13 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api-client';
 import { roomService, consultationService } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
 import { getServerToday } from '@/lib/utils/serverTime';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import {
@@ -69,43 +70,32 @@ export default function RoomQueuePage() {
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [roomFilter, setRoomFilter] = useState('all');
   const [visitTypeFilter, setVisitTypeFilter] = useState('all');
   
-  // Load rooms and queue from API
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Load rooms, sessions, today, and queue in parallel
-        const [roomsResult, sessionsResult, today, queueResult, todayCountByRoom] = await Promise.all([
-          roomService.getRooms({ page_size: MAX_LIST_PAGE_SIZE }),
-          consultationService.getSessions({ status: 'active', page_size: MAX_LIST_PAGE_SIZE }).catch(() => ({ results: [], count: 0 })),
-          (async () => {
-            try {
-              return await getServerToday();
-            } catch {
-              return formatLocalYmd(new Date());
-            }
-          })(),
-          consultationService.getQueue({ is_active: true, page_size: MAX_LIST_PAGE_SIZE }).catch(() => ({ results: [], count: 0 })),
-          (async () => {
-            try {
-              const day = await getServerToday();
-              return await consultationService.getRoomDaySessionCounts(day);
-            } catch {
-              return {} as Record<string, number>;
-            }
-          })(),
-        ]);
-        
-        const activeSessions = sessionsResult.results || [];
-        const queueItems = queueResult.results || [];
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [roomsResult, activeSessions, today, queueItems, todayCountByRoom] = await Promise.all([
+        fetchAllPaginatedResults((page, page_size) =>
+          roomService.getRooms({ page, page_size })
+        ),
+        fetchAllPaginatedResults((page, page_size) =>
+          consultationService.getSessions({ status: 'active', page, page_size })
+        ),
+        getServerToday().catch(() => formatLocalYmd(new Date())),
+        fetchAllPaginatedResults((page, page_size) =>
+          consultationService.getQueue({ is_active: true, page, page_size })
+        ),
+        getServerToday()
+          .then((day) => consultationService.getRoomDaySessionCounts(day))
+          .catch(() => ({} as Record<string, number>)),
+      ]);
         
         // Group sessions by room
         const sessionsByRoom: Record<string, any[]> = {};
@@ -120,7 +110,7 @@ export default function RoomQueuePage() {
         // Count today's sessions per room (aggregate from backend)
         const todayCountByRoomResolved = todayCountByRoom;
         
-        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
+        const transformedRooms: ConsultationRoom[] = roomsResult.map((room: any) => {
           const roomId = String(room.id);
           const activeSession = sessionsByRoom[roomId]?.[0];
           const isOccupied = !!activeSession;
@@ -151,7 +141,7 @@ export default function RoomQueuePage() {
         // queueItems already loaded in parallel above
         
         // Create a map of rooms by ID for quick lookup
-        const roomsMap = new Map(roomsResult.results.map((room: any) => [String(room.id), room]));
+        const roomsMap = new Map(roomsResult.map((room: any) => [String(room.id), room]));
         
         // Transform queue items using embedded patient/visit/vitals from queue serializer
         const transformedPatients = queueItems.map((item: any) => {
@@ -199,21 +189,20 @@ export default function RoomQueuePage() {
         });
         
         const validPatients = transformedPatients.filter((p): p is QueuedPatient => p !== null);
-        setPatients(validPatients);
-      } catch (err) {
-        console.error('Error loading room queue data:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load room queue data. Please try again.');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    loadData();
-  }, []);
+      setPatients(validPatients);
+    } catch (err) {
+      console.error('Error loading room queue data:', err);
+      if (handleAuthError(err)) return;
+      setError('Failed to load room queue data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [handleAuthError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadData();
+  }, [ready, loadData]);
   
   // Dialog states
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
@@ -225,16 +214,18 @@ export default function RoomQueuePage() {
 
   // Filter patients
   const filteredPatients = useMemo(() => {
+    const q = debouncedSearchQuery.trim().toLowerCase();
     return patients.filter(p => {
-      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           p.personalNumber.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = !q ||
+                           p.name.toLowerCase().includes(q) ||
+                           p.patientId.toLowerCase().includes(q) ||
+                           p.personalNumber.toLowerCase().includes(q);
       const matchesRoom = roomFilter === 'all' || p.roomId === roomFilter;
       const matchesVisitType =
         visitTypeFilter === 'all' || normalizeVisitTypeKey(p.visitType) === visitTypeFilter;
       return matchesSearch && matchesRoom && matchesVisitType;
     });
-  }, [patients, searchQuery, roomFilter, visitTypeFilter]);
+  }, [patients, debouncedSearchQuery, roomFilter, visitTypeFilter]);
 
   // Group patients by room
   const patientsByRoom = useMemo(() => {
@@ -293,15 +284,11 @@ export default function RoomQueuePage() {
         return;
       }
 
-      console.log('Reassigning patient from room', selectedPatient.roomId, 'to room', selectedNewRoom);
-
       // Update queue item to assign to new room
-      const response = await apiFetch(`/consultation/queue/${queueItemId}/`, {
+      await apiFetch(`/consultation/queue/${queueItemId}/`, {
         method: 'PATCH',
         body: JSON.stringify({ room: newRoomId }),
       });
-
-      console.log('Reassign response:', response);
 
       const oldRoom = rooms.find(r => r.id === selectedPatient.roomId);
       const newRoom = rooms.find(r => r.id === selectedNewRoom);
@@ -591,7 +578,7 @@ export default function RoomQueuePage() {
 
         {/* Reassign Dialog */}
         <Dialog open={isReassignDialogOpen} onOpenChange={setIsReassignDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowLeftRight className="h-5 w-5 text-blue-500" />
@@ -651,7 +638,7 @@ export default function RoomQueuePage() {
 
         {/* Patient Details Dialog */}
         <Dialog open={isPatientDetailsOpen} onOpenChange={setIsPatientDetailsOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <User className="h-5 w-5 text-emerald-500" />

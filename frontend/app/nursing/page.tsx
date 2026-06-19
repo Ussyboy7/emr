@@ -23,8 +23,7 @@ import {
   BarChart3,
   DoorOpen,
 } from "lucide-react";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { useNursingPageAuth } from "@/hooks/use-nursing-page-auth";
 import { useServerToday } from "@/hooks/use-server-today";
 import {
   nursingService,
@@ -52,9 +51,7 @@ const defaultDashboard: NursingDashboardData = {
 export default function NursingDashboardPage() {
   const router = useRouter();
   const serverToday = useServerToday();
-  const [authError, setAuthError] = useState<unknown>(null);
-  useAuthRedirect(authError);
-
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState<NursingDashboardData>(defaultDashboard);
 
@@ -65,19 +62,17 @@ export default function NursingDashboardPage() {
       setDashboard(data);
     } catch (error) {
       console.error("Error loading nursing dashboard:", error);
-      if (isAuthenticationError(error)) {
-        setAuthError(error);
-      } else {
-        toast.error("Failed to load nursing dashboard. Please try again.");
-      }
+      if (handleAuthError(error)) return;
+      toast.error("Failed to load nursing dashboard. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [serverToday]);
+  }, [serverToday, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadDashboard();
-  }, [loadDashboard]);
+  }, [ready, loadDashboard]);
 
   const { metrics, pendingTasks, recentActivities, criticalAlerts, poolQueueCount, roomQueueCount } =
     dashboard;

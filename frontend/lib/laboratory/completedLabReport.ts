@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import { getMediaUrl } from '@/lib/media-url';
 import { transformPriority } from '@/lib/services/transformers';
 import { apiFetch } from '@/lib/api-client';
 import {
@@ -7,19 +8,9 @@ import {
   type ResultStatus,
 } from '@/lib/laboratory/template-utils';
 
-/** Resolve uploaded result file URLs consistently across lab modules. */
+/** Resolve uploaded result file paths to the protected media API (same as radiology). */
 export function resolveLabResultFileUrl(raw: string | null | undefined): string | null {
-  if (!raw || typeof raw !== 'string') return null;
-  const s = raw.trim();
-  if (!s) return null;
-  if (s.startsWith('http')) return s;
-  const apiBase = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-  const path = s.startsWith('/') ? s : `/${s}`;
-  if (apiBase) return `${apiBase}${path}`;
-  if (typeof window !== 'undefined') {
-    return `${window.location.origin}${path}`;
-  }
-  return s;
+  return getMediaUrl(raw);
 }
 
 /** Official NPA lab report PDF (``LabResult.id`` only). */
@@ -160,7 +151,10 @@ export function transformApiRowToCompletedTest(
         ? `${turnaroundMins}m`
         : '< 1 min';
 
-  const rf = test.result_file;
+  const rf =
+    (test as any).result_file_url ||
+    (row as any).result_file_url ||
+    test.result_file;
   const resultFileExists = (test as any)?.result_file_exists !== false;
   const resultFileUrl = rf && typeof rf === 'string' ? resolveLabResultFileUrl(rf) : null;
 

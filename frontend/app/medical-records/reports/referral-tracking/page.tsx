@@ -23,6 +23,7 @@ import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import { referralStatusLabel } from "@/lib/referrals/referral-helpers";
 import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface BreakdownRow {
   key: string;
@@ -89,6 +90,7 @@ function normalizeSummary(raw?: Partial<ReferralSummary> | null): ReferralSummar
 }
 
 export default function ReferralTrackingReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -136,6 +138,7 @@ export default function ReferralTrackingReport() {
       setReferrals(response.data ?? []);
     } catch (error: unknown) {
       console.error("Error fetching referral report:", error);
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load referral tracking report");
       setSummary(emptySummary);
       setStatusBreakdown([]);
@@ -147,6 +150,7 @@ export default function ReferralTrackingReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);

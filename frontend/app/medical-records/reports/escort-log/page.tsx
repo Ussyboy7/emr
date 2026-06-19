@@ -27,6 +27,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface BreakdownRow {
   key: string;
@@ -119,6 +120,7 @@ function formatDuration(minutes: number | null) {
 }
 
 export default function EscortLogReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -175,6 +177,7 @@ export default function EscortLogReport() {
       setRows(response.data ?? []);
     } catch (error: unknown) {
       console.error("Error fetching escort log report:", error);
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load escort log report");
       setSummary(emptySummary);
       setOutcomeBreakdown([]);
@@ -186,6 +189,7 @@ export default function EscortLogReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode, statusFilter, outcomeFilter]);

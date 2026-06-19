@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { pharmacyService, type GenericMedication } from "@/lib/services";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import { DOSAGE_FORMS as DOSAGE_FORM_OPTIONS, MEDICATION_STRENGTHS, MEDICATION_CATEGORIES } from "@/lib/constants/pharmacy";
 import { Plus, Search, Edit, Eye, Trash2, Loader2 } from "lucide-react";
 
@@ -46,6 +47,7 @@ const GENERIC_ROUTES = ROUTES.filter((r) => r.value !== ANY);
 const GENERIC_CATEGORIES = MEDICATION_CATEGORIES.filter((c) => c.value !== "All Categories");
 
 export default function GenericsPage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const [loading, setLoading] = useState(true);
   const [generics, setGenerics] = useState<GenericMedication[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -85,12 +87,13 @@ export default function GenericsPage() {
       setGenerics(response.results || []);
       setTotalCount(typeof response.count === "number" ? response.count : (response.results || []).length);
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error("Error loading generics:", err);
       toast.error("Failed to load generics");
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, routeFilter, formFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearch, routeFilter, formFilter, handleAuthError]);
 
   const prevFiltersRef = useRef({ debouncedSearch, routeFilter, formFilter, itemsPerPage });
   useEffect(() => {
@@ -107,8 +110,9 @@ export default function GenericsPage() {
   }, [debouncedSearch, routeFilter, formFilter, itemsPerPage]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadGenerics();
-  }, [loadGenerics, currentPage]);
+  }, [loadGenerics, currentPage, ready]);
 
   const openCreate = () => {
     setFormData({

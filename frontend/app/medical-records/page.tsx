@@ -22,8 +22,7 @@ import {
 import Link from "next/link";
 import { patientService, visitService, type Visit } from "@/lib/services";
 import { PREVIEW_PAGE_SIZE } from "@/lib/pagination-constants";
-import { isAuthenticationError } from "@/lib/auth-errors";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 import { useServerToday } from "@/hooks/use-server-today";
 import {
   getVisitServiceClinicsDisplay,
@@ -50,10 +49,9 @@ interface VisitDayStats {
 export default function MedicalRecordsPage() {
   const router = useRouter();
   const serverToday = useServerToday();
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown>(null);
-  useAuthRedirect(authError);
 
   const [totalPatients, setTotalPatients] = useState(0);
   const [visitStats, setVisitStats] = useState<VisitDayStats>({
@@ -78,7 +76,7 @@ export default function MedicalRecordsPage() {
         scheduledListRes,
         recentPatientsRes,
       ] = await Promise.all([
-        patientService.getPatientCounts().catch(() => ({ total: 0 })),
+        patientService.getPatientCounts(),
         visitService.getListStats({ date: serverToday }),
         visitService.getVisits({ date: serverToday, status: "in_progress", page: 1, page_size: PREVIEW_PAGE_SIZE }),
         visitService.getVisits({ date: serverToday, status: "scheduled", page: 1, page_size: PREVIEW_PAGE_SIZE }),
@@ -106,20 +104,18 @@ export default function MedicalRecordsPage() {
       );
     } catch (err) {
       console.error("Error loading medical records dashboard:", err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError("Failed to load medical records data");
-        toast.error("Failed to load medical records dashboard. Please try again.");
-      }
+      if (handleAuthError(err)) return;
+      setError("Failed to load medical records data");
+      toast.error("Failed to load medical records dashboard. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [serverToday]);
+  }, [serverToday, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadDashboard();
-  }, [loadDashboard]);
+  }, [ready, loadDashboard]);
 
   const hasActiveWork = visitStats.inProgress > 0 || visitStats.scheduled > 0;
 

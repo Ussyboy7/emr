@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,8 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Pill, ClipboardList, Package, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, Database, TrendingUp, Notebook, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { pharmacyService } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
 
 interface PharmacyStats {
   pendingRx: number;
@@ -29,9 +29,9 @@ interface PharmacyActivity {
 }
 
 export default function PharmacyPage() {
+  const router = useRouter();
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
 
   const [stats, setStats] = useState<PharmacyStats>({
     pendingRx: 0,
@@ -42,6 +42,7 @@ export default function PharmacyPage() {
   const [recentActivities, setRecentActivities] = useState<PharmacyActivity[]>([]);
 
   useEffect(() => {
+    if (!ready) return;
     const fetchData = async () => {
       try {
         setLoading(true);
@@ -56,9 +57,7 @@ export default function PharmacyPage() {
         setRecentActivities(activities);
       } catch (error) {
         console.error('Error fetching pharmacy data:', error);
-        if (isAuthenticationError(error)) {
-          setAuthError(error);
-        }
+        if (handleAuthError(error)) return;
         // Keep default values on error
       } finally {
         setLoading(false);
@@ -66,7 +65,7 @@ export default function PharmacyPage() {
     };
 
     fetchData();
-  }, []);
+  }, [ready, handleAuthError]);
 
   return (
     <DashboardLayout>
@@ -87,7 +86,7 @@ export default function PharmacyPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="bg-white text-violet-600 hover:bg-violet-50 shadow-md"
-                  onClick={() => window.location.href = '/pharmacy/prescriptions'}
+                  onClick={() => router.push('/pharmacy/prescriptions')}
                 >
                   <ClipboardList className="h-4 w-4 mr-2" />
                   Manage Prescriptions
@@ -95,7 +94,7 @@ export default function PharmacyPage() {
                 <Button
                   variant="outline"
                   className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => window.location.href = '/pharmacy/inventory'}
+                  onClick={() => router.push('/pharmacy/inventory')}
                 >
                   <Package className="h-4 w-4 mr-2" />
                   Inventory
@@ -217,24 +216,24 @@ export default function PharmacyPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => window.location.href = '/pharmacy/prescriptions'} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white border-l-4 border-l-white/20">
+            <Button onClick={() => router.push('/pharmacy/prescriptions')} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
                 <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
               <span className="text-xs sm:text-sm font-medium">Prescriptions Queue</span>
               <span className="text-[10px] sm:text-xs opacity-90">Pending Prescriptions</span>
             </Button>
-            <Button onClick={() => window.location.href = '/pharmacy/history'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-violet-500">
+            <Button onClick={() => router.push('/pharmacy/history')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-violet-500">
               <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6 text-violet-500 dark:text-violet-400" />
               <span className="text-xs sm:text-sm font-medium">Dispense History</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Completed dispensations</span>
             </Button>
-            <Button onClick={() => window.location.href = '/pharmacy/inventory'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-blue-500">
+            <Button onClick={() => router.push('/pharmacy/inventory')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-blue-500">
               <Package className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
               <span className="text-xs sm:text-sm font-medium">Inventory</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Stock management</span>
             </Button>
-            <Button onClick={() => window.location.href = '/pharmacy/analytics'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-emerald-500">
+            <Button onClick={() => router.push('/pharmacy/analytics')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-emerald-500">
               <Notebook className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
               <span className="text-xs sm:text-sm font-medium">Analytics</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Analytics</span>

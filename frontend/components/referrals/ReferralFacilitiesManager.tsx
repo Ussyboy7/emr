@@ -2,6 +2,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -41,6 +42,7 @@ import {
   referralService,
   type ReferralFacility,
 } from "@/lib/services/referral-service";
+import { useAuthenticatedPage } from "@/hooks/use-authenticated-page";
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
 import { isAuthenticationError } from "@/lib/auth-errors";
 
@@ -144,6 +146,15 @@ export const ReferralFacilitiesManager = forwardRef<
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
+  const { ready } = useAuthenticatedPage();
+
+  const handleAuthError = useCallback((error: unknown): boolean => {
+    if (isAuthenticationError(error)) {
+      setAuthError(error);
+      return true;
+    }
+    return false;
+  }, []);
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | ReferralFacility["facility_type"]>("all");
@@ -157,7 +168,7 @@ export const ReferralFacilitiesManager = forwardRef<
   const [saving, setSaving] = useState(false);
   const [deletingNow, setDeletingNow] = useState(false);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const rows = await referralService.getReferralFacilities({
@@ -165,16 +176,17 @@ export const ReferralFacilitiesManager = forwardRef<
       });
       setFacilities(rows);
     } catch (error) {
-      if (isAuthenticationError(error)) setAuthError(error);
-      else toast.error("Failed to load referral facilities");
+      if (handleAuthError(error)) return;
+      toast.error("Failed to load referral facilities");
     } finally {
       setLoading(false);
     }
-  };
+  }, [handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void refresh();
-  }, []);
+  }, [ready, refresh]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -236,8 +248,8 @@ export const ReferralFacilitiesManager = forwardRef<
       setEditing(null);
       void refresh();
     } catch (error) {
-      if (isAuthenticationError(error)) setAuthError(error);
-      else toast.error((error as Error)?.message || "Failed to save facility");
+      if (handleAuthError(error)) return;
+      toast.error((error as Error)?.message || "Failed to save facility");
     } finally {
       setSaving(false);
     }
@@ -252,8 +264,8 @@ export const ReferralFacilitiesManager = forwardRef<
       setDeleting(null);
       void refresh();
     } catch (error) {
-      if (isAuthenticationError(error)) setAuthError(error);
-      else toast.error((error as Error)?.message || "Failed to delete facility");
+      if (handleAuthError(error)) return;
+      toast.error((error as Error)?.message || "Failed to delete facility");
     } finally {
       setDeletingNow(false);
     }
@@ -265,8 +277,8 @@ export const ReferralFacilitiesManager = forwardRef<
       toast.success(f.is_active ? `Hid ${f.name}` : `Restored ${f.name}`);
       void refresh();
     } catch (error) {
-      if (isAuthenticationError(error)) setAuthError(error);
-      else toast.error((error as Error)?.message || "Failed to update facility");
+      if (handleAuthError(error)) return;
+      toast.error((error as Error)?.message || "Failed to update facility");
     }
   };
 

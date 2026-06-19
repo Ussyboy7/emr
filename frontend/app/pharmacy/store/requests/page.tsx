@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
+import {
+  formatEditableQuantity,
+  formatPackDisplay,
+  packSizeForStockItem,
+  requestInputToUnits,
+  toDisplayQuantity,
+  toUnitsQuantity,
+} from "@/lib/pharmacy/stock-request-quantity";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,16 +31,8 @@ import { Send, CheckCircle2, Clock, Loader2, Eye, Zap, Search, Plus, Minus, Help
 
 const MAX_QUANTITY = 100000;
 
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
-}
-
 export default function StoreRequestsPage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -109,8 +111,8 @@ export default function StoreRequestsPage() {
         approved: stats.approved,
         awaiting: stats.awaitingConfirmation,
       });
-    } catch {
-      // ignore
+    } catch (err) {
+      handleAuthError(err);
     }
   };
 
@@ -139,6 +141,7 @@ export default function StoreRequestsPage() {
       setRequests(response.results || []);
       setTotalCount(response.count ?? response.results?.length ?? 0);
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error("Error loading requests:", err);
       toast.error("Failed to load requests");
     } finally {
@@ -147,14 +150,17 @@ export default function StoreRequestsPage() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     loadRequests();
-  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, requestTab, hodDirection]);
+  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, requestTab, hodDirection, ready]);
 
   useEffect(() => {
+    if (!ready) return;
     loadStats();
-  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, hodDirection]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, hodDirection, ready]);
 
   useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
     const run = async () => {
       const term = debouncedHodMedSearch.trim();
@@ -177,7 +183,7 @@ export default function StoreRequestsPage() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedHodMedSearch]);
+  }, [debouncedHodMedSearch, ready]);
 
   const handleAddHodRequestItem = () => {
     if (!hodSelectedMed) {
@@ -190,7 +196,7 @@ export default function StoreRequestsPage() {
       toast.error("Enter a valid quantity (min 1)");
       return;
     }
-    const qty = packSize > 1 ? inputVal * packSize : inputVal;
+    const qty = requestInputToUnits(inputVal, packSize);
     if (qty > MAX_QUANTITY) {
       toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
       return;
@@ -249,7 +255,7 @@ export default function StoreRequestsPage() {
     setSelectedRequest(req);
     const qtyMap: Record<number, number> = {};
     (req.items || []).forEach((item: StockRequestItem) => {
-      if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForItem(item));
+      if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForStockItem(item));
     });
     setEditedQuantities(qtyMap);
     setShowDetailsModal(true);
@@ -279,8 +285,8 @@ export default function StoreRequestsPage() {
       const items = validItems.map((item: StockRequestItem) => ({
         id: item.id!,
         quantity: toUnitsQuantity(
-          editedQuantities[item.id!] ?? toDisplayQuantity(Number(item.quantity), packSizeForItem(item)),
-          packSizeForItem(item),
+          editedQuantities[item.id!] ?? toDisplayQuantity(Number(item.quantity), packSizeForStockItem(item)),
+          packSizeForStockItem(item),
         ),
       }));
       const res = await pharmacyService.updateStockRequestItems(selectedRequest.id, items);
@@ -289,7 +295,7 @@ export default function StoreRequestsPage() {
         setSelectedRequest(res.request);
         const qtyMap: Record<number, number> = {};
         (res.request.items || []).forEach((item: StockRequestItem) => {
-          if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForItem(item));
+          if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForStockItem(item));
         });
         setEditedQuantities(qtyMap);
       }
@@ -312,7 +318,7 @@ export default function StoreRequestsPage() {
         setSelectedRequest(updated);
         const qtyMap: Record<number, number> = {};
         (updated.items || []).forEach((item: StockRequestItem) => {
-          if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForItem(item));
+          if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForStockItem(item));
         });
         setEditedQuantities(qtyMap);
       }
@@ -354,26 +360,6 @@ export default function StoreRequestsPage() {
   };
 
   const paginatedRequests = requests;
-
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
-  const toDisplayQuantity = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return units;
-    return Math.floor(units / packSize);
-  };
-  const toUnitsQuantity = (displayQty: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return displayQty;
-    return displayQty * packSize;
-  };
-  const formatEditableQuantity = (displayQty: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${displayQty.toLocaleString()} units`;
-    const units = toUnitsQuantity(displayQty, packSize);
-    return `${displayQty.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
-  const packSizeForItem = (item: any) => item.medication_pack_size ?? null;
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string; tip?: string }> = {
@@ -677,7 +663,7 @@ export default function StoreRequestsPage() {
                     {(selectedRequest.items || []).map((item: StockRequestItem) => {
                       const canEdit = selectedRequest.status === "pending" || selectedRequest.status === "approved";
                       const fulfilled = Number(item.fulfilled_quantity || 0);
-                      const packSize = packSizeForItem(item);
+                      const packSize = packSizeForStockItem(item);
                       const qty = editedQuantities[item.id!] ?? toDisplayQuantity(Number(item.quantity), packSize);
                       return (
                         <div key={item.id} className="border rounded-lg p-3 bg-muted/30 flex justify-between items-center gap-3">
@@ -764,7 +750,7 @@ export default function StoreRequestsPage() {
             if (!open) resetHodRequestModal();
           }}
         >
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Request from HOD Store</DialogTitle>
               <DialogDescription>

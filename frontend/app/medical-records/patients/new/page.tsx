@@ -38,6 +38,7 @@ import {
   NOK_RELATIONSHIPS,
   NIGERIA_STATES_AND_LGAS
 } from '@/lib/constants/patient';
+import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth';
 
 
 
@@ -54,6 +55,7 @@ const STEPS: { id: FormStep; label: string; icon: React.ReactNode }[] = [
 
 export default function NewPatientPage() {
   const router = useRouter();
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const searchParams = useSearchParams();
   const { locations: locationOptions } = useWorkLocationOptions();
   const [patientCategory, setPatientCategory] = useState<'employee' | 'retiree' | 'nonnpa' | 'dependent'>('employee');
@@ -117,6 +119,7 @@ export default function NewPatientPage() {
   }, [patientCategory]);
 
   useEffect(() => {
+    if (!ready) return;
     const prefilledCategory = searchParams.get('category');
     const principalPk = searchParams.get('principal');
     const principalStaffId = searchParams.get('principal_staff_id');
@@ -165,7 +168,7 @@ export default function NewPatientPage() {
         principalStaffId: principalStaffId.trim() || prev.principalStaffId,
       }));
     }
-  }, [searchParams]);
+  }, [ready, searchParams]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => {
@@ -326,7 +329,10 @@ export default function NewPatientPage() {
       let foundPatient: any = null;
       let numericId: number | null = null;
 
-      const searchResult = await patientService.getPatients({ search: trimmedId, page_size: DEFAULT_LIST_PAGE_SIZE }).catch(() => ({ results: [] }));
+      const searchResult = await patientService.getPatients({
+        search: trimmedId,
+        page_size: DEFAULT_LIST_PAGE_SIZE,
+      });
       const results = searchResult.results || [];
 
       const matchPrincipal = (p: any) =>
@@ -352,6 +358,7 @@ export default function NewPatientPage() {
         try {
           patient = await patientService.getPatient(numericId);
         } catch (err) {
+          if (handleAuthError(err)) return;
           console.error('Failed to get full patient details:', err);
         }
       }
@@ -408,10 +415,11 @@ export default function NewPatientPage() {
       }
 
     } catch (error) {
+      if (handleAuthError(error)) return;
       setPrincipalValidation({
         isValidating: false,
         isValid: false,
-        message: 'Error validating personal number'
+        message: 'Could not verify principal. Please try again.',
       });
     }
   };
@@ -562,7 +570,21 @@ export default function NewPatientPage() {
       if (patientCategory === 'dependent') {
         // Resolve principal via personal_number on an employee or retiree record.
         const principalIdStr = formData.principalStaffId.trim();
-        const searchResult = await patientService.getPatients({ search: principalIdStr, page_size: DEFAULT_LIST_PAGE_SIZE }).catch(() => ({ results: [] }));
+        let searchResult;
+        try {
+          searchResult = await patientService.getPatients({
+            search: principalIdStr,
+            page_size: DEFAULT_LIST_PAGE_SIZE,
+          });
+        } catch (err) {
+          if (handleAuthError(err)) {
+            setIsSubmitting(false);
+            return;
+          }
+          toast.error("Could not verify principal. Please try again.");
+          setIsSubmitting(false);
+          return;
+        }
         const principalMatches = searchResult.results || [];
         let matchedPrincipal = principalMatches.find(
           p => p.personal_number === principalIdStr
@@ -702,6 +724,10 @@ export default function NewPatientPage() {
       router.push('/medical-records/patients');
     } catch (error: any) {
       console.error('Error registering patient:', error);
+      if (handleAuthError(error)) {
+        setIsSubmitting(false);
+        return;
+      }
       
       // Extract detailed error message
       let errorMessage = 'Failed to register patient';

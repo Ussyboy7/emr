@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -280,6 +281,7 @@ const getSubstitutesForMedication = async (medicationName: string): Promise<Subs
 };
 
 export default function PrescriptionsPage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -639,6 +641,7 @@ export default function PrescriptionsPage() {
       }));
       setPrescriptions(transformed as Prescription[]);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       if (!silent) {
         setError(err.message || 'Failed to load prescriptions');
       }
@@ -665,6 +668,7 @@ export default function PrescriptionsPage() {
       });
       setQueueStats(s);
     } catch (e) {
+      if (handleAuthError(e)) return;
       console.error('Failed to load prescription queue stats', e);
       setQueueStats(null);
     } finally {
@@ -673,8 +677,9 @@ export default function PrescriptionsPage() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     void loadQueueStats();
-  }, [searchQuery, statusFilter, genderFilter, dateFilter]);
+  }, [searchQuery, statusFilter, genderFilter, dateFilter, ready]);
 
   const loadQueueStatsRef = useRef(loadQueueStats);
   loadQueueStatsRef.current = loadQueueStats;
@@ -683,10 +688,12 @@ export default function PrescriptionsPage() {
   loadPrescriptionsRef.current = loadPrescriptions;
 
   useEffect(() => {
+    if (!ready) return;
     void loadPrescriptions();
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, genderFilter, dateFilter]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery, genderFilter, dateFilter, ready]);
 
   useEffect(() => {
+    if (!ready) return;
     if (showViewModal || showDispenseModal || showSubstitutionModal) {
       return;
     }
@@ -705,6 +712,7 @@ export default function PrescriptionsPage() {
     showViewModal,
     showDispenseModal,
     showSubstitutionModal,
+    ready,
   ]);
 
   // Status update functionality
@@ -982,14 +990,11 @@ export default function PrescriptionsPage() {
   };
 
   const handleViewDetails = async (prescription: Prescription) => {
-    // Always fetch fresh prescription data to ensure we have latest changes
     try {
       const freshPrescription = await pharmacyService.getPrescription(Number(prescription.id));
 
-      // Apply the same transformation as the prescription list
       const transformedMedications = transformMedications(freshPrescription.medications || [], freshPrescription.status);
 
-      // Hydrate modal-friendly status from API value
       const hydratedPrescription = {
         ...prescription,
         ...(freshPrescription as any),
@@ -1003,12 +1008,12 @@ export default function PrescriptionsPage() {
       };
       setSelectedPrescription(hydratedPrescription as any);
       setSelectedPrescriptionMedications(transformedMedications);
+      setShowViewModal(true);
     } catch (error) {
       console.error('Error fetching prescription details:', error);
-      // Fallback to cached data
-      setSelectedPrescription(prescription);
+      if (handleAuthError(error)) return;
+      toast.error('Failed to load prescription details. Please try again.');
     }
-    setShowViewModal(true);
   };
 
   const handleMarkAsCompleted = async (prescription: Prescription) => {

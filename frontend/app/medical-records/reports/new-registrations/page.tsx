@@ -18,6 +18,7 @@ import {
   import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
   import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface DailyRow {
   date: string;
@@ -41,6 +42,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export default function NewRegistrationsReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -81,6 +83,7 @@ export default function NewRegistrationsReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);

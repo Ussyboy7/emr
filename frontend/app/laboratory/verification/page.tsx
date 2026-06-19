@@ -187,8 +187,8 @@ const transformResult = (
   // Extract result file URL if available
   let resultFileUrl: string | undefined = undefined;
   const resultFileExists = (testDetails as any)?.result_file_exists !== false;
-  if (testDetails?.result_file) {
-    const fileField = testDetails.result_file;
+  if (testDetails?.result_file || (testDetails as any)?.result_file_url) {
+    const fileField = (testDetails as any).result_file_url || testDetails.result_file;
     if (typeof fileField === 'string') {
       resultFileUrl = resolveLabResultFileUrl(fileField) || undefined;
     } else if (fileField) {

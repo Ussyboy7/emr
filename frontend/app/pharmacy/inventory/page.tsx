@@ -2,6 +2,8 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
+import { formatPackDisplay, resolvePackSize } from '@/lib/pharmacy/dispense-quantity';
 import { useClinic } from '@/hooks/use-clinic';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
@@ -59,6 +61,7 @@ const EXPIRY_WARNING_DAYS = 180;
 
 export default function InventoryPage() {
   const location = PHARMACY_LOCATIONS.DISPENSARY;
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const { activeClinicName } = useClinic();
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,13 +102,15 @@ export default function InventoryPage() {
         expired: s.expired ?? 0,
       });
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error('Error loading dispensary inventory stats:', err);
     }
-  }, [location, categoryFilter, debouncedSearch]);
+  }, [location, categoryFilter, debouncedSearch, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadStats();
-  }, [loadStats]);
+  }, [loadStats, ready]);
 
   const loadInventory = useCallback(async () => {
     try {
@@ -126,16 +131,18 @@ export default function InventoryPage() {
       setTotalCount(typeof inventoryResponse.count === 'number' ? inventoryResponse.count : transformed.length);
       setInventory(transformed);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load inventory');
       console.error('Error loading inventory:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, stockFilter, location]);
+  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, stockFilter, location, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadInventory();
-  }, [loadInventory]);
+  }, [loadInventory, ready]);
 
   // Transform inventory items helper function
   const transformInventoryItems = (results: any[]): MedicationInventoryItem[] => {
@@ -163,7 +170,7 @@ export default function InventoryPage() {
           category,
           strength,
           dosageForm,
-        packSize: medication.pack_size || 10, // Get from backend
+        packSize: resolvePackSize(medication),
         manufacturer: medication.manufacturer || '', // Get from backend
         currentStock: Number(item.quantity),
         minimumStock: Number(item.min_stock_level),
@@ -197,11 +204,6 @@ export default function InventoryPage() {
     }
   }, [debouncedSearch, categoryFilter, stockFilter]);
   
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
 
   const getDaysUntilExpiry = (expiryDate: string) => {
     if (!expiryDate) return 9999;

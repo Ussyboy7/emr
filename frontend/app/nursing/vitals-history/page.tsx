@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
@@ -17,9 +16,10 @@ import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDi
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { apiFetch } from '@/lib/api-client';
 import { patientService } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
+import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
+import { toast } from 'sonner';
 import {
   Activity, Search, Eye, Heart, Calendar, Clock, User, Loader2,
 } from 'lucide-react';
@@ -115,11 +115,11 @@ function apiVitalToDetail(v: ApiVital) {
 }
 
 export default function VitalsHistoryPage() {
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [patients, setPatients] = useState<VitalsPatientSummary[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [dateFilter, setDateFilter] = useState('all');
@@ -142,8 +142,6 @@ export default function VitalsHistoryPage() {
   const [vitalsLoading, setVitalsLoading] = useState(false);
   const [selectedVital, setSelectedVital] = useState<ApiVital | null>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
-
-  useAuthRedirect(authError);
 
   const appendHistoryFilters = useCallback(
     (qs: URLSearchParams, opts?: { skipDate?: boolean }) => {
@@ -182,8 +180,10 @@ export default function VitalsHistoryPage() {
       });
     } catch (e) {
       console.error('Failed to load vitals history stats:', e);
+      if (handleAuthError(e)) return;
+      toast.error('Failed to load vitals history statistics');
     }
-  }, [debouncedSearch, genderFilter, dateFilter, dateRange.from, dateRange.to]);
+  }, [debouncedSearch, genderFilter, dateFilter, dateRange.from, dateRange.to, handleAuthError]);
 
   const loadPatientsPage = useCallback(async () => {
     try {
@@ -200,15 +200,12 @@ export default function VitalsHistoryPage() {
       setTotalCount(typeof res.count === 'number' ? res.count : (res.results || []).length);
     } catch (err) {
       console.error('Error loading vitals history:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError('Failed to load vitals history. Please try again.');
-      }
+      if (handleAuthError(err)) return;
+      setError('Failed to load vitals history. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [appendHistoryFilters, currentPage, itemsPerPage]);
+  }, [appendHistoryFilters, currentPage, itemsPerPage, handleAuthError]);
 
   const loadPatientVitals = useCallback(async (patient: VitalsPatientSummary) => {
     try {
@@ -216,26 +213,33 @@ export default function VitalsHistoryPage() {
       const qs = new URLSearchParams({
         patient: String(patient.patient),
         ordering: '-recorded_at',
-        page_size: String(MAX_LIST_PAGE_SIZE),
       });
       appendHistoryFilters(qs);
-      const res = await apiFetch<{ results: ApiVital[] }>(`/vitals/?${qs.toString()}`);
-      setPatientVitals(res.results || []);
+      const allVitals = await fetchAllPaginatedResults((page, page_size) =>
+        apiFetch<{ results: ApiVital[]; count?: number }>(
+          `/vitals/?${new URLSearchParams({ ...Object.fromEntries(qs), page: String(page), page_size: String(page_size) }).toString()}`
+        )
+      );
+      setPatientVitals(allVitals);
     } catch (err) {
       console.error('Error loading patient vitals:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load patient vitals');
       setPatientVitals([]);
     } finally {
       setVitalsLoading(false);
     }
-  }, [appendHistoryFilters]);
+  }, [appendHistoryFilters, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadHistoryStats();
-  }, [loadHistoryStats]);
+  }, [ready, loadHistoryStats]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadPatientsPage();
-  }, [loadPatientsPage]);
+  }, [ready, loadPatientsPage]);
 
   useEffect(() => {
     setCurrentPage(1);

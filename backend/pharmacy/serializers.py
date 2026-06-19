@@ -742,6 +742,13 @@ class DispenseSerializer(serializers.ModelSerializer):
     prescribed_medication_name = serializers.SerializerMethodField()
     prescribed_unit = serializers.SerializerMethodField()
     dispense_context = serializers.SerializerMethodField()
+    medication_pack_size = serializers.SerializerMethodField(read_only=True)
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_medication_pack_size(self, obj):
+        if not obj.medication_id:
+            return None
+        return getattr(obj.medication, "pack_size", None)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):

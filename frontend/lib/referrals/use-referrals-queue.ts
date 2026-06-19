@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { useAuthenticatedPage } from "@/hooks/use-authenticated-page";
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { isAuthenticationError } from "@/lib/auth-errors";
@@ -89,6 +90,9 @@ export interface UseReferralsQueueResult {
   // actions
   refetch: () => Promise<void>;
   refetchStats: () => Promise<void>;
+
+  ready: boolean;
+  handleAuthError: (error: unknown) => boolean;
 }
 
 /**
@@ -117,6 +121,15 @@ export function useReferralsQueue(
 
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
+  const { ready } = useAuthenticatedPage();
+
+  const handleAuthError = useCallback((error: unknown): boolean => {
+    if (isAuthenticationError(error)) {
+      setAuthError(error);
+      return true;
+    }
+    return false;
+  }, []);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
@@ -183,15 +196,12 @@ export function useReferralsQueue(
       setTotalCount(response.count || 0);
     } catch (error: unknown) {
       console.error("Error loading referrals:", error);
-      if (isAuthenticationError(error)) {
-        setAuthError(error);
-        return;
-      }
+      if (handleAuthError(error)) return;
       toast.error((error as Error)?.message || "Failed to load referrals");
     } finally {
       setIsLoading(false);
     }
-  }, [baseFilterParams, currentPage, itemsPerPage, statusFilter]);
+  }, [baseFilterParams, currentPage, itemsPerPage, statusFilter, handleAuthError]);
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
@@ -206,20 +216,24 @@ export function useReferralsQueue(
         inReview: stats.inReview,
         approved: stats.approved,
       });
-    } catch (error) {
-      console.error(error);
+    } catch (error: unknown) {
+      console.error("Error loading referral stats:", error);
+      if (handleAuthError(error)) return;
+      toast.error((error as Error)?.message || "Failed to load referral statistics");
     } finally {
       setStatsLoading(false);
     }
-  }, [baseFilterParams]);
+  }, [baseFilterParams, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void fetchReferrals();
-  }, [fetchReferrals]);
+  }, [ready, fetchReferrals]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadStats();
-  }, [loadStats]);
+  }, [ready, loadStats]);
 
   // Reset to page 1 whenever the filter shape changes — otherwise the user can
   // be stuck on an out-of-range page after narrowing results.
@@ -273,5 +287,8 @@ export function useReferralsQueue(
 
     refetch: fetchReferrals,
     refetchStats: loadStats,
+
+    ready,
+    handleAuthError,
   };
 }

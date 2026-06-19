@@ -63,40 +63,57 @@ export function LabCompletedReportDialog({
 }: LabCompletedReportDialogProps) {
   const hasUsableResultFile = Boolean(test?.result_file && test?.result_file_exists !== false);
   const canUseOfficialPdf = Boolean(test?.labResultId);
+  const canOpenUploadedFile = hasUsableResultFile && Boolean(test?.result_file);
 
   const hasRowAttachments = Array.isArray(test?.results) && test.results.some((r) => Boolean(r.attachment?.url));
 
   const handlePrint = async () => {
     if (!test) return;
-    if (!test.labResultId) {
-      toast.error('Cannot print: missing result id. Refresh the list and try again.');
+    if (test.labResultId) {
+      try {
+        await printOfficialLabReportPdf(test.labResultId);
+      } catch (error) {
+        console.error('Print error:', error);
+        toast.error((error as Error)?.message || 'Failed to open print PDF');
+      }
       return;
     }
-    try {
-      await printOfficialLabReportPdf(test.labResultId);
-    } catch (error) {
-      console.error('Print error:', error);
-      toast.error((error as Error)?.message || 'Failed to open print PDF');
+    if (hasUsableResultFile && test.result_file) {
+      try {
+        await openMediaInNewTab(test.result_file);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to open uploaded report');
+      }
+      return;
     }
+    toast.error('No printable report is available for this test.');
   };
 
   const handleFooterDownload = async () => {
     if (!test) return;
-    if (!test.labResultId) {
-      toast.error('Cannot download PDF: missing result id. Refresh the list and try again.');
+    if (test.labResultId) {
+      try {
+        await downloadOfficialLabReportPdf({
+          labResultId: test.labResultId,
+          patientId: test.patient?.id,
+          testCode: test.testCode,
+          patientName: test.patient?.name,
+        });
+      } catch (error) {
+        console.error('Error downloading PDF report:', error);
+        toast.error('Failed to download PDF report');
+      }
       return;
     }
-    try {
-      await downloadOfficialLabReportPdf({
-        labResultId: test.labResultId,
-        patientId: test.patient?.id,
-        testCode: test.testCode,
-        patientName: test.patient?.name,
-      });
-    } catch (error) {
-      console.error('Error downloading PDF report:', error);
-      toast.error('Failed to download PDF report');
+    if (hasUsableResultFile && test.result_file) {
+      try {
+        await openMediaInNewTab(test.result_file);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to open uploaded report');
+      }
+      return;
     }
+    toast.error('No downloadable report is available for this test.');
   };
 
   return (
@@ -323,11 +340,11 @@ export function LabCompletedReportDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button variant="outline" onClick={handlePrint} disabled={!test || !canUseOfficialPdf}>
+          <Button variant="outline" onClick={handlePrint} disabled={!test || (!canUseOfficialPdf && !canOpenUploadedFile)}>
             <Printer className="h-4 w-4 mr-2" />
             Print
           </Button>
-          <Button onClick={handleFooterDownload} disabled={!test || !canUseOfficialPdf}>
+          <Button onClick={handleFooterDownload} disabled={!test || (!canUseOfficialPdf && !canOpenUploadedFile)}>
             <Download className="h-4 w-4 mr-2" />
             Download PDF
           </Button>

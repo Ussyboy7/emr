@@ -18,15 +18,14 @@ import {
   type ICD10Code,
   type ICD10Stats,
 } from "@/lib/services";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 
 export default function ICD10CodingPage() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
-  const [authError, setAuthError] = useState<unknown>(null);
-  useAuthRedirect(authError);
 
   const [stats, setStats] = useState<ICD10Stats | null>(null);
   const [categories, setCategories] = useState<{ category: string; count: number }[]>([]);
@@ -34,15 +33,10 @@ export default function ICD10CodingPage() {
   const [totalCodes, setTotalCodes] = useState(0);
 
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(t);
-  }, [search]);
 
   useEffect(() => {
     setPage(1);
@@ -55,16 +49,13 @@ export default function ICD10CodingPage() {
       setStats(statsRes);
       setCategories(statsRes.categories ?? []);
     } catch (err) {
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-        return;
-      }
+      if (handleAuthError(err)) return;
       console.error("Failed to load ICD-10 stats:", err);
       toast.error("Failed to load ICD-10 statistics");
     } finally {
       setStatsLoading(false);
     }
-  }, []);
+  }, [handleAuthError]);
 
   const loadCodes = useCallback(async () => {
     try {
@@ -81,24 +72,23 @@ export default function ICD10CodingPage() {
       setCodes(res.results ?? []);
       setTotalCodes(res.count ?? 0);
     } catch (err) {
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-        return;
-      }
+      if (handleAuthError(err)) return;
       console.error("Failed to load ICD-10 codes:", err);
       toast.error("Failed to load ICD-10 codes");
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearch, selectedCategory, itemsPerPage]);
+  }, [page, debouncedSearch, selectedCategory, itemsPerPage, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadStats();
-  }, [loadStats]);
+  }, [ready, loadStats]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadCodes();
-  }, [loadCodes]);
+  }, [ready, loadCodes]);
 
   return (
     <DashboardLayout>

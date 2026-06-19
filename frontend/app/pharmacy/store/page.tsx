@@ -3,6 +3,8 @@ import { formatDisplayDateTime } from '@/lib/dates';
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { formatPackDisplay, resolvePackSize } from "@/lib/pharmacy/dispense-quantity";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
@@ -31,6 +33,9 @@ interface MedicationWithStock {
   form?: string;
   category?: string;
   packSize?: number;
+  pack_size?: number;
+  dispense_mode?: Medication["dispense_mode"];
+  unit?: string;
   storeQuantity: number;
   minimumStock: number;
   batches: MedicationInventory[];
@@ -46,8 +51,7 @@ function mapStoreStockRow(
   }
 ): MedicationWithStock {
   const sq = Number(row.store_quantity ?? 0);
-  const packSize =
-    typeof row.pack_size === "number" && row.pack_size > 0 ? row.pack_size : 10;
+  const packSize = resolvePackSize(row);
   return {
     id: row.id,
     name: row.name || "Unknown",
@@ -57,6 +61,9 @@ function mapStoreStockRow(
     form: row.form || "",
     category: row.category || "",
     packSize,
+    pack_size: packSize,
+    dispense_mode: row.dispense_mode,
+    unit: row.unit,
     storeQuantity: sq,
     minimumStock: Number(row.min_stock_level ?? 0),
     batches: [],
@@ -77,6 +84,7 @@ const adjustmentReasons = [
 const EXPIRY_WARNING_DAYS = 180;
 
 export default function WarehouseStorePage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   // Inventory state
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [storeInventory, setStoreInventory] = useState<MedicationWithStock[]>([]);
@@ -139,12 +147,6 @@ export default function WarehouseStorePage() {
     totalUnits: 0,
   });
 
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
-
   const loadStoreStats = useCallback(async () => {
     try {
       const s = await pharmacyService.getStoreStockStats({ location: PHARMACY_LOCATIONS.STORE });
@@ -157,9 +159,10 @@ export default function WarehouseStorePage() {
         totalUnits: Number(s.total_units ?? 0),
       });
     } catch (e) {
+      if (handleAuthError(e)) return;
       console.error("Error loading store stats:", e);
     }
-  }, []);
+  }, [handleAuthError]);
 
   const loadStorePage = useCallback(async () => {
     try {
@@ -179,6 +182,7 @@ export default function WarehouseStorePage() {
       })));
       setInventoryTotalCount(typeof res.count === "number" ? res.count : (res.results || []).length);
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error("Error loading store inventory:", err);
       toast.error("Failed to load central store inventory");
     } finally {
@@ -190,15 +194,18 @@ export default function WarehouseStorePage() {
     debouncedInventorySearch,
     categoryFilter,
     stockFilter,
+    handleAuthError,
   ]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadStoreStats();
-  }, [loadStoreStats]);
+  }, [loadStoreStats, ready]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadStorePage();
-  }, [loadStorePage]);
+  }, [loadStorePage, ready]);
 
   useEffect(() => {
     setInventoryCurrentPage(1);
@@ -318,7 +325,7 @@ export default function WarehouseStorePage() {
     }
 
     const currentQty = Number(selectedBatch.quantity || 0);
-    const packSize = selectedMedication?.packSize || 1;
+    const packSize = resolvePackSize(selectedMedication);
     const adjustPacks = adjustmentForm.quantity;
     const adjustUnits = adjustPacks * packSize;
 
@@ -353,8 +360,6 @@ export default function WarehouseStorePage() {
     }
   };
 
-  const getPackSize = (med: MedicationWithStock | null) => med?.packSize || 1;
-
   const handleReceive = async () => {
     if (!selectedMedication) return;
     if (!receiveForm.batch_number.trim() || !receiveForm.expiry_date.trim()) {
@@ -367,7 +372,7 @@ export default function WarehouseStorePage() {
       return;
     }
 
-    const packSize = getPackSize(selectedMedication);
+    const packSize = resolvePackSize(selectedMedication);
     const quantityInUnits = packs * packSize;
 
     try {
@@ -1005,7 +1010,7 @@ export default function WarehouseStorePage() {
                   ) : (
                     <div className="space-y-3">
                       {adjustmentHistory.map((h) => {
-                        const packSize = selectedMedication?.packSize || 1;
+                        const packSize = resolvePackSize(selectedMedication);
                         const deltaUnits = Number(h.quantity_after || 0) - Number(h.quantity_before || 0);
                         const direction = deltaUnits >= 0 ? "Increase" : "Decrease";
                         const absUnits = Math.abs(deltaUnits);
@@ -1128,7 +1133,7 @@ export default function WarehouseStorePage() {
                     />
                     {adjustmentForm.quantity > 0 && selectedMedication?.packSize && (
                       <p className="text-xs text-muted-foreground mt-1">
-                        Total: {(adjustmentForm.quantity * (selectedMedication.packSize || 1)).toLocaleString()} units
+                        Total: {(adjustmentForm.quantity * resolvePackSize(selectedMedication)).toLocaleString()} units
                       </p>
                     )}
                   </div>
@@ -1180,7 +1185,7 @@ export default function WarehouseStorePage() {
                       <strong>
                         {(() => {
                           const current = Number(selectedBatch.quantity || 0);
-                          const packSize = selectedMedication?.packSize || 1;
+                          const packSize = resolvePackSize(selectedMedication);
                           const adjustPacks = adjustmentForm.quantity;
                           const adjustUnits = adjustPacks * packSize;
                           const next =
@@ -1239,7 +1244,7 @@ export default function WarehouseStorePage() {
                 />
                 {receiveForm.quantity && selectedMedication?.packSize && (
                   <p className="text-xs text-muted-foreground mt-1">
-                    Total units: {(Number(receiveForm.quantity) * (selectedMedication.packSize || 1)).toLocaleString()}
+                    Total units: {(Number(receiveForm.quantity) * resolvePackSize(selectedMedication)).toLocaleString()}
                   </p>
                 )}
               </div>

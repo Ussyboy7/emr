@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
+import { formatPackDisplay, packSizeForRequestItem, requestInputToUnits } from "@/lib/pharmacy/stock-request-quantity";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,16 +26,8 @@ import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye, HelpCircle, Buil
 const MEDICATION_SEARCH_LIMIT = 20;
 const MAX_QUANTITY = 100000;
 
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
-}
-
 export default function DispensaryRequestsPage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const { activeClinicName } = useClinic();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
@@ -82,16 +77,19 @@ export default function DispensaryRequestsPage() {
   }, [dateFilter]);
 
   useEffect(() => {
-    loadMedications();
-  }, []);
+    if (!ready) return;
+    void loadMedications();
+  }, [ready]);
 
   useEffect(() => {
-    loadStats();
-  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab]);
+    if (!ready) return;
+    void loadStats();
+  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, ready]);
 
   useEffect(() => {
-    loadRequests();
-  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, requestTab]);
+    if (!ready) return;
+    void loadRequests();
+  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, requestTab, ready]);
 
   const loadRequests = async () => {
     try {
@@ -109,6 +107,7 @@ export default function DispensaryRequestsPage() {
       setRequests(response.results || []);
       setTotalRequests(response.count ?? response.results?.length ?? 0);
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error("Error loading stock requests:", err);
       toast.error("Failed to load stock requests");
     } finally {
@@ -130,8 +129,8 @@ export default function DispensaryRequestsPage() {
         confirmed: stats.confirmed,
         awaitingConfirmation: stats.awaitingConfirmation,
       });
-    } catch {
-      // ignore
+    } catch (err) {
+      handleAuthError(err);
     }
   };
 
@@ -140,6 +139,7 @@ export default function DispensaryRequestsPage() {
       const response = await pharmacyService.getMedications({ page: 1, page_size: MAX_LIST_PAGE_SIZE });
       setMedications(response.results || []);
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error("Error loading medications:", err);
     }
   };
@@ -155,7 +155,7 @@ export default function DispensaryRequestsPage() {
       toast.error("Please enter a valid quantity (min 1)");
       return;
     }
-    const qty = packSize > 1 ? inputVal * packSize : inputVal;
+    const qty = requestInputToUnits(inputVal, packSize);
     if (qty > MAX_QUANTITY) {
       toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
       return;
@@ -218,14 +218,6 @@ export default function DispensaryRequestsPage() {
       )
       .slice(0, MEDICATION_SEARCH_LIMIT);
   }, [medications, debouncedMedSearch]);
-
-  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
-    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
-    const packs = Math.floor(units / packSize);
-    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
-  };
-
-  const packSizeForItem = (item: any) => item.medication_pack_size ?? medications.find((m) => m.id === item.medication)?.pack_size ?? null;
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string; tip?: string }> = {
@@ -593,9 +585,9 @@ export default function DispensaryRequestsPage() {
                       <div key={idx} className="border rounded-lg p-3 text-sm flex justify-between items-start">
                         <div>
                           <p className="font-medium">{item.medication_name || "Unknown"}</p>
-                          <p className="text-xs text-muted-foreground">Requested: {formatPackDisplay(Number(item.quantity), packSizeForItem(item))}</p>
+                          <p className="text-xs text-muted-foreground">Requested: {formatPackDisplay(Number(item.quantity), packSizeForRequestItem(item, medications))}</p>
                         </div>
-                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(Number(item.fulfilled_quantity), packSizeForItem(item))}</span>}
+                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(Number(item.fulfilled_quantity), packSizeForRequestItem(item, medications))}</span>}
                       </div>
                     ))}
                   </div>
@@ -629,7 +621,7 @@ export default function DispensaryRequestsPage() {
                     {(selectedRequest.items || []).map((item: any, idx: number) => (
                       <div key={idx} className="flex justify-between">
                         <span>{item.medication_name}</span>
-                        <span className="font-medium">{formatPackDisplay(Number(item.fulfilled_quantity || item.quantity), packSizeForItem(item))}</span>
+                        <span className="font-medium">{formatPackDisplay(Number(item.fulfilled_quantity || item.quantity), packSizeForRequestItem(item, medications))}</span>
                       </div>
                     ))}
                   </div>

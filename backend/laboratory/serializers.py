@@ -109,6 +109,7 @@ class LabTestSerializer(serializers.ModelSerializer):
     verified_by_name = serializers.SerializerMethodField()
     rejected_by_name = serializers.SerializerMethodField()
     order_details = serializers.SerializerMethodField()
+    result_file_url = serializers.SerializerMethodField()
     result_file_exists = serializers.SerializerMethodField()
     lab_result_id = serializers.SerializerMethodField()
     overall_status = serializers.SerializerMethodField()
@@ -254,6 +255,18 @@ class LabTestSerializer(serializers.ModelSerializer):
             'priority': order.priority,
             'clinical_notes': order.clinical_notes or '',
         }
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_result_file_url(self, obj):
+        """Storage-relative path for uploaded results (served via protected media API)."""
+        rf = getattr(obj, "result_file", None)
+        if not rf:
+            return None
+        try:
+            name = getattr(rf, "name", "") or ""
+            return name or None
+        except Exception:
+            return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_result_file_exists(self, obj):

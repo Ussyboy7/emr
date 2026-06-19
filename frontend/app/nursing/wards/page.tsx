@@ -40,6 +40,10 @@ import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSecti
 import { ObservationChartDialog } from '@/components/ward/ObservationChartDialog';
 import { ProgressNotesTimeline } from '@/components/ward/ProgressNotesTimeline';
 import { useServerToday } from '@/hooks/use-server-today';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
+import { MODAL_SIZES, modalNoOverflow } from '@/components/ui/modal-sizes';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 
 // Single source of truth for the condition vocabulary used in the observation
@@ -85,6 +89,7 @@ const SEVERITY_BADGE: Record<ConditionSeverity, string> = {
 
 export default function WardCarePage() {
   const { currentUser } = useCurrentUser();
+  const { ready, handleAuthError } = useNursingPageAuth();
   const serverToday = useServerToday();
 
   const [wards, setWards] = useState<Ward[]>([]);
@@ -110,6 +115,7 @@ export default function WardCarePage() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
 
   // Dialog states
   const [showAdmissionDetails, setShowAdmissionDetails] = useState(false);
@@ -161,19 +167,23 @@ export default function WardCarePage() {
     if (nurseDirectory.length || nurseDirectoryLoading) return;
     setNurseDirectoryLoading(true);
     try {
-      const res = await adminService.getUsers({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
-      const filtered = (res.results || []).filter((u) => {
+      const allUsers = await fetchAllPaginatedResults((page, page_size) =>
+        adminService.getUsers({ is_active: true, page, page_size })
+      );
+      const filtered = allUsers.filter((u) => {
         const role = (u.system_role || '').toLowerCase();
         return NURSE_ROLE_HINTS.some((hint) => role.includes(hint));
       });
       setNurseDirectory(filtered);
     } catch (err) {
       console.error('Failed to load nurse directory', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load nurse directory');
     } finally {
       setNurseDirectoryLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nurseDirectory.length, nurseDirectoryLoading]);
+  }, [nurseDirectory.length, nurseDirectoryLoading, handleAuthError]);
 
   // Observation form
   const [observationData, setObservationData] = useState({
@@ -222,6 +232,7 @@ export default function WardCarePage() {
       setWards(wardsResponse.results || []);
     } catch (error: unknown) {
       console.error('Error fetching wards:', error);
+      if (handleAuthError(error)) return;
       const msg = error instanceof Error ? error.message : 'Failed to load wards';
       toast.error(msg);
     }
@@ -240,6 +251,7 @@ export default function WardCarePage() {
       setKpiPendingDischargeTotal(stats.pending_discharge ?? 0);
     } catch (error: unknown) {
       console.error('Error fetching admission KPI counts:', error);
+      if (handleAuthError(error)) return;
       setKpiAdmittedTotal(0);
       setKpiPendingDischargeTotal(0);
     }
@@ -273,6 +285,7 @@ export default function WardCarePage() {
             : {}),
         ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
         ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
+        ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
         ...dischargedScope,
       };
       const admissionsResponse = await wardService.getAdmissions(listParams);
@@ -295,6 +308,7 @@ export default function WardCarePage() {
       }
     } catch (error: unknown) {
       console.error('Error fetching admissions:', error);
+      if (handleAuthError(error)) return;
       const msg = error instanceof Error ? error.message : 'Failed to load admissions';
       toast.error(msg);
       setAdmissions([]);
@@ -311,11 +325,13 @@ export default function WardCarePage() {
     admissionsPage,
     admissionsPageSize,
     viewMode,
+    debouncedSearch,
+    handleAuthError,
   ]);
 
   useEffect(() => {
     setAdmissionsPage(1);
-  }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, viewMode]);
+  }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, viewMode, debouncedSearch]);
 
   // Defensive: if the user lands on the active view with a stale
   // statusFilter='discharged', reset it. We removed the Discharged
@@ -328,8 +344,9 @@ export default function WardCarePage() {
   }, [viewMode, statusFilter]);
 
   useEffect(() => {
+    if (!ready) return;
     fetchData();
-  }, [fetchData]);
+  }, [ready, fetchData]);
 
   // Pending-escort queue ("patients leaving with us") — refresh after the
   // admissions list reloads so the badge reflects ward state.
@@ -339,15 +356,18 @@ export default function WardCarePage() {
       try {
         const res = await wardService.getAdmissionEscorts({ status: 'pending', page_size: 50 });
         if (!cancelled) setPendingEscorts(res.results || []);
-      } catch {
-        if (!cancelled) setPendingEscorts([]);
+      } catch (err) {
+        if (cancelled) return;
+        if (handleAuthError(err)) return;
+        console.error('Failed to load pending escorts:', err);
+        setPendingEscorts([]);
       }
     };
     void run();
     return () => {
       cancelled = true;
     };
-  }, [admissions]);
+  }, [admissions, handleAuthError]);
 
   const handleViewAdmission = (admission: PatientAdmission) => {
     setSelectedAdmission(admission);
@@ -479,7 +499,9 @@ export default function WardCarePage() {
         return a.bed_number.localeCompare(b.bed_number);
       });
       setAvailableBeds(sorted);
-    } catch {
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load beds for this ward');
       setAvailableBeds([]);
     }
   };
@@ -705,26 +727,17 @@ export default function WardCarePage() {
     }
   };
 
-  const filteredAdmissions = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return admissions;
-    return admissions.filter(a =>
-      a.patient_name.toLowerCase().includes(q) ||
-      a.admission_id.toLowerCase().includes(q)
-    );
-  }, [admissions, searchQuery]);
-
-  /** Badges above the list — scoped to the current result page + client search. */
+  /** Badges above the list — scoped to the current result page. */
   const escalatedOnPage = useMemo(
-    () => filteredAdmissions.filter(
+    () => admissions.filter(
       a => a.status === 'admitted' && conditionSeverity(a.current_condition) === 'escalated',
     ).length,
-    [filteredAdmissions],
+    [admissions],
   );
 
   const pendingDischargeOnPage = useMemo(
-    () => filteredAdmissions.filter(a => a.status === 'pending_discharge').length,
-    [filteredAdmissions],
+    () => admissions.filter(a => a.status === 'pending_discharge').length,
+    [admissions],
   );
 
   const activeFilterCount = useMemo(() => {
@@ -1076,7 +1089,7 @@ export default function WardCarePage() {
                     {searchQuery.trim() && (
                       <>
                         Search narrowed page to{' '}
-                        <span className="font-medium text-foreground">{filteredAdmissions.length}</span>
+                        <span className="font-medium text-foreground">{admissionsTotal}</span>
                         {' '}of{' '}
                         <span className="font-medium text-foreground">{admissions.length}</span>
                       </>
@@ -1201,7 +1214,7 @@ export default function WardCarePage() {
               )}
 
               <div className="space-y-2">
-                {filteredAdmissions.length === 0 ? (
+                {admissions.length === 0 ? (
                   <Card>
                     <CardContent className="py-12 text-center">
                       <Search className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -1214,7 +1227,7 @@ export default function WardCarePage() {
                     </CardContent>
                   </Card>
                 ) : (
-                  filteredAdmissions.map((admission) => {
+                  admissions.map((admission) => {
                     const avatar = getAvatarStyle(admission);
                     const isEscalated = conditionSeverity(admission.current_condition) === 'escalated';
                     return (
@@ -1366,7 +1379,7 @@ export default function WardCarePage() {
               breathing room. Internal flex column + min-h-0 keeps the tab body
               scrollable without overflowing the header.
             */}
-            <DialogContent className="w-[95vw] sm:max-w-[760px] lg:max-w-[920px] max-h-[90vh] flex flex-col p-0 gap-0">
+            <DialogContent className={`${modalNoOverflow('lg')} max-h-[90vh] flex flex-col p-0 gap-0`}>
               <DialogHeader className="p-5 pb-3 border-b">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
@@ -1747,7 +1760,7 @@ export default function WardCarePage() {
             setShowObservationDialog(open);
             if (!open) setObservationData({ current_condition: '', bp: '', temperature: '', pulse: '', spo2: '', shift_notes: '', escalate: false });
           }}>
-            <DialogContent className="w-[95vw] sm:max-w-[580px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
+            <DialogContent className={`${modalNoOverflow('md')} max-h-[92vh] flex flex-col gap-0 p-0`}>
               <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-2">
                 <div className="flex items-start justify-between gap-3">
                   <DialogTitle className="flex items-center gap-2 text-lg">
@@ -1985,7 +1998,7 @@ export default function WardCarePage() {
               resetExitForm();
             }
           }}>
-            <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
+            <DialogContent className={`${modalNoOverflow('ml')} max-h-[92vh] flex flex-col gap-0 p-0`}>
               <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-1">
                 <DialogTitle className="flex items-center gap-2 text-lg">
                   <CheckCircle className="h-5 w-5 text-green-500" />
@@ -2275,7 +2288,7 @@ export default function WardCarePage() {
             setShowArrivalDialog(open);
             if (!open) setArrivalEscort(null);
           }}>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className={MODAL_SIZES.sm2}>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <PhoneCall className="h-5 w-5 text-amber-500" />
@@ -2351,7 +2364,7 @@ export default function WardCarePage() {
         {/* Assign Bed Dialog */}
         {selectedAdmission && (
           <Dialog open={showAssignBedDialog} onOpenChange={setShowAssignBedDialog}>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className={MODAL_SIZES.sm2}>
               <DialogHeader>
                 <DialogTitle>
                   {selectedAdmission.bed_number ? 'Change Bed' : 'Assign Bed'}: {selectedAdmission.patient_name}
@@ -2476,7 +2489,7 @@ export default function WardCarePage() {
               if (!open) setBedRemovalTarget(null);
             }}
           >
-            <DialogContent className="sm:max-w-[460px]">
+            <DialogContent className={MODAL_SIZES.sm2}>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <AlertTriangle className="h-5 w-5 text-amber-500" />

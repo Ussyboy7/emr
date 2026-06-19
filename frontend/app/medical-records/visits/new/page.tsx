@@ -1,7 +1,7 @@
 "use client";
 import { todayApiDateString, formatDisplayDateMedium } from "@/lib/dates";
 
-import { useState, useEffect, useMemo, useRef, useCallback, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -18,8 +18,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { patientService, visitService, adminService, formatPatientGenderLabel } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { 
   Calendar, User, Send, Stethoscope, ClipboardList, Search, AlertTriangle,
   MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle, X
@@ -48,6 +48,7 @@ function isAnnualCheckupEligible(patient: { category?: string; is_active?: boole
 
 function NewVisitPageContent() {
   const router = useRouter();
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const searchParams = useSearchParams();
   const patientIdParam = searchParams.get('patient');
   const prefDate = searchParams.get('date');
@@ -59,13 +60,12 @@ function NewVisitPageContent() {
   const [loading, setLoading] = useState(!!patientIdParam);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
 
   const [patients, setPatients] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
   const [patientSearch, setPatientSearch] = useState('');
+  const debouncedPatientSearch = useDebouncedValue(patientSearch, 300);
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
   const [createdVisitData, setCreatedVisitData] = useState<{ visitId: string; patientName: string; date: string; time: string; location: string; clinic: string } | null>(null);
 
@@ -171,6 +171,7 @@ function NewVisitPageContent() {
 
   // Preselect patient from ?patient= URL (patient_id string or numeric PK)
   useEffect(() => {
+    if (!ready) return;
     if (!patientIdParam) {
       setLoading(false);
       return;
@@ -201,45 +202,44 @@ function NewVisitPageContent() {
       } catch (err) {
         if (cancelled) return;
         console.error('Error loading patient:', err);
-        if (isAuthenticationError(err)) setAuthError(err);
-        else setError('Failed to load patient.');
+        if (handleAuthError(err)) return;
+        setError('Failed to load patient.');
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [patientIdParam, mapPatient]);
+  }, [ready, patientIdParam, mapPatient, handleAuthError]);
 
   // Backend search: debounced by patientSearch
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const q = patientSearch.trim();
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-      searchTimeoutRef.current = null;
-    }
+    if (!ready) return;
+    const q = debouncedPatientSearch.trim();
     if (!q) {
       setPatients([]);
       setSearching(false);
       return;
     }
+    let cancelled = false;
     setSearching(true);
-    searchTimeoutRef.current = setTimeout(async () => {
-      searchTimeoutRef.current = null;
+    void (async () => {
       try {
         const result = await patientService.getPatients({ search: q, page_size: DEFAULT_LIST_PAGE_SIZE });
-        setPatients((result.results || []).map(mapPatient));
+        if (!cancelled) setPatients((result.results || []).map(mapPatient));
       } catch (err) {
-        if (isAuthenticationError(err)) setAuthError(err);
-        else setPatients([]);
+        if (handleAuthError(err)) return;
+        if (!cancelled) {
+          toast.error('Patient search failed');
+          setPatients([]);
+        }
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
-    }, 300);
+    })();
     return () => {
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      cancelled = true;
     };
-  }, [patientSearch, mapPatient]);
+  }, [ready, debouncedPatientSearch, mapPatient, handleAuthError]);
 
   const handleInputChange = (field: string, value: string) => setFormData(prev => ({ ...prev, [field]: value }));
 
@@ -356,28 +356,28 @@ function NewVisitPageContent() {
       
     } catch (err: any) {
       console.error('Error creating visit:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        // Try to extract more detailed error message from the API response
-        let errorMessage = 'Failed to create visit. Please try again.';
-        
-        if (err.apiMessage) {
-          errorMessage = err.apiMessage;
-        } else if (err.message) {
-          // Check if the message contains useful information
-          const msg = err.message;
-          if (msg.includes('non_field_errors')) {
-            // Try to extract the actual error from the serialized error
-            errorMessage = 'This patient already has an open visit for this date. Please complete or cancel the existing visit first.';
-          } else if (msg !== 'Request failed. Please try again') {
-            errorMessage = msg;
-          }
-        }
-        
-        toast.error(errorMessage);
+      if (handleAuthError(err)) {
         setIsSubmitting(false);
+        return;
       }
+      // Try to extract more detailed error message from the API response
+      let errorMessage = 'Failed to create visit. Please try again.';
+      
+      if (err.apiMessage) {
+        errorMessage = err.apiMessage;
+      } else if (err.message) {
+        // Check if the message contains useful information
+        const msg = err.message;
+        if (msg.includes('non_field_errors')) {
+          // Try to extract the actual error from the serialized error
+          errorMessage = 'This patient already has an open visit for this date. Please complete or cancel the existing visit first.';
+        } else if (msg !== 'Request failed. Please try again') {
+          errorMessage = msg;
+        }
+      }
+      
+      toast.error(errorMessage);
+      setIsSubmitting(false);
     }
   };
 

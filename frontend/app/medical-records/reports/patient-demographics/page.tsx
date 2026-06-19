@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface BreakdownRow {
   label?: string;
@@ -91,6 +92,7 @@ function normalizeReport(raw: Demographics | null): {
 }
 
 export default function PatientDemographicsReport() {
+  const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const {
     year,
     setYear,
@@ -132,6 +134,7 @@ export default function PatientDemographicsReport() {
       setCohortMode(response.cohort_mode ?? "active_register");
     } catch (error: unknown) {
       console.error("Error fetching patient demographics:", error);
+      if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load patient demographics");
       setReport(null);
     } finally {
@@ -140,6 +143,7 @@ export default function PatientDemographicsReport() {
   };
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetch) void fetchReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, startDate, endDate, viewMode]);

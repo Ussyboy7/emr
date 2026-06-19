@@ -17,9 +17,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api-client';
 import { wardService, nursingService, visitService } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { isAuthenticationError } from '@/lib/auth-errors';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
@@ -44,11 +43,6 @@ const DRESSING_INTERVENTION_MAP: Record<string, string> = {
   Suturing: 'sutures',
   'Suture removal': 'suture_removal',
   'Incision and drainage': 'i_and_d',
-};
-
-const isInvalidAdmissionTypeError = (error: any) => {
-  const msg = String(error?.message || error?.apiMessage || '').toLowerCase();
-  return msg.includes('admission_type') && msg.includes('not a valid choice');
 };
 
 // ==================== TYPES ====================
@@ -344,8 +338,7 @@ export default function ProceduresQueuePage() {
   const [wardSearch, setWardSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = useNursingPageAuth();
   const { currentUser } = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
@@ -435,6 +428,7 @@ export default function ProceduresQueuePage() {
   }, [selectedProcedure, medicationForm.administeredTime]);
   
   useEffect(() => {
+    if (!ready) return;
     wardService
       .getWards({ status: 'active' })
       .then((wardsResponse) => {
@@ -442,10 +436,11 @@ export default function ProceduresQueuePage() {
       })
       .catch((wardError) => {
         console.error('Failed to load wards:', wardError);
+        if (handleAuthError(wardError)) return;
         toast.error('Could not load wards. The ward picker will be empty until the wards API is reachable.');
         setWards([]);
       });
-  }, []);
+  }, [ready, handleAuthError]);
 
   const appendQueueDateFilters = useCallback(
     (qs: URLSearchParams) => {
@@ -477,12 +472,15 @@ export default function ProceduresQueuePage() {
       });
     } catch (e) {
       console.error('Failed to load procedure queue stats:', e);
+      if (handleAuthError(e)) return;
+      toast.error('Failed to load procedure queue statistics');
     }
-  }, [dateFilter, dateRange.from, dateRange.to]);
+  }, [dateFilter, dateRange.from, dateRange.to, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadQueueStats();
-  }, [loadQueueStats]);
+  }, [ready, loadQueueStats]);
 
   const getCompletedIconStyle = (type: Procedure['type']) => {
     // Use module/type colors (same as typeConfig palettes)
@@ -535,11 +533,8 @@ export default function ProceduresQueuePage() {
       setTotalCount(typeof ordersResult.count === 'number' ? ordersResult.count : rows.length);
     } catch (err) {
       console.error('Error loading orders:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError('Failed to load procedures queue. Please try again.');
-      }
+      if (handleAuthError(err)) return;
+      setError('Failed to load procedures queue. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -552,11 +547,13 @@ export default function ProceduresQueuePage() {
     priorityFilter,
     genderFilter,
     appendQueueDateFilters,
+    handleAuthError,
   ]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadOrders();
-  }, [loadOrders]);
+  }, [ready, loadOrders]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -599,6 +596,8 @@ export default function ProceduresQueuePage() {
       }
     } catch (err) {
       console.error('Failed to load procedure record:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load procedure details');
     } finally {
       setViewLoading(false);
     }
@@ -805,38 +804,10 @@ export default function ProceduresQueuePage() {
           admission_notes: `Admitted to ${wardName}. ${wardAdmissionForm.notes || ''}`.trim(),
           created_by: currentUser?.id,
         };
-        console.log('Creating admission record with data:', admissionData);
-        const createAdmissionWithFallback = async () => {
-          try {
-            return await apiFetch('/admissions/', {
-              method: 'POST',
-              body: JSON.stringify(admissionData),
-            });
-          } catch (admissionError: any) {
-            if (!isInvalidAdmissionTypeError(admissionError)) {
-              throw admissionError;
-            }
-
-            const fallbackAdmissionData = {
-              ...admissionData,
-              admission_type: 'elective',
-              admission_notes: `${admissionData.admission_notes}\n[Observation Mode] Created via compatibility fallback using elective admission type.`,
-            };
-            return await apiFetch('/admissions/', {
-              method: 'POST',
-              body: JSON.stringify(fallbackAdmissionData),
-            });
-          }
-        };
-
-        try {
-          const admissionResponse = await createAdmissionWithFallback();
-          console.log('Admission created:', admissionResponse);
-        } catch (admissionError: any) {
-          console.error('Admission creation failed:', admissionError);
-          console.error('Admission error details:', admissionError?.body || admissionError?.apiMessage || admissionError?.message);
-          throw admissionError;
-        }
+        await apiFetch('/admissions/', {
+          method: 'POST',
+          body: JSON.stringify(admissionData),
+        });
       } else {
         description = formatCompletedProcedureDescription('medication', selectedProcedure.details, selectedProcedure.description);
 
@@ -892,28 +863,21 @@ export default function ProceduresQueuePage() {
       };
       
       // Create procedure
-      console.log('Creating procedure with data:', procedureData);
       try {
-        const procedureResponse = await apiFetch('/nursing/procedures/', {
+        await apiFetch('/nursing/procedures/', {
           method: 'POST',
           body: JSON.stringify(procedureData),
         });
-        console.log('Procedure created:', procedureResponse);
-      } catch (procedureError: any) {
+      } catch (procedureError: unknown) {
         console.error('Procedure creation failed:', procedureError);
-        if (procedureError?.body != null) {
-          console.error('Procedure error details:', procedureError.body);
-        }
         throw procedureError;
       }
 
       // Update order status to completed
-      console.log('Updating order status for orderId:', orderId);
-      const orderResponse = await apiFetch(`/nursing/orders/${orderId}/`, {
+      await apiFetch(`/nursing/orders/${orderId}/`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'completed' }),
       });
-      console.log('Order updated:', orderResponse);
 
       if (selectedProcedure.createdNursingVisit && selectedProcedure.visitId) {
         try {
@@ -925,7 +889,6 @@ export default function ProceduresQueuePage() {
 
       void loadOrders();
       void loadQueueStats();
-      console.log('Refreshed queue after procedure ID:', selectedProcedure.id);
       
       const typeLabel = getTypeConfig(selectedProcedure.type).label;
       toast.success(`${typeLabel} completed for ${selectedProcedure.patientName}`, {
@@ -1438,7 +1401,7 @@ export default function ProceduresQueuePage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {selectedProcedure && (() => {

@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 import type { LucideIcon } from "lucide-react";
 import {
   FileText,
@@ -237,6 +238,7 @@ function StatisticalReportRowCard({
 }
 
 export default function ReportsPage() {
+  useMedicalRecordsPageAuth();
   const router = useRouter();
 
   return (

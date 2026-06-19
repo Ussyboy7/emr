@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import {
   AnalyticsReportLayout,
@@ -174,6 +175,7 @@ function pharmacyAnalyticsToCsv(
 }
 
 export default function PharmacyAnalyticsPage() {
+  const { ready, handleAuthError } = usePharmacyPageAuth();
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>('year');
   const [year, setYear] = useState(() => new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState('');
@@ -225,6 +227,7 @@ export default function PharmacyAnalyticsPage() {
       }>(url);
       setDispensedItems(dispensedResponse.dispensed_items || []);
     } catch (e: unknown) {
+      if (handleAuthError(e)) return;
       console.error(e);
       toast.error(getReadableApiError(e));
       setData(null);
@@ -232,13 +235,14 @@ export default function PharmacyAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [reportRange, viewMode]);
+  }, [reportRange, viewMode, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) {
       void fetchReport();
     }
-  }, [reportRange, fetchReport]);
+  }, [reportRange, fetchReport, ready, viewMode]);
 
   const setThisMonth = () => {
     const n = new Date();

@@ -15,7 +15,7 @@ from common.openapi import document_viewset
 from django.shortcuts import get_object_or_404
 from django.db.models import OuterRef, Subquery, Exists, Q, Count, Max
 from django.utils import timezone
-from datetime import timedelta
+from datetime import date, timedelta
 
 from common.mixins import ClinicScopedMixin
 from accounts.utils import resolve_clinic, resolve_clinic_id
@@ -125,7 +125,7 @@ def apply_nursing_status_filter(
 ):
     """
     Narrow visits for nursing pool queue (expects queryset already limited, e.g. in_progress + date).
-    nursing_status: pending | vitals_incomplete | ready | sent_to_room | completed
+    nursing_status: pending | vitals_incomplete | ready | sent_to_room | sent_to_physiotherapy | completed
 
     Stages are mutually exclusive (the three nursing cards on the dashboard
     should sum to Today's Visits, modulo 'Completed'):
@@ -226,6 +226,25 @@ def apply_nursing_status_filter(
         visit_ids = q_items.values('visit_id')
         return queryset.filter(id__in=visit_ids).exclude(status='completed')
 
+    if ns in ('sent_to_physiotherapy', 'sent_to_physio'):
+        from physiotherapy.models import PhysioOrder
+
+        has_physio_order = Exists(
+            PhysioOrder.objects.filter(
+                visit_id=OuterRef('pk'),
+                status__in=['pending', 'scheduled', 'in_progress', 'completed'],
+            )
+        )
+        has_physio_clinic = Q(clinic='Physiotherapy') | Q(clinics__contains=['Physiotherapy'])
+        not_in_room_queue = ~Exists(
+            ConsultationQueue.objects.filter(is_active=True, visit_id=OuterRef('pk'))
+        )
+        return queryset.filter(
+            not_in_room_queue,
+            has_physio_order,
+            has_physio_clinic,
+        ).exclude(status='completed')
+
     return queryset
 
 
@@ -258,6 +277,38 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     qs = annotate_visit_history_flags(qs)
     qs = view.filter_queryset(qs)
     return qs
+
+
+def _date_years_ago(years: int) -> date:
+    """Approximate calendar date N years before today (for age filtering)."""
+    today = date.today()
+    try:
+        return today.replace(year=today.year - years)
+    except ValueError:
+        return today.replace(year=today.year - years, month=2, day=28)
+
+
+def _apply_patient_list_filters(queryset, request):
+    """Optional list filters: age_min, age_max, last_visit_after, last_visit_before."""
+    age_min = request.query_params.get("age_min")
+    if age_min:
+        try:
+            queryset = queryset.filter(date_of_birth__lte=_date_years_ago(int(age_min)))
+        except (TypeError, ValueError):
+            pass
+    age_max = request.query_params.get("age_max")
+    if age_max:
+        try:
+            queryset = queryset.filter(date_of_birth__gt=_date_years_ago(int(age_max) + 1))
+        except (TypeError, ValueError):
+            pass
+    last_visit_after = request.query_params.get("last_visit_after")
+    if last_visit_after:
+        queryset = queryset.filter(_last_visit_date__gte=last_visit_after)
+    last_visit_before = request.query_params.get("last_visit_before")
+    if last_visit_before:
+        queryset = queryset.filter(_last_visit_date__lte=last_visit_before)
+    return queryset
 
 
 @extend_schema_view(
@@ -323,6 +374,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 _last_visit_date=Subquery(latest_visit.values('date')[:1]),
                 _last_visit_time=Subquery(latest_visit.values('time')[:1]),
             )
+            queryset = _apply_patient_list_filters(queryset, self.request)
         return queryset
     
     def get_serializer_class(self):
