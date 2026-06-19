@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import {
   canChooseQuantityEntryMode,
   getDefaultQuantityEntryMode,
+  getDefaultQuantityEntryModeForPrescription,
   getEffectiveDispenseMode,
   getQuantityConversionHint,
   getQuantityFieldLabel,
