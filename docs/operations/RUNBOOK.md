@@ -2,6 +2,8 @@
 
 Single reference for running the EMR stack in **local**, **staging**, and **production**. Script details: [../../scripts/README.md](../../scripts/README.md).
 
+**CI/CD (GitHub Actions):** [CI_CD.md](CI_CD.md)
+
 ## Entry point
 
 ```bash
@@ -94,6 +96,7 @@ External port mapping may differ per server; see your compose file and admin gui
 
 ## Related docs
 
+- [CI_CD.md](CI_CD.md) — GitHub Actions pipeline and runners
 - [../admin/EMR_ADMINISTRATION_GUIDE.md](../admin/EMR_ADMINISTRATION_GUIDE.md) — user/clinic admin
 - [../admin/EMR_SUPPORT_MAINTENANCE.md](../admin/EMR_SUPPORT_MAINTENANCE.md) — support procedures
 - [../testing/EMR_GO_LIVE_CHECKLIST.md](../testing/EMR_GO_LIVE_CHECKLIST.md) — go-live

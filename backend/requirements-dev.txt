@@ -1,3 +1,5 @@
 django-extensions>=3.2.0
 pydot>=2.0.0
 coverage>=7.0.0
+bandit>=1.7.0
+pip-audit>=2.7.0

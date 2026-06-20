@@ -8,6 +8,8 @@ monitoring, backing up and troubleshooting the EMR stack across **local**,
 
 One entry-point per environment, one source of truth for the logic.
 
+**CI/CD:** GitHub Actions runs tests on every PR; staging deploys automatically on `main` via self-hosted runners. See [docs/operations/CI_CD.md](../docs/operations/CI_CD.md).
+
 ```
 scripts/
 ├── lib/                Shared helpers, sourced by everything

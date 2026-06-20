@@ -10,6 +10,7 @@ Guide for **application administrators** (users, roles, clinics, audit). Infrast
 | System architecture | [architecture/OVERVIEW.md](../architecture/OVERVIEW.md) |
 | RBAC | [architecture/AUTH_AND_RBAC.md](../architecture/AUTH_AND_RBAC.md) |
 | Support tiers | [EMR_SUPPORT_MAINTENANCE.md](EMR_SUPPORT_MAINTENANCE.md) |
+| Email / SMTP (planned) | [../planning/EMAIL_AND_SMTP.md](../planning/EMAIL_AND_SMTP.md) |
 | Go-live | [testing/EMR_GO_LIVE_CHECKLIST.md](../testing/EMR_GO_LIVE_CHECKLIST.md) |
 
 ## Admin UI (`/admin`)

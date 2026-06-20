@@ -20,6 +20,7 @@ Start here. This index lists **maintained** documentation. Generated API docs li
 | Document | Description |
 |----------|-------------|
 | [operations/RUNBOOK.md](operations/RUNBOOK.md) | Deploy, backup, health, incidents |
+| [operations/CI_CD.md](operations/CI_CD.md) | GitHub Actions CI/CD and self-hosted runners |
 | [../PRODUCTION_OPERATIONS.md](../PRODUCTION_OPERATIONS.md) | Quick pointer to runbook + env-manager |
 
 ## For administrators & users
@@ -59,6 +60,7 @@ Start here. This index lists **maintained** documentation. Generated API docs li
 |----------|-------------|
 | [compliance/ICT_EMR_AUDIT_CHECKLIST.md](compliance/ICT_EMR_AUDIT_CHECKLIST.md) | ICT audit backlog |
 | [planning/ANNUAL_CHECKUP_AND_ORACLE_HR.md](planning/ANNUAL_CHECKUP_AND_ORACLE_HR.md) | Annual check-up / HR integration notes |
+| [planning/EMAIL_AND_SMTP.md](planning/EMAIL_AND_SMTP.md) | Email/SMTP requirements, ICT checklist, clinical mail roadmap (planned) |
 
 ## Integrations
 
