@@ -62,14 +62,13 @@ import { ConsultationRoomPhysioOrderViewDialog } from '@/components/consultation
 import { ConsultationRoomTailDialogs } from '@/components/consultation/room/ConsultationRoomTailDialogs';
 import { mapQueueItemsToPatients } from '@/lib/consultation/room-queue';
 import { apiFetch } from '@/lib/api-client';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
+import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import {
   getVisitServiceClinicsDisplay,
   getVisitServiceClinicsList,
   normalizeClinicName,
 } from '@/lib/utils/clinic-utils';
-import { useCurrentUser } from '@/hooks/use-current-user';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import {
   getPresentingComplaintOptions,
@@ -90,7 +89,6 @@ import {
   type ConsultationReportSession,
 } from '@/lib/consultation-report';
 import type { PatientHistoryData } from '@/lib/clinical-overview-utils';
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 interface LabTestResult {
   id: number;
@@ -128,15 +126,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const router = useRouter();
   const resolvedParams = use(params);
   const roomId = resolvedParams.roomId;
-  const { currentUser } = useCurrentUser();
+  const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
   const { names: opdClinicNames } = useOutpatientClinicTypes();
 
   const [room, setRoom] = useState<ConsultationRoom | null>(null);
   const [currentPatient, setCurrentPatient] = useState<Patient | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
   const [activeTab, setActiveTab] = useState("notes");
   const [showEndDialog, setShowEndDialog] = useState(false);
   const [showDischargeDialog, setShowDischargeDialog] = useState(false);
@@ -559,24 +555,27 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const roomData = await roomService.getRoom(numericRoomId);
       
       // Load queue items for this room - single optimized API call
-      const queueResult = await consultationService.getQueue({
-        room: numericRoomId,
-        is_active: true,
-        page_size: MAX_LIST_PAGE_SIZE,
-      });
-      const queueItems = queueResult.results || [];
+      const queueItems = await fetchAllPaginatedResults((page, pageSize) =>
+        consultationService.getQueue({
+          room: numericRoomId,
+          is_active: true,
+          page,
+          page_size: pageSize,
+        })
+      );
       const validPatients = mapQueueItemsToPatients(queueItems);
 
-        // Fetch today's completed sessions for this room to compute stats
         const todayStr = todayApiDateString();
-        const todaySessionsResult = await consultationService.getSessions({
-          room: numericRoomId,
-          status: 'completed',
-          start_date: todayStr,
-          end_date: todayStr,
-          page_size: MAX_LIST_PAGE_SIZE,
-        }).catch(() => ({ results: [] }));
-        const completedSessions = todaySessionsResult.results || [];
+        const completedSessions = await fetchAllPaginatedResults((page, pageSize) =>
+          consultationService.getSessions({
+            room: numericRoomId,
+            status: 'completed',
+            start_date: todayStr,
+            end_date: todayStr,
+            page,
+            page_size: pageSize,
+          })
+        ).catch(() => [] as Awaited<ReturnType<typeof consultationService.getSessions>>['results']);
         const completedCount = completedSessions.length;
         const durations = completedSessions
           .map((s: any) => {
@@ -618,19 +617,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         }
       } catch (err) {
         console.error('Error loading room data:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load consultation room. Please try again.');
-        }
+        if (handleAuthError(err)) return;
+        setError('Failed to load consultation room. Please try again.');
       } finally {
         setLoading(false);
       }
     };
   
   useEffect(() => {
-    loadRoomData();
-  }, [roomId]);
+    if (!ready) return;
+    void loadRoomData();
+  }, [roomId, ready]);
 
 
   // Auto-refresh queue while waiting (no active consultation patient)

@@ -4,6 +4,7 @@ import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { VisuallyHidden } from "@/components/ui/visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1198,7 +1199,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="w-[95vw] sm:max-w-[min(95vw,1100px)] lg:max-w-[min(96vw,1320px)] max-h-[90vh] overflow-y-auto mx-2 sm:mx-4"
+        className={MODAL_SIZES.xl}
         aria-labelledby="consultation-modal-title"
         aria-describedby="consultation-modal-description"
       >

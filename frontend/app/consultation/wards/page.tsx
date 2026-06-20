@@ -25,21 +25,28 @@ import {
 import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/components/referrals/FacilityPartnerSelect';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
+import { StandardPagination } from '@/components/shared/StandardPagination';
 import { toast } from 'sonner';
 import { formatDisplayDateMedium, formatDisplayDateTime, localWeekToTodayBounds } from '@/lib/dates';
 import { wardService, type Ward, type PatientAdmission, type WardAssignment } from '@/lib/services/ward-service';
-import { useCurrentUser } from '@/hooks/use-current-user';
+import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
 import { useServerToday } from '@/hooks/use-server-today';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 
 export default function WardOverviewPage() {
-  const { currentUser } = useCurrentUser();
+  const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
   const serverToday = useServerToday();
   const [wards, setWards] = useState<Ward[]>([]);
   const [admissions, setAdmissions] = useState<PatientAdmission[]>([]);
   const [assignments, setAssignments] = useState<WardAssignment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [admissionsPage, setAdmissionsPage] = useState(1);
+  const [admissionsPageSize, setAdmissionsPageSize] = useState(25);
+  const [admissionsTotal, setAdmissionsTotal] = useState(0);
+  const [kpiAdmittedTotal, setKpiAdmittedTotal] = useState(0);
+  const [kpiPendingDischargeTotal, setKpiPendingDischargeTotal] = useState(0);
 
   // Filters
   const [selectedWard, setSelectedWard] = useState<string>('all');
@@ -49,6 +56,7 @@ export default function WardOverviewPage() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   // Client-side filter — escalated patients are detected via current_condition
   // text rather than a backend `status`, so a dedicated toggle keeps the API
   // filters simple and the stat-card click-through accurate.
@@ -161,31 +169,92 @@ export default function WardOverviewPage() {
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
-    try {
-      const admissionsParams: any = { ...buildDateParams() };
-      if (statusFilter !== 'all') admissionsParams.status = statusFilter;
-      if (selectedWard !== 'all') admissionsParams.ward = parseInt(selectedWard);
-      if (typeFilter !== 'all') admissionsParams.admission_type = typeFilter;
 
-      const [wardsResponse, admissionsResponse, assignmentsResponse] = await Promise.all([
-        wardService.getWards(),
-        wardService.getAdmissions(admissionsParams),
-        wardService.getAssignments(),
-      ]);
+    try {
+      const wardsResponse = await wardService.getWards();
       setWards(wardsResponse.results || []);
-      setAdmissions(admissionsResponse.results || []);
-      setAssignments(assignmentsResponse.results || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      console.error('Error fetching wards:', error);
+      if (handleAuthError(error)) return;
+      toast.error(error instanceof Error ? error.message : 'Unable to load wards.');
+    }
+
+    const dateParams = buildDateParams();
+    const kpiBase = {
+      ...dateParams,
+      ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
+      ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
+      ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+    };
+
+    try {
+      const stats = await wardService.getAdmissionListStats(kpiBase);
+      setKpiAdmittedTotal(stats.admitted ?? 0);
+      setKpiPendingDischargeTotal(stats.pending_discharge ?? 0);
+    } catch (error: unknown) {
+      console.error('Error fetching admission KPI counts:', error);
+      if (handleAuthError(error)) return;
+      setKpiAdmittedTotal(0);
+      setKpiPendingDischargeTotal(0);
+    }
+
+    try {
+      const listParams = {
+        ...dateParams,
+        page: admissionsPage,
+        page_size: admissionsPageSize,
+        ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+        ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
+        ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
+        ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+      };
+      const admissionsResponse = await wardService.getAdmissions(listParams);
+      const loaded = admissionsResponse.results || [];
+      setAdmissions(loaded);
+      setAdmissionsTotal(admissionsResponse.count ?? loaded.length);
+
+      try {
+        if (!loaded.length) {
+          setAssignments([]);
+        } else {
+          const ar = await wardService.getActiveAssignmentsForAdmissions(
+            loaded.map((a) => a.id),
+          );
+          setAssignments(ar.results || []);
+        }
+      } catch (e: unknown) {
+        console.error('Error fetching assignments for admissions:', e);
+        setAssignments([]);
+      }
+    } catch (error: unknown) {
       console.error('Error fetching ward data:', error);
-      toast.error(error.message || 'Unable to load ward data.');
+      if (handleAuthError(error)) return;
+      toast.error(error instanceof Error ? error.message : 'Unable to load ward data.');
+      setAdmissions([]);
+      setAdmissionsTotal(0);
+      setAssignments([]);
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter, selectedWard, typeFilter, buildDateParams]);
+  }, [
+    statusFilter,
+    selectedWard,
+    typeFilter,
+    buildDateParams,
+    debouncedSearch,
+    admissionsPage,
+    admissionsPageSize,
+    handleAuthError,
+  ]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    setAdmissionsPage(1);
+  }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, debouncedSearch]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void fetchData();
+  }, [ready, fetchData]);
 
   const handleViewAdmission = (
     admission: PatientAdmission,
@@ -465,33 +534,25 @@ export default function WardOverviewPage() {
   const wardStats = useMemo(() => {
     const totalCapacity = wards.reduce((sum, w) => sum + w.total_beds, 0);
     const totalOccupied = wards.reduce((sum, w) => sum + w.occupied_beds, 0);
-    const totalAdmissions = admissions.filter(a => a.status === 'admitted').length;
     const criticalPatients = admissions.filter(a =>
       (a.status === 'admitted' || a.status === 'pending_discharge') &&
       /critical|serious|needs doctor review/i.test(a.current_condition || '')
     ).length;
-    const pendingDischarge = admissions.filter(a => a.status === 'pending_discharge').length;
     return {
       totalCapacity,
-      totalAdmissions,
+      totalAdmissions: kpiAdmittedTotal,
       criticalPatients,
-      pendingDischarge,
+      pendingDischarge: kpiPendingDischargeTotal,
       occupancyRate: totalCapacity > 0 ? Math.round((totalOccupied / totalCapacity) * 100) : 0,
     };
-  }, [wards, admissions]);
+  }, [wards, admissions, kpiAdmittedTotal, kpiPendingDischargeTotal]);
 
   const isEscalated = (admission: PatientAdmission) =>
     /critical|serious|needs doctor review/i.test(admission.current_condition || '');
 
   const filteredAdmissions = admissions.filter(admission => {
     if (escalatedOnly && !isEscalated(admission)) return false;
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      admission.patient_name.toLowerCase().includes(q) ||
-      admission.admission_id.toLowerCase().includes(q) ||
-      (admission.admission_diagnosis?.toLowerCase().includes(q) ?? false)
-    );
+    return true;
   });
 
   const activeFilterCount =
@@ -779,7 +840,11 @@ export default function WardOverviewPage() {
             <div className="flex items-center justify-between px-1 gap-2 flex-wrap">
               <p className="text-sm text-muted-foreground">
                 {escalatedOnly ? 'Escalated only · ' : ''}
-                Showing <span className="font-medium text-foreground">{filteredAdmissions.length}</span> patient{filteredAdmissions.length !== 1 ? 's' : ''}
+                Showing <span className="font-medium text-foreground">{filteredAdmissions.length}</span>
+                {!escalatedOnly && admissionsTotal > filteredAdmissions.length ? (
+                  <> of <span className="font-medium text-foreground">{admissionsTotal}</span></>
+                ) : null}
+                {' '}patient{filteredAdmissions.length !== 1 ? 's' : ''}
               </p>
               {!escalatedOnly && filteredAdmissions.some(a => /needs doctor review/i.test(a.current_condition || '')) && (
                 <button
@@ -925,6 +990,20 @@ export default function WardOverviewPage() {
                 })
               )}
             </div>
+
+            {!escalatedOnly && admissionsTotal > 0 && (
+              <Card className="p-4">
+                <StandardPagination
+                  currentPage={admissionsPage}
+                  totalItems={admissionsTotal}
+                  itemsPerPage={admissionsPageSize}
+                  onPageChange={setAdmissionsPage}
+                  onItemsPerPageChange={setAdmissionsPageSize}
+                  itemName="admissions"
+                  pageSizeOptions={[25, 50, 100]}
+                />
+              </Card>
+            )}
           </>
         )}
 

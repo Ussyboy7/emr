@@ -38,6 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import {
   annualCheckupService,
   capturedViaLabel,
@@ -783,7 +784,7 @@ export function AnnualCheckupPanel({
         open={activeRecordModal === "blood_group"}
         onOpenChange={(open) => !open && setActiveRecordModal(null)}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle>Record blood group</DialogTitle>
             <DialogDescription>
@@ -845,7 +846,7 @@ export function AnnualCheckupPanel({
         open={activeRecordModal === "genotype"}
         onOpenChange={(open) => !open && setActiveRecordModal(null)}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle>Record haemoglobin genotype</DialogTitle>
             <DialogDescription>
@@ -904,7 +905,7 @@ export function AnnualCheckupPanel({
       </Dialog>
 
       <Dialog open={selectionOpen} onOpenChange={setSelectionOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.lg}>
           <DialogHeader>
             <DialogTitle>Edit checklist selection</DialogTitle>
             <DialogDescription>

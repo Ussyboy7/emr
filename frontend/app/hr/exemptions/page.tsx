@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { MODAL_SIZES } from "@/components/ui/modal-sizes";
@@ -36,11 +46,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { hrService, type AnnualCheckupExemption } from "@/lib/services/hr-service";
-import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
-import { exemptionReasonBadgeClass } from "@/lib/hr/hr-display";
+import { DEFAULT_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
+import { exemptionReasonBadgeClass, employeeInitials } from "@/lib/hr/hr-display";
 import { patientService } from "@/lib/services/patient-service";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { useHrPageAuth } from "@/hooks/use-hr-page-auth";
+import { useHrProgrammeYear } from "@/hooks/use-hr-programme-year";
+import { formatDisplayDateMedium } from "@/lib/dates";
 
 const REASONS = [
   { value: "maternity", label: "Maternity" },
@@ -50,92 +61,114 @@ const REASONS = [
   { value: "other", label: "Other" },
 ];
 
-import { formatDisplayDateMedium } from "@/lib/dates";
-
-const formatDate = (d: string | null | undefined): string => formatDisplayDateMedium(d);
-
 export default function HRExemptionsPage() {
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { ready, handleAuthError } = useHrPageAuth();
+  const { year, setYear, yearOptions } = useHrProgrammeYear();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
   const [rows, setRows] = useState<AnnualCheckupExemption[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
+  const [listCount, setListCount] = useState(0);
+  const [yearExemptionCount, setYearExemptionCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<unknown>(null);
   const [open, setOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AnnualCheckupExemption | null>(null);
   const [patientSearch, setPatientSearch] = useState("");
+  const debouncedPatientSearch = useDebouncedValue(patientSearch, 300);
   const [patients, setPatients] = useState<{ id: number; label: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [form, setForm] = useState({
     patient: "",
-    programme_year: String(currentYear),
+    programme_year: String(new Date().getFullYear()),
     reason: "on_leave",
     notes: "",
   });
-  useAuthRedirect(authError);
+
+  const loadYearCount = useCallback(async () => {
+    try {
+      const data = await hrService.listExemptions({
+        programme_year: year,
+        page_size: 1,
+      });
+      setYearExemptionCount(data.count ?? data.results.length);
+    } catch (err) {
+      if (handleAuthError(err)) return;
+    }
+  }, [year, handleAuthError]);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       const data = await hrService.listExemptions({
         programme_year: year,
-        page_size: MAX_LIST_PAGE_SIZE,
+        search: debouncedSearch.trim() || undefined,
+        page: currentPage,
+        page_size: itemsPerPage,
       });
       setRows(data.results);
-      setTotalCount(data.count ?? data.results.length);
+      setListCount(data.count ?? data.results.length);
     } catch (err) {
-      if (isAuthenticationError(err)) setAuthError(err);
+      if (handleAuthError(err)) return;
+      toast.error("Could not load exemptions.");
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, [year, debouncedSearch, currentPage, itemsPerPage, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
+    loadYearCount();
+  }, [ready, loadYearCount]);
+
+  useEffect(() => {
+    if (!ready) return;
     load();
-  }, [load]);
-
-  useEffect(() => {
-    if (!patientSearch.trim()) {
-      setPatients([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      const res = await patientService.getPatients({
-        search: patientSearch,
-        category: "employee",
-        page_size: DEFAULT_LIST_PAGE_SIZE,
-      });
-      setPatients(
-        res.results.map((p) => ({
-          id: p.id,
-          label: `${p.full_name} (${p.patient_id})`,
-        }))
-      );
-    }, 300);
-    return () => clearTimeout(t);
-  }, [patientSearch]);
-
-  const filteredRows = useMemo(() => {
-    const q = debouncedSearch.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (row) =>
-        row.patient_name.toLowerCase().includes(q) ||
-        row.patient_display_id.toLowerCase().includes(q) ||
-        row.reason_display.toLowerCase().includes(q)
-    );
-  }, [rows, debouncedSearch]);
+  }, [ready, load]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [year, debouncedSearch, itemsPerPage]);
 
-  const paginatedRows = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredRows.slice(start, start + itemsPerPage);
-  }, [filteredRows, currentPage, itemsPerPage]);
+  useEffect(() => {
+    if (searchParams.get("grant") !== "1") return;
+    setForm((f) => ({ ...f, programme_year: String(year) }));
+    setOpen(true);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("grant");
+    const query = params.toString();
+    router.replace(query ? `?${query}` : "?", { scroll: false });
+  }, [searchParams, router, year]);
+
+  useEffect(() => {
+    if (!debouncedPatientSearch.trim()) {
+      setPatients([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await patientService.getPatients({
+          search: debouncedPatientSearch,
+          category: "employee",
+          page_size: DEFAULT_LIST_PAGE_SIZE,
+        });
+        if (cancelled) return;
+        setPatients(
+          res.results.map((p) => ({
+            id: p.id,
+            label: `${p.full_name} (${p.patient_id})`,
+          })),
+        );
+      } catch {
+        if (!cancelled) setPatients([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedPatientSearch]);
 
   const handleCreate = async () => {
     if (!form.patient) {
@@ -158,18 +191,24 @@ export default function HRExemptionsPage() {
         notes: "",
       });
       setPatientSearch("");
+      loadYearCount();
       load();
-    } catch {
+    } catch (err) {
+      if (handleAuthError(err)) return;
       toast.error("Could not create exemption.");
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await hrService.deleteExemption(id);
+      await hrService.deleteExemption(deleteTarget.id);
       toast.success("Exemption removed.");
+      setDeleteTarget(null);
+      loadYearCount();
       load();
-    } catch {
+    } catch (err) {
+      if (handleAuthError(err)) return;
       toast.error("Could not remove exemption.");
     }
   };
@@ -178,6 +217,16 @@ export default function HRExemptionsPage() {
     setForm((f) => ({ ...f, programme_year: String(year) }));
     setOpen(true);
   };
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6 flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -210,7 +259,7 @@ export default function HRExemptionsPage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Active exemptions</p>
                   <p className="text-2xl sm:text-3xl font-bold text-violet-500">
-                    {totalCount}
+                    {yearExemptionCount}
                   </p>
                 </div>
                 <ShieldCheck className="h-8 w-8 text-violet-500 opacity-50" />
@@ -247,7 +296,7 @@ export default function HRExemptionsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                  {yearOptions.map((y) => (
                     <SelectItem key={y} value={String(y)}>
                       {y}
                     </SelectItem>
@@ -258,10 +307,11 @@ export default function HRExemptionsPage() {
           </CardContent>
         </Card>
 
-        {!loading && filteredRows.length > 0 ? (
+        {!loading && listCount > 0 ? (
           <p className="text-sm text-muted-foreground px-1">
-            Showing {paginatedRows.length} of {filteredRows.length} exemption
-            {filteredRows.length === 1 ? "" : "s"}
+            Showing {rows.length} of {listCount} exemption
+            {listCount === 1 ? "" : "s"}
+            {debouncedSearch.trim() ? " matching search" : ""}
           </p>
         ) : null}
 
@@ -272,7 +322,7 @@ export default function HRExemptionsPage() {
               <p>Loading exemptions…</p>
             </CardContent>
           </Card>
-        ) : filteredRows.length === 0 ? (
+        ) : listCount === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <ShieldCheck className="h-16 w-16 text-muted-foreground mb-4" />
@@ -280,11 +330,11 @@ export default function HRExemptionsPage() {
                 No exemptions found
               </h3>
               <p className="text-muted-foreground text-center max-w-md mb-4">
-                {rows.length === 0
-                  ? `No exemptions for the ${year} programme year.`
-                  : "Try adjusting your search."}
+                {debouncedSearch.trim()
+                  ? "Try adjusting your search."
+                  : `No exemptions for the ${year} programme year.`}
               </p>
-              {rows.length === 0 ? (
+              {!debouncedSearch.trim() ? (
                 <Button
                   onClick={openGrantDialog}
                   className="bg-violet-600 hover:bg-violet-700 text-white"
@@ -297,14 +347,18 @@ export default function HRExemptionsPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {paginatedRows.map((row) => (
+            {rows.map((row) => (
               <Card
                 key={row.id}
                 className="border-l-4 border-l-violet-500 hover:shadow-md transition-shadow"
               >
                 <CardContent className="py-3 px-4">
                   <div className="flex items-start gap-3">
-                    <PatientAvatar name={row.patient_name} photoUrl={undefined} size="sm" />
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-violet-100 dark:bg-violet-900/30">
+                      <span className="font-semibold text-xs text-violet-600 dark:text-violet-400">
+                        {employeeInitials(row.patient_name)}
+                      </span>
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -322,7 +376,7 @@ export default function HRExemptionsPage() {
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                             <span>{row.patient_display_id}</span>
                             <span>•</span>
-                            <span>Granted {formatDate(row.granted_at)}</span>
+                            <span>Granted {formatDisplayDateMedium(row.granted_at)}</span>
                             {row.granted_by_name ? (
                               <>
                                 <span>•</span>
@@ -332,7 +386,7 @@ export default function HRExemptionsPage() {
                             {row.expires_at ? (
                               <>
                                 <span>•</span>
-                                <span>Expires {formatDate(row.expires_at)}</span>
+                                <span>Expires {formatDisplayDateMedium(row.expires_at)}</span>
                               </>
                             ) : null}
                           </div>
@@ -344,7 +398,7 @@ export default function HRExemptionsPage() {
                           size="icon"
                           variant="ghost"
                           className="flex-shrink-0 h-8 w-8"
-                          onClick={() => handleDelete(row.id)}
+                          onClick={() => setDeleteTarget(row)}
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -357,11 +411,11 @@ export default function HRExemptionsPage() {
           </div>
         )}
 
-        {filteredRows.length > 0 ? (
+        {listCount > 0 ? (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredRows.length}
+              totalItems={listCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
@@ -410,7 +464,7 @@ export default function HRExemptionsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                    {yearOptions.map((y) => (
                       <SelectItem key={y} value={String(y)}>
                         {y}
                       </SelectItem>
@@ -458,6 +512,27 @@ export default function HRExemptionsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove exemption</AlertDialogTitle>
+              <AlertDialogDescription>
+                Remove the {year} exemption for {deleteTarget?.patient_name}? They will appear as
+                due in the compliance list again.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDelete}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </DashboardLayout>
   );

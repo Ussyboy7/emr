@@ -40,7 +40,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             if obj.patient:
                 return obj.patient.get_full_name()
             return None
-        except:
+        except (AttributeError, TypeError):
             return None
 
     @extend_schema_field(OpenApiTypes.STR)
@@ -49,7 +49,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             if obj.ordered_by:
                 return obj.ordered_by.get_full_name() or obj.ordered_by.username
             return None
-        except:
+        except (AttributeError, TypeError):
             return None
 
     location_clinic_name = serializers.SerializerMethodField()
@@ -66,7 +66,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             if obj.patient:
                 return obj.patient.patient_id
             return None
-        except:
+        except (AttributeError, TypeError):
             return None
 
 
@@ -131,7 +131,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
             if obj.order and obj.order.patient:
                 return obj.order.patient.get_full_name()
             return None
-        except:
+        except (AttributeError, TypeError):
             return None
 
     @extend_schema_field(OpenApiTypes.STR)
@@ -140,7 +140,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
             if obj.physiotherapist:
                 return obj.physiotherapist.get_full_name() or obj.physiotherapist.username
             return None
-        except:
+        except (AttributeError, TypeError):
             return None
 
     @extend_schema_field(OpenApiTypes.STR)
@@ -149,7 +149,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
             if obj.order and obj.order.patient:
                 return obj.order.patient.patient_id
             return None
-        except:
+        except (AttributeError, TypeError):
             return None
 
     def to_representation(self, instance):

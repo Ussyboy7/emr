@@ -234,7 +234,7 @@ class Command(BaseCommand):
                 'type': 'admin',
                 'description': 'Full system access with all permissions',
                 'permissions': [
-                    "/admin", "/admin/annual-checkup-programme", "/admin/audit", "/admin/clinics", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
+                    "/admin", "/admin/annual-checkup-programme", "/admin/audit", "/admin/support-tickets", "/admin/clinics", "/admin/health", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
                     "/analytics", "/analytics/executive",
                     "/hr", "/hr/annual-checkups", "/hr/exemptions",
                     "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/room", "/consultation/start", "/consultation/wards",
@@ -242,7 +242,8 @@ class Command(BaseCommand):
                     "/medical-records", "/medical-records/appointments", "/medical-records/coding", "/medical-records/patient-records", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/referrals", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
                     "/nursing", "/nursing/analytics", "/nursing/vitals-history", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
                     "/pharmacy", "/pharmacy/history", "/pharmacy/inventory", "/pharmacy/prescriptions",
-                    "/physiotherapy", "/physiotherapy/completed", "/physiotherapy/pool-queue",
+                    "/physiotherapy", "/physiotherapy/completed", "/physiotherapy/orders",
+                    "/eyecare", "/eyecare/completed", "/eyecare/orders", "/eyecare/analytics",
                     "/radiology", "/radiology/completed", "/radiology/orders", "/radiology/templates", "/radiology/verification",
                 ],
                 'is_active': True,
@@ -273,7 +274,9 @@ class Command(BaseCommand):
                     # Radiology - View access
                     '/radiology', '/radiology/orders', '/radiology/verification', '/radiology/completed',
                     # Physiotherapy - View access
-                    '/physiotherapy', '/physiotherapy/pool-queue', '/physiotherapy/completed',
+                    '/physiotherapy', '/physiotherapy/orders', '/physiotherapy/completed',
+                    # Eye clinic - View access
+                    '/eyecare', '/eyecare/orders', '/eyecare/completed', '/eyecare/analytics',
                     # Analytics - View access
                     '/analytics',
                 ],
@@ -314,7 +317,7 @@ class Command(BaseCommand):
                     '/pharmacy/prescriptions',  # Prescriptions - pharmacy_view
 
                     # Physiotherapy - Selected pages only
-                    '/physiotherapy/pool-queue',  # Pool Queue - physio_view
+                    '/physiotherapy/orders',  # Orders queue — physio_view
 
                     # Radiology: None
                     # Analytics: None
@@ -413,7 +416,7 @@ class Command(BaseCommand):
                     '/medical-records/patients',  # View patients for physiotherapy sessions
 
                     # Physiotherapy - All pages
-                    '/physiotherapy', '/physiotherapy/pool-queue', '/physiotherapy/completed',
+                    '/physiotherapy', '/physiotherapy/orders', '/physiotherapy/completed',
 
                     # Nursing coordination for patient management
                     '/nursing/pool-queue',  # Access to pool queue for patient coordination
@@ -426,6 +429,23 @@ class Command(BaseCommand):
             }
         )
         roles['Physiotherapist'] = physio_role
+
+        # Ophthalmologist - Eye clinic services
+        eye_role, _ = Role.objects.get_or_create(
+            name='Ophthalmologist',
+            defaults={
+                'type': 'ophthalmologist',
+                'description': 'Eye clinic examination and treatment services',
+                'permissions': [
+                    '/medical-records/patients',
+                    '/eyecare', '/eyecare/orders', '/eyecare/completed', '/eyecare/analytics',
+                    '/nursing/pool-queue',
+                    '/consultation/referrals',
+                ],
+                'is_active': True,
+            }
+        )
+        roles['Ophthalmologist'] = eye_role
 
         # Medical Records Officer - Records management
         records_role, _ = Role.objects.get_or_create(

@@ -6,10 +6,11 @@ import {
   AnalyticsReportLayout,
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
+import { usePhysioPageAuth } from '@/hooks/use-physio-page-auth';
 import { useReportDateRange } from "@/hooks/use-report-date-range";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { apiFetch, getReadableApiError } from '@/lib/api-client';
+import { getReadableApiError } from '@/lib/api-client';
 import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
 import { physioService, type PhysiotherapyAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
@@ -75,6 +76,7 @@ function physiotherapyAnalyticsToCsv(
 }
 
 export default function PhysiotherapyAnalyticsPage() {
+  const { ready, handleAuthError } = usePhysioPageAuth();
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>('year');
   const [year, setYear] = useState(() => new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState('');
@@ -118,18 +120,20 @@ export default function PhysiotherapyAnalyticsPage() {
       setData(res);
     } catch (e: unknown) {
       console.error(e);
+      if (handleAuthError(e)) return;
       toast.error(getReadableApiError(e));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [reportRange]);
+  }, [reportRange, viewMode, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) {
       void fetchReport();
     }
-  }, [reportRange, fetchReport, viewMode]);
+  }, [ready, reportRange, fetchReport, viewMode]);
 
   const periodBreakdown = useMemo(() => {
     if (!data) return [];

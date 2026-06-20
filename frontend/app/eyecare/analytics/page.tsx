@@ -6,11 +6,12 @@ import {
   AnalyticsReportLayout,
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
-import { useReportDateRange } from "@/hooks/use-report-date-range";
+import { useReportDateRange } from '@/hooks/use-report-date-range';
+import { useEyecarePageAuth } from '@/hooks/use-eyecare-page-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { apiFetch, getReadableApiError } from '@/lib/api-client';
-import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
+import { getReadableApiError } from '@/lib/api-client';
+import { useAnalyticsExportHandlers } from '@/lib/analytics-export';
 import { eyecareService, type EyecareAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
 import { endOfMonth, startOfMonth } from 'date-fns';
@@ -20,13 +21,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
-  ComposedChart,
   Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -35,46 +30,8 @@ import {
 
 import { Eye, Users, Clock, TrendingUp } from 'lucide-react';
 
-const CHART_COLORS = {
-  primary: "#3b82f6",
-  secondary: "#a855f7",
-  success: "#10b981",
-  warning: "#f59e0b",
-  error: "#ef4444",
-  info: "#06b6d4",
-  muted: "#64748b",
-};
-
-function eyecareAnalyticsToCsv(
-  d: EyecareAnalyticsSummary,
-  viewMode: AnalyticsViewMode,
-  year: string,
-  start: string,
-  end: string
-) {
-  const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
-  const lines: string[] = [];
-  const periodLabel = viewMode === 'year' ? year : `${start}_to_${end}`;
-  lines.push(['Eyecare analytics', periodLabel].map(esc).join(','));
-  lines.push(['Period start', d.period.start_date].map(esc).join(','));
-  lines.push(['Period end', d.period.end_date].map(esc).join(','));
-  lines.push('');
-  lines.push(['Session metric', 'Value'].map(esc).join(','));
-  lines.push(['total_sessions', String(d.session_metrics.total_sessions)].map(esc).join(','));
-  lines.push(['completed_sessions', String(d.session_metrics.completed_sessions)].map(esc).join(','));
-  lines.push(['avg_duration', String(d.session_metrics.avg_duration)].map(esc).join(','));
-  lines.push(['completion_rate', String(d.session_metrics.completion_rate)].map(esc).join(','));
-  lines.push('');
-  lines.push(['Category', 'Male', 'Female', 'Total', 'Percentage'].map(esc).join(','));
-  d.patient_demographics.attendance_by_category.forEach((row) =>
-    lines.push(
-      [row.label, String(row.male), String(row.female), String(row.total), String(row.percentage)].map(esc).join(',')
-    )
-  );
-  return lines.join('\n');
-}
-
 export default function EyecareAnalyticsPage() {
+  const { ready, handleAuthError } = useEyecarePageAuth();
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>('year');
   const [year, setYear] = useState(() => new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState('');
@@ -83,22 +40,19 @@ export default function EyecareAnalyticsPage() {
   const reportRange = useReportDateRange(viewMode, year, startDate, endDate);
 
   const { handleExportCsv, handleDownloadPdf } = useAnalyticsExportHandlers({
-    apiPath: "/eyecare/analytics/summary/",
-    filenameBase: "eyecare_analytics",
+    apiPath: '/eyecare/analytics/summary/',
+    filenameBase: 'eyecare_analytics',
     viewMode,
     year,
     startDate,
     endDate,
-    queryStyle: "start_date",
+    queryStyle: 'start_date',
   });
 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<EyecareAnalyticsSummary | null>(null);
 
-  const range = useMemo(
-    () => reportRange,
-    [reportRange]
-  );
+  const range = useMemo(() => reportRange, [reportRange]);
 
   const highlightThisMonth =
     viewMode === 'range' &&
@@ -117,23 +71,23 @@ export default function EyecareAnalyticsPage() {
       const res = await eyecareService.getAnalyticsSummary(params);
       setData(res);
     } catch (e: unknown) {
+      if (handleAuthError(e)) return;
       console.error(e);
       toast.error(getReadableApiError(e));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [reportRange]);
+  }, [reportRange, viewMode, handleAuthError]);
 
   useEffect(() => {
-    if (canFetchReportPeriod(viewMode, reportRange)) {
-      void fetchReport();
-    }
-  }, [reportRange, fetchReport, viewMode]);
+    if (!ready || !canFetchReportPeriod(viewMode, reportRange)) return;
+    void fetchReport();
+  }, [ready, reportRange, fetchReport, viewMode]);
 
   const periodBreakdown = useMemo(() => {
     if (!data) return [];
-    let source: any[] = [];
+    let source: Array<Record<string, unknown>> = [];
     let key = '';
     let label = '';
     if (viewMode === 'daily' || viewMode === 'range') {
@@ -162,9 +116,9 @@ export default function EyecareAnalyticsPage() {
       label = 'Half-Year';
     }
     return source.map((row) => ({
-      period: row[key] ?? '',
-      sessions: row.sessions || 0,
-      completed: row.completed || 0,
+      period: String(row[key] ?? ''),
+      sessions: Number(row.sessions || 0),
+      completed: Number(row.completed || 0),
     }));
   }, [data, viewMode]);
 
@@ -180,6 +134,13 @@ export default function EyecareAnalyticsPage() {
     setViewMode('year');
   };
 
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground">Loading…</div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -229,7 +190,7 @@ export default function EyecareAnalyticsPage() {
                       <p className="text-sm text-muted-foreground">Completed Sessions</p>
                       <p className="text-2xl sm:text-3xl font-bold">{data.session_metrics.completed_sessions}</p>
                     </div>
-                      <TrendingUp className="h-10 w-10 text-green-500 opacity-50" />
+                    <TrendingUp className="h-10 w-10 text-green-500 opacity-50" />
                   </div>
                 </CardContent>
               </Card>
@@ -327,18 +288,4 @@ export default function EyecareAnalyticsPage() {
       </AnalyticsReportLayout>
     </DashboardLayout>
   );
-}
-
-function triggerCsvDownload(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function EmptyChart() {
-  return <p className="text-sm text-muted-foreground h-full flex items-center justify-center">No data in this period</p>;
 }

@@ -7,6 +7,7 @@ Fix legacy role.permissions shape and page paths in the database.
   - /physiotherapy/pool-queue -> /physiotherapy/orders
   - /nursing/patient-vitals -> /nursing/vitals-history
   - roles with /consultation/start gain /consultation/room (consultation workspace)
+- Drops retired pages: /radiology/viewer, /radiology/studies
 
 Usage:
   python manage.py fix_role_permission_paths          # dry run
@@ -41,6 +42,7 @@ class Command(BaseCommand):
             "/medical-records/reports/clinic-attendance": "/medical-records/reports/clinic-statistics",
             "/medical-records/reports/gop-attendance": "/medical-records/reports/clinic-statistics",
         }
+        retired_pages = frozenset({"/radiology/viewer", "/radiology/studies"})
 
         changed_roles = 0
 
@@ -52,6 +54,8 @@ class Command(BaseCommand):
             for p in pages:
                 if not isinstance(p, str):
                     updated.append(p)
+                    continue
+                if p in retired_pages:
                     continue
                 updated.append(replacements.get(p, p))
 

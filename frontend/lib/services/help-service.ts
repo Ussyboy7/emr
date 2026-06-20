@@ -12,64 +12,79 @@ export interface SystemStatus {
   };
 }
 
+export type SupportTicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+
 export interface SupportTicket {
+  reference?: string;
   id?: number;
   category: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
   subject: string;
   description: string;
-  status?: 'open' | 'in_progress' | 'resolved' | 'closed';
+  status?: SupportTicketStatus;
   created_at?: string;
-  updated_at?: string;
+  user_id?: number;
+  user_name?: string;
+  user_username?: string;
+}
+
+export interface UserDocSummary {
+  slug: string;
+  title: string;
+  filename: string;
+}
+
+export interface UserDocDetail extends UserDocSummary {
+  content: string;
+}
+
+export interface Paginated<T> {
+  count: number;
+  results: T[];
 }
 
 class HelpService {
-  /**
-   * Get system health status
-   */
   async getSystemStatus(): Promise<SystemStatus> {
-    try {
-      return await apiFetch<SystemStatus>('/health/');
-    } catch (err) {
-      // If health check fails, return unhealthy status
-      return {
-        status: 'unhealthy',
-        services: {
-          api: 'unhealthy: Connection failed',
-        },
-      };
-    }
+    return apiFetch<SystemStatus>('/health/');
   }
 
-  /**
-   * Submit a support ticket
-   * Note: This would require a support ticket API endpoint
-   * For now, we'll use a placeholder
-   */
-  async submitTicket(ticket: SupportTicket): Promise<SupportTicket> {
-    // In a real system, this would call an API endpoint
-    // For now, we'll simulate it
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          ...ticket,
-          id: Date.now(),
-          status: 'open',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-      }, 1000);
+  async submitTicket(
+    ticket: Omit<SupportTicket, 'reference' | 'id' | 'status' | 'created_at' | 'user_id' | 'user_name' | 'user_username'>,
+  ): Promise<SupportTicket> {
+    return apiFetch<SupportTicket>('/support/tickets/', {
+      method: 'POST',
+      body: JSON.stringify(ticket),
     });
   }
 
-  /**
-   * Get FAQs (would load from API if available)
-   */
-  async getFAQs(): Promise<any[]> {
-    // FAQs are static content, but could be loaded from API
-    return [];
+  async listMyTickets(params?: { page?: number; page_size?: number; status?: SupportTicketStatus }): Promise<Paginated<SupportTicket>> {
+    return apiFetch<Paginated<SupportTicket>>(`/support/tickets/${buildQueryString(params ?? {})}`);
+  }
+
+  async listTicketQueue(params?: {
+    page?: number;
+    page_size?: number;
+    status?: SupportTicketStatus;
+    search?: string;
+  }): Promise<Paginated<SupportTicket>> {
+    return apiFetch<Paginated<SupportTicket>>(`/support/tickets/queue/${buildQueryString(params ?? {})}`);
+  }
+
+  async updateTicketStatus(id: number, status: SupportTicketStatus): Promise<SupportTicket> {
+    return apiFetch<SupportTicket>(`/support/tickets/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async listUserDocs(): Promise<{ results: UserDocSummary[] }> {
+    return apiFetch<{ results: UserDocSummary[] }>('/support/docs/');
+  }
+
+  async getUserDoc(slug: string): Promise<UserDocDetail> {
+    return apiFetch<UserDocDetail>(`/support/docs/${slug}/`);
   }
 }
 
 export const helpService = new HelpService();
-
+export default helpService;

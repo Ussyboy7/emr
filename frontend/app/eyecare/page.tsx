@@ -20,17 +20,20 @@ import {
   Plus,
   UserCheck,
 } from 'lucide-react';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { useEyecarePageAuth } from '@/hooks/use-eyecare-page-auth';
 import {
   DEFAULT_CLINIC_DASHBOARD_POLL_MS,
   useReloadOnFocus,
 } from '@/hooks/use-reload-on-focus';
 import { useServerToday } from '@/hooks/use-server-today';
-import { isAuthenticationError } from '@/lib/auth-errors';
 import { formatDisplayDateTime } from '@/lib/dates';
 import { toast } from 'sonner';
 import { eyeCareService, type EyeOrder, type EyeSession } from '@/lib/services/eye-care-service';
 import { eyeSessionSubtitle } from '@/lib/eyecare/session-display';
+import {
+  buildEyecareOrderHref,
+  buildEyecareSessionHref,
+} from '@/lib/eyecare/eyecare-workflow-search';
 import { NewEyeOrderModal } from '@/components/eyecare/NewEyeOrderModal';
 import { EyecarePatientFinder } from '@/components/eyecare/EyecarePatientFinder';
 
@@ -56,8 +59,7 @@ function statusLabel(status: string): string {
 export default function EyeClinicPage() {
   const router = useRouter();
   const serverToday = useServerToday();
-  const [authError, setAuthError] = useState<unknown>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = useEyecarePageAuth();
 
   const [stats, setStats] = useState<EyeDashboardStats>({
     queue: 0,
@@ -92,21 +94,24 @@ export default function EyeClinicPage() {
       setRecentCompletedSessions(data.recentCompletedSessions ?? []);
     } catch (error) {
       console.error('Error loading eye clinic dashboard:', error);
-      if (isAuthenticationError(error)) {
-        setAuthError(error);
-      } else if (!opts.silent) {
+      if (handleAuthError(error)) return;
+      if (!opts.silent) {
         toast.error('Failed to load eye clinic dashboard. Please try again.');
       }
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, [serverToday]);
+  }, [serverToday, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadDashboard();
-  }, [loadDashboard]);
+  }, [ready, loadDashboard]);
 
-  useReloadOnFocus(() => loadDashboard({ silent: true }), {
+  useReloadOnFocus(() => {
+    if (!ready) return;
+    void loadDashboard({ silent: true });
+  }, {
     pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
   });
 
@@ -144,6 +149,7 @@ export default function EyeClinicPage() {
         subtitle: eyeSessionSubtitle(session),
         time: session.started_at || session.scheduled_at,
         tone: 'active' as const,
+        href: buildEyecareSessionHref(session),
       }));
 
     const completedItems = recentCompletedSessions.map((session) => ({
@@ -154,12 +160,21 @@ export default function EyeClinicPage() {
       subtitle: eyeSessionSubtitle(session),
       time: session.completed_at || session.started_at || session.scheduled_at,
       tone: 'completed' as const,
+      href: buildEyecareSessionHref(session),
     }));
 
     return [...activeItems, ...completedItems]
       .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
       .slice(0, 5);
   }, [activeSessions, recentCompletedSessions]);
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground">Loading…</div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -460,7 +475,7 @@ export default function EyeClinicPage() {
                             {statusLabel(order.status)}
                           </Badge>
                           <Button asChild variant="ghost" size="sm">
-                            <Link href="/eyecare/orders">
+                            <Link href={buildEyecareOrderHref(order)}>
                               Open
                               <ArrowRight className="h-4 w-4 ml-1" />
                             </Link>
@@ -499,7 +514,7 @@ export default function EyeClinicPage() {
                       key={item.id}
                       type="button"
                       className="w-full rounded-lg border p-3 space-y-1 text-left hover:bg-muted/50 transition-colors"
-                      onClick={() => router.push('/eyecare/orders')}
+                      onClick={() => router.push(item.href)}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-medium">{item.title}</p>

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useAdminPageAuth } from "@/hooks/use-admin-page-auth";
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { UI_TRANSITION_DELAY } from '@/lib/constants/ui';
 import { formatDisplayDateTime } from '@/lib/dates';
@@ -12,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -22,7 +25,7 @@ import { getAccessRoleBadgeClass, getAccessRoleIcon } from "@/lib/access-role-di
 import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
-  Building2, AlertTriangle, CheckCircle2, UserPlus, Key, Lock, Unlock, Loader2, Stethoscope, Download,
+  Building2, AlertTriangle, CheckCircle2, UserPlus, Key, Lock, Unlock, Loader2, Download, XCircle,
 } from "lucide-react";
 
 // Types
@@ -67,6 +70,7 @@ const emptyStaff: Partial<StaffMember> = {
 const statuses = ['All Status', 'Active', 'Inactive'];
 
 export default function UserManagementPage() {
+  const { ready, handleAuthError } = useAdminPageAuth();
   const { currentUser, hydrated, refresh: refreshCurrentUser } = useCurrentUser();
 
   const isScopedDeptHead = Boolean(
@@ -79,11 +83,17 @@ export default function UserManagementPage() {
   const headedDepartments = currentUser?.headedDepartments ?? [];
 
   const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
-  const [usersWithAccessRole, setUsersWithAccessRole] = useState(0);
+  const [userKpis, setUserKpis] = useState({
+    totalStaff: 0,
+    activeStaff: 0,
+    inactiveStaff: 0,
+    withAccessRole: 0,
+  });
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 400);
   const [roleFilter, setRoleFilter] = useState('all');
 
   const [statusFilter, setStatusFilter] = useState('all');
@@ -131,16 +141,30 @@ export default function UserManagementPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
-  const loadRoles = useCallback(async () => {
+  const loadUserKpis = useCallback(async () => {
     try {
-      const [rolesResponse, assignmentSummary] = await Promise.all([
-        adminService.getRoles({ page_size: MAX_LIST_PAGE_SIZE }),
+      const [userStats, inactivePage, assignmentSummary] = await Promise.all([
+        adminService.getUserStats(),
+        adminService.getUsers({ page: 1, page_size: 1, is_active: false }),
         adminService.getUserRoleAssignmentSummary(),
       ]);
-      // Include inactive roles too so a user's currently-assigned role always appears/selects correctly.
-      // (If we filter to active-only, the Select will show empty even though the assignment exists.)
+      const inactiveStaff = inactivePage.count ?? 0;
+      const activeStaff = userStats.total_active ?? 0;
+      setUserKpis({
+        totalStaff: activeStaff + inactiveStaff,
+        activeStaff,
+        inactiveStaff,
+        withAccessRole: assignmentSummary.unique_users ?? 0,
+      });
+    } catch (err: unknown) {
+      console.error('Error loading user KPIs:', err);
+    }
+  }, []);
+
+  const loadRoles = useCallback(async () => {
+    try {
+      const rolesResponse = await adminService.getRoles({ page_size: MAX_LIST_PAGE_SIZE });
       setAccessRoles(rolesResponse.results || []);
-      setUsersWithAccessRole(assignmentSummary.unique_users ?? 0);
     } catch (err: any) {
       console.error('Error loading roles:', err);
     }
@@ -165,8 +189,9 @@ export default function UserManagementPage() {
   }, []);
 
   useEffect(() => {
-    loadRoles();
-  }, [loadRoles]);
+    void loadRoles();
+    void loadUserKpis();
+  }, [loadRoles, loadUserKpis]);
 
   // Use a ref to track current page to avoid dependency loops
   const currentPageRef = useRef(currentPage);
@@ -180,7 +205,7 @@ export default function UserManagementPage() {
       const response = await adminService.getUsers({
         page: currentPageRef.current,
         page_size: itemsPerPage,
-        search: searchQuery || undefined,
+        search: debouncedSearch || undefined,
         access_role: roleFilter !== 'all' ? Number(roleFilter) : undefined,
         department: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
@@ -208,13 +233,14 @@ export default function UserManagementPage() {
 
       setStaff(transformedStaff);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load staff');
       toast.error('Failed to load staff. Please try again.');
       console.error('Error loading staff:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, roleFilter, statusFilter, departmentFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearch, roleFilter, statusFilter, departmentFilter]);
 
 
 
@@ -254,13 +280,8 @@ export default function UserManagementPage() {
     loadDepartments();
   }, [loadClinics, loadDepartments]);
 
-  // Calculate stats for metrics cards
-  const stats = useMemo(() => ({
-    totalRoles: accessRoles.length,
-    activeRoles: accessRoles.filter(r => r.is_active).length,
-    clinicalRoles: accessRoles.filter(r => ['doctor', 'nurse', 'lab_tech', 'pharmacist', 'radiologist'].includes(r.type)).length,
-    usersWithRoles: usersWithAccessRole,
-  }), [accessRoles, usersWithAccessRole]);
+  // User-focused KPIs (not role catalog stats — see /admin/roles for those)
+  const stats = userKpis;
 
   // Dialog states
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -402,7 +423,6 @@ export default function UserManagementPage() {
         clinics: formData.clinics || [],
       } as any);
 
-      console.log('Created user:', newUser, 'id:', newUser.id);
       if (!newUser.id) {
         throw new Error('User created but no ID returned from server');
       }
@@ -415,7 +435,7 @@ export default function UserManagementPage() {
       toast.success(`${formData.lastName}${formData.firstName ? ` ${formData.firstName}` : ''} has been added`);
       setIsCreateDialogOpen(false);
       setFormData(emptyStaff);
-      await loadStaff();
+      await Promise.all([loadStaff(), loadUserKpis()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create staff member');
       console.error('Error creating staff:', err);
@@ -467,7 +487,7 @@ export default function UserManagementPage() {
       setIsEditDialogOpen(false);
       setSelectedStaff(null);
       setFormData(emptyStaff);
-      await loadStaff(); // Reload staff list
+      await Promise.all([loadStaff(), loadUserKpis()]); // Reload staff list
     } catch (err: any) {
       toast.error(err.message || 'Failed to update staff member');
       console.error('Error updating staff:', err);
@@ -486,7 +506,7 @@ export default function UserManagementPage() {
       toast.success(`${selectedStaff.firstName} ${selectedStaff.lastName} has been removed`);
       setIsDeleteDialogOpen(false);
       setSelectedStaff(null);
-      await loadStaff(); // Reload staff list
+      await Promise.all([loadStaff(), loadUserKpis()]); // Reload staff list
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete staff member');
       console.error('Error deleting staff:', err);
@@ -561,16 +581,85 @@ export default function UserManagementPage() {
       toast.success(`${s.firstName} ${s.lastName} is now ${newStatus}`);
 
       // Best-effort refresh to ensure server truth is reflected.
-      await loadStaff();
+      await Promise.all([loadStaff(), loadUserKpis()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to toggle status');
       console.error('Error toggling status:', err);
     }
-  }, [loadStaff]);
+  }, [loadStaff, loadUserKpis]);
 
-  const handleExport = () => {
-    toast.success('Exporting staff list to CSV...');
+  const handleExport = async () => {
+    try {
+      const rows: StaffMember[] = [];
+      let page = 1;
+      const pageSize = 200;
+      let total = 0;
+
+      do {
+        const response = await adminService.getUsers({
+          page,
+          page_size: pageSize,
+          search: debouncedSearch || undefined,
+          access_role: roleFilter !== 'all' ? Number(roleFilter) : undefined,
+          department: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
+          is_active: statusFilter !== 'all' ? statusFilter === 'Active' : undefined,
+        });
+        total = response.count || response.results.length;
+        rows.push(...response.results.map((user: ApiUser) => ({
+          id: user.id.toString(),
+          firstName: user.first_name || '',
+          lastName: user.last_name || '',
+          email: user.email || '',
+          phone: user.phone || '',
+          username: user.username || '',
+          accessRoleName: user.access_role_name || '',
+          employeeId: user.employee_id || '',
+          status: user.is_active ? 'Active' : 'Inactive',
+          departmentName: user.department_name || '',
+        })) as StaffMember[]);
+        if (rows.length >= total || response.results.length === 0) break;
+        page += 1;
+      } while (rows.length < total);
+
+      const headers = ['Username', 'First Name', 'Last Name', 'Email', 'Phone', 'Employee ID', 'Access Role', 'Department', 'Status'];
+      const csv = [
+        headers.map(h => `"${h}"`).join(','),
+        ...rows.map(row => [
+          row.username,
+          row.firstName,
+          row.lastName,
+          row.email,
+          row.phone || '',
+          row.employeeId || '',
+          row.accessRoleName || '',
+          row.departmentName || '',
+          row.status,
+        ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')),
+      ].join('\n');
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `staff_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${rows.length} staff records`);
+    } catch (err: any) {
+      if (handleAuthError(err)) return;
+      toast.error(err.message || 'Failed to export staff list');
+    }
   };
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
       <DashboardLayout>
@@ -600,10 +689,10 @@ export default function UserManagementPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Roles</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.totalRoles}</p>
+                  <p className="text-sm text-muted-foreground">Total Staff</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.totalStaff}</p>
                 </div>
-                <Shield className="h-8 w-8 text-purple-500 opacity-50 shrink-0" />
+                <Users className="h-8 w-8 text-purple-500 opacity-50 shrink-0" />
               </div>
             </CardContent>
           </Card>
@@ -612,22 +701,22 @@ export default function UserManagementPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Active Roles</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.activeRoles}</p>
+                  <p className="text-sm text-muted-foreground">Active Staff</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.activeStaff}</p>
                 </div>
                 <CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50 shrink-0" />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-l-4 border-l-teal-500">
+          <Card className="border-l-4 border-l-amber-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Clinical Roles</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.clinicalRoles}</p>
+                  <p className="text-sm text-muted-foreground">Inactive Staff</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.inactiveStaff}</p>
                 </div>
-                <Stethoscope className="h-8 w-8 text-teal-500 opacity-50 shrink-0" />
+                <XCircle className="h-8 w-8 text-amber-500 opacity-50 shrink-0" />
               </div>
             </CardContent>
           </Card>
@@ -636,10 +725,10 @@ export default function UserManagementPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Users with Roles</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.usersWithRoles}</p>
+                  <p className="text-sm text-muted-foreground">With Access Role</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.withAccessRole}</p>
                 </div>
-                <Users className="h-8 w-8 text-blue-500 opacity-50 shrink-0" />
+                <Shield className="h-8 w-8 text-blue-500 opacity-50 shrink-0" />
               </div>
             </CardContent>
           </Card>
@@ -825,7 +914,7 @@ export default function UserManagementPage() {
             setFormData(emptyStaff);
           }
         }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <UserPlus className="h-5 w-5 text-blue-500" />
@@ -1059,7 +1148,7 @@ export default function UserManagementPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Eye className="h-5 w-5 text-blue-500" />

@@ -1,7 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 import { formatDisplayDateTime } from '@/lib/dates';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -12,8 +11,9 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { useEyecarePageAuth } from '@/hooks/use-eyecare-page-auth';
+import { useEyecareCompletedUrlSync } from '@/hooks/use-eyecare-completed-url-sync';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -33,17 +33,14 @@ import {
 } from 'lucide-react';
 
 export default function EyeClinicCompletedSessionsPage() {
-  const searchParams = useSearchParams();
-  const urlHydrated = useRef(false);
+  const { ready, handleAuthError } = useEyecarePageAuth();
 
   const [sessions, setSessions] = useState<EyeSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [dateFilter, setDateFilter] = useState('today');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -63,19 +60,12 @@ export default function EyeClinicCompletedSessionsPage() {
   const [reportSessionId, setReportSessionId] = useState<number | undefined>();
   const [pdfDownloadLoadingId, setPdfDownloadLoadingId] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (urlHydrated.current) return;
-    urlHydrated.current = true;
-    const urlSearch = searchParams.get('search');
-    const urlDate = searchParams.get('date');
-    if (urlSearch) setSearchQuery(urlSearch);
-    if (urlDate === 'all') setDateFilter('all');
-  }, [searchParams]);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
+  useEyecareCompletedUrlSync({
+    search: searchQuery,
+    dateFilter,
+    onSearchFromUrl: setSearchQuery,
+    onDateFilterFromUrl: () => setDateFilter('all'),
+  });
 
   const loadSessions = useCallback(async () => {
     try {
@@ -101,20 +91,18 @@ export default function EyeClinicCompletedSessionsPage() {
       setStats(statsResult);
     } catch (err: unknown) {
       console.error('Error loading completed eye sessions:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to load sessions');
-        toast.error('Failed to load completed eye sessions');
-      }
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : 'Failed to load sessions');
+      toast.error('Failed to load completed eye sessions');
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadSessions();
-  }, [loadSessions]);
+  }, [ready, loadSessions]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -142,6 +130,14 @@ export default function EyeClinicCompletedSessionsPage() {
       setPdfDownloadLoadingId(null);
     }
   };
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground">Loading…</div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <TooltipProvider>

@@ -25,15 +25,20 @@ describe('hrService', () => {
         programme_year: 2025,
         summary: { completed: 50, in_progress: 20, exempt: 5, due: 15, overdue: 10, total_eligible: 100 },
         results: [{ patient_id: 1 }],
-        count: 1,
+        count: 100,
+        page: 1,
+        page_size: 50,
       };
       mockApiFetch.mockResolvedValue(payload);
 
-      const res = await hrService.getCompliance({ programme_year: 2025 });
+      const res = await hrService.getCompliance({ programme_year: 2025, page: 1, page_size: 50 });
       expect(res.programme_year).toBe(2025);
       expect(res.results).toHaveLength(1);
+      expect(res.count).toBe(100);
       const url = mockApiFetch.mock.calls[0][0] as string;
       expect(url).toContain('/hr/compliance/');
+      expect(url).toContain('page=1');
+      expect(url).toContain('page_size=50');
     });
   });
 
@@ -101,10 +106,11 @@ describe('hrService', () => {
       const blob = new Blob(['csv data']);
       mockApiFetch.mockResolvedValue(blob);
 
-      const res = await hrService.exportCsv(2025);
+      const res = await hrService.exportCsv(2025, { status: 'overdue', search: 'smith' });
       expect(res).toBeInstanceOf(Blob);
       const url = mockApiFetch.mock.calls[0][0] as string;
       expect(url).toContain('/hr/compliance/export-csv/');
+      expect(url).toContain('search=smith');
     });
   });
 });

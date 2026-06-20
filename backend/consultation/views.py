@@ -946,17 +946,27 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         from common.list_stats import viewset_queryset_excluding_params
 
         base = viewset_queryset_excluding_params(self, frozenset({'status', 'page', 'page_size', 'ordering'}))
-
-        clinic = request.query_params.get('clinic')
-        today_qs = self.scope_queryset(ConsultationSession.objects.all())
-        week_qs = self.scope_queryset(ConsultationSession.objects.all())
-        if clinic:
-            today_qs = today_qs.filter(visit__clinic=clinic)
-            week_qs = week_qs.filter(visit__clinic=clinic)
+        # Today / this-week cards use calendar bounds, not the list date tab — but
+        # still respect doctor, clinic, search, etc.
+        scoped = viewset_queryset_excluding_params(
+            self,
+            frozenset({
+                'status',
+                'page',
+                'page_size',
+                'ordering',
+                'date',
+                'start_date',
+                'end_date',
+                'calendar_today',
+                'week_start',
+                'week_end',
+            }),
+        )
 
         return Response({
-            'today': today_qs.filter(started_at__date=calendar_today).count(),
-            'thisWeek': week_qs.filter(
+            'today': scoped.filter(started_at__date=calendar_today).count(),
+            'thisWeek': scoped.filter(
                 started_at__date__gte=week_start,
                 started_at__date__lte=week_end,
             ).count(),

@@ -14,6 +14,8 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/notifications", name: "Notifications", description: "View and manage notifications", module: "User" },
   { id: "/settings", name: "Settings", description: "User settings and preferences", module: "User" },
   { id: "/help", name: "Help & Support", description: "Help and support resources", module: "User" },
+  { id: "/help/tickets", name: "My Support Tickets", description: "View submitted support tickets", module: "User" },
+  { id: "/help/docs", name: "User Guides", description: "Role-based user documentation", module: "User" },
 
   // Medical Records
   { id: "/medical-records", name: "Dashboard", description: "Medical Records Dashboard", module: "Medical Records" },
@@ -96,8 +98,6 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/radiology/completed", name: "Completed Studies", description: "View completed studies", module: "Radiology" },
   { id: "/radiology/templates", name: "Study Templates", description: "Manage radiology templates", module: "Radiology" },
   { id: "/radiology/analytics", name: "Radiology Analytics", description: "View radiology analytics", module: "Radiology" },
-  { id: "/radiology/viewer", name: "Image Viewer", description: "View radiology images", module: "Radiology" },
-  { id: "/radiology/studies", name: "Studies List", description: "View all radiology studies", module: "Radiology" },
 
   // Physiotherapy
   { id: "/physiotherapy", name: "Dashboard", description: "Physiotherapy Dashboard", module: "Physiotherapy" },
@@ -124,12 +124,13 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/admin", name: "Dashboard", description: "Administration Dashboard", module: "Administration" },
   { id: "/admin/users", name: "User Management", description: "Manage staff accounts", module: "Administration" },
   { id: "/admin/roles", name: "Roles & Permissions", description: "Manage roles and permissions", module: "Administration" },
-  { id: "/admin/clinics", name: "Facilities & Departments", description: "Manage clinics and departments", module: "Administration" },
+  { id: "/admin/clinics", name: "Clinics & Departments", description: "Manage clinics and departments", module: "Administration" },
   { id: "/admin/rooms", name: "Room Management", description: "Manage rooms", module: "Administration" },
   { id: "/admin/settings", name: "System Settings", description: "System settings", module: "Administration" },
   { id: "/admin/health", name: "System Health", description: "Infrastructure status, storage, and backups", module: "Administration" },
   { id: "/admin/annual-checkup-programme", name: "Annual Check-up Programme", description: "Default pre-ticked annual check-up investigations", module: "Administration" },
   { id: "/admin/audit", name: "Audit Trail", description: "View audit logs", module: "Administration" },
+  { id: "/admin/support-tickets", name: "Support Tickets", description: "IT helpdesk ticket queue", module: "Administration" },
 ];
 
 /** DB / seed paths that no longer match a route id — map to the canonical path used in the UI. */

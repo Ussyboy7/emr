@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import type { ConsultationRoomPatient } from '@/lib/consultation/room-types';
 import { CheckCircle } from 'lucide-react';
 import type { Dispatch, SetStateAction } from 'react';
@@ -50,7 +51,7 @@ export function ConsultationRoomDischargeDialog({
 }: ConsultationRoomDischargeDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className={MODAL_SIZES.md}>
         <DialogHeader>
           <DialogTitle>Discharge Patient: {currentPatient?.name}</DialogTitle>
           <DialogDescription>

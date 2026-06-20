@@ -23,6 +23,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { StandardPagination } from "@/components/shared/StandardPagination";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
+import { isAuthenticationError } from "@/lib/auth-errors";
 import { Plus, Send, Stethoscope } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -31,8 +33,7 @@ import {
 } from "@/lib/services/referral-service";
 import { patientService, type Patient } from "@/lib/services/patient-service";
 import { DEFAULT_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
-import { isAuthenticationError } from "@/lib/auth-errors";
-import { useCurrentUser } from "@/hooks/use-current-user";
+import { useConsultationPageAuth } from "@/hooks/use-consultation-page-auth";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   type ReferralWithPatient,
@@ -50,7 +51,7 @@ import { hasOverlappingActiveResponsibilityForm } from "@/components/referrals/r
 import { FacilityPartnerSelect } from "@/components/referrals/FacilityPartnerSelect";
 
 export default function ConsultationReferralsPage() {
-  const { currentUser } = useCurrentUser();
+  const { currentUser } = useConsultationPageAuth();
 
   const queue = useReferralsQueue();
   const {
@@ -123,11 +124,18 @@ export default function ConsultationReferralsPage() {
     setFormsLoading(true);
     try {
       const [fresh, forms] = await Promise.all([
-        referralService.getReferral(referral.id).catch(() => null),
-        referralService.getForms(referral.id).catch(() => []),
+        referralService.getReferral(referral.id),
+        referralService.getForms(referral.id),
       ]);
       setSelectedReferral((fresh || referral) as ReferralWithPatient);
       setSelectedForms(forms || []);
+    } catch (err) {
+      console.error('Failed to load referral details:', err);
+      if (!isAuthenticationError(err)) {
+        toast.error('Failed to load referral details');
+      }
+      setSelectedReferral(referral as ReferralWithPatient);
+      setSelectedForms([]);
     } finally {
       setFormsLoading(false);
     }
@@ -484,7 +492,7 @@ export default function ConsultationReferralsPage() {
             if (!open) setCreateDialogOpen(false);
           }}
         >
-          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5 text-emerald-500" />
@@ -691,7 +699,7 @@ export default function ConsultationReferralsPage() {
         />
 
         <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle>Edit referral</DialogTitle>
               <DialogDescription>Only available for your draft referrals.</DialogDescription>

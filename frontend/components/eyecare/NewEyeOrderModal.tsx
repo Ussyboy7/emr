@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -87,7 +88,7 @@ export function NewEyeOrderModal({ open, onOpenChange, onSuccess }: NewEyeOrderM
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.lg}>
         <DialogHeader>
           <DialogTitle>New Eye Care Order</DialogTitle>
           <DialogDescription>

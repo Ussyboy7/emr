@@ -26,6 +26,7 @@ import {
   Calendar,
   CalendarDays,
   ClipboardList,
+  Ticket,
   UserPlus,
   TestTube,
   Eye,
@@ -40,7 +41,6 @@ import {
   CheckCircle,
   ShieldCheck,
   Database,
-  Image as ImageIcon,
   FileBarChart,
   Target,
   LucideIcon,
@@ -195,7 +195,6 @@ export const menuSections: MenuSection[] = [
       { label: "Results Verification", href: "/radiology/verification", icon: ShieldCheck },
       { label: "Completed Studies", href: "/radiology/completed", icon: FileBarChart },
       { label: "Study Templates", href: "/radiology/templates", icon: FileText },
-      { label: "Image Viewer", href: "/radiology/viewer", icon: ImageIcon },
       { label: "Analysis", href: "/radiology/analytics", icon: TrendingUp },
     ],
   },
@@ -264,6 +263,7 @@ export const menuSections: MenuSection[] = [
       { label: "System Health", href: "/admin/health", icon: Activity },
       { label: "Annual Check-up", href: "/admin/annual-checkup-programme", icon: ClipboardCheck },
       { label: "Audit Trail", href: "/admin/audit", icon: ClipboardList },
+      { label: "Support Tickets", href: "/admin/support-tickets", icon: Ticket },
     ],
   },
 ];
@@ -555,7 +555,7 @@ export function AppSidebar() {
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={isActive("/help")} tooltip="Help & Support" className="text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:bg-sidebar-primary/10 data-[active=true]:text-sidebar-primary">
-                    <Link href="/help">
+                    <Link href="/help?ticket=1">
                       <HelpCircle className="h-4 w-4" />
                       {!isCollapsed && <span>Help & Support</span>}
                     </Link>

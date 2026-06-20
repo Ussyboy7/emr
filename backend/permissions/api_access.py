@@ -61,6 +61,8 @@ MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "/consultation",
             "/medical-records/referrals",
             "/medical-records/coding",
+            # Admin room management uses consultation/rooms/ (ConsultationRoom model).
+            "/admin/rooms",
             # Nursing room queue page fetches consultation rooms/sessions/queue APIs.
             "/nursing/room-queue",
             # Nursing pool queue also fetches consultation queue/session APIs.
@@ -74,7 +76,6 @@ MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("eyecare/", ("/eyecare",)),
     ("wards/", ("/nursing/wards", "/consultation/wards")),
     ("appointments/", ("/medical-records/appointments",)),
-    ("hr/", ("/hr",)),
     ("analytics/", ("/analytics", "/analytics/executive")),
     ("dashboard/", ("/dashboard", "/admin")),
     ("audit/", ("/admin/audit",)),
@@ -316,7 +317,7 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
     if api_path.startswith(("orders/", "sessions/", "templates/", "stats/", "patient-tracker/")):
         return _consultation_clinical_access(allowed_pages) or user_has_any_page(
             allowed_pages,
-            ("/physiotherapy/orders", "/physiotherapy", "/nursing/pool-queue"),
+            ("/physiotherapy/orders", "/physiotherapy"),
         )
 
     # Consultation can create eye clinic orders (check-in paths handled separately below).
@@ -450,6 +451,33 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         return _consultation_clinical_access(allowed_pages) or user_has_any_page(
             allowed_pages,
             ("/medical-records/appointments",),
+        )
+
+    if api_path.startswith("support/tickets/queue"):
+        return user_has_any_page(
+            allowed_pages,
+            ("/admin/support-tickets", "/admin/audit", "/admin"),
+        )
+
+    if re.match(r"support/tickets/\d+/?$", api_path):
+        return user_has_any_page(
+            allowed_pages,
+            ("/admin/support-tickets", "/admin/audit", "/admin"),
+        )
+
+    if api_path.startswith("support/docs"):
+        return bool(allowed_pages)
+
+    if api_path.startswith("support/tickets"):
+        return bool(allowed_pages)
+
+    if api_path.startswith("hr/exemptions"):
+        return user_has_any_page(allowed_pages, ("/hr/exemptions",))
+
+    if api_path.startswith("hr/"):
+        return user_has_any_page(
+            allowed_pages,
+            ("/hr", "/hr/annual-checkups", "/hr/exemptions"),
         )
 
     for prefix, pages in MODULE_API_RULES:

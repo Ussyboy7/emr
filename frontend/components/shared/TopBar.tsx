@@ -317,7 +317,7 @@ export const TopBar = () => {
                     <button
                       onClick={(e) => {
                         e.preventDefault();
-                        router.push('/help');
+                        router.push('/help?ticket=1');
                       }}
                       className="flex items-center cursor-pointer w-full text-left"
                     >

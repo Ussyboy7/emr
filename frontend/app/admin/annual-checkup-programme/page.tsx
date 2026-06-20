@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useAdminPageAuth } from "@/hooks/use-admin-page-auth";
 import {
   DndContext,
   KeyboardSensor,
@@ -44,6 +46,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { toast } from "sonner";
 import {
   ClipboardCheck,
@@ -208,9 +211,15 @@ const emptyForm = () => ({
 });
 
 export default function AnnualCheckupProgrammePage() {
+  const { ready, handleAuthError } = useAdminPageAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const yearFromUrl = parseInt(searchParams.get("year") || "", 10);
   const { currentUser } = useCurrentUser();
   const [activeTab, setActiveTab] = useState<"investigations" | "defaults">("investigations");
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [year, setYear] = useState(
+    Number.isFinite(yearFromUrl) && yearFromUrl > 2000 ? yearFromUrl : new Date().getFullYear(),
+  );
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -241,16 +250,25 @@ export default function AnnualCheckupProgrammePage() {
       const data = await annualCheckupService.getProgramme(year);
       setCatalog(data.catalog || []);
       setSelected(data.default_selected_codes || []);
-    } catch {
+    } catch (err) {
+      if (handleAuthError(err)) return;
       toast.error("Could not load annual check-up programme.");
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, [year, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     load();
-  }, [load]);
+  }, [ready, load]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (params.get("year") === String(year)) return;
+    params.set("year", String(year));
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [year, router, searchParams]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -964,6 +982,16 @@ export default function AnnualCheckupProgrammePage() {
     </div>
   );
 
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -1227,7 +1255,7 @@ export default function AnnualCheckupProgrammePage() {
       </div>
 
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Plus className="h-5 w-5 text-teal-500" />
@@ -1255,7 +1283,7 @@ export default function AnnualCheckupProgrammePage() {
       </Dialog>
 
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Edit className="h-5 w-5 text-teal-500" />
@@ -1280,7 +1308,7 @@ export default function AnnualCheckupProgrammePage() {
       </Dialog>
 
       <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="h-5 w-5 text-teal-500" />

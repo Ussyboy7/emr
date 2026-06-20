@@ -46,6 +46,14 @@ export function isValidPhysioOrdersTab(value: string | null): value is PhysioOrd
   return value != null && PHYSIO_ORDERS_TAB_ORDER.includes(value as PhysioOrdersTab);
 }
 
+/** Map Orders UI tab to backend ``status`` query param. */
+export function physioOrdersTabToStatus(
+  tab: PhysioOrdersTab,
+): 'pending' | 'scheduled' | 'in_progress' | 'cancelled' | 'completed' | undefined {
+  if (tab === 'all') return undefined;
+  return tab;
+}
+
 export function buildPhysioOrdersHref(search?: string, tab?: PhysioOrdersTab): string {
   const params = new URLSearchParams();
   if (search?.trim()) params.set('search', search.trim());

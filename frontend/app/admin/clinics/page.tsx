@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useAdminPageAuth } from "@/hooks/use-admin-page-auth";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { toApiDateFromInstant } from "@/lib/dates";
@@ -103,8 +106,16 @@ function parseSystemRolesResponse(raw: unknown): SystemRoleRow[] {
   return [];
 }
 
+const CLINIC_TABS = ['facilities', 'departments', 'visit_types', 'referral_facilities', 'wards', 'rooms'] as const;
+type ClinicTab = typeof CLINIC_TABS[number];
+
 export default function ClinicDepartmentPage() {
-  const [activeTab, setActiveTab] = useState<'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards' | 'rooms'>('facilities');
+  const { ready, handleAuthError } = useAdminPageAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams.get('tab');
+  const initialTab = CLINIC_TABS.includes(tabFromUrl as ClinicTab) ? tabFromUrl as ClinicTab : 'facilities';
+  const [activeTab, setActiveTab] = useState<ClinicTab>(initialTab);
   const referralFacilitiesRef = useRef<ReferralFacilitiesManagerHandle>(null);
   const wardsAdminRef = useRef<WardsAdminManagerHandle>(null);
   const roomsAdminRef = useRef<RoomsAdminManagerHandle>(null);
@@ -171,62 +182,71 @@ export default function ClinicDepartmentPage() {
   const loadData = async (
     roleCounts: Record<string, number> = {},
     clinicalRoles: Set<string> = clinicalSystemRoleNames,
+    tab: ClinicTab = activeTab,
   ) => {
     try {
+      const needClinics = tab === 'facilities';
+      const needDepts = tab === 'departments';
+      if (!needClinics && !needDepts) {
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError(null);
-      const [clinicsResponse, deptsResponse] = await Promise.all([
-        adminService.getClinics({
-          page: currentPage,
-          page_size: itemsPerPage,
-          search: debouncedSearch.trim() || undefined,
-          is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
-        }),
-        adminService.getDepartments({
-          page: currentPage,
-          page_size: itemsPerPage,
-          search: debouncedSearch.trim() || undefined,
-          is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
-        }),
-      ]);
-      setClinicsTotalCount(typeof clinicsResponse.count === "number" ? clinicsResponse.count : (clinicsResponse.results || []).length);
-      setDepartmentsTotalCount(typeof deptsResponse.count === "number" ? deptsResponse.count : (deptsResponse.results || []).length);
+      const listParams = {
+        page: currentPage,
+        page_size: itemsPerPage,
+        search: debouncedSearch.trim() || undefined,
+        is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
+      };
 
-      // Transform clinics — use the API's staff_count per clinic
-      const transformedClinics: Clinic[] = clinicsResponse.results.map((clinic: ApiClinic) => ({
-        id: clinic.id.toString(),
-        code: clinic.code,
-        name: clinic.name,
-        description: clinic.description || '',
-        location: clinic.location || '',
-        phone: clinic.phone || '',
-        email: clinic.email || '',
-        staffCount: clinic.staff_count ?? 0,
-        roomCount: clinic.room_count || 0,
-        isActive: clinic.is_active,
-        createdAt: toApiDateFromInstant(clinic.created_at),
-      }));
+      const promises: Promise<{ results: ApiClinic[] | ApiDepartment[]; count?: number }>[] = [];
+      if (needClinics) promises.push(adminService.getClinics(listParams));
+      if (needDepts) promises.push(adminService.getDepartments(listParams));
+      const results = await Promise.all(promises);
 
-      // Transform departments — use the API's staff_count which counts all
-      // active users assigned to the department regardless of system_role.
-      const transformedDepts: Department[] = deptsResponse.results.map((dept: ApiDepartment) => ({
-        id: dept.id.toString(),
-        code: dept.code,
-        name: dept.name,
-        description: dept.description || '',
-        head: dept.head_name || '',
-        headUserId: dept.head != null ? String(dept.head) : '',
-        deputyHead: dept.deputy_head_name || '',
-        deputyUserId: dept.deputy_head != null ? String(dept.deputy_head) : '',
-        staffCount: dept.staff_count ?? 0,
-        clinics: dept.clinic_name ? [dept.clinic_name] : [],
-        clinic: dept.clinic?.toString() || '',
-        isActive: dept.is_active,
-      }));
+      let resultIndex = 0;
+      if (needClinics) {
+        const clinicsResponse = results[resultIndex++] as { results: ApiClinic[]; count?: number };
+        setClinicsTotalCount(typeof clinicsResponse.count === "number" ? clinicsResponse.count : (clinicsResponse.results || []).length);
+        const transformedClinics: Clinic[] = clinicsResponse.results.map((clinic: ApiClinic) => ({
+          id: clinic.id.toString(),
+          code: clinic.code,
+          name: clinic.name,
+          description: clinic.description || '',
+          location: clinic.location || '',
+          phone: clinic.phone || '',
+          email: clinic.email || '',
+          staffCount: clinic.staff_count ?? 0,
+          roomCount: clinic.room_count || 0,
+          isActive: clinic.is_active,
+          createdAt: toApiDateFromInstant(clinic.created_at),
+        }));
+        setClinics(transformedClinics);
+      }
 
-      setClinics(transformedClinics);
-      setDepartments(transformedDepts);
+      if (needDepts) {
+        const deptsResponse = results[resultIndex++] as { results: ApiDepartment[]; count?: number };
+        setDepartmentsTotalCount(typeof deptsResponse.count === "number" ? deptsResponse.count : (deptsResponse.results || []).length);
+        const transformedDepts: Department[] = deptsResponse.results.map((dept: ApiDepartment) => ({
+          id: dept.id.toString(),
+          code: dept.code,
+          name: dept.name,
+          description: dept.description || '',
+          head: dept.head_name || '',
+          headUserId: dept.head != null ? String(dept.head) : '',
+          deputyHead: dept.deputy_head_name || '',
+          deputyUserId: dept.deputy_head != null ? String(dept.deputy_head) : '',
+          staffCount: dept.staff_count ?? 0,
+          clinics: dept.clinic_name ? [dept.clinic_name] : [],
+          clinic: dept.clinic?.toString() || '',
+          isActive: dept.is_active,
+        }));
+        setDepartments(transformedDepts);
+      }
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load data');
       toast.error('Failed to load clinics/departments. Please try again.');
       console.error('Error loading data:', err);
@@ -275,12 +295,20 @@ export default function ClinicDepartmentPage() {
         console.error('Error loading bootstrap stats:', err);
       }
 
-      await loadData(counts, clinical);
+      await loadData(counts, clinical, activeTab);
     };
+    if (!ready) return;
     loadAllData();
     // clinicalSystemRoleNames intentionally omitted: we read & set it inside.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, itemsPerPage, debouncedSearch, statusFilter]);
+  }, [ready, currentPage, itemsPerPage, debouncedSearch, statusFilter, activeTab]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (params.get('tab') === activeTab) return;
+    params.set('tab', activeTab);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [activeTab, router, searchParams]);
 
   useEffect(() => {
     void loadKpiStats();
@@ -769,12 +797,22 @@ export default function ClinicDepartmentPage() {
     );
   };
 
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3"><Building2 className="h-8 w-8 text-teal-500" />Facilities &amp; Departments</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3"><Building2 className="h-8 w-8 text-teal-500" />Clinics &amp; Departments</h1>
             <p className="text-muted-foreground mt-1">
               Facilities are physical sites; visit clinics (OPD) are service lines such as GOPD or Eye Clinic (managed on this page).
             </p>
@@ -824,7 +862,7 @@ export default function ClinicDepartmentPage() {
           <Card className="border-l-4 border-l-amber-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Rooms</p><p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.totalRooms}</p></div><DoorOpen className="h-8 w-8 text-amber-500 opacity-50" /></div></CardContent></Card>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'facilities' | 'departments' | 'visit_types' | 'referral_facilities' | 'wards' | 'rooms')}>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ClinicTab)}>
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="facilities">Facilities</TabsTrigger>
             <TabsTrigger value="departments">Departments</TabsTrigger>
@@ -1075,7 +1113,7 @@ export default function ClinicDepartmentPage() {
 
         {/* Facility Create/Edit Dialog */}
         <Dialog open={(isCreateDialogOpen || isEditDialogOpen) && activeTab === 'facilities'} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-teal-500" />{isCreateDialogOpen ? 'Add facility' : 'Edit facility'}</DialogTitle></DialogHeader>
             <div className="space-y-4 mt-4">
               <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Code *</Label><Input value={clinicForm.code || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} placeholder="e.g., BODE-THOMAS" /></div><div className="space-y-2"><Label>Name *</Label><Input value={clinicForm.name || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., Bode Thomas Clinic" /></div></div>
@@ -1110,7 +1148,7 @@ export default function ClinicDepartmentPage() {
         </Dialog>
 
         <Dialog open={isVisitTypeDialogOpen} onOpenChange={(open) => { if (!open) { setIsVisitTypeDialogOpen(false); resetVisitTypeForm(); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-[480px]">
+          <DialogContent className={MODAL_SIZES.xs}>
             <DialogHeader>
               <DialogTitle>{isEditVisitType ? 'Edit visit clinic' : 'Add visit clinic'}</DialogTitle>
               <DialogDescription>Stable code is used in URLs and integrations (lowercase, hyphens).</DialogDescription>
@@ -1133,7 +1171,7 @@ export default function ClinicDepartmentPage() {
 
         {/* Department Create/Edit Dialog */}
         <Dialog open={(isCreateDialogOpen || isEditDialogOpen) && activeTab === 'departments'} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />{isCreateDialogOpen ? 'Add Department' : 'Edit Department'}</DialogTitle></DialogHeader>
             <div className="space-y-4 mt-4">
               <div className="space-y-2"><Label>Facility *</Label><Select value={deptForm.clinic || ''} onValueChange={(value) => setDeptForm(prev => ({ ...prev, clinic: value }))}><SelectTrigger><SelectValue placeholder="Select a facility" /></SelectTrigger><SelectContent>{clinics.filter(c => c.isActive).map(clinic => (<SelectItem key={clinic.id} value={clinic.id.toString()}>{clinic.name}</SelectItem>))}</SelectContent></Select></div>
@@ -1190,7 +1228,7 @@ export default function ClinicDepartmentPage() {
 
         {/* View Clinic Dialog */}
         <Dialog open={isViewDialogOpen && activeTab === 'facilities'} onOpenChange={(open) => { if (!open) setIsViewDialogOpen(false); }}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-teal-500" />{selectedClinic?.name}</DialogTitle><DialogDescription>{selectedClinic?.code}</DialogDescription></DialogHeader>
             {selectedClinic && (<div className="space-y-6 mt-4">
               <p className="text-muted-foreground">{selectedClinic.description}</p>
@@ -1208,7 +1246,7 @@ export default function ClinicDepartmentPage() {
 
         {/* View Department Dialog */}
         <Dialog open={isViewDialogOpen && activeTab === 'departments'} onOpenChange={(open) => { if (!open) setIsViewDialogOpen(false); }}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />{selectedDepartment?.name}</DialogTitle><DialogDescription>{selectedDepartment?.code}</DialogDescription></DialogHeader>
             {selectedDepartment && (<div className="space-y-4 mt-4">
               <p className="text-muted-foreground">{selectedDepartment.description}</p>

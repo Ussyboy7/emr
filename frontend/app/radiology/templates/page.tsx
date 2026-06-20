@@ -3,6 +3,8 @@ import { todayApiDateString } from "@/lib/dates";
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -70,6 +72,7 @@ const transformTemplate = (apiTemplate: ApiRadiologyTemplate): RadiologyTemplate
 const categories = ['All', 'xray', 'ct', 'mri', 'ultrasound', 'mammography', 'fluoroscopy', 'angiography', 'nuclear', 'dental', 'interventional'];
 
 export default function RadiologyTemplatesPage() {
+  const { ready, handleAuthError } = useRadiologyPageAuth();
   const [templates, setTemplates] = useState<RadiologyTemplate[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -118,14 +121,17 @@ export default function RadiologyTemplatesPage() {
         mri: stats.mri ?? 0,
         ct: stats.ct ?? 0,
       });
-    } catch {
-      /* keep */
+    } catch (err) {
+      console.error('Failed to load template stats:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load template statistics');
     }
-  }, []);
+  }, [handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadTemplateStats();
-  }, [loadTemplateStats]);
+  }, [ready, loadTemplateStats]);
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -145,17 +151,19 @@ export default function RadiologyTemplatesPage() {
       setTemplates(transformed);
       setTotalCount(typeof apiTemplates.count === 'number' ? apiTemplates.count : transformed.length);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load templates');
       toast.error('Failed to load templates. Please try again.');
       console.error('Error loading templates:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, statusFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, statusFilter, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadTemplates();
-  }, [loadTemplates]);
+  }, [ready, loadTemplates]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -210,6 +218,7 @@ export default function RadiologyTemplatesPage() {
       setIsCreateDialogOpen(false);
       resetForm();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to create template');
       console.error('Error creating template:', err);
     } finally {
@@ -251,6 +260,7 @@ export default function RadiologyTemplatesPage() {
       setIsEditDialogOpen(false);
       resetForm();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to update template');
       console.error('Error updating template:', err);
     } finally {
@@ -275,6 +285,7 @@ export default function RadiologyTemplatesPage() {
       void loadTemplateStats();
       setIsDeleteDialogOpen(false);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to delete template');
       console.error('Error deleting template:', err);
     } finally {
@@ -317,6 +328,7 @@ export default function RadiologyTemplatesPage() {
       void loadTemplates();
       void loadTemplateStats();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to duplicate template');
       console.error('Error duplicating template:', err);
     } finally {
@@ -337,6 +349,7 @@ export default function RadiologyTemplatesPage() {
       void loadTemplates();
       void loadTemplateStats();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to update template status');
       console.error('Error toggling template status:', err);
     }
@@ -606,7 +619,7 @@ export default function RadiologyTemplatesPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Template Details</DialogTitle>
               <DialogDescription>{selectedTemplate?.name}</DialogDescription>
@@ -663,7 +676,7 @@ export default function RadiologyTemplatesPage() {
 
         {/* Create/Edit Dialog */}
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {isEditDialogOpen ? <Edit className="h-5 w-5 text-amber-500" /> : <Plus className="h-5 w-5 text-emerald-500" />}

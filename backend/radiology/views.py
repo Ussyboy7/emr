@@ -252,7 +252,11 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         if source_type in ('internal_emr', 'external_manual'):
             qs = qs.filter(source_type=source_type)
         study_status = self.request.query_params.get('study_status')
-        if study_status in ('pending', 'processing', 'reported', 'rejected', 'verified'):
+        if study_status == 'pending':
+            qs = qs.filter(
+                studies__status__in=('pending', 'scheduled', 'acquired')
+            ).distinct()
+        elif study_status in ('processing', 'reported', 'rejected', 'verified'):
             qs = qs.filter(studies__status=study_status).distinct()
         gender = self.request.query_params.get('gender')
         if gender in ('male', 'female'):
@@ -327,7 +331,11 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
         summary = ordered_scoped.aggregate(
             total=Count('id', distinct=True),
-            pending=Count('id', filter=Q(studies__status='pending'), distinct=True),
+            pending=Count(
+                'id',
+                filter=Q(studies__status__in=('pending', 'scheduled', 'acquired')),
+                distinct=True,
+            ),
             processing=Count('id', filter=Q(studies__status='processing'), distinct=True),
             results_ready=Count('id', filter=Q(studies__status='reported'), distinct=True),
             stat=Count('id', filter=Q(priority='stat'), distinct=True),
@@ -368,67 +376,9 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def list(self, request, *args, **kwargs):
-        logger.debug("RadiologyOrderViewSet.list() called")
-        # Ensure all orders have at least one study before serialization
-        orders = self.get_queryset()
-        created_count = 0
-        for order in orders:
-            study_count = order.studies.count()
-            logger.debug("Order %s (%s) has %s studies", order.id, order.order_id, study_count)
-            if study_count == 0:
-                logger.debug("Creating default study for order %s", order.id)
-                RadiologyStudy.objects.create(
-                    order=order,
-                    procedure='Radiology Study',
-                    body_part='',
-                    modality='X-Ray',
-                    status='pending',
-                    images_count=0,
-                    technical_notes='Auto-created for legacy order compatibility'
-                )
-                created_count += 1
-
-        logger.debug("Created %s default studies", created_count)
-
-        # Refresh queryset to include newly created studies
-        self.queryset = self.get_queryset()
-
-        # Debug: Check final study counts
-        final_orders = self.get_queryset()
-        for order in final_orders[:3]:  # Just check first 3
-            logger.debug("Final - Order %s has %s studies", order.id, order.studies.count())
-
         return super().list(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
-        logger.debug("RadiologyOrderViewSet.retrieve() called")
-        # Ensure the order has at least one study before serialization
-        order = self.get_object()
-        study_count = order.studies.count()
-        logger.debug(
-            "Order %s (%s) has %s studies before retrieve",
-            order.id,
-            order.order_id,
-            study_count,
-        )
-
-        if study_count == 0:
-            logger.debug("ViewSet retrieve() creating default study for order %s", order.id)
-            RadiologyStudy.objects.create(
-                order=order,
-                procedure='Radiology Study',
-                body_part='',
-                modality='X-Ray',
-                status='pending',
-                images_count=0,
-                technical_notes='Auto-created for legacy order compatibility'
-            )
-
-        # Refresh the order object to include the new study
-        order.refresh_from_db()
-        study_count_after = order.studies.count()
-        logger.debug("Order %s has %s studies after retrieve", order.id, study_count_after)
-
         return super().retrieve(request, *args, **kwargs)
 
     def perform_create(self, serializer):

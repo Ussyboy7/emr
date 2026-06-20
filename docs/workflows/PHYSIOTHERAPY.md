@@ -8,7 +8,7 @@ Detailed, critical walkthrough from when a doctor orders physiotherapy during a 
 
 The following have been implemented:
 
-- **Consultation room:** `physioOrders` is loaded from `getOrders({ consultation_session: sessionId })` when `sessionId` is set; merged with drafts so the doctor sees real statuses (Sent to Physiotherapy, Scheduled, In Progress, Completed) and does not lose them on refresh. A link **View in Physiotherapy queue →** to `/physiotherapy/pool-queue` was added.
+- **Consultation room:** `physioOrders` is loaded from `getOrders({ consultation_session: sessionId })` when `sessionId` is set; merged with drafts so the doctor sees real statuses (Sent to Physiotherapy, Scheduled, In Progress, Completed) and does not lose them on refresh. A link **View in Physiotherapy queue →** to `/physiotherapy/orders` was added.
 - **Pool queue – Start Session:** The primary button when starting a **new** session (`!currentSession`) is now **"Start Session"** (was "Complete Session").
 - **Pool queue – End treatment plan:** An **"End treatment plan"** button (when `order.status === 'in_progress'`) calls `handleCompleteOrder` so the order can be completed without relying on "Complete Session" with no `in_progress` sessions.
 - **Pool queue – Completed tab:** A **Completed** tab and stat card were added to show completed orders.
@@ -101,7 +101,7 @@ physioOrders = [
 
 ### 2.1 How orders are loaded
 
-- **Pool queue** (`/physiotherapy/pool-queue`) calls `physioService.getOrders({ page, page_size, search })` (no `status` in the request).
+- **Study orders** (`/physiotherapy/orders`) calls `physioService.getOrders({ page, page_size, search })` (no `status` in the request when on the All tab).
 - Backend returns **all** orders; the UI filters by `activeTab`: `pending` | `scheduled` | `in_progress` | `cancelled`.
 - **Completed** orders are not shown in any tab; they effectively “leave” the main queue view.
 
@@ -217,7 +217,7 @@ Order moves from **Pending** to **Scheduled** tab.
 - `getSessions({ order })`; for every session with `status !== 'completed'`, `updateSession(..., { status: 'completed', completed_at })`.
 - `updateOrder(order.id, { status: 'completed', completed_at })`.
 
-So the **order** becomes `completed`. It then no longer matches any pool-queue tab (pending/scheduled/in_progress/cancelled) and disappears from the main queue.
+So the **order** becomes `completed`. It then no longer matches any orders-queue tab (pending/scheduled/in_progress/cancelled) and disappears from the main queue.
 
 **Critical:**
 
@@ -317,7 +317,7 @@ So both **in‑progress** and **completed** sessions for an order can be edited 
 7. **Completed Sessions**  
    - Sessions `1` and `2` (and any later completed ones) show in `/physiotherapy/completed`.  
    - Session reports, Edit, and Add recommendation work.  
-   - Order `1` is `completed` and no longer in the pool-queue tabs; it can still be seen in patient history and consultation session viewer.
+   - Order `1` is `completed` and no longer in the orders-queue tabs; it can still be seen in patient history and consultation session viewer.
 
 ---
 
@@ -332,7 +332,7 @@ So both **in‑progress** and **completed** sessions for an order can be edited 
 | No dedicated “Complete order” / “End treatment plan” | Pool queue | Hard to discover; depends on **Complete Session** when there are no `in_progress` sessions. | **Fixed** (End treatment plan button) |
 | `physioService.completeOrder` calls non‑existent `/orders/{id}/complete/` | Frontend | Dead or broken if ever used; backend has no such action. | **Fixed** (uses `updateOrder`) |
 | `physiotherapist: 1` hardcoded | Pool queue, createSession, createNextSession, etc. | All sessions are attributed to user `1`; should use current user. | **Fixed** |
-| Completed orders not shown in any pool-queue tab | Pool queue | By design they leave the main queue, but there is no “Completed” or “History” tab in the same view. | **Fixed** (Completed tab) |
+| Completed orders not shown in any orders-queue tab | Study orders | By design they leave the main queue, but there is no “Completed” or “History” tab in the same view. | **Fixed** (Completed tab) |
 | Sessions only reach Completed page if completed via the green Complete Session dialog | Backend + pool queue | Save Session in Start/Continue does not set `status=completed`; those sessions never appear in Completed. | **Clarified** (note in Complete Session dialog) |
 | Duplicate `session_number` for same order possible | Session create logic | Needs clear rules and ideally a DB constraint on `(order_id, session_number)`. | **Fixed** (DB constraint) |
 

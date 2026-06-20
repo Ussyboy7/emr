@@ -1,12 +1,14 @@
 """Cross-workflow physiotherapy patient lookup for dashboard search."""
-import re
 
-from django.db.models import Prefetch, Q
+from django.db.models import Prefetch
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.openapi import document_api_view
+from accounts.utils import resolve_clinic_id
+from organization.models import SystemConfig
+from physiotherapy.filters import filter_physio_orders_by_search
 from physiotherapy.models import PhysioOrder, PhysioSession
 
 
@@ -33,23 +35,15 @@ def _format_phy_id(pk: int) -> str:
 
 
 def _filter_orders_by_search(qs, search: str):
-    term = search.strip()
-    if not term:
-        return qs
-    q = Q()
-    if term.isdigit():
-        q |= Q(pk=int(term))
-    m = re.match(r'^PHY-(\d+)$', term, re.IGNORECASE)
-    if m:
-        q |= Q(pk=int(m.group(1)))
-    return qs.filter(
-        q
-        | Q(patient__patient_id__icontains=term)
-        | Q(patient__surname__icontains=term)
-        | Q(patient__first_name__icontains=term)
-        | Q(patient__middle_name__icontains=term)
-        | Q(diagnosis__icontains=term)
-    ).distinct()
+    return filter_physio_orders_by_search(qs, search)
+
+
+def _scope_orders_for_user(qs, user):
+    if SystemConfig.is_enabled('multi_clinic_enabled'):
+        clinic_id = resolve_clinic_id(user)
+        if clinic_id is not None:
+            qs = qs.filter(location_clinic_id=clinic_id)
+    return qs
 
 
 @document_api_view(tag="Physiotherapy", summary="Cross-workflow physiotherapy patient tracker")
@@ -75,6 +69,7 @@ class PhysiotherapyPatientTrackerView(APIView):
                 Prefetch('sessions', queryset=PhysioSession.objects.select_related('physiotherapist').order_by('id'))
             )
         )
+        orders_qs = _scope_orders_for_user(orders_qs, request.user)
         orders_qs = _filter_orders_by_search(orders_qs, search)[:40]
 
         for order in orders_qs:

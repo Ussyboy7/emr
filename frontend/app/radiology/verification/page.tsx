@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getMediaUrl, openMediaInNewTab } from '@/lib/media-url';
+import { openMediaInNewTab } from '@/lib/media-url';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,11 +15,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { radiologyService, type RadiologyReport as ApiRadiologyReport } from '@/lib/services';
+import { radiologyService } from '@/lib/services';
 import { RADIOLOGY_VERIFICATION_POLL_INTERVAL } from '@/lib/constants/ui';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
-import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { useRadiologyUrlSync } from '@/hooks/use-radiology-url-sync';
+import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   isValidRadiologyVerificationTab,
   RADIOLOGY_VERIFICATION_TAB_LABELS,
@@ -27,172 +29,21 @@ import {
 } from '@/lib/radiology/radiology-workflow-search';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { StandardPagination } from '@/components/shared/StandardPagination';
-import { transformPriority } from '@/lib/services/transformers';
+import {
+  transformApiRowToVerificationRadiologyReport,
+  type VerificationRadiologyReport,
+} from '@/lib/radiology/completedRadiologyReport';
 import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
   Loader2, User, Calendar, FileText, Stethoscope, ScanLine, Download
 } from 'lucide-react';
 
-interface ImagingStudy {
-  id: string;
-  procedure: string;
-  category: string;
-  bodyPart: string;
-  status: 'Pending' | 'Scheduled' | 'Acquired' | 'Processing' | 'Reported' | 'Verified';
-  processingMethod?: 'In-house' | 'Outsourced';
-  outsourcedFacility?: string;
-  scheduledDate?: string;
-  scheduledTime?: string;
-  technologist?: string;
-  acquiredAt?: string;
-  imagesCount?: number;
-  report?: string;
-  customReports?: Array<{ id: string; procedure: string; report: string; recommendations?: string; critical?: boolean; attachment?: { name: string; url: string } | null }>;
-  critical?: boolean;
-  reportFile?: { name: string; type: string; uploadedAt: string };
-  reportAttachments?: Array<{ name: string; url: string }>;
-  reportedBy?: string;
-  reportedAt?: string;
-  verifiedBy?: string;
-  verifiedAt?: string;
-}
-
-interface RadiologyReport {
-  id: string;
-  orderId: string;
-  studyId: string;
-  patient: { id: string; name: string; age: number; gender: string; };
-  doctor: { id: string; name: string; specialty: string; };
-  study: ImagingStudy;
-  priority: 'Routine' | 'Urgent' | 'STAT';
-  clinic: string;
-  location_clinic_name?: string;
-  clinicalIndication?: string;
-  provisionalDiagnosis?: string;
-  lmp?: string;
-}
-
-const getRadiologyReportFileUrl = (filePath?: string | null) =>
-  getMediaUrl(filePath ?? '') ?? '';
-
-// Transform backend radiology report to frontend format
-const transformReport = (apiReport: any): RadiologyReport => {
-  const study = apiReport.study_details || apiReport.study;
-  const studyObj = typeof study === 'object' && study !== null ? study : {};
-  const legacyFindings = String(studyObj.findings || '').trim();
-  const legacyImpression = String(studyObj.impression || '').trim();
-  const reportText = String(studyObj.report || '').trim() || legacyFindings;
-  const mergedReportText = legacyImpression
-    ? `${reportText}\n\nImpression:\n${legacyImpression}`.trim()
-    : reportText;
-  const attachments = Array.isArray(studyObj.report_attachments) ? studyObj.report_attachments : [];
-  const matchedAttachmentFiles = new Set<string>();
-  const customReports = Array.isArray(studyObj.custom_reports)
-    ? studyObj.custom_reports.map((row: any) => {
-        const attachment = attachments.find((file: any) => {
-          const matched = file.row_id === row.id || file.row_name?.trim().toLowerCase() === String(row.procedure || row.name || '').trim().toLowerCase();
-          if (matched && file.file) matchedAttachmentFiles.add(String(file.file));
-          return matched;
-        });
-        const attachmentUrl = getRadiologyReportFileUrl(attachment?.file);
-        return {
-          id: String(row.id || ''),
-          procedure: String(row.procedure || row.name || ''),
-          report: String(row.report || ''),
-          recommendations: row.recommendations ? String(row.recommendations) : undefined,
-          critical: Boolean(row.critical),
-          attachment: attachmentUrl
-            ? {
-                name: String(attachment.row_name || attachment.file.split('/').pop() || 'Report file'),
-                url: attachmentUrl,
-              }
-            : null,
-        };
-      })
-    : [];
-  const reportAttachments = attachments
-    .filter((att: any) => !att.file || !matchedAttachmentFiles.has(String(att.file)))
-    .map((att: any) => ({
-      name: att.row_name || att.file?.split('/').filter(Boolean).pop() || 'Additional file',
-      url: getRadiologyReportFileUrl(String(att.file)),
-    }))
-    .filter((att: { name: string; url: string }) => att.url);
-  
-  // Extract patient details
-  const patientId = (apiReport as any).patient_details?.patient_id || '';
-  const patientName = apiReport.patient_name ?? '';
-  const patientAge = (apiReport as any).patient_details?.age || (apiReport as any).patient_age || 0;
-  const patientGender = (apiReport as any).patient_details?.gender || (apiReport as any).patient_gender || 'Unknown';
-  
-  // Extract doctor details from order
-  const orderDetails = (apiReport as any).order_details || {};
-  const doctorId = orderDetails.doctor?.toString() || apiReport.doctor?.toString() || '';
-  const doctorName = orderDetails.doctor_name || apiReport.doctor_name || '';
-  const doctorSpecialty = orderDetails.doctor_specialty || (apiReport as any).doctor_specialty || '';
-  
-  // Extract clinic and clinical indication
-  const clinic = orderDetails.clinic || (apiReport as any).clinic || '';
-  const locationClinicName = orderDetails.location_clinic_name || (studyObj as any).location_clinic_name || (apiReport as any).location_clinic_name || '';
-  const clinicalIndication = orderDetails.clinical_notes || apiReport.clinical_notes || '';
-  const provisionalDiagnosis = orderDetails.provisional_diagnosis || (apiReport as any).provisional_diagnosis || '';
-  const lmp = orderDetails.lmp || (apiReport as any).lmp || '';
-  
-  return {
-    id: apiReport.id.toString(),
-    orderId: apiReport.order_id || '',
-    studyId: studyObj.id?.toString() || '',
-    patient: {
-      id: patientId,
-      name: patientName,
-      age: patientAge,
-      gender: patientGender,
-    },
-    doctor: {
-      id: doctorId,
-      name: doctorName,
-      specialty: doctorSpecialty,
-    },
-    study: {
-      id: studyObj.id?.toString() || '',
-      procedure: studyObj.procedure || '',
-      category: studyObj.modality || 'X-Ray',
-      bodyPart: studyObj.body_part || '',
-      status: studyObj.status ? (
-        studyObj.status === 'reported' || studyObj.status === 'results_ready' ? 'Reported' :
-        studyObj.status === 'verified' ? 'Verified' : 'Reported'
-      ) : 'Reported',
-      processingMethod: studyObj.processing_method ? (studyObj.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
-      outsourcedFacility: studyObj.outsourced_facility,
-      imagesCount: studyObj.images_count ? Number(studyObj.images_count) : undefined,
-      report: mergedReportText || undefined,
-      customReports,
-      critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
-      reportAttachments: reportAttachments.length > 0 ? reportAttachments : undefined,
-      reportFile: studyObj.report_file_url || studyObj.report_file ? {
-        name: String(studyObj.report_file ? studyObj.report_file.split('/').pop() : 'Report File'),
-        type: 'application/pdf',
-        uploadedAt: String(studyObj.reported_at || new Date().toISOString()),
-        url: getRadiologyReportFileUrl(studyObj.report_file_url || studyObj.report_file),
-      } as any : undefined,
-      reportedBy: studyObj.reported_by_name || (studyObj.reported_by ? String(studyObj.reported_by) : undefined),
-      reportedAt: studyObj.reported_at ? String(studyObj.reported_at) : undefined,
-      verifiedBy: studyObj.verified_by_name || (studyObj.verified_by ? String(studyObj.verified_by) : undefined),
-      verifiedAt: studyObj.verified_at ? String(studyObj.verified_at) : undefined,
-    },
-    priority: transformPriority(apiReport.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
-    clinic,
-    location_clinic_name: locationClinicName,
-    clinicalIndication,
-    provisionalDiagnosis: provisionalDiagnosis || undefined,
-    lmp: lmp || undefined,
-  };
-};
-
 export default function RadiologyVerificationPage() {
   const serverToday = useServerToday();
-  const [reports, setReports] = useState<RadiologyReport[]>([]);
-  const [verifiedReports, setVerifiedReports] = useState<RadiologyReport[]>([]);
+  const { ready, handleAuthError } = useRadiologyPageAuth();
+  const [reports, setReports] = useState<VerificationRadiologyReport[]>([]);
+  const [verifiedReports, setVerifiedReports] = useState<VerificationRadiologyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [verifiedLoading, setVerifiedLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -217,7 +68,7 @@ export default function RadiologyVerificationPage() {
   const [activeTab, setActiveTab] = useState<RadiologyVerificationTab>('pending');
   const autoTabRef = useRef<string | null>(null);
 
-  useLabUrlSync({
+  useRadiologyUrlSync({
     search: searchQuery,
     tab: activeTab,
     defaultTab: 'pending',
@@ -227,7 +78,7 @@ export default function RadiologyVerificationPage() {
   });
 
   // Dialog states
-  const [selectedReport, setSelectedReport] = useState<RadiologyReport | null>(null);
+  const [selectedReport, setSelectedReport] = useState<VerificationRadiologyReport | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isVerifyDialogOpen, setIsVerifyDialogOpen] = useState(false);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
@@ -289,16 +140,19 @@ export default function RadiologyVerificationPage() {
 
       const response = await radiologyService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
-      const transformedReports = response.results.map(transformReport);
+      const transformedReports = response.results.map((r) =>
+        transformApiRowToVerificationRadiologyReport(r as unknown as Record<string, unknown>),
+      );
       setReports(transformedReports);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load reports');
       toast.error('Failed to load verification reports. Please try again.');
       console.error('Error loading reports:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday]);
+  }, [currentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
 
   const loadVerifiedReports = useCallback(async () => {
     try {
@@ -320,43 +174,53 @@ export default function RadiologyVerificationPage() {
 
       const response = await radiologyService.getPendingVerifications(params);
       setVerifiedTotalCount(response.count || response.results.length);
-      const transformedReports = response.results.map(transformReport);
+      const transformedReports = response.results.map((r) =>
+        transformApiRowToVerificationRadiologyReport(r as unknown as Record<string, unknown>),
+      );
       setVerifiedReports(transformedReports);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setVerifiedError(err.message || 'Failed to load verified reports');
       toast.error('Failed to load verified reports. Please try again.');
       console.error('Error loading verified reports:', err);
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday]);
+  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
 
   const loadVerificationCounts = useCallback(async () => {
-    const searching = Boolean(searchQuery.trim());
-    const base = {
-      overall_status: undefined,
-      priority: priorityFilter !== 'all' ? priorityFilter.toLowerCase() : undefined,
-      search: searching ? searchQuery.trim() : undefined,
-      gender: genderFilter !== 'all' ? genderFilter : undefined,
-      category: categoryFilter !== 'all' ? categoryFilter : undefined,
-      ...(searching ? {} : buildDateQuery(dateFilter)),
-    };
-    const [pendingStats, verifiedStats] = await Promise.all([
-      radiologyService.getVerificationStats({ ...base, status: 'reported' }),
-      radiologyService.getVerificationStats({ ...base, status: 'verified' }),
-    ]);
-    setPendingCount(pendingStats.total || 0);
-    setVerifiedCount(verifiedStats.total || 0);
-    setVerifiedBreakdown({
-      normal: verifiedStats.normal || 0,
-      abnormal: verifiedStats.abnormal || 0,
-      critical: verifiedStats.critical || 0,
-    });
-  }, [priorityFilter, searchQuery, genderFilter, categoryFilter, dateFilter, serverToday]);
+    try {
+      const searching = Boolean(searchQuery.trim());
+      const base = {
+        overall_status: undefined,
+        priority: priorityFilter !== 'all' ? priorityFilter.toLowerCase() : undefined,
+        search: searching ? searchQuery.trim() : undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        category: categoryFilter !== 'all' ? categoryFilter : undefined,
+        ...(searching ? {} : buildDateQuery(dateFilter)),
+      };
+      const [pendingStats, verifiedStats] = await Promise.all([
+        radiologyService.getVerificationStats({ ...base, status: 'reported' }),
+        radiologyService.getVerificationStats({ ...base, status: 'verified' }),
+      ]);
+      setPendingCount(pendingStats.total || 0);
+      setVerifiedCount(verifiedStats.total || 0);
+      setVerifiedBreakdown({
+        normal: verifiedStats.normal || 0,
+        abnormal: verifiedStats.abnormal || 0,
+        critical: verifiedStats.critical || 0,
+      });
+    } catch (err: unknown) {
+      console.error('Failed to load verification counts:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load verification counts');
+    }
+  }, [priorityFilter, searchQuery, genderFilter, categoryFilter, dateFilter, serverToday, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadVerificationCounts();
-  }, [loadVerificationCounts]);
+  }, [ready, loadVerificationCounts]);
 
   // When searching, switch tab if the current one has no matches but the other does.
   useEffect(() => {
@@ -392,16 +256,17 @@ export default function RadiologyVerificationPage() {
   ]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadReports();
-  }, [loadReports]);
+  }, [ready, loadReports]);
 
   useEffect(() => {
-    if (activeTab === 'verified') {
-      void loadVerifiedReports();
-    }
-  }, [activeTab, loadVerifiedReports]);
+    if (!ready || activeTab !== 'verified') return;
+    void loadVerifiedReports();
+  }, [ready, activeTab, loadVerifiedReports]);
 
   useEffect(() => {
+    if (!ready) return;
     const interval = setInterval(() => {
       void loadReports();
       if (activeTab === 'verified') {
@@ -409,7 +274,7 @@ export default function RadiologyVerificationPage() {
       }
     }, RADIOLOGY_VERIFICATION_POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [loadReports, loadVerifiedReports, activeTab]);
+  }, [ready, loadReports, loadVerifiedReports, activeTab]);
 
   const getCategoryBadge = (category: string) => {
     const colors: Record<string, string> = {
@@ -474,6 +339,7 @@ export default function RadiologyVerificationPage() {
       setVerificationNotes('');
       setSelectedReport(null);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to verify report');
       console.error('Error verifying report:', err);
     } finally {
@@ -507,6 +373,7 @@ export default function RadiologyVerificationPage() {
       setRejectionReason('');
       setSelectedReport(null);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to reject report');
       console.error('Error rejecting report:', err);
     } finally {
@@ -541,6 +408,7 @@ export default function RadiologyVerificationPage() {
       setIsBatchVerifyOpen(false);
       setSelectedIds([]);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to verify reports');
       console.error('Error batch verifying:', err);
     } finally {
@@ -554,9 +422,9 @@ export default function RadiologyVerificationPage() {
 
 
 
-  const openViewDialog = (report: RadiologyReport) => { setSelectedReport(report); setIsViewDialogOpen(true); };
-  const openVerifyDialog = (report: RadiologyReport) => { setSelectedReport(report); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
-  const openRejectDialog = (report: RadiologyReport) => { setSelectedReport(report); setRejectionReason(''); setIsRejectDialogOpen(true); };
+  const openViewDialog = (report: VerificationRadiologyReport) => { setSelectedReport(report); setIsViewDialogOpen(true); };
+  const openVerifyDialog = (report: VerificationRadiologyReport) => { setSelectedReport(report); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
+  const openRejectDialog = (report: VerificationRadiologyReport) => { setSelectedReport(report); setRejectionReason(''); setIsRejectDialogOpen(true); };
   const isSelectedReportMutable = selectedReport?.study?.status === 'Reported';
 
   return (
@@ -570,17 +438,15 @@ export default function RadiologyVerificationPage() {
           <p className="text-muted-foreground mt-1">Senior Admin / Radiologist - Verify radiology results before completion</p>
         </div>
 
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RadiologyVerificationTab)} className="w-full space-y-4 sm:space-y-6">
         {/* Tabs & Filters */}
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RadiologyVerificationTab)} className="w-full">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending Review ({pendingCount})</TabsTrigger>
-                  <TabsTrigger value="verified">Verified ({verifiedCount})</TabsTrigger>
-                  <TabsTrigger value="all">All</TabsTrigger>
-                </TabsList>
-              </Tabs>
+              <TabsList>
+                <TabsTrigger value="pending">Pending Review ({pendingCount})</TabsTrigger>
+                <TabsTrigger value="verified">Verified ({verifiedCount})</TabsTrigger>
+              </TabsList>
               <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
                 <div className="relative flex-1 min-w-[min(100%,16rem)]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -635,8 +501,6 @@ export default function RadiologyVerificationPage() {
           </CardContent>
         </Card>
 
-        {/* Tab Content */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as RadiologyVerificationTab)} className="w-full">
           {/* Pending Review Tab */}
           <TabsContent value="pending" className="space-y-6">
 
@@ -890,20 +754,11 @@ export default function RadiologyVerificationPage() {
               )}
             </div>
           </TabsContent>
-
-          {/* All Tab */}
-          <TabsContent value="all" className="space-y-6">
-            <div className="text-center py-12 text-muted-foreground">
-              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">All Results</p>
-              <p className="text-sm">Combined view of pending and verified results</p>
-            </div>
-          </TabsContent>
         </Tabs>
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.ml}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Result Details</DialogTitle>
               <DialogDescription>{selectedReport?.study.procedure} - {selectedReport?.patient.name}</DialogDescription>
@@ -1041,7 +896,7 @@ export default function RadiologyVerificationPage() {
 
         {/* Verify Dialog */}
         <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-500" />Verify Result</DialogTitle>
               <DialogDescription>Confirm verification for {selectedReport?.patient.name}</DialogDescription>
@@ -1081,7 +936,7 @@ export default function RadiologyVerificationPage() {
 
         {/* Reject Dialog */}
         <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-rose-600"><XCircle className="h-5 w-5" />Reject Result</DialogTitle>
               <DialogDescription>Send back to reporting radiologist for correction</DialogDescription>

@@ -38,10 +38,7 @@ class AnnualCheckupExemptionSerializer(serializers.ModelSerializer):
         user = getattr(obj, "granted_by", None)
         if not user:
             return None
-        try:
-            return user.get_full_name() or user.username
-        except (AttributeError, TypeError):
-            return str(user)
+        return user.get_full_name() or user.username
 
     class Meta:
         model = AnnualCheckupExemption

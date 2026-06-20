@@ -15,6 +15,7 @@ import {
   type RadiologyOrdersTab,
   type RadiologyVerificationTab,
 } from '@/lib/radiology/radiology-workflow-search';
+import { toast } from 'sonner';
 import { ArrowRight, Loader2, Search } from 'lucide-react';
 
 type TrackerHit = {
@@ -55,6 +56,7 @@ export function RadiologyPatientFinder() {
       setHits(res.results || []);
     } catch {
       setHits([]);
+      toast.error('Patient search failed. Please try again.');
     } finally {
       setLoading(false);
     }

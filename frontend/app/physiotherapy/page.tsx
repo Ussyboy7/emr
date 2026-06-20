@@ -18,12 +18,11 @@ import {
   UserCheck,
 } from "lucide-react";
 import { physioService, type PhysioOrder } from "@/lib/services";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
+import { usePhysioPageAuth } from "@/hooks/use-physio-page-auth";
 import {
   DEFAULT_CLINIC_DASHBOARD_POLL_MS,
   useReloadOnFocus,
 } from "@/hooks/use-reload-on-focus";
-import { isAuthenticationError } from "@/lib/auth-errors";
 import { useServerToday } from "@/hooks/use-server-today";
 import { formatDisplayDateTime } from "@/lib/dates";
 import { joinDisplayParts } from "@/lib/utils/clinic-utils";
@@ -52,9 +51,8 @@ function statusLabel(status: string): string {
 export default function PhysiotherapyPage() {
   const router = useRouter();
   const serverToday = useServerToday();
+  const { ready, handleAuthError } = usePhysioPageAuth();
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<unknown>(null);
-  useAuthRedirect(authError);
 
   const [stats, setStats] = useState<PhysioDashboardStats>({
     pending: 0,
@@ -81,23 +79,29 @@ export default function PhysiotherapyPage() {
       setRecentOrders(data.recentOrders ?? []);
     } catch (error) {
       console.error("Failed to load physiotherapy dashboard:", error);
-      if (isAuthenticationError(error)) {
-        setAuthError(error);
-      } else if (!opts.silent) {
+      if (handleAuthError(error)) return;
+      if (!opts.silent) {
         toast.error("Failed to load physiotherapy dashboard. Please try again.");
       }
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, [serverToday]);
+  }, [serverToday, handleAuthError]);
 
   useEffect(() => {
+    if (!ready || !serverToday) return;
     void loadData();
-  }, [loadData]);
+  }, [ready, serverToday, loadData]);
 
-  useReloadOnFocus(() => loadData({ silent: true }), {
-    pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
-  });
+  useReloadOnFocus(
+    () => {
+      if (!ready || !serverToday) return;
+      void loadData({ silent: true });
+    },
+    {
+      pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+    },
+  );
 
   const queueCount = useMemo(
     () => stats.pending + stats.scheduled,
@@ -310,15 +314,6 @@ export default function PhysiotherapyPage() {
               <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
               <span className="text-xs sm:text-sm font-medium">Analytics</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Outcomes & workload trends</span>
-            </Button>
-            <Button
-              onClick={() => router.push("/physiotherapy/orders")}
-              variant="outline"
-              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-emerald-500"
-            >
-              <Dumbbell className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
-              <span className="text-xs sm:text-sm font-medium">Start Session</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Open an order to begin</span>
             </Button>
           </div>
         </div>

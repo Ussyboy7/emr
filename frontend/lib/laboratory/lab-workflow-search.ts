@@ -1,7 +1,7 @@
 import { LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 
 export type LabOrdersTab = 'pending' | 'processing' | 'results' | 'rejected' | 'all';
-export type LabVerificationTab = 'pending' | 'verified' | 'all';
+export type LabVerificationTab = 'pending' | 'verified';
 
 export const LAB_ORDERS_TAB_ORDER: LabOrdersTab[] = [
   'pending',
@@ -22,8 +22,14 @@ export const LAB_ORDERS_TAB_LABELS: Record<LabOrdersTab, string> = {
 export const LAB_VERIFICATION_TAB_LABELS: Record<LabVerificationTab, string> = {
   pending: 'Pending Review',
   verified: 'Verified',
-  all: 'All',
 };
+
+/** Map Lab Orders UI tab to backend ``workflow_tab`` query param. */
+export function labOrdersTabToWorkflowParam(tab: LabOrdersTab): string | undefined {
+  if (tab === 'all') return undefined;
+  if (tab === 'results') return 'results_ready';
+  return tab;
+}
 
 export type LabOrderLike = {
   tests?: Array<{ status?: string }>;
@@ -66,7 +72,7 @@ export function isValidLabOrdersTab(value: string | null): value is LabOrdersTab
 }
 
 export function isValidLabVerificationTab(value: string | null): value is LabVerificationTab {
-  return value === 'pending' || value === 'verified' || value === 'all';
+  return value === 'pending' || value === 'verified';
 }
 
 export function buildLabOrdersHref(search?: string, tab?: LabOrdersTab): string {

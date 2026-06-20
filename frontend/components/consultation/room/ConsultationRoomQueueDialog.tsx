@@ -17,8 +17,8 @@ import {
   formatRoomTime as formatTime,
   initialsFromQueueDisplayName,
 } from '@/lib/consultation/room-helpers';
-import { PAUSED_SESSIONS_LIST_PAGE_SIZE } from '@/lib/consultation/room-paused-sessions';
 import type { ConsultationRoomPatient } from '@/lib/consultation/room-types';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { getVisitTypeBadgeClass, getVisitTypeLabel } from '@/lib/utils/priority';
 import { type ConsultationSession } from '@/lib/services';
 import {
@@ -81,7 +81,7 @@ export function ConsultationRoomQueueDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[88vh] overflow-y-auto gap-3 p-5 sm:p-6">
+      <DialogContent className={`${MODAL_SIZES.xl} gap-3 p-5 sm:p-6 max-h-[88vh]`}>
         <DialogHeader className="space-y-1">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Users className="h-4 w-4 text-emerald-500 shrink-0" />
@@ -292,20 +292,12 @@ export function ConsultationRoomQueueDialog({
 
           <TabsContent value="paused" className="mt-3 space-y-2 focus-visible:outline-none">
             {!loading && pausedSessionsSorted.length > 0 && (
-              <div className="text-[11px] text-muted-foreground space-y-0.5">
+              <div className="text-[11px] text-muted-foreground">
                 <p>
                   {pausedSessionsSorted.length}
                   {pausedSessionsTotalCount != null ? ` of ${pausedSessionsTotalCount}` : ''} paused,
                   oldest first (all providers).
                 </p>
-                {pausedSessionsListIncomplete && (
-                  <p className="text-amber-700 dark:text-amber-400 font-medium">
-                    Not all rows shown—contact an administrator for the full list.
-                  </p>
-                )}
-                {!pausedSessionsListIncomplete && pausedSessionsUnknownTotal && (
-                  <p>Up to {PAUSED_SESSIONS_LIST_PAGE_SIZE} rows per load.</p>
-                )}
               </div>
             )}
             {loading ? (

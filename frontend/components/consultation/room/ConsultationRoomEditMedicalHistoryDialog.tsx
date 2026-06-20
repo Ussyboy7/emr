@@ -26,6 +26,7 @@ import { patientService } from '@/lib/services';
 import { resolvePatientNumericId } from '@/lib/utils/patient-id';
 import { AlertTriangle, FileText, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import type { Dispatch, SetStateAction } from 'react';
 
 export type MedicalHistoryFormState = {
@@ -62,7 +63,7 @@ export function ConsultationRoomEditMedicalHistoryDialog({ open, onOpenChange, c
     <>
       {/* Edit Medical History Dialog */}
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.lg}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-blue-500" />

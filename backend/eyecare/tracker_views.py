@@ -7,6 +7,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.openapi import document_api_view
+from accounts.utils import resolve_clinic_id
+from organization.models import SystemConfig
 from eyecare.models import EyeOrder, EyeSession
 
 
@@ -51,6 +53,14 @@ def _filter_orders_by_search(qs, search: str):
     ).distinct()
 
 
+def _scope_orders_for_user(qs, user):
+    if SystemConfig.is_enabled('multi_clinic_enabled'):
+        clinic_id = resolve_clinic_id(user)
+        if clinic_id is not None:
+            qs = qs.filter(location_clinic_id=clinic_id)
+    return qs
+
+
 @document_api_view(tag="Eyecare", summary="Cross-workflow eyecare patient tracker")
 class EyecarePatientTrackerView(APIView):
     """
@@ -74,6 +84,7 @@ class EyecarePatientTrackerView(APIView):
                 Prefetch('sessions', queryset=EyeSession.objects.order_by('id'))
             )
         )
+        orders_qs = _scope_orders_for_user(orders_qs, request.user)
         orders_qs = _filter_orders_by_search(orders_qs, search)[:40]
 
         for order in orders_qs:

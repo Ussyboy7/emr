@@ -44,9 +44,8 @@ import {
   type ConsultationStats,
 } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
+import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 
 // Types
 interface Patient {
@@ -239,7 +238,7 @@ const StartConsultation = () => {
   const [loadingRooms, setLoadingRooms] = useState<boolean>(true);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
+  const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
   const [roomFilter, setRoomFilter] = useState<RoomFilter>("all");
   const [overviewStats, setOverviewStats] = useState({
     openConsultations: 0,
@@ -248,8 +247,6 @@ const StartConsultation = () => {
     queueCount: 0,
     unmatchedOpenSessions: 0,
   });
-  useAuthRedirect(authError);
-
   const applyRoomFilter = (f: RoomFilter) => {
     setRoomFilter(f);
     setSelectedRoom((prev) => {
@@ -264,45 +261,50 @@ const StartConsultation = () => {
 
   // Load rooms and queue from API
   useEffect(() => {
+    if (!ready) return;
+
     const loadRooms = async () => {
       try {
         setLoadingRooms(true);
         setError(null);
 
         const todayStr = todayApiDateString();
+        const doctorId = currentUser?.id ? Number(currentUser.id) : undefined;
 
-        const emptySessions = (): { results: ConsultationSession[]; count: number } => ({
-          results: [],
-          count: 0,
-        });
-
-        const [roomsResult, queueResult, statsRes, activeRes, pausedRes, todaySessionsRes] =
+        const [roomsList, queueItems, statsRes, activeSessions, pausedSessions, todaySessions] =
           await Promise.all([
-            roomService.getRooms({ page_size: MAX_LIST_PAGE_SIZE }),
-            apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=${MAX_LIST_PAGE_SIZE}`),
-            consultationService.getStats().catch((): ConsultationStats | null => null),
-            consultationService.getSessions({ status: "active", page_size: MAX_LIST_PAGE_SIZE }).catch(emptySessions),
-            consultationService.getSessions({ status: "paused", page_size: MAX_LIST_PAGE_SIZE }).catch(emptySessions),
-            consultationService
-              .getSessions({ date: todayStr, page_size: MAX_LIST_PAGE_SIZE })
-              .catch(emptySessions),
+            fetchAllPaginatedResults((page, pageSize) =>
+              roomService.getRooms({ page, page_size: pageSize })
+            ),
+            fetchAllPaginatedResults((page, pageSize) =>
+              apiFetch<{ results: any[]; count?: number }>(
+                `/consultation/queue/?is_active=true&page=${page}&page_size=${pageSize}`
+              )
+            ),
+            consultationService.getStats(doctorId).catch((): ConsultationStats | null => null),
+            fetchAllPaginatedResults((page, pageSize) =>
+              consultationService.getSessions({ status: "active", page, page_size: pageSize })
+            ).catch(() => [] as ConsultationSession[]),
+            fetchAllPaginatedResults((page, pageSize) =>
+              consultationService.getSessions({ status: "paused", page, page_size: pageSize })
+            ).catch(() => [] as ConsultationSession[]),
+            fetchAllPaginatedResults((page, pageSize) =>
+              consultationService.getSessions({ date: todayStr, page, page_size: pageSize })
+            ).catch(() => [] as ConsultationSession[]),
           ]);
 
-        const queueItems = queueResult.results || [];
-        const roomTodayMap = buildRoomCompletedTodayMap(todaySessionsRes.results);
+        const roomTodayMap = buildRoomCompletedTodayMap(todaySessions);
         const stats = statsRes;
 
-        const activeSessions = activeRes.results || [];
-        const pausedSessions = pausedRes.results || [];
         const openSessionsByRoom = buildOpenSessionsByRoom(activeSessions, pausedSessions);
-        const openConsultations = (activeRes.count ?? activeSessions.length) + (pausedRes.count ?? pausedSessions.length);
+        const openConsultations = activeSessions.length + pausedSessions.length;
 
         const completedFromSessions = totalCompletedFromRoomMap(roomTodayMap);
         const completedToday =
           stats?.completed_today ?? stats?.today?.completed ?? completedFromSessions;
         const avgTodayMinutes =
           stats?.today?.avg_duration ??
-          (completedFromSessions > 0 ? globalCompletedAvgMinutes(todaySessionsRes.results) : 0);
+          (completedFromSessions > 0 ? globalCompletedAvgMinutes(todaySessions) : 0);
         const queueCount = stats?.queue_count ?? queueItems.length;
 
         // Group queue items by room
@@ -316,7 +318,7 @@ const StartConsultation = () => {
         });
 
         // Transform rooms with queue + open session data
-        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
+        const transformedRooms: ConsultationRoom[] = roomsList.map((room: any) => {
           const roomId = String(room.id);
           const roomQueue = queueByRoom[roomId] || [];
           const sortedQueue = [...roomQueue].sort(compareConsultationQueueEntries);
@@ -367,21 +369,20 @@ const StartConsultation = () => {
         setConsultationRooms(transformedRooms);
       } catch (err) {
         console.error("Error loading consultation rooms:", err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError("Failed to load consultation rooms. Please try again.");
-        }
+        if (handleAuthError(err)) return;
+        setError("Failed to load consultation rooms. Please try again.");
       } finally {
         setLoadingRooms(false);
       }
     };
 
-    loadRooms();
-  }, []);
+    void loadRooms();
+  }, [ready, currentUser?.id, handleAuthError]);
 
   // Load patient for selected room
   useEffect(() => {
+    if (!ready) return;
+
     const loadPatient = async () => {
       if (!selectedRoom) {
         setSelectedPatient(null);
@@ -438,38 +439,30 @@ const StartConsultation = () => {
         // Use numeric room ID for the filter
         let queueItem: any = null;
         try {
-          const queueResult = await consultationService.getQueue({
-            room: numericRoomId,
-            is_active: true,
-            page_size: MAX_LIST_PAGE_SIZE,
-          });
-          // Find the queue item that matches our patient ID
-          queueItem = queueResult.results?.find((item: any) => {
+          const queueItems = await fetchAllPaginatedResults((page, pageSize) =>
+            consultationService.getQueue({
+              room: numericRoomId,
+              is_active: true,
+              page,
+              page_size: pageSize,
+            })
+          );
+          queueItem = queueItems.find((item: any) => {
             const itemPatientId = typeof item.patient === 'number' ? item.patient : parseInt(String(item.patient || ''));
             return itemPatientId === numericPatientId;
           });
-          
-          if (!queueItem && queueResult.results && queueResult.results.length > 0) {
-            // Fallback: use first item if patient ID doesn't match
-            console.warn('Patient ID mismatch, using first queue item:', {
-              expectedPatientId: numericPatientId,
-              firstItemPatientId: queueResult.results[0].patient
-            });
-            queueItem = queueResult.results[0];
-            // Update the patient ID from the queue item
-            const itemPatientId = typeof queueItem.patient === 'number' ? queueItem.patient : parseInt(String(queueItem.patient || ''));
-            if (!isNaN(itemPatientId) && itemPatientId > 0) {
-              numericPatientId = itemPatientId;
-            }
+
+          if (!queueItem) {
+            toast.error('Queue patient not found. Please refresh the room queue.');
+            setSelectedPatient(null);
+            return;
           }
         } catch (queueErr) {
-          console.warn('Could not load queue item from API, using patient ID from room queue:', queueErr);
-          // Continue with just the patient ID we have
-        }
-        
-        
-        if (queueItem) {
-          
+          console.error('Could not load queue item from API:', queueErr);
+          if (handleAuthError(queueErr)) return;
+          toast.error('Failed to load queue. Please refresh and try again.');
+          setSelectedPatient(null);
+          return;
         }
         
         // Use the patient ID we have (either from room queue or from queue item)
@@ -578,25 +571,22 @@ const StartConsultation = () => {
           selectedRoom
         });
         
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
+        if (handleAuthError(err)) return;
+
+        const errorMessage = err?.message || String(err);
+        if (errorMessage.includes('not found') || errorMessage.includes('Not found') || err?.status === 404) {
+          toast.error(`Patient not found. The patient may have been removed from the system.`);
+        } else if (errorMessage.includes('Patient ID not found')) {
+          toast.error(`Patient ID not found. Queue item may be invalid.`);
         } else {
-          // Check for specific error messages
-          const errorMessage = err?.message || String(err);
-          if (errorMessage.includes('not found') || errorMessage.includes('Not found') || err?.status === 404) {
-            toast.error(`Patient not found. The patient may have been removed from the system.`);
-          } else if (errorMessage.includes('Patient ID not found')) {
-            toast.error(`Patient ID not found. Queue item may be invalid.`);
-          } else {
-            toast.error(`Failed to load patient: ${errorMessage}`);
-          }
+          toast.error(`Failed to load patient: ${errorMessage}`);
         }
         setSelectedPatient(null);
       }
     };
     
-    loadPatient();
-  }, [selectedRoom, consultationRooms]);
+    void loadPatient();
+  }, [ready, selectedRoom, consultationRooms, handleAuthError]);
 
   const handleStartConsultation = () => {
     if (!selectedRoom) {

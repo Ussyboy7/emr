@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { FacilityPartnerSelect } from '@/components/referrals/FacilityPartnerSelect';
 import { PrescriptionOrderModal } from '@/components/consultation/orders/PrescriptionOrderModal';
 import { PrescriptionRefillDialog } from '@/components/consultation/orders/PrescriptionRefillDialog';
@@ -189,7 +190,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
     <>
       {/* Add Diagnosis Dialog */}
       <Dialog open={showAddDiagnosis} onOpenChange={(open) => { setShowAddDiagnosis(open); if (!open) { setDiagnosisSearch(""); setShowDiagnosisDropdown(false); setDiagnosisNotes(""); } }}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Stethoscope className="h-5 w-5 text-rose-500" />
@@ -408,7 +409,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           }
         }}
       >
-        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><TestTube className="h-5 w-5 text-amber-500" />Order Lab Test(s)</DialogTitle>
             <DialogDescription>
@@ -588,7 +589,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           setInjectionConfigs(new Map());
         }
       }}>
-        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Syringe className="h-5 w-5 text-cyan-500" />
@@ -1100,7 +1101,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           }
         }}
       >
-        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ScanLine className="h-5 w-5 text-indigo-500" />
@@ -1289,7 +1290,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           setNewPhysio({ historyClinicalFindings: "", diagnoses: [], drugHistory: "", specialInstructions: "", priority: "normal" });
         }
       }}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Activity className="h-5 w-5 text-emerald-500" />
@@ -1395,7 +1396,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           });
         }
       }}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="h-5 w-5 text-cyan-500" />
@@ -1520,7 +1521,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
 
       {/* Add Referral Dialog */}
       <Dialog open={showAddReferral} onOpenChange={setShowAddReferral}>
-        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Send className="h-5 w-5 text-teal-500" />

@@ -21,6 +21,8 @@ import {
 } from '@/lib/laboratory/completedLabReport';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
+import { useLabPageAuth } from '@/hooks/use-lab-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
@@ -29,6 +31,7 @@ import {
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 
 export default function CompletedTestsPage() {
+  const { ready, handleAuthError } = useLabPageAuth();
   const { names: opdClinicNames } = useOutpatientClinicTypes();
   const serverToday = useServerToday();
   const searchParams = useSearchParams();
@@ -37,7 +40,7 @@ export default function CompletedTestsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
@@ -70,12 +73,6 @@ export default function CompletedTestsPage() {
     if (urlSearch) setSearchQuery(urlSearch);
     if (urlDate === 'all') setDateFilter('all');
   }, [searchParams]);
-
-  // Debounce search to prevent firing API calls per keystroke
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
 
   // Load completed tests function - memoized to prevent infinite loops
   const loadTests = useCallback(async () => {
@@ -159,17 +156,19 @@ export default function CompletedTestsPage() {
       );
       setTests(transformed);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load completed tests');
       console.error('Error loading completed tests:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday, handleAuthError]);
 
   // Load completed tests from API when page changes
   useEffect(() => {
+    if (!ready) return;
     loadTests();
-  }, [loadTests]);
+  }, [ready, loadTests]);
 
   // Server-side filtered list (already matches current filters)
   const paginatedTests = tests;

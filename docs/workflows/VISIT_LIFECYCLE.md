@@ -78,7 +78,7 @@ See [PHARMACY.md](PHARMACY.md) for strength/topical rules.
 |------|---------|-----|
 | Orders | `/radiology/orders` | `radiology/orders/` |
 | Verification | `/radiology/verification` | report verify |
-| Viewer / studies | `/radiology/viewer`, `/radiology/studies` | imaging assets via protected media |
+| Completed / templates | `/radiology/completed`, `/radiology/templates` | reports & templates |
 
 ## 7. Completion
 

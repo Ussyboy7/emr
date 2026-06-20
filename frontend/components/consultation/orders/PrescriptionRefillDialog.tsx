@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, ChevronDown, ChevronRight, History, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { pharmacyService, type Prescription } from "@/lib/services";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import {
   getRefillablePrescriptions,
   isRefillableLine,
@@ -156,7 +157,7 @@ export function PrescriptionRefillDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.ml}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <History className="h-5 w-5 text-violet-500" />

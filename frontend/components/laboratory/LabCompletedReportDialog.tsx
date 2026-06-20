@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { openMediaInNewTab } from '@/lib/media-url';
 import { Download, Eye, FileText, FlaskConical, Printer } from 'lucide-react';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   displayNameFromLabResultFileUrl,
   downloadOfficialLabReportPdf,
@@ -118,7 +119,7 @@ export function LabCompletedReportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.ml}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-emerald-500" />

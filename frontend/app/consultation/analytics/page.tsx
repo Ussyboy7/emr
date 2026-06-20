@@ -13,6 +13,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Activity, Heart, Timer, Users, Stethoscope, FileText, TestTube, Pill } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, buildQueryString } from "@/lib/api-client";
+import { useConsultationPageAuth } from "@/hooks/use-consultation-page-auth";
+import { isAuthenticationError } from "@/lib/auth-errors";
 import { useAnalyticsExportHandlers } from "@/lib/analytics-export";
 import { localMonthBounds, peekServerTodayMonthPrefix, peekServerTodayYear } from "@/lib/dates";
 import { buildReportPeriodQuery, canFetchReportPeriod } from "@/lib/report-period-query";
@@ -29,6 +31,7 @@ const CHART_COLORS = {
 };
 
 export default function ConsultationAnalyticsPage() {
+  const { ready, handleAuthError } = useConsultationPageAuth();
   const [loading, setLoading] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<ConsultationAnalytics | null>(null);
   const [year, setYear] = useState(new Date().getFullYear().toString());
@@ -64,6 +67,7 @@ export default function ConsultationAnalyticsPage() {
   };
 
   const loadAnalytics = useCallback(async () => {
+    if (!ready) return;
     const params = buildReportPeriodQuery(viewMode, reportRange, "start");
     if (!params) {
       toast.error("Please select a valid date range");
@@ -77,18 +81,20 @@ export default function ConsultationAnalyticsPage() {
       setAnalyticsData(data);
     } catch (error: any) {
       console.error("Error loading analytics:", error);
+      if (handleAuthError(error) || isAuthenticationError(error)) return;
       toast.error(error?.message || "Failed to load consultation analytics");
       emptyState();
     } finally {
       setLoading(false);
     }
-  }, [reportRange]);
+  }, [reportRange, ready, handleAuthError, viewMode]);
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) {
       void loadAnalytics();
     }
-  }, [reportRange, loadAnalytics, viewMode]);
+  }, [ready, reportRange, loadAnalytics, viewMode]);
 
 
   const summaryStats = useMemo(() => {

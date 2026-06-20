@@ -76,3 +76,18 @@ class PhysioOrderListTest(APITestCase):
         }, format="json")
         resp = self.client.get("/api/v1/orders/?priority=urgent")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_list_search_phy_id_with_status_filter(self):
+        from physiotherapy.models import PhysioOrder
+
+        order = PhysioOrder.objects.create(
+            patient=self.patient,
+            ordered_by=self.user,
+            diagnosis="Shoulder pain",
+            status="pending",
+        )
+        label = f"PHY-{order.pk:06d}"
+        resp = self.client.get("/api/v1/orders/", {"search": label, "status": "pending"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in resp.data["results"]}
+        self.assertEqual(ids, {order.pk})

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,27 +40,46 @@ import {
   employeeInitials,
   formatComplianceStatus,
 } from "@/lib/hr/hr-display";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { isAuthenticationError } from "@/lib/auth-errors";
-
+import { useHrPageAuth } from "@/hooks/use-hr-page-auth";
+import { useHrProgrammeYear } from "@/hooks/use-hr-programme-year";
 import { formatDisplayDateMedium } from "@/lib/dates";
 
-const formatDate = (d: string | null | undefined): string => formatDisplayDateMedium(d);
+const STATUS_OPTIONS = ["all", "completed", "in_progress", "due", "overdue", "exempt"] as const;
+
+function parseStatus(value: string | null): string {
+  if (value && STATUS_OPTIONS.includes(value as (typeof STATUS_OPTIONS)[number])) {
+    return value;
+  }
+  return "all";
+}
 
 export default function HRAnnualCheckupsPage() {
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
-  const [status, setStatus] = useState("all");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { ready, handleAuthError } = useHrPageAuth();
+  const { year, setYear, yearOptions } = useHrProgrammeYear();
+  const [status, setStatus] = useState(() => parseStatus(searchParams.get("status")));
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
   const [rows, setRows] = useState<HRComplianceRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [summary, setSummary] = useState<HRComplianceSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<unknown>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
-  useAuthRedirect(authError);
+
+  useEffect(() => {
+    setStatus(parseStatus(searchParams.get("status")));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    const next = status === "all" ? null : status;
+    if ((params.get("status") || null) === next) return;
+    if (next) params.set("status", next);
+    else params.delete("status");
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [status, router, searchParams]);
 
   const load = useCallback(async () => {
     try {
@@ -68,38 +88,39 @@ export default function HRAnnualCheckupsPage() {
         programme_year: year,
         status: status !== "all" ? status : undefined,
         search: debouncedSearch.trim() || undefined,
+        page: currentPage,
+        page_size: itemsPerPage,
       });
       setRows(data.results);
       setTotalCount(data.count ?? data.results.length);
       setSummary(data.summary);
     } catch (err) {
-      if (isAuthenticationError(err)) setAuthError(err);
-      else toast.error("Could not load compliance data.");
+      if (handleAuthError(err)) return;
+      toast.error("Could not load compliance data.");
     } finally {
       setLoading(false);
     }
-  }, [year, status, debouncedSearch]);
+  }, [year, status, debouncedSearch, currentPage, itemsPerPage, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     load();
-  }, [load]);
+  }, [ready, load]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [year, status, debouncedSearch, itemsPerPage]);
 
-  const paginatedRows = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return rows.slice(start, start + itemsPerPage);
-  }, [rows, currentPage, itemsPerPage]);
-
   const handleExport = async () => {
     try {
       const blob = await hrService.exportCsv(year, {
         status: status !== "all" ? status : undefined,
+        search: debouncedSearch.trim() || undefined,
       });
       hrService.downloadBlob(blob, `annual_checkup_compliance_${year}.csv`);
-    } catch {
+      toast.success("Compliance report exported.");
+    } catch (err) {
+      if (handleAuthError(err)) return;
       toast.error("CSV export failed.");
     }
   };
@@ -108,11 +129,9 @@ export default function HRAnnualCheckupsPage() {
     if (!row.annual_checkup_id) return;
     try {
       const blob = await hrService.fetchOutcomeLetterPdf(row.annual_checkup_id);
-      hrService.downloadBlob(
-        blob,
-        `outcome_${row.patient_display_id}_${year}.pdf`
-      );
-    } catch {
+      hrService.downloadBlob(blob, `outcome_${row.patient_display_id}_${year}.pdf`);
+    } catch (err) {
+      if (handleAuthError(err)) return;
       toast.error("Outcome letter not available.");
     }
   };
@@ -134,7 +153,7 @@ export default function HRAnnualCheckupsPage() {
           color: "text-emerald-500",
         },
         {
-          label: "Due",
+          label: "Due / in progress",
           value: summary.due + summary.in_progress,
           icon: ClipboardList,
           border: "border-l-amber-500",
@@ -149,6 +168,16 @@ export default function HRAnnualCheckupsPage() {
         },
       ]
     : [];
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6 flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -209,7 +238,7 @@ export default function HRAnnualCheckupsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                    {yearOptions.map((y) => (
                       <SelectItem key={y} value={String(y)}>
                         {y}
                       </SelectItem>
@@ -234,9 +263,9 @@ export default function HRAnnualCheckupsPage() {
           </CardContent>
         </Card>
 
-        {!loading && rows.length > 0 ? (
+        {!loading && totalCount > 0 ? (
           <p className="text-sm text-muted-foreground px-1">
-            Showing {paginatedRows.length} of {totalCount} employee
+            Showing {rows.length} of {totalCount} employee
             {totalCount === 1 ? "" : "s"}
             {summary && summary.exempt > 0 ? ` · ${summary.exempt} exempt` : ""}
           </p>
@@ -249,7 +278,7 @@ export default function HRAnnualCheckupsPage() {
               <p>Loading compliance data…</p>
             </CardContent>
           </Card>
-        ) : rows.length === 0 ? (
+        ) : totalCount === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <ClipboardList className="h-16 w-16 text-muted-foreground mb-4" />
@@ -263,9 +292,8 @@ export default function HRAnnualCheckupsPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {paginatedRows.map((row) => {
-              const outcome =
-                row.fitness_outcome_display || row.exemption_reason || "";
+            {rows.map((row) => {
+              const outcome = row.fitness_outcome_display || row.exemption_reason || "";
               const avatar = complianceAvatarClasses(row.compliance_status);
               return (
                 <Card
@@ -315,7 +343,7 @@ export default function HRAnnualCheckupsPage() {
                           {row.visit_date ? (
                             <>
                               <span>•</span>
-                              <span>{formatDate(row.visit_date)}</span>
+                              <span>{formatDisplayDateMedium(row.visit_date)}</span>
                             </>
                           ) : null}
                         </div>
@@ -342,11 +370,11 @@ export default function HRAnnualCheckupsPage() {
           </div>
         )}
 
-        {rows.length > 0 ? (
+        {totalCount > 0 ? (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={rows.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

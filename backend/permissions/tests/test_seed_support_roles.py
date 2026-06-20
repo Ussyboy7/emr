@@ -57,4 +57,5 @@ class SeedSupportRolesTests(TestCase):
             "/admin/users",
             "/admin/clinics",
             "/admin/health",
+            "/admin/support-tickets",
         ])

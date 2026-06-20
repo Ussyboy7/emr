@@ -7,6 +7,7 @@ import {
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
 import { useReportDateRange } from "@/hooks/use-report-date-range";
+import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getReadableApiError } from '@/lib/api-client';
@@ -145,6 +146,7 @@ function radiologyAnalyticsToCsv(
 }
 
 export default function RadiologyAnalyticsPage() {
+  const { ready, handleAuthError } = useRadiologyPageAuth();
   const [viewMode, setViewMode] = useState<AnalyticsViewMode>('year');
   const [year, setYear] = useState(() => new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState('');
@@ -188,18 +190,20 @@ export default function RadiologyAnalyticsPage() {
       setData(res);
     } catch (e: unknown) {
       console.error(e);
+      if (handleAuthError(e)) return;
       toast.error(getReadableApiError(e));
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [reportRange]);
+  }, [reportRange, viewMode, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) {
       void fetchReport();
     }
-  }, [reportRange, fetchReport, viewMode]);
+  }, [ready, reportRange, fetchReport, viewMode]);
 
   const setThisMonth = () => {
     const n = new Date();

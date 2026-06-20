@@ -1,3 +1,5 @@
+import re
+
 import django_filters as filters
 from django.db.models import Q
 
@@ -10,13 +12,38 @@ from common.session_filters import (
 from .models import PhysioOrder, PhysioSession
 
 
+def filter_physio_orders_by_search(qs, search: str):
+    """Match patient names/ids, diagnosis, numeric pk, and PHY-000123 order labels."""
+    term = (search or '').strip()
+    if not term:
+        return qs
+    q = Q()
+    if term.isdigit():
+        q |= Q(pk=int(term))
+    m = re.match(r'^PHY-(\d+)$', term, re.IGNORECASE)
+    if m:
+        q |= Q(pk=int(m.group(1)))
+    return qs.filter(
+        q
+        | Q(patient__patient_id__icontains=term)
+        | Q(patient__surname__icontains=term)
+        | Q(patient__first_name__icontains=term)
+        | Q(patient__middle_name__icontains=term)
+        | Q(diagnosis__icontains=term)
+    ).distinct()
+
+
 class PhysioOrderFilter(filters.FilterSet):
     ordered_at_after = filters.DateFilter(field_name="ordered_at", lookup_expr="date__gte")
     ordered_at_before = filters.DateFilter(field_name="ordered_at", lookup_expr="date__lte")
+    search = filters.CharFilter(method="filter_search")
 
     class Meta:
         model = PhysioOrder
-        fields = ["status", "priority", "patient", "visit", "consultation_session", "referral_source"]
+        fields = ["status", "priority", "patient", "visit", "consultation_session", "referral_source", "search"]
+
+    def filter_search(self, queryset, name, value):
+        return filter_physio_orders_by_search(queryset, value)
 
 
 class PhysioSessionFilter(filters.FilterSet):

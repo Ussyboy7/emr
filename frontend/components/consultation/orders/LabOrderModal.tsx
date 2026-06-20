@@ -13,6 +13,7 @@ import { Loader2, Plus, TestTube, X } from "lucide-react";
 import { toast } from "sonner";
 import { labService } from "@/lib/services";
 import { LAB_OTHER_TEMPLATE_CODE } from "@/lib/constants/order-template-codes";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 
 export type LabTemplateLike = {
   id: number;
@@ -212,7 +213,7 @@ export function LabOrderModal({
         if (!next) reset();
       }}
     >
-      <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.ml}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <TestTube className="h-5 w-5 text-amber-500" />

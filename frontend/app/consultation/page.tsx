@@ -5,15 +5,12 @@ import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Stethoscope, Users, Pill, FlaskConical, Heart, Calendar, Clock, CheckCircle2, ArrowRight, UserCheck, Activity, Plus, Eye, Hospital, ClipboardList, AlertCircle, ScanLine } from 'lucide-react';
-import Link from 'next/link';
-import { peekServerTodayApi, toApiDateFromInstant } from "@/lib/dates";
+import { Loader2, Stethoscope, Pill, FlaskConical, Clock, Activity, Plus, Eye, Hospital, ClipboardList, AlertCircle, ScanLine } from 'lucide-react';
+import { peekServerTodayApi } from "@/lib/dates";
 import { useRouter } from 'next/navigation';
-import { consultationService, pharmacyService, labService, radiologyService } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { consultationService, radiologyService } from '@/lib/services';
+import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { useCurrentUser } from '@/hooks/use-current-user';
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 interface ConsultationStats {
   totalConsultations: number;
@@ -28,9 +25,7 @@ export default function ConsultationPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
-  const { currentUser } = useCurrentUser();
+  const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
 
   const [stats, setStats] = useState<ConsultationStats>({
     totalConsultations: 0,
@@ -42,121 +37,43 @@ export default function ConsultationPage() {
   });
 
   useEffect(() => {
+    if (!ready) return;
+
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
 
         const today = peekServerTodayApi();
+        const doctorId = currentUser?.id ? Number(currentUser.id) : undefined;
 
-        // Fetch consultation sessions for today
-        try {
-          const sessionsResult = await consultationService.getSessions({
-            page_size: MAX_LIST_PAGE_SIZE,
-          });
-          const sessions = sessionsResult.results || [];
-          
-          // Filter sessions for today by doctor
-          const todaySessions = sessions.filter((s: any) => {
-            const sessionDate = s.started_at ? toApiDateFromInstant(s.started_at) : '';
-            const isToday = sessionDate === today;
-            const isCurrentDoctor = !currentUser || (
-              String(s.doctor) === String(currentUser.id) ||
-              s.doctor_name === currentUser.name ||
-              s.doctor_name === currentUser.username
-            );
+        const [statsRes, radiologyRes, recentRes] = await Promise.all([
+          consultationService.getStats(doctorId),
+          radiologyService.getOrders({
+            date: today,
+            doctor: doctorId != null ? String(doctorId) : undefined,
+            page_size: 1,
+          }),
+          consultationService.getSessions({
+            date: today,
+            doctor: doctorId,
+            ordering: '-started_at',
+            page_size: 3,
+          }),
+        ]);
 
-
-
-            return isToday && isCurrentDoctor; // Restore doctor filter
-          });
-
-          setStats(prev => ({
-            ...prev,
-            totalConsultations: todaySessions.length,
-            activeSessions: todaySessions.filter((s: any) => s.status === 'active').length,
-            recentSessions: todaySessions.slice(0, 3),
-          }));
-        } catch (err) {
-          console.error('Error fetching consultation sessions:', err);
-          if (isAuthenticationError(err)) {
-            setAuthError(err);
-          } else {
-            setError('Failed to load consultation sessions');
-          }
-          setStats(prev => ({ ...prev, totalConsultations: 0, activeSessions: 0, radiologyOrders: 0 }));
-        }
-
-        // Fetch prescriptions for today
-        try {
-          const prescriptionsResult = await pharmacyService.getPrescriptions({
-            page_size: MAX_LIST_PAGE_SIZE,
-          });
-          const prescriptions = prescriptionsResult.results || [];
-          
-          // Filter prescriptions for today
-          const todayPrescriptions = prescriptions.filter((p: any) => {
-            const prescDate = p.prescribed_at ? toApiDateFromInstant(p.prescribed_at) : '';
-            return prescDate === today;
-          });
-
-          setStats(prev => ({
-            ...prev,
-            prescriptions: todayPrescriptions.length,
-          }));
-        } catch (err) {
-          console.error('Error fetching prescriptions:', err);
-          setStats(prev => ({ ...prev, prescriptions: 0, radiologyOrders: 0 }));
-        }
-
-        // Fetch lab orders for today
-        try {
-          const labOrdersResult = await labService.getOrders({
-            page_size: MAX_LIST_PAGE_SIZE,
-          });
-          const labOrders = labOrdersResult.results || [];
-
-          // Filter lab orders for today
-          const todayLabOrders = labOrders.filter((l: any) => {
-            const orderDate = l.ordered_at ? toApiDateFromInstant(l.ordered_at) : '';
-            return orderDate === today;
-          });
-
-          setStats(prev => ({
-            ...prev,
-            labOrders: todayLabOrders.length,
-          }));
-        } catch (err) {
-          console.error('Error fetching lab orders:', err);
-          setStats(prev => ({ ...prev, labOrders: 0, radiologyOrders: 0 }));
-        }
-
-        // Fetch radiology orders for today
-        try {
-          const radiologyResult = await radiologyService.getOrders({
-            page_size: MAX_LIST_PAGE_SIZE,
-          });
-          const radiologyOrders = radiologyResult.results || [];
-
-          // Filter radiology orders for today
-          const todayRadiologyOrders = radiologyOrders.filter((r: any) => {
-            const orderDate = r.ordered_at ? toApiDateFromInstant(r.ordered_at) : '';
-            return orderDate === today;
-          });
-
-          setStats(prev => ({
-            ...prev,
-            radiologyOrders: todayRadiologyOrders.length,
-          }));
-        } catch (err) {
-          console.error('Error fetching radiology orders:', err);
-          setStats(prev => ({ ...prev, radiologyOrders: 0 }));
-        }
-
+        setStats({
+          totalConsultations: statsRes.today.sessions,
+          activeSessions: statsRes.today.active,
+          prescriptions: statsRes.today.prescriptions,
+          labOrders: statsRes.today.lab_orders,
+          radiologyOrders: radiologyRes.count ?? 0,
+          recentSessions: recentRes.results || [],
+        });
       } catch (err) {
-        console.error('Error in fetchData:', err);
+        console.error('Error loading consultation dashboard:', err);
         if (isAuthenticationError(err)) {
-          setAuthError(err);
+          handleAuthError(err);
         } else {
           setError('Failed to load consultation dashboard');
         }
@@ -165,13 +82,12 @@ export default function ConsultationPage() {
       }
     };
 
-    fetchData();
-  }, [currentUser]);
+    void fetchData();
+  }, [ready, currentUser?.id, handleAuthError]);
 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Error Alert */}
         {error && (
           <Card className="border-red-500/50 bg-red-500/10">
             <CardContent className="p-4 flex items-center gap-3">
@@ -184,7 +100,6 @@ export default function ConsultationPage() {
           </Card>
         )}
 
-        {/* Header */}
         <Card className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-0">
           <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -208,7 +123,7 @@ export default function ConsultationPage() {
                 <Button
                   variant="outline"
                   className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => router.push('/consultation/history')}
+                  onClick={() => router.push('/consultation/history?scope=my')}
                 >
                   <Eye className="h-4 w-4 mr-2" />
                   My Sessions
@@ -218,9 +133,6 @@ export default function ConsultationPage() {
           </CardContent>
         </Card>
 
-
-
-        {/* Today's Overview */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Clock className="h-5 w-5 text-blue-500 dark:text-blue-400" />
@@ -321,7 +233,6 @@ export default function ConsultationPage() {
           </div>
         </div>
 
-        {/* Quick Actions */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
@@ -335,7 +246,7 @@ export default function ConsultationPage() {
               <span className="text-xs sm:text-sm font-medium">Start New Consultation</span>
               <span className="text-[10px] sm:text-xs opacity-90">Begin patient consultation</span>
             </Button>
-            <Button onClick={() => router.push('/consultation/history')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-emerald-500/30 hover:bg-emerald-500/10 border-l-4 border-l-emerald-500">
+            <Button onClick={() => router.push('/consultation/history?scope=my')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-emerald-500/30 hover:bg-emerald-500/10 border-l-4 border-l-emerald-500">
               <Eye className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
               <span className="text-xs sm:text-sm font-medium">View My Sessions</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Review completed consultations</span>
@@ -354,7 +265,6 @@ export default function ConsultationPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Recent Consultations */}
           <div className="lg:col-span-2">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -400,7 +310,6 @@ export default function ConsultationPage() {
             </Card>
           </div>
 
-          {/* Today's Summary */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg flex items-center gap-2">

@@ -48,4 +48,4 @@ class EyeSessionFilter(filters.FilterSet):
     def filter_is_urgent(self, queryset, name, value):
         if not value:
             return queryset
-        return queryset.filter(order__priority__in=["urgent", "emergency", "stat"])
+        return queryset.filter(order__priority__in=["urgent", "stat"])

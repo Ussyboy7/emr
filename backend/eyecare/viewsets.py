@@ -451,3 +451,15 @@ class EyeSessionDiagnosticFileViewSet(mixins.DestroyModelMixin, viewsets.Generic
     """Delete uploaded diagnostic rows (multi-upload only)."""
     queryset = EyeSessionDiagnosticFile.objects.all()
     serializer_class = EyeSessionDiagnosticFileSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        from organization.models import SystemConfig
+
+        if SystemConfig.is_enabled('multi_clinic_enabled'):
+            from accounts.utils import resolve_clinic_id
+
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None:
+                qs = qs.filter(session__order__location_clinic_id=clinic_id)
+        return qs

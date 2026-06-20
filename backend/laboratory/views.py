@@ -250,6 +250,19 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         source_type = self.request.query_params.get('source_type')
         if source_type in ('internal_emr', 'external_manual'):
             qs = qs.filter(source_type=source_type)
+
+        workflow_tab = self.request.query_params.get('workflow_tab')
+        if workflow_tab == 'pending':
+            qs = qs.filter(tests__status='pending').distinct()
+        elif workflow_tab == 'processing':
+            qs = qs.filter(
+                Q(tests__status='sample_collected') | Q(tests__status='processing')
+            ).distinct()
+        elif workflow_tab in ('results', 'results_ready'):
+            qs = qs.filter(tests__status='results_ready').distinct()
+        elif workflow_tab == 'rejected':
+            qs = qs.filter(tests__status='rejected').distinct()
+
         return self.scope_queryset(qs)
 
     @extend_schema(tags=["Laboratory"], summary="Stats", description="Server-side counts for lab order dashboard cards/tabs.")

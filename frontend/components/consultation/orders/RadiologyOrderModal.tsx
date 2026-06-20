@@ -14,6 +14,7 @@ import { radiologyService } from "@/lib/services";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { joinDisplayParts } from "@/lib/utils/clinic-utils";
 import { RAD_OTHER_TEMPLATE_CODE } from "@/lib/constants/order-template-codes";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 
 export type RadiologyTemplateLike = {
   id: number;
@@ -225,7 +226,7 @@ export function RadiologyOrderModal({
         if (!next) reset();
       }}
     >
-      <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.ml}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ScanLine className="h-5 w-5 text-indigo-500" />

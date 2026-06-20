@@ -251,6 +251,82 @@ export function transformApiRowToCompletedTest(
   };
 }
 
+/** Verification page row shape (LabResult.id = verification pk, testId = LabTest pk). */
+export interface VerificationLabResult {
+  id: string;
+  testId: string;
+  orderId: string;
+  patient: { id: string; name: string; age: number; gender: string };
+  doctor: { id: string; name: string; specialty: string };
+  testName: string;
+  testCode: string;
+  results: CompletedTestResultRow[];
+  reportAttachments?: Array<{ name: string; url: string }>;
+  resultFile?: string;
+  resultFileExists?: boolean;
+  overallStatus: 'Normal' | 'Abnormal' | 'Critical';
+  priority: 'Routine' | 'Urgent' | 'STAT';
+  status: 'Results Ready' | 'Verified' | 'Completed';
+  submittedBy: string;
+  submittedAt: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  clinic: string;
+  location_clinic_name?: string;
+  clinicalNotes?: string;
+  processing_method?: 'in_house' | 'outsourced';
+  outsourced_lab?: string;
+}
+
+/** Map verification API row using the shared completed-test transform. */
+export function transformApiRowToVerificationLabResult(
+  apiResult: Record<string, unknown>,
+): VerificationLabResult {
+  const completed = transformApiRowToCompletedTest(apiResult, 'verification');
+  const testDetails = (apiResult as any).test_details || apiResult.test;
+  const order = (apiResult as any).order || (testDetails as any)?.order;
+  const rawStatus = String((testDetails as any)?.status || (testDetails as any)?.status || '').toLowerCase();
+  let status: VerificationLabResult['status'] = 'Results Ready';
+  if (rawStatus === 'verified') status = 'Verified';
+  else if (rawStatus === 'completed') status = 'Completed';
+
+  const clinicalNotes = String(order?.clinical_notes || (testDetails as any)?.notes || '').trim();
+  const notesDeduped = clinicalNotes.includes('; ')
+    ? [...new Set(clinicalNotes.split('; ').map((p: string) => p.trim()).filter(Boolean))].join('; ')
+    : clinicalNotes;
+
+  return {
+    id: String((apiResult as any).id ?? completed.labResultId ?? ''),
+    testId: completed.id,
+    orderId: completed.orderId,
+    patient: {
+      id: completed.patient.id,
+      name: completed.patient.name,
+      age: completed.patient.age ?? 0,
+      gender: completed.patient.gender || 'Unknown',
+    },
+    doctor: completed.doctor,
+    testName: completed.testName,
+    testCode: completed.testCode,
+    results: completed.results,
+    reportAttachments: completed.reportAttachments,
+    resultFile: completed.result_file || undefined,
+    resultFileExists: completed.result_file_exists,
+    overallStatus: completed.overallStatus,
+    priority: completed.priority,
+    status,
+    submittedBy: completed.submittedBy || 'Lab Tech',
+    submittedAt: completed.completedAt,
+    verifiedBy: completed.verifiedBy || undefined,
+    verifiedAt: completed.verifiedAt || undefined,
+    clinic: completed.clinic,
+    location_clinic_name: completed.location_clinic_name,
+    clinicalNotes: notesDeduped || undefined,
+    processing_method: completed.processing_method,
+    outsourced_lab: completed.outsourced_lab,
+  };
+}
+
 /** Collapse accidental `.pdf.pdf` from storage/upload naming. */
 export function sanitizeLabResultFileName(name: string): string {
   let n = name.trim();

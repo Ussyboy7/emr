@@ -62,11 +62,15 @@ class HRService {
     division?: string;
     status?: string;
     search?: string;
+    page?: number;
+    page_size?: number;
   }): Promise<{
     programme_year: number;
     summary: HRComplianceSummary;
     results: HRComplianceRow[];
     count: number;
+    page?: number;
+    page_size?: number;
   }> {
     const query = buildQueryString((params || {}) as Record<string, string | number | undefined>);
     return apiFetch(`/hr/compliance/${query}`);
@@ -79,7 +83,10 @@ class HRService {
     return apiFetch(`/hr/compliance/summary/${query}`);
   }
 
-  async exportCsv(programme_year?: number, params?: { division?: string; status?: string }): Promise<Blob> {
+  async exportCsv(
+    programme_year?: number,
+    params?: { division?: string; status?: string; search?: string },
+  ): Promise<Blob> {
     const query = buildQueryString({
       programme_year,
       ...params,
@@ -105,6 +112,8 @@ class HRService {
   async listExemptions(params?: {
     programme_year?: number;
     patient?: number;
+    search?: string;
+    page?: number;
     page_size?: number;
   }): Promise<{ results: AnnualCheckupExemption[]; count: number }> {
     const query = buildQueryString((params || {}) as Record<string, string | number | undefined>);

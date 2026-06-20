@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SAVE_SIMULATION_DELAY } from '@/lib/constants/ui';
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { useAdminPageAuth } from "@/hooks/use-admin-page-auth";
+import { adminService } from "@/lib/services";
 import {
   Settings, Save, RefreshCw, Clock, Calendar, Bell, Shield, Database,
   Globe, Mail, Printer, Stethoscope, TestTube, Pill, ScanLine, Users,
-  AlertTriangle, CheckCircle2, FileText, Lock, Key, Plus, Trash2
+  AlertTriangle, CheckCircle2, FileText, Lock, Key, Plus, Trash2, Loader2
 } from "lucide-react";
 import { consultationService, type PresentingComplaint, type PresentingComplaintCategory } from "@/lib/services";
 import {
@@ -26,10 +28,26 @@ import {
   MAX_IDLE_TIMEOUT_MINUTES,
 } from "@/lib/auth-session-settings";
 
-export default function SystemSettingsPage() {
-  const [isSaving, setIsSaving] = useState(false);
+function PreviewSettingsNotice() {
+  return (
+    <Alert className="border-amber-200 bg-amber-50/60 dark:bg-amber-950/20">
+      <AlertTriangle className="h-4 w-4 text-amber-600" />
+      <AlertTitle className="text-amber-900 dark:text-amber-100">Not persisted yet</AlertTitle>
+      <AlertDescription className="text-amber-800/90 dark:text-amber-200/90">
+        No backend API for this tab yet. Security saves org idle timeout; Consultation saves the complaints library; Notifications saves the routing matrix.
+      </AlertDescription>
+    </Alert>
+  );
+}
 
-  // General Settings
+export default function SystemSettingsPage() {
+  const { ready, handleAuthError } = useAdminPageAuth();
+  const [isSaving, setIsSaving] = useState(false);
+  const [routingLoading, setRoutingLoading] = useState(false);
+  const [routingSaving, setRoutingSaving] = useState(false);
+  const [routingSource, setRoutingSource] = useState<'default' | 'override'>('default');
+  const [routingMatrix, setRoutingMatrix] = useState<Record<string, string[]>>({});
+
   const [generalSettings, setGeneralSettings] = useState({
     facilityName: 'NPA Medical Center',
     facilityCode: 'NPA-MC-001',
@@ -43,7 +61,6 @@ export default function SystemSettingsPage() {
     currency: 'NGN',
   });
 
-  // Appointment Settings
   const [appointmentSettings, setAppointmentSettings] = useState({
     defaultSlotDuration: '30',
     maxAdvanceBooking: '30',
@@ -57,7 +74,6 @@ export default function SystemSettingsPage() {
     showAvailability: true,
   });
 
-  // Consultation Settings
   const [consultationSettings, setConsultationSettings] = useState({
     requireVitals: true,
     autoAssignRoom: true,
@@ -71,7 +87,6 @@ export default function SystemSettingsPage() {
     historyMonths: '12',
   });
 
-  // Laboratory Settings
   const [labSettings, setLabSettings] = useState({
     requireOrderApproval: false,
     allowStatOrders: true,
@@ -85,7 +100,6 @@ export default function SystemSettingsPage() {
     specimenTracking: true,
   });
 
-  // Pharmacy Settings
   const [pharmacySettings, setPharmacySettings] = useState({
     requireDoctorApproval: false,
     allowSubstitution: true,
@@ -99,9 +113,8 @@ export default function SystemSettingsPage() {
     trackBatches: true,
   });
 
-  // Security Settings
   const [securitySettings, setSecuritySettings] = useState({
-    sessionTimeout: '30',
+    sessionTimeout: String(DEFAULT_IDLE_TIMEOUT_MINUTES),
     maxLoginAttempts: '5',
     lockoutDuration: '15',
     passwordExpiry: '90',
@@ -113,7 +126,6 @@ export default function SystemSettingsPage() {
     dataEncryption: true,
   });
 
-  // Notification Settings
   const [notificationSettings, setNotificationSettings] = useState({
     emailEnabled: true,
     smsEnabled: false,
@@ -152,14 +164,60 @@ export default function SystemSettingsPage() {
   };
 
   useEffect(() => {
-    loadPresentingComplaintLibrary();
+    if (!ready) return;
+    void loadPresentingComplaintLibrary();
+    void loadRoutingMatrix();
     void fetchOrgIdleTimeoutMinutes().then((minutes) => {
-      setSecuritySettings((prev) => ({
-        ...prev,
-        sessionTimeout: String(minutes),
-      }));
+      setSecuritySettings((prev) => ({ ...prev, sessionTimeout: String(minutes) }));
     });
-  }, []);
+  }, [ready]);
+
+  const loadRoutingMatrix = async () => {
+    setRoutingLoading(true);
+    try {
+      const res = await adminService.getNotificationRoutingMatrix();
+      setRoutingMatrix(res.matrix || {});
+      setRoutingSource(res.source === 'override' ? 'override' : 'default');
+    } catch (error) {
+      if (handleAuthError(error)) return;
+      console.error('Failed to load notification routing matrix', error);
+      toast.error('Failed to load notification routing matrix');
+    } finally {
+      setRoutingLoading(false);
+    }
+  };
+
+  const handleSaveRoutingMatrix = async () => {
+    setRoutingSaving(true);
+    try {
+      const res = await adminService.updateNotificationRoutingMatrix(routingMatrix);
+      setRoutingMatrix(res.matrix || routingMatrix);
+      setRoutingSource('override');
+      toast.success('Notification routing matrix saved');
+    } catch (error: unknown) {
+      if (handleAuthError(error)) return;
+      const message = error instanceof Error ? error.message : 'Failed to save routing matrix';
+      toast.error(message);
+    } finally {
+      setRoutingSaving(false);
+    }
+  };
+
+  const handleResetRoutingMatrix = async () => {
+    setRoutingSaving(true);
+    try {
+      const res = await adminService.resetNotificationRoutingMatrix();
+      setRoutingMatrix(res.matrix || {});
+      setRoutingSource('default');
+      toast.success('Routing matrix reset to defaults');
+    } catch (error: unknown) {
+      if (handleAuthError(error)) return;
+      const message = error instanceof Error ? error.message : 'Failed to reset routing matrix';
+      toast.error(message);
+    } finally {
+      setRoutingSaving(false);
+    }
+  };
 
   const filteredLibraryCategories = useMemo(() => {
     const query = librarySearch.trim().toLowerCase();
@@ -258,9 +316,9 @@ export default function SystemSettingsPage() {
     try {
       const idleMinutes = await updateOrgIdleTimeoutMinutes(Number(securitySettings.sessionTimeout));
       setSecuritySettings((prev) => ({ ...prev, sessionTimeout: String(idleMinutes) }));
-      await new Promise((r) => setTimeout(r, SAVE_SIMULATION_DELAY));
-      toast.success("Settings saved successfully");
+      toast.success("Org idle timeout saved");
     } catch (error: unknown) {
+      if (handleAuthError(error)) return;
       const message = error instanceof Error ? error.message : "Failed to save settings";
       toast.error(message);
     } finally {
@@ -275,6 +333,16 @@ export default function SystemSettingsPage() {
     }));
     toast.info("Security timeout reset to default in the form. Click Save Changes to apply org-wide.");
   };
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -314,6 +382,7 @@ export default function SystemSettingsPage() {
                 <CardDescription>Basic facility information and regional preferences</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <PreviewSettingsNotice />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2"><Label>Facility Name</Label><Input value={generalSettings.facilityName} onChange={(e) => setGeneralSettings(p => ({ ...p, facilityName: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Facility Code</Label><Input value={generalSettings.facilityCode} onChange={(e) => setGeneralSettings(p => ({ ...p, facilityCode: e.target.value }))} /></div>
@@ -339,6 +408,7 @@ export default function SystemSettingsPage() {
                 <CardDescription>Configure scheduling and booking preferences</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <PreviewSettingsNotice />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2"><Label>Default Slot Duration (minutes)</Label><Select value={appointmentSettings.defaultSlotDuration} onValueChange={(v) => setAppointmentSettings(p => ({ ...p, defaultSlotDuration: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="15">15 minutes</SelectItem><SelectItem value="20">20 minutes</SelectItem><SelectItem value="30">30 minutes</SelectItem><SelectItem value="45">45 minutes</SelectItem><SelectItem value="60">60 minutes</SelectItem></SelectContent></Select></div>
                   <div className="space-y-2"><Label>Max Advance Booking (days)</Label><Input type="number" value={appointmentSettings.maxAdvanceBooking} onChange={(e) => setAppointmentSettings(p => ({ ...p, maxAdvanceBooking: e.target.value }))} /></div>
@@ -364,6 +434,7 @@ export default function SystemSettingsPage() {
                 <CardDescription>Configure clinical session preferences</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <PreviewSettingsNotice />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2"><Label>Session Timeout (minutes)</Label><Input type="number" value={consultationSettings.sessionTimeout} onChange={(e) => setConsultationSettings(p => ({ ...p, sessionTimeout: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Auto-End After (minutes)</Label><Input type="number" value={consultationSettings.autoEndMinutes} onChange={(e) => setConsultationSettings(p => ({ ...p, autoEndMinutes: e.target.value }))} /></div>
@@ -500,6 +571,7 @@ export default function SystemSettingsPage() {
                 <CardDescription>Configure lab testing and result management</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <PreviewSettingsNotice />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2"><Label>Default Turnaround Time (hours)</Label><Input type="number" value={labSettings.defaultTurnaround} onChange={(e) => setLabSettings(p => ({ ...p, defaultTurnaround: e.target.value }))} /></div>
                 </div>
@@ -524,6 +596,7 @@ export default function SystemSettingsPage() {
                 <CardDescription>Configure dispensing and inventory management</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <PreviewSettingsNotice />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2"><Label>Low Stock Threshold</Label><Input type="number" value={pharmacySettings.lowStockThreshold} onChange={(e) => setPharmacySettings(p => ({ ...p, lowStockThreshold: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Expiry Warning (days before)</Label><Input type="number" value={pharmacySettings.expiryWarningDays} onChange={(e) => setPharmacySettings(p => ({ ...p, expiryWarningDays: e.target.value }))} /></div>
@@ -548,6 +621,13 @@ export default function SystemSettingsPage() {
                 <CardDescription>Configure authentication and access control</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <Alert>
+                  <Shield className="h-4 w-4" />
+                  <AlertTitle>Session timeout</AlertTitle>
+                  <AlertDescription>
+                    Only org idle timeout is saved via Save Changes. Other security toggles are placeholders until a policy API exists.
+                  </AlertDescription>
+                </Alert>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <Label>Session Timeout (minutes)</Label>
@@ -583,9 +663,52 @@ export default function SystemSettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5 text-cyan-500" />Notification Settings</CardTitle>
-                <CardDescription>Configure system alerts and notifications</CardDescription>
+                <CardDescription>Configure in-app notification audience routing by system role</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Routing matrix source</p>
+                    <p className="text-xs text-muted-foreground">
+                      {routingSource === 'override' ? 'Custom override active' : 'Using built-in defaults'}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => void loadRoutingMatrix()} disabled={routingLoading || routingSaving}>
+                      <RefreshCw className="h-4 w-4 mr-2" />Reload
+                    </Button>
+                    <Button variant="outline" onClick={() => void handleResetRoutingMatrix()} disabled={routingSaving}>
+                      Reset defaults
+                    </Button>
+                    <Button onClick={() => void handleSaveRoutingMatrix()} disabled={routingSaving || routingLoading}>
+                      {routingSaving ? 'Saving...' : 'Save routing'}
+                    </Button>
+                  </div>
+                </div>
+                {routingLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                ) : (
+                  <div className="space-y-4">
+                    {Object.entries(routingMatrix).map(([role, hints]) => (
+                      <div key={role} className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-3 items-start p-4 rounded-lg bg-muted/40">
+                        <Label className="pt-2 font-medium">{role}</Label>
+                        <Input
+                          value={(hints || []).join(', ')}
+                          onChange={(e) => {
+                            const next = e.target.value
+                              .split(',')
+                              .map((part) => part.trim())
+                              .filter(Boolean);
+                            setRoutingMatrix((prev) => ({ ...prev, [role]: next }));
+                          }}
+                          placeholder="Department codes or names, comma-separated"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Separator />
+                <h4 className="font-medium">Channel preferences (not persisted)</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg"><div><Label>Email Notifications</Label></div><Switch checked={notificationSettings.emailEnabled} onCheckedChange={(v) => setNotificationSettings(p => ({ ...p, emailEnabled: v }))} /></div>
                   <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg"><div><Label>SMS Notifications</Label></div><Switch checked={notificationSettings.smsEnabled} onCheckedChange={(v) => setNotificationSettings(p => ({ ...p, smsEnabled: v }))} /></div>

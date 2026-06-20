@@ -20,13 +20,12 @@ import {
   Users, TrendingUp, ArrowRight, AlertTriangle, RefreshCw, Plus, X, ScanLine
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api-client';
 import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService } from '@/lib/services';
 import type { Diagnosis, ICD10Code } from '@/lib/services/consultation-service';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
-import { useCurrentUser } from '@/hooks/use-current-user';
+import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
@@ -58,43 +57,6 @@ import { extractSessionEditState } from '@/lib/consultation/workspace-bundle-enr
 
 // ICD-10 diagnosis search in history should use the same backend source
 // as active consultation sessions (not a hardcoded subset).
-
-// Helper function to clean garbage text from clinical notes
-const cleanClinicalText = (text: string): string => {
-  if (!text || text.trim().length < 3) return '';
-
-  // Remove common garbage patterns and normalize
-  let cleaned = text
-    .replace(/[a-zA-Z]{25,}/g, '') // Remove very long words (likely garbage)
-    .replace(/[^\w\s.,;:\-\n]/g, '') // Remove special characters except common punctuation
-    .replace(/\s+/g, ' ') // Normalize whitespace
-    .trim();
-
-  // Additional garbage detection patterns
-  const garbagePatterns = [
-    /^[^\w]*$/, // Only non-word characters
-    /lorem ipsum/i,
-    /test data/i,
-    /sample text/i,
-    /^[a-z]{1,2}(\s+[a-z]{1,2})*$/i, // Very short words repeated (like "a b c d")
-    /(.)\1{4,}/, // Same character repeated 5+ times
-    /([a-z])\1{2,}[a-z]*([a-z])\2{2,}/i, // Repeated letter patterns
-  ];
-
-  // Check for garbage patterns
-  for (const pattern of garbagePatterns) {
-    if (pattern.test(cleaned)) {
-      return '';
-    }
-  }
-
-  // If it's too short after cleaning, return empty
-  if (cleaned.length < 3) {
-    return '';
-  }
-
-  return cleaned;
-};
 
 // Extended type for local use (includes patientGender for filtering)
 interface ConsultationRecordWithGender extends ConsultationRecord {
@@ -197,8 +159,11 @@ const generateTimeline = (
 };
 
 export default function ConsultationHistoryPage() {
+  const searchParams = useSearchParams();
+  const scopeMy = searchParams.get('scope') === 'my';
   const { names: opdClinicNames } = useOutpatientClinicTypes();
-  const { currentUser } = useCurrentUser();
+  const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
+  const myDoctorId = scopeMy && currentUser?.id ? Number(currentUser.id) : undefined;
   const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -283,9 +248,6 @@ export default function ConsultationHistoryPage() {
     diagnosisCodes: []
   });
 
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
-
   const searchICD10Codes = useCallback(async (searchTerm: string) => {
     const q = searchTerm.trim();
     if (!q) {
@@ -339,6 +301,8 @@ export default function ConsultationHistoryPage() {
   }, [dateFilter]);
 
   useEffect(() => {
+    if (!ready) return;
+
     const loadConsultations = async () => {
       try {
         setLoading(true);
@@ -352,6 +316,7 @@ export default function ConsultationHistoryPage() {
           page_size: itemsPerPage,
           status: apiStatus,
           clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+          doctor: myDoctorId,
           date,
           start_date,
           end_date,
@@ -373,8 +338,8 @@ export default function ConsultationHistoryPage() {
 
             const diagnosis = '';
             const diagnosisCodes: { code: string; description: string; type: 'Primary' | 'Secondary' | 'Differential' }[] = [];
-            const assessment = cleanClinicalText(session.assessment || '');
-            const plan = cleanClinicalText(session.plan || '');
+            const assessment = session.assessment || '';
+            const plan = session.plan || '';
             const historyOfPresentIllness = session.history_of_presenting_illness || '';
             const physicalExamination = session.physical_examination || '';
             
@@ -443,20 +408,19 @@ export default function ConsultationHistoryPage() {
         setConsultations(validConsultations);
       } catch (err) {
         console.error('Error loading consultations:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          toast.error('Failed to load consultation history. Please try again.');
-        }
+        if (handleAuthError(err)) return;
+        toast.error('Failed to load consultation history. Please try again.');
       } finally {
         setLoading(false);
       }
     };
     
-    loadConsultations();
-  }, [statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, debouncedSearchQuery]);
+    void loadConsultations();
+  }, [ready, statusFilter, clinicFilter, buildDateParams, currentPage, itemsPerPage, debouncedSearchQuery, myDoctorId, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
+
     const loadStats = async () => {
       try {
         const { date, start_date, end_date } = buildDateParams();
@@ -465,6 +429,7 @@ export default function ConsultationHistoryPage() {
 
         const stats = await consultationService.getHistoryStats({
           clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+          doctor: myDoctorId,
           date,
           start_date,
           end_date,
@@ -485,8 +450,8 @@ export default function ConsultationHistoryPage() {
       }
     };
 
-    loadStats();
-  }, [clinicFilter, buildDateParams]);
+    void loadStats();
+  }, [ready, clinicFilter, buildDateParams, debouncedSearchQuery, myDoctorId]);
 
   // Reset to page 1 when filters change (same pattern as Lab Orders)
   useEffect(() => {
@@ -1200,7 +1165,9 @@ export default function ConsultationHistoryPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Consultation History</h1>
-            <p className="text-muted-foreground mt-1">View and manage all consultation records</p>
+            <p className="text-muted-foreground mt-1">
+              {scopeMy ? 'Your consultation sessions' : 'View and manage all consultation records'}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Link href="/consultation">

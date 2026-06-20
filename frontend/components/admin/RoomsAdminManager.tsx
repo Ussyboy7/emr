@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo, useImperativeHandle, forwardRef } from 'react';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/hooks/use-location-options';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { useClinic } from '@/hooks/use-clinic';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 
 interface Room {
   id: string | number;
@@ -65,9 +67,14 @@ export interface RoomsAdminManagerHandle {
 
 interface RoomsAdminManagerProps {
   showHeader?: boolean;
+  /** Show KPI stat cards (default true when showHeader is true). */
+  showStats?: boolean;
+  onAuthError?: (error: unknown) => boolean;
 }
 
-const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerProps>(({ showHeader = true }, ref) => {
+const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerProps>(
+  ({ showHeader = true, showStats, onAuthError }, ref) => {
+  const showStatCards = showStats ?? showHeader;
   const { names: opdClinicNames } = useOutpatientClinicTypes();
   const { locations: locationOptions } = useLocationOptions({ includeAll: true });
   const { activeClinicId } = useClinic();
@@ -75,6 +82,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 400);
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [locationFilter, setLocationFilter] = useState('all');
@@ -106,7 +114,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       const params: Record<string, string | number> = {
         page: currentPage, page_size: itemsPerPage,
       };
-      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
       if (statusFilter !== 'all') params.status = statusFilter;
       if (typeFilter !== 'all') params.room_type = typeFilter;
       if (locationFilter !== 'all') params.clinic = locationFilter;
@@ -118,17 +126,17 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       setRooms(mapped);
       setTotalCount(typeof res.count === 'number' ? res.count : mapped.length);
     } catch (err: any) {
-      if (isAuthenticationError(err)) return;
+      if (onAuthError?.(err) || isAuthenticationError(err)) return;
       setError(err.message || 'Failed to load rooms');
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, locationFilter, clinicOptions]);
+  }, [currentPage, itemsPerPage, debouncedSearch, statusFilter, typeFilter, locationFilter, clinicOptions, onAuthError]);
 
   const fetchStats = useCallback(async () => {
     try {
       const filters: Record<string, string | number> = {};
-      if (searchQuery.trim()) filters.search = searchQuery.trim();
+      if (debouncedSearch.trim()) filters.search = debouncedSearch.trim();
       if (typeFilter !== 'all') filters.room_type = typeFilter;
       if (locationFilter !== 'all') filters.clinic = locationFilter;
       const stats = await roomService.getListStats(filters);
@@ -139,11 +147,11 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
         maintenance: stats.maintenance ?? 0,
       });
     } catch { /* ignore */ }
-  }, [searchQuery, typeFilter, locationFilter]);
+  }, [debouncedSearch, typeFilter, locationFilter]);
 
   useEffect(() => { fetchRooms(); }, [fetchRooms, refreshToken]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, typeFilter, locationFilter]);
+  useEffect(() => { setCurrentPage(1); }, [debouncedSearch, statusFilter, typeFilter, locationFilter]);
 
   function mapRoom(api: ApiRoom, clinicLabel: string): Room {
     const s = (api.status || 'active').toLowerCase();
@@ -255,7 +263,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
         </div>
       )}
 
-      {showHeader && (
+      {showStatCards && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[{ label: 'Total', value: stats.total, color: 'text-violet-500', bg: 'bg-violet-500/10' },
             { label: 'Active', value: stats.active, color: 'text-green-500', bg: 'bg-green-500/10' },
@@ -364,7 +372,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       )}
 
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[500px]">
+        <DialogContent className={MODAL_SIZES.sm2}>
           <DialogHeader><DialogTitle className="flex items-center gap-2"><DoorOpen className="h-5 w-5 text-violet-500" />{selectedRoom?.name}</DialogTitle></DialogHeader>
           {selectedRoom && (
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -384,7 +392,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       </Dialog>
 
       <Dialog open={isCreateDialogOpen} onOpenChange={v => { if (!v) { setIsCreateDialogOpen(false); setFormData({}); } }}>
-        <DialogContent className="w-[95vw] sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader><DialogTitle>Add New Room</DialogTitle><DialogDescription>Create a consultation room or procedure room</DialogDescription></DialogHeader>
           <RoomForm formData={formData} setFormData={setFormData} formErrors={formErrors} clinicOptions={clinicOptions} opdClinicNames={opdClinicNames} />
           <DialogFooter>
@@ -395,7 +403,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       </Dialog>
 
       <Dialog open={isEditDialogOpen} onOpenChange={v => { if (!v) { setIsEditDialogOpen(false); setFormData({}); } }}>
-        <DialogContent className="w-[95vw] sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader><DialogTitle>Edit Room</DialogTitle><DialogDescription>Update room details</DialogDescription></DialogHeader>
           <RoomForm formData={formData} setFormData={setFormData} formErrors={formErrors} clinicOptions={clinicOptions} opdClinicNames={opdClinicNames} />
           <DialogFooter>

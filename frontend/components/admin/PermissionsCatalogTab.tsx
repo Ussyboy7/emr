@@ -21,6 +21,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { SHEET_SIZES } from "@/components/ui/modal-sizes";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -416,7 +417,7 @@ export function PermissionsCatalogTab() {
       )}
 
       <Sheet open={activePage != null} onOpenChange={(o) => !o && closePanel()}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+        <SheetContent side="right" className={SHEET_SIZES.lg}>
           {activePage ? (
             <>
               <SheetHeader>

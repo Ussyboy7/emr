@@ -154,6 +154,72 @@ class RadiologyOrderListFilterTests(APITestCase):
         for key in ("total", "pending", "processing", "results_ready", "rejected", "stat"):
             self.assertIn(key, resp.data)
 
+    def test_filter_by_study_status_pending_includes_scheduled_and_acquired(self):
+        """study_status=pending should match pending, scheduled, and acquired studies."""
+        order_pending = RadiologyOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        RadiologyStudy.objects.create(
+            order=order_pending,
+            procedure="Chest X-Ray",
+            body_part="Chest",
+            modality="X-Ray",
+            status="pending",
+        )
+
+        order_scheduled = RadiologyOrder.objects.create(
+            patient=self.other_patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        RadiologyStudy.objects.create(
+            order=order_scheduled,
+            procedure="Abdominal Ultrasound",
+            body_part="Abdomen",
+            modality="Ultrasound",
+            status="scheduled",
+        )
+
+        order_acquired = RadiologyOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        RadiologyStudy.objects.create(
+            order=order_acquired,
+            procedure="CT Head",
+            body_part="Head",
+            modality="CT",
+            status="acquired",
+        )
+
+        order_processing = RadiologyOrder.objects.create(
+            patient=self.other_patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        RadiologyStudy.objects.create(
+            order=order_processing,
+            procedure="MRI Spine",
+            body_part="Spine",
+            modality="MRI",
+            status="processing",
+        )
+
+        resp = self.client.get(f"{BASE}/orders/", {"study_status": "pending"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in resp.data["results"]}
+        self.assertEqual(
+            ids,
+            {order_pending.pk, order_scheduled.pk, order_acquired.pk},
+        )
+
 
 class RadiologyScheduleTests(APITestCase):
     """POST /api/v1/radiology/orders/{id}/schedule/"""

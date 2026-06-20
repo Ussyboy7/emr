@@ -120,8 +120,11 @@ export function middleware(request: NextRequest) {
   }
 
   // Always allow global user pages for authenticated users
-  const globalPages = ['/notifications', '/settings', '/help'];
-  if (isPathAllowedByPages(pathname, allowedPages) || globalPages.includes(pathname)) {
+  const globalPages = ['/notifications', '/settings', '/help', '/help/tickets', '/help/docs'];
+  const isGlobalPage = globalPages.some(
+    (page) => pathname === page || pathname.startsWith(`${page}/`),
+  );
+  if (isPathAllowedByPages(pathname, allowedPages) || isGlobalPage) {
     return NextResponse.next();
   }
 

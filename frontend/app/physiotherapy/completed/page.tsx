@@ -11,13 +11,15 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
 import { formatDisplayDateTime } from '@/lib/dates';
 import { physioService, type PhysioSession } from '@/lib/services';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
+import { usePhysioPageAuth } from '@/hooks/use-physio-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { PhysioSessionReportDialog } from '@/components/physiotherapy/PhysioSessionReportDialog';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -38,14 +40,13 @@ import {
 export default function PhysioCompletedPage() {
   const searchParams = useSearchParams();
   const urlHydrated = useRef(false);
+  const { ready, handleAuthError } = usePhysioPageAuth();
   const [sessions, setSessions] = useState<PhysioSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [dateFilter, setDateFilter] = useState('today');
   const [stats, setStats] = useState<CompletedSessionStats>({
     total: 0,
@@ -64,11 +65,7 @@ export default function PhysioCompletedPage() {
   const [selectedSession, setSelectedSession] = useState<PhysioSession | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isSessionReportOpen, setIsSessionReportOpen] = useState(false);
-  const [pdfDownloadLoading, setPdfDownloadLoading] = useState(false);
-
-  // Session Report: all sessions for the same order (to switch Session 1, 2, 3...) and which one we're viewing
-  const [orderSessionsForReport, setOrderSessionsForReport] = useState<PhysioSession[]>([]);
-  const [reportViewingSession, setReportViewingSession] = useState<PhysioSession | null>(null);
+  const [reportSession, setReportSession] = useState<PhysioSession | null>(null);
 
   useEffect(() => {
     if (urlHydrated.current) return;
@@ -78,11 +75,6 @@ export default function PhysioCompletedPage() {
     if (urlSearch) setSearchQuery(urlSearch);
     if (urlDate === 'all') setDateFilter('all');
   }, [searchParams]);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -108,76 +100,27 @@ export default function PhysioCompletedPage() {
       setStats(statsResult);
     } catch (err: any) {
       console.error('Error loading completed sessions:', err);
-      if (isAuthenticationError(err)) {
-        setAuthError(err);
-      } else {
-        setError(err.message || 'Failed to load sessions');
-        toast.error('Failed to load completed sessions');
-      }
+      if (handleAuthError(err)) return;
+      setError(err.message || 'Failed to load sessions');
+      toast.error('Failed to load completed sessions');
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     loadSessions();
-  }, [loadSessions]);
+  }, [ready, loadSessions]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [debouncedSearchQuery, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
-  // When Session Report opens: load all sessions for the same order so user can switch Session 1, 2, 3...
-  useEffect(() => {
-    if (!isSessionReportOpen || !selectedSession) {
-      return;
-    }
-    const orderId = selectedSession.order ?? (selectedSession as any).order_details?.id;
-    if (!orderId) {
-      setOrderSessionsForReport(selectedSession ? [selectedSession] : []);
-      setReportViewingSession(selectedSession);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await physioService.getSessions({ order: orderId, page_size: 50 });
-        const list = r?.results ?? [];
-        if (cancelled) return;
-        const hasSelected = list.some((s: PhysioSession) => s.id === selectedSession.id);
-        const merged = hasSelected ? list : [selectedSession, ...list];
-        const sorted = [...merged].sort((a, b) => (a.session_number ?? 0) - (b.session_number ?? 0));
-        setOrderSessionsForReport(sorted);
-        setReportViewingSession(selectedSession);
-      } catch {
-        if (!cancelled) {
-          setOrderSessionsForReport(selectedSession ? [selectedSession] : []);
-          setReportViewingSession(selectedSession);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isSessionReportOpen, selectedSession?.id, selectedSession?.order]);
-
-  const handleDownloadSessionPdf = async (sessionId: number) => {
-    setPdfDownloadLoading(true);
-    try {
-      const blob = await physioService.downloadSessionReport(sessionId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `physio-session-${sessionId}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success('PDF download started');
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to download PDF');
-    } finally {
-      setPdfDownloadLoading(false);
-    }
+  const openSessionReport = (session: PhysioSession) => {
+    setReportSession(session);
+    setIsSessionReportOpen(true);
   };
-
-  const reportSession = isSessionReportOpen ? (reportViewingSession || selectedSession) : null;
 
   return (
     <TooltipProvider>
@@ -308,7 +251,7 @@ export default function PhysioCompletedPage() {
                             </Tooltip>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={() => { setSelectedSession(session); setIsSessionReportOpen(true); }}>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={() => openSessionReport(session)}>
                                   <FileText className="h-4 w-4 text-muted-foreground hover:text-green-600" />
                                 </Button>
                               </TooltipTrigger>
@@ -318,7 +261,7 @@ export default function PhysioCompletedPage() {
                             </Tooltip>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={() => handleDownloadSessionPdf(session.id)}>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={() => openSessionReport(session)}>
                                   <Download className="h-4 w-4 text-muted-foreground hover:text-sky-600" />
                                 </Button>
                               </TooltipTrigger>
@@ -369,7 +312,7 @@ export default function PhysioCompletedPage() {
 
         {/* View Session Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.ml}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-emerald-500" />
@@ -572,298 +515,16 @@ export default function PhysioCompletedPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Session Report Modal */}
-        <Dialog open={isSessionReportOpen} onOpenChange={(open) => {
-          setIsSessionReportOpen(open);
-          if (!open) { setOrderSessionsForReport([]); setReportViewingSession(null); }
-        }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-blue-500" />
-                Physiotherapy Session Report - {reportSession?.patient_name}
-              </DialogTitle>
-              <DialogDescription>
-                {joinDisplayParts([
-                  reportSession?.id != null ? `PHY-${String(reportSession.id).padStart(6, '0')}` : '',
-                  reportSession?.session_number != null ? `Session ${reportSession.session_number}` : '',
-                ])}
-              </DialogDescription>
-            </DialogHeader>
+        <PhysioSessionReportDialog
+          open={isSessionReportOpen}
+          onOpenChange={(open) => {
+            setIsSessionReportOpen(open);
+            if (!open) setReportSession(null);
+          }}
+          session={reportSession}
+          handleAuthError={handleAuthError}
+        />
 
-            {reportSession && (
-              <div className="space-y-6">
-                {/* Report Header */}
-                <div className="border-b pb-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h2 className="text-lg font-semibold text-blue-700">PHYSIOTHERAPY SESSION REPORT</h2>
-                      <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
-                    </div>
-                    <div className="text-right print:hidden">
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => reportSession?.id != null && handleDownloadSessionPdf(reportSession.id)} disabled={pdfDownloadLoading}>
-                          {pdfDownloadLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-                          Download PDF
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => window.print()}>
-                          <Printer className="h-4 w-4 mr-1" />
-                          Print
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Patient & Session Info */}
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
-                      <div className="space-y-1">
-                        <p><span className="font-medium">Name:</span> {reportSession.patient_name}</p>
-                        <p><span className="font-medium">ID:</span> {reportSession.patient_id}</p>
-                        {reportSession.physiotherapist_name?.trim() && (
-                          <p><span className="font-medium">Physiotherapist:</span> {reportSession.physiotherapist_name}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
-                      <div className="space-y-1">
-                        {reportSession.session_number != null && (
-                          <p><span className="font-medium">Session:</span> {reportSession.session_number}</p>
-                        )}
-                        {reportSession.scheduled_at && (
-                          <p><span className="font-medium">Scheduled:</span> {formatDisplayDateTime(reportSession.scheduled_at)}</p>
-                        )}
-                        {reportSession.completed_at && (
-                          <p><span className="font-medium">Completed:</span> {formatDisplayDateTime(reportSession.completed_at)}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Diagnosis */}
-                  {reportSession.order_details?.diagnosis && (
-                    <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-                      <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Primary Diagnosis</p>
-                      <p className="text-sm mt-1">{reportSession.order_details.diagnosis}</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Assessment Sections */}
-                <div className="space-y-6">
-                  {/* A. Patient Assessment */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">A. Patient Assessment</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Presenting Complaint</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.presenting_complaint || 'Not documented'}
-                        </p>
-                      </div>
-                      {(reportSession.pain_level_before != null || reportSession.pain_level_after != null) && (
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium">Pain Assessment</Label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {reportSession.pain_level_before != null && (
-                              <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded border">
-                                <p className="text-xs text-muted-foreground">Before Treatment</p>
-                                <p className="text-xl font-bold text-red-600">{reportSession.pain_level_before}/10</p>
-                              </div>
-                            )}
-                            {reportSession.pain_level_after != null && (
-                              <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded border">
-                                <p className="text-xs text-muted-foreground">After Treatment</p>
-                                <p className="text-xl font-bold text-green-600">{reportSession.pain_level_after}/10</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* B. Medical & Social Background */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b pb-2">B. Medical & Social Background</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Medical History</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.medical_history || 'Not documented'}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Medications</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.medications || 'Not documented'}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Social History</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.social_history || 'Not documented'}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Previous Treatments</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.previous_treatments || 'Not documented'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* C. Physical Examination */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-400 border-b pb-2">C. Physical Examination</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Posture & Gait</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.posture_gait || 'Not documented'}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Range of Motion</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.range_of_motion || 'Not documented'}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Muscle Strength</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.muscle_strength || 'Not documented'}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Special Tests</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.special_tests || 'Not documented'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* D. Functional Evaluation */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b pb-2">D. Functional Evaluation</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Functional Assessment</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.functional_assessment || 'Not documented'}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Functional Goals</Label>
-                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                          {reportSession.functional_goals || 'Not documented'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* E. Clinical Reasoning */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">E. Clinical Reasoning</h3>
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">Assessment Findings & Clinical Impression</Label>
-                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">
-                        {reportSession.clinical_reasoning || reportSession.assessment_findings || 'Not documented'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* F. Treatment Plan */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 border-b pb-2">F. Treatment Plan</h3>
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">Planned Treatment Approach</Label>
-                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">
-                        {reportSession.next_session_plan || reportSession.treatment_performed || 'Not documented'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Treatment Performed & Outcomes */}
-                  {(reportSession.treatment_performed || reportSession.progress_notes) && (
-                    <div className="space-y-3">
-                      <h3 className="text-lg font-semibold text-indigo-700 dark:text-indigo-400 border-b pb-2">Treatment Performed & Outcomes</h3>
-                      <div className="space-y-4">
-                        {reportSession.treatment_performed && (
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">Treatment Performed</Label>
-                            <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                              {reportSession.treatment_performed}
-                            </p>
-                          </div>
-                        )}
-                        {reportSession.progress_notes && (
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">Progress Notes</Label>
-                            <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                              {reportSession.progress_notes}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Home Exercises & Recommendations - only when there is content */}
-                  {((reportSession.home_exercises?.length ?? 0) > 0 || (reportSession.exercises_prescribed?.length ?? 0) > 0 || (reportSession.recommendations?.length ?? 0) > 0) && (
-                    <div className="space-y-3">
-                      <h3 className="text-lg font-semibold text-emerald-700 dark:text-emerald-400 border-b pb-2">Home Program & Recommendations</h3>
-                      <div className="space-y-4">
-                        {((reportSession.home_exercises || reportSession.exercises_prescribed) || []).length > 0 && (
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">Home Exercises</Label>
-                            <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md p-3">
-                              <ul className="text-sm space-y-1">
-                                {(reportSession.home_exercises || reportSession.exercises_prescribed || []).map((exercise: any, index: number) => (
-                                  <li key={index} className="flex items-start gap-2">
-                                    <span className="text-emerald-600 mt-1">•</span>
-                                    <span>{typeof exercise === 'string' ? exercise : (exercise?.description ?? exercise)}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          </div>
-                        )}
-                        {reportSession.recommendations && reportSession.recommendations.length > 0 && (
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">Recommendations</Label>
-                            <div className="space-y-2">
-                              {reportSession.recommendations.map((rec: any, index: number) => (
-                                <div key={index} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
-                                  <p className="text-sm">{rec.text}</p>
-                                  <p className="text-xs text-muted-foreground mt-1">Type: {rec.type || 'general'}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer */}
-                <div className="border-t pt-4">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <p>Report generated on {formatDisplayDateTime(new Date())}</p>
-                    {reportSession?.id != null && (
-                      <p>Session ID: PHY-{String(reportSession.id).padStart(6, '0')}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
         </div>
       </DashboardLayout>
     </TooltipProvider>

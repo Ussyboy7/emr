@@ -14,6 +14,7 @@ import {
   type PhysioOrdersTab,
 } from '@/lib/physiotherapy/physio-workflow-search';
 import { ArrowRight, Loader2, Search } from 'lucide-react';
+import { toast } from 'sonner';
 
 type TrackerHit = {
   patient_name: string;
@@ -51,6 +52,7 @@ export function PhysiotherapyPatientFinder() {
       setHits(res.results || []);
     } catch {
       setHits([]);
+      toast.error('Failed to search physiotherapy records');
     } finally {
       setLoading(false);
     }

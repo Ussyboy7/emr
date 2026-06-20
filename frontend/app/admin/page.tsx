@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
+import { useAdminPageAuth } from "@/hooks/use-admin-page-auth";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { formatDisplayTime } from '@/lib/dates';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { Progress } from "@/components/ui/progress";
 import { adminService } from "@/lib/services";
 import { toast } from "sonner";
-import { GenericMedicationsModal } from "@/components/admin/GenericMedicationsModal";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Users,
@@ -37,11 +37,11 @@ import {
   AlertCircle,
   Loader2,
   Pill,
-  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 
 export default function AdminDashboardPage() {
+  const { ready, handleAuthError } = useAdminPageAuth();
   const { currentUser } = useCurrentUser();
   type BackupStatus = {
     status?: string;
@@ -53,7 +53,6 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
-  const [showGenericsModal, setShowGenericsModal] = useState(false);
   const [showOnlineModal, setShowOnlineModal] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Array<{
     id: number; name: string; email: string; role: string;
@@ -182,6 +181,7 @@ export default function AdminDashboardPage() {
         setLastUpdated(formatDisplayTime(new Date()));
       }
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load dashboard data');
       // Don't spam toasts on background polls — only on the initial
       // load or a user-triggered refresh.
@@ -193,9 +193,10 @@ export default function AdminDashboardPage() {
       if (!opts.silent && isMountedRef.current) setLoading(false);
       inFlightRef.current = false;
     }
-  }, []);
+  }, [handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     isMountedRef.current = true;
     loadDashboardData();
 
@@ -233,7 +234,7 @@ export default function AdminDashboardPage() {
       stopPolling();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [loadDashboardData, loadLiveSlice]);
+  }, [ready, loadDashboardData, loadLiveSlice]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -290,6 +291,50 @@ export default function AdminDashboardPage() {
       ? "No backup files found in the configured locations. Schedule a backup job to start tracking."
       : backupStatus.message || "Backup telemetry isn’t available yet.";
 
+  const systemStatusSummary = useMemo(() => {
+    const statuses = systemHealth.map((item) => String(item.status || '').toLowerCase());
+    if (statuses.length === 0) {
+      return {
+        label: 'Status unavailable',
+        textClass: 'text-slate-300',
+        iconClass: 'text-slate-400',
+        Icon: AlertCircle,
+      };
+    }
+    if (statuses.some((s) => s === 'error' || s === 'unhealthy')) {
+      return {
+        label: 'Degraded',
+        textClass: 'text-red-400',
+        iconClass: 'text-red-500',
+        Icon: AlertTriangle,
+      };
+    }
+    if (statuses.some((s) => s === 'warning')) {
+      return {
+        label: 'Attention needed',
+        textClass: 'text-amber-400',
+        iconClass: 'text-amber-500',
+        Icon: AlertTriangle,
+      };
+    }
+    return {
+      label: 'Operational',
+      textClass: 'text-green-400',
+      iconClass: 'text-green-500',
+      Icon: ShieldCheck,
+    };
+  }, [systemHealth]);
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
@@ -322,8 +367,10 @@ export default function AdminDashboardPage() {
           <CardContent className="p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-green-500" />
-                <span className="text-sm font-medium text-green-400">System Status: Operational</span>
+                <systemStatusSummary.Icon className={`h-5 w-5 ${systemStatusSummary.iconClass}`} />
+                <span className={`text-sm font-medium ${systemStatusSummary.textClass}`}>
+                  System Status: {systemStatusSummary.label}
+                </span>
               </div>
               <div className="hidden h-4 w-px bg-slate-600 sm:block" />
               <div className="flex items-center gap-2">
@@ -873,14 +920,12 @@ export default function AdminDashboardPage() {
                           <span className="text-xs">Clinics</span>
                         </Button>
                       </Link>
-                      <Button 
-                        variant="outline" 
-                        className="w-full h-auto py-3 flex flex-col items-center gap-1" 
-                        onClick={() => setShowGenericsModal(true)}
-                      >
-                        <Pill className="h-5 w-5 text-violet-500" />
-                        <span className="text-xs">Generics</span>
-                      </Button>
+                      <Link href="/pharmacy/generics">
+                        <Button variant="outline" className="w-full h-auto py-3 flex flex-col items-center gap-1">
+                          <Pill className="h-5 w-5 text-violet-500" />
+                          <span className="text-xs">Generics</span>
+                        </Button>
+                      </Link>
                       <div></div> {/* Empty div to maintain grid layout */}
                     </div>
                   </div>
@@ -909,12 +954,8 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </div>
-      <GenericMedicationsModal 
-        open={showGenericsModal} 
-        onOpenChange={setShowGenericsModal} 
-      />
       <Dialog open={showOnlineModal} onOpenChange={setShowOnlineModal}>
-        <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[80vh] flex flex-col">
+        <DialogContent className={`${MODAL_SIZES.sm2} max-h-[80vh] flex flex-col`}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users className="h-5 w-5 text-green-500" />

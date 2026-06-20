@@ -15,6 +15,7 @@ import {
   type LabOrdersTab,
   type LabVerificationTab,
 } from '@/lib/laboratory/lab-workflow-search';
+import { toast } from 'sonner';
 import { ArrowRight, Loader2, Search } from 'lucide-react';
 
 type TrackerHit = {
@@ -56,6 +57,7 @@ export function LabPatientFinder() {
       setHits(res.results || []);
     } catch {
       setHits([]);
+      toast.error('Patient search failed. Please try again.');
     } finally {
       setLoading(false);
     }

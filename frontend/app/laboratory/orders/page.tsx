@@ -28,10 +28,13 @@ import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATU
 import { useServerToday } from '@/hooks/use-server-today';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { useLabPageAuth } from '@/hooks/use-lab-page-auth';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   findLabOrdersTabForOrders,
   isValidLabOrdersTab,
   LAB_ORDERS_TAB_LABELS,
+  labOrdersTabToWorkflowParam,
   orderMatchesLabOrdersTab,
   type LabOrdersTab,
 } from '@/lib/laboratory/lab-workflow-search';
@@ -255,11 +258,18 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
     results: apiTest.results as Record<string, string>,
     resultAttachments: (apiTest as any).result_attachments || [],
     templateNormalRange: (apiTest as any).template_normal_range || null,
-    resultFile: apiTest.result_file ? {
-      name: typeof apiTest.result_file === 'string' ? apiTest.result_file : apiTest.result_file.name || '',
-      type: typeof apiTest.result_file === 'string' ? 'application/pdf' : apiTest.result_file.type || 'application/pdf',
-      uploadedAt: typeof apiTest.result_file === 'string' ? '' : apiTest.result_file.uploaded_at || '',
-    } : undefined,
+    resultFile: (() => {
+      const url =
+        (apiTest as any).result_file_url ||
+        (typeof apiTest.result_file === 'string' ? apiTest.result_file : (apiTest as any).result_file?.url);
+      if (!url) return undefined;
+      const mediaUrl = getLabResultFileUrl(url);
+      return {
+        name: mediaUrl,
+        type: typeof apiTest.result_file === 'string' ? 'application/pdf' : apiTest.result_file?.type || 'application/pdf',
+        uploadedAt: typeof apiTest.result_file === 'string' ? '' : apiTest.result_file?.uploaded_at || '',
+      };
+    })(),
     template: apiTest.template?.toString(),
     rejectedBy: apiTest.rejected_by_name || apiTest.rejected_by?.toString(),
     rejectedAt: apiTest.rejected_at,
@@ -328,6 +338,7 @@ const OUTSOURCED_LAB_OTHER = '__other__';
 
 export default function LabOrdersPage() {
   const serverToday = useServerToday();
+  const { ready, handleAuthError } = useLabPageAuth();
   const [orders, setOrders] = useState<LabOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -642,102 +653,6 @@ export default function LabOrdersPage() {
     return LAB_ORDER_STATUS.PENDING;
   };
 
-  // Helper functions for filtering
-  const normalizeGender = (value: unknown): string => {
-    const v = String(value || '').trim().toLowerCase();
-    if (v === 'm') return 'male';
-    if (v === 'f') return 'female';
-    return v;
-  };
-
-  const matchesDateFilter = (isoDate: string | undefined, filter: string): boolean => {
-    if (filter === 'all') return true;
-    if (!isoDate) return false;
-    const dt = new Date(isoDate);
-    if (Number.isNaN(dt.getTime())) return false;
-
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-
-    if (filter === 'today') {
-      return dt >= todayStart && dt < tomorrowStart;
-    }
-
-    if (filter === 'week') {
-      const weekStart = new Date(todayStart);
-      weekStart.setDate(todayStart.getDate() - 6);
-      return dt >= weekStart && dt < tomorrowStart;
-    }
-
-    if (filter === 'month') {
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      return dt >= monthStart && dt < tomorrowStart;
-    }
-
-    return true;
-  };
-
-  const matchesCustomDateRange = (isoDate: string | undefined): boolean => {
-    if (!dateRange.from && !dateRange.to) return true;
-    if (!isoDate) return false;
-
-    const dt = new Date(isoDate);
-    if (Number.isNaN(dt.getTime())) return false;
-
-    if (dateRange.from) {
-      const from = new Date(`${dateRange.from}T00:00:00`);
-      if (dt < from) return false;
-    }
-
-    if (dateRange.to) {
-      const to = new Date(`${dateRange.to}T23:59:59.999`);
-      if (dt > to) return false;
-    }
-
-    return true;
-  };
-
-  // Base scope filtering (date / gender / processing), shared by stats and tab counts.
-  const scopedOrders = useMemo(() => {
-    return orders.filter(order => {
-      // Date filter
-      if (!matchesDateFilter(order.orderedAt, dateFilter) || !matchesCustomDateRange(order.orderedAt)) {
-        return false;
-      }
-
-      // Gender filter
-      if (genderFilter !== 'all') {
-        const orderGender = normalizeGender(order.patient?.gender);
-        if (orderGender !== genderFilter) {
-          return false;
-        }
-      }
-
-      // Processing (in-house / outsourced) — also applied server-side; narrow current page if needed
-      if (processingFilter !== 'all') {
-        const hasMatch = order.tests.some((t) => {
-          const m = t.processingMethod === 'In-house' ? 'in_house' : t.processingMethod === 'Outsourced' ? 'outsourced' : '';
-          return m === processingFilter;
-        });
-        if (!hasMatch) return false;
-      }
-      return true;
-    });
-  }, [orders, dateFilter, genderFilter, processingFilter, dateRange.from, dateRange.to]);
-
-  // Client-side tab filtering for scoped current page data.
-  const filteredOrders = useMemo(() => {
-    if (activeTab === 'pending') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.PENDING));
-    if (activeTab === 'processing') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.SAMPLE_COLLECTED || t.status === LAB_TEST_STATUS.PROCESSING));
-    if (activeTab === 'results') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.RESULTS_READY));
-    if (activeTab === 'rejected') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.REJECTED));
-    return scopedOrders;
-  }, [scopedOrders, activeTab]);
-
-  // With server-side pagination, orders array contains only current page results
-  const paginatedOrders = filteredOrders;
-
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
@@ -794,6 +709,11 @@ export default function LabOrdersPage() {
         params.gender = genderFilter;
       }
 
+      const workflowTab = labOrdersTabToWorkflowParam(activeTab);
+      if (workflowTab) {
+        params.workflow_tab = workflowTab;
+      }
+
       const [response, statsResponse] = await Promise.all([
         labService.getOrders(params),
         labService.getOrderStats({
@@ -823,6 +743,8 @@ export default function LabOrdersPage() {
         reworkOrders: statsResponse.rework_required || 0,
       });
     } catch (err: any) {
+      if (handleAuthError(err)) return;
+
       let errorMessage = 'Unable to load lab orders. Please check your connection and try again.';
       let toastMessage = errorMessage;
 
@@ -858,12 +780,13 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab]);
+  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab, handleAuthError]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
+    if (!ready) return;
     loadOrders();
-  }, [loadOrders]);
+  }, [ready, loadOrders]);
 
   // When searching, switch to the tab that actually contains matches.
   useEffect(() => {
@@ -903,19 +826,26 @@ export default function LabOrdersPage() {
   );
 
   useEffect(() => {
-    if (pollingPaused) return;
+    if (!ready || pollingPaused) return;
     const id = setInterval(() => {
       void loadOrders({ silent: true });
     }, 15000);
     return () => clearInterval(id);
-  }, [loadOrders, pollingPaused]);
+  }, [ready, loadOrders, pollingPaused]);
 
-  // Load Test Templates from API for result entry (so FBC, etc. use template parameters)
-  const loadTemplatesForResults = useCallback(async () => {
+  // Load test templates once for result entry and external order dialogs
+  const loadLabTemplates = useCallback(async () => {
     try {
-      const { results } = await labService.getTemplates();
+      const response = await labService.getTemplates({ is_active: true });
+      const results = response.results || [];
 
-      // Fetch all DB-managed field options and index by template code + field name
+      setLabTemplates(results.map((t) => ({
+        id: Number(t.id),
+        name: t.name,
+        code: t.code,
+        sample_type: t.sample_type,
+      })));
+
       let allOptions: Record<string, Record<string, string[]>> = {};
       try {
         const raw = await labService.getFieldOptions({});
@@ -937,7 +867,6 @@ export default function LabOrdersPage() {
       for (const t of results) {
         const tpl = buildEntryTemplate(t.code, (t as any).normal_range);
         if (tpl) {
-          // Inject DB-managed options into each field
           const codeOpts = allOptions[t.code];
           if (codeOpts) {
             for (const f of tpl.fields) {
@@ -951,51 +880,35 @@ export default function LabOrdersPage() {
       }
       setApiTemplatesByCode(prev => ({ ...prev, ...next }));
     } catch (e) {
-      // Templates from /laboratory/templates are the canonical source for
-      // result-entry parameters. If this load fails, the result-entry UI
-      // still renders using `template_normal_range` snapshots pinned on the
-      // test rows at order time. Tests without a snapshot fall back to a
-      // free-text Result Value field with a "no template configured" warning.
-      console.warn('Could not load lab templates for result entry:', e);
-    }
-  }, []);
-
-  const loadTemplatesForExternalOrders = useCallback(async () => {
-    try {
-      const response = await labService.getTemplates({ is_active: true });
-      setLabTemplates((response.results || []).map((t) => ({
-        id: Number(t.id),
-        name: t.name,
-        code: t.code,
-        sample_type: t.sample_type,
-      })));
-    } catch {
+      console.warn('Could not load lab templates:', e);
       setLabTemplates([]);
     }
   }, []);
-  useEffect(() => { loadTemplatesForResults(); }, [loadTemplatesForResults]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadLabTemplates();
+  }, [ready, loadLabTemplates]);
 
   useEffect(() => {
     if (!isExternalOrderDialogOpen) return;
     void (async () => {
-      if (labTemplates.length === 0) setLoadingExternalTemplates(true);
+      if (labTemplates.length === 0) {
+        setLoadingExternalTemplates(true);
+        try {
+          await loadLabTemplates();
+        } finally {
+          setLoadingExternalTemplates(false);
+        }
+      }
       try {
-        await Promise.all([
-          labTemplates.length === 0 ? loadTemplatesForExternalOrders() : Promise.resolve(),
-          (async () => {
-            try {
-              const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
-              setExternalClinics(res.results || []);
-            } catch {
-              setExternalClinics([]);
-            }
-          })(),
-        ]);
-      } finally {
-        setLoadingExternalTemplates(false);
+        const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
+        setExternalClinics(res.results || []);
+      } catch {
+        setExternalClinics([]);
       }
     })();
-  }, [isExternalOrderDialogOpen, labTemplates.length, loadTemplatesForExternalOrders]);
+  }, [isExternalOrderDialogOpen, labTemplates.length, loadLabTemplates]);
 
   useEffect(() => {
     if (!isExternalOrderDialogOpen) return;
@@ -1105,6 +1018,7 @@ export default function LabOrdersPage() {
       setSelectedMethod('');
       setCollectionNotes('');
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       let errorMessage = 'Failed to collect samples. Please try again.';
       if (err.message) {
         if (err.message.includes('already collected')) {
@@ -1154,6 +1068,7 @@ export default function LabOrdersPage() {
 
       setIsProcessDialogOpen(false);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       let errorMessage = 'Failed to start processing. Please try again.';
       if (err.message) {
         if (err.message.includes('already processing')) {
@@ -1199,6 +1114,7 @@ export default function LabOrdersPage() {
       const dispatches = await labService.getOrderDispatches(orderId);
       setOrderDispatches(dispatches);
     } catch (e: any) {
+      if (handleAuthError(e)) return;
       console.error('getOrderDispatches failed', e);
       // 404 likely means migrations haven't run yet — keep the rest of the page usable.
       if (e?.status !== 404) {
@@ -1208,7 +1124,7 @@ export default function LabOrdersPage() {
     } finally {
       setLoadingOrderDispatches(false);
     }
-  }, []);
+  }, [handleAuthError]);
 
   /**
    * Open the order-level dispatch dialog. By default every eligible test is
@@ -1286,6 +1202,7 @@ export default function LabOrdersPage() {
         loadOrderDispatches(parseInt(selectedOrder.id)),
       ]);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('dispatchOutsourced failed', err);
       const msg = err?.apiMessage || err?.message || 'Failed to create dispatch';
       toast.error(msg);
@@ -1327,6 +1244,7 @@ export default function LabOrdersPage() {
       // Refresh history so the printed-at timestamp shows up in the table.
       await loadOrderDispatches(parseInt(selectedOrder.id));
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('openDispatchPdf failed', err);
       toast.error(err?.apiMessage || err?.message || 'Failed to open PDF');
     } finally {
@@ -1389,6 +1307,7 @@ export default function LabOrdersPage() {
       setCancelDispatchTarget(null);
       setCancelDispatchReason('');
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('cancelDispatch failed', err);
       toast.error(err?.apiMessage || err?.message || 'Failed to cancel dispatch');
     } finally {
@@ -1500,6 +1419,7 @@ export default function LabOrdersPage() {
       setCustomResultFiles({});
       setResultEntryMode('values');
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       let errorMessage = 'Failed to submit results. Please try again.';
       if (err.message) {
         if (err.message.includes('validation') || err.message.includes('invalid')) {
@@ -1550,6 +1470,7 @@ export default function LabOrdersPage() {
       setLabPartners(partners);
       return partners;
     } catch (e: any) {
+      if (handleAuthError(e)) return [];
       console.error('getLabPartners failed', e?.status, e?.body, e);
       const hint =
         e?.status === 404
@@ -1561,7 +1482,7 @@ export default function LabOrdersPage() {
     } finally {
       setLoadingLabPartners(false);
     }
-  }, []);
+  }, [handleAuthError]);
 
   const openProcessDialog = async (test: LabTest) => {
     setSelectedTest(test);
@@ -1647,6 +1568,7 @@ export default function LabOrdersPage() {
           : `Lab partner "${saved.name}" added successfully`
       );
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('Failed to save lab partner:', err);
       const msg = err?.message || 'Failed to save lab partner. Please try again.';
       toast.error(msg);
@@ -1678,6 +1600,7 @@ export default function LabOrdersPage() {
 
       toast.success(`Lab partner "${deleteConfirmPartnerName}" deleted successfully`);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('Failed to delete lab partner:', err);
       const msg = err?.message || 'Failed to delete lab partner. Please try again.';
       toast.error(msg);
@@ -1809,6 +1732,7 @@ export default function LabOrdersPage() {
       setCurrentPage(1);
       await loadOrders();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err?.message || 'Failed to create external lab request');
     } finally {
       setIsSubmittingExternalOrder(false);
@@ -2151,13 +2075,13 @@ export default function LabOrdersPage() {
               <p className="text-red-600 dark:text-red-400">{error}</p>
               <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
             </CardContent></Card>
-          ) : filteredOrders.length === 0 ? (
+          ) : orders.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <TestTube className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No orders found</p>
             </CardContent></Card>
           ) : (
-            paginatedOrders
+            orders
               .sort((a, b) => {
                 if (sortBy === 'priority') {
                   const priorityOrder = { STAT: 0, Urgent: 1, Routine: 2 };
@@ -2179,7 +2103,7 @@ export default function LabOrdersPage() {
         </div>
 
         {/* Pagination */}
-        {filteredOrders.length > 0 && (
+        {orders.length > 0 && (
           <Card className="p-4">
               <StandardPagination
               currentPage={currentPage}
@@ -2193,13 +2117,13 @@ export default function LabOrdersPage() {
               itemName="orders"
             />
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (page {currentPage} of {Math.ceil(totalCount / itemsPerPage)})
+              Showing {totalCount} order{totalCount !== 1 ? 's' : ''} (page {currentPage} of {Math.ceil(totalCount / itemsPerPage)})
             </p>
           </Card>
         )}
 
         <Dialog open={isExternalOrderDialogOpen} onOpenChange={setIsExternalOrderDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.xl}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5 text-amber-500" />
@@ -2441,7 +2365,7 @@ export default function LabOrdersPage() {
 
         {/* View & Manage Order Dialog - All actions happen here */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-amber-500" />Manage Order</DialogTitle>
               <DialogDescription>{selectedOrder?.orderId} • Process individual tests</DialogDescription>
@@ -2905,7 +2829,7 @@ export default function LabOrdersPage() {
 
         {/* Collect Sample Dialog */}
         <Dialog open={isCollectDialogOpen} onOpenChange={setIsCollectDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Beaker className="h-5 w-5 text-violet-500" />Collect {selectedTest?.sampleType || 'Sample'}</DialogTitle>
               <DialogDescription>Collect sample for laboratory testing</DialogDescription>
@@ -3100,7 +3024,7 @@ export default function LabOrdersPage() {
           open={isProcessDialogOpen}
           onOpenChange={setIsProcessDialogOpen}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Play className="h-5 w-5 text-blue-500" />Process Test
@@ -3204,7 +3128,7 @@ export default function LabOrdersPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.ml}>
             {confirmedDispatch ? (
               <>
                 <DialogHeader>
@@ -3556,7 +3480,7 @@ export default function LabOrdersPage() {
             if (!open) setSkipPrintConfirmOpen(false);
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[440px]">
+          <DialogContent className={MODAL_SIZES.sm}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -3611,7 +3535,7 @@ export default function LabOrdersPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[480px]">
+          <DialogContent className={MODAL_SIZES.xs}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <X className="h-5 w-5 text-rose-500" />
@@ -3689,7 +3613,7 @@ export default function LabOrdersPage() {
             if (!open) resetPartnerForm();
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {editingPartnerId !== null ? (
@@ -3831,7 +3755,7 @@ export default function LabOrdersPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Building2 className="h-5 w-5 text-blue-500" />
@@ -3922,7 +3846,7 @@ export default function LabOrdersPage() {
             setDeleteConfirmPartnerName('');
           }
         }}>
-          <DialogContent className="w-[95vw] sm:max-w-[400px]">
+          <DialogContent className={MODAL_SIZES.sm}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-red-500" />
@@ -3972,7 +3896,7 @@ export default function LabOrdersPage() {
 
         {/* Enter Results Dialog */}
         <Dialog open={isResultsDialogOpen} onOpenChange={setIsResultsDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-amber-500" />

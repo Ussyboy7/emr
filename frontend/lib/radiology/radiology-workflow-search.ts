@@ -10,7 +10,7 @@ export const RADIOLOGY_STUDY_STATUS = {
 } as const;
 
 export type RadiologyOrdersTab = 'pending' | 'processing' | 'results' | 'rejected' | 'all';
-export type RadiologyVerificationTab = 'pending' | 'verified' | 'all';
+export type RadiologyVerificationTab = 'pending' | 'verified';
 
 export const RADIOLOGY_ORDERS_TAB_ORDER: RadiologyOrdersTab[] = [
   'pending',
@@ -31,7 +31,15 @@ export const RADIOLOGY_ORDERS_TAB_LABELS: Record<RadiologyOrdersTab, string> = {
 export const RADIOLOGY_VERIFICATION_TAB_LABELS: Record<RadiologyVerificationTab, string> = {
   pending: 'Pending Review',
   verified: 'Verified',
-  all: 'All',
+};
+
+/** Map Study Orders UI tab to backend ``study_status`` query param. */
+export function radiologyOrdersTabToStudyStatus(
+  tab: RadiologyOrdersTab,
+): 'pending' | 'processing' | 'reported' | 'rejected' | undefined {
+  if (tab === 'all') return undefined;
+  if (tab === 'results') return 'reported';
+  return tab;
 };
 
 export type RadiologyOrderLike = {
@@ -82,7 +90,7 @@ export function isValidRadiologyOrdersTab(value: string | null): value is Radiol
 }
 
 export function isValidRadiologyVerificationTab(value: string | null): value is RadiologyVerificationTab {
-  return value === 'pending' || value === 'verified' || value === 'all';
+  return value === 'pending' || value === 'verified';
 }
 
 export function buildRadiologyOrdersHref(search?: string, tab?: RadiologyOrdersTab): string {

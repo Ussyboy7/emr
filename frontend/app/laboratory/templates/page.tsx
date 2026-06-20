@@ -3,6 +3,8 @@ import { todayApiDateString } from "@/lib/dates";
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useLabPageAuth } from '@/hooks/use-lab-page-auth';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -16,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { labService, radiologyService, type RadiologyTemplate as ApiRadiologyTemplate, type LabTemplate as ApiLabTemplate } from '@/lib/services';
+import { labService, type LabTemplate as ApiLabTemplate } from '@/lib/services';
 import {
   FileText, Search, Eye, Plus, Edit, Trash2, Copy, CheckCircle2,
   Loader2, Settings, ListPlus, ScanLine, Activity, Clock,
@@ -102,6 +104,7 @@ const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
 const categories = ['All', 'chemistry', 'hematology', 'microbiology', 'serology', 'toxicology'];
 
 export default function TestTemplatesPage() {
+  const { ready, handleAuthError } = useLabPageAuth();
   const [templates, setTemplates] = useState<TestTemplate[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -177,14 +180,17 @@ export default function TestTemplatesPage() {
         serology: stats.serology ?? 0,
         toxicology: stats.toxicology ?? 0,
       });
-    } catch {
-      /* keep previous */
+    } catch (err) {
+      console.error('Failed to load template stats:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load template statistics');
     }
-  }, []);
+  }, [handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadTemplateStats();
-  }, [loadTemplateStats]);
+  }, [ready, loadTemplateStats]);
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -204,17 +210,19 @@ export default function TestTemplatesPage() {
       setTemplates(transformed);
       setTotalCount(typeof response.count === 'number' ? response.count : transformed.length);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load templates');
       toast.error('Failed to load templates. Please try again.');
       console.error('Error loading templates:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, statusFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearch, categoryFilter, statusFilter, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     void loadTemplates();
-  }, [loadTemplates]);
+  }, [ready, loadTemplates]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -392,6 +400,7 @@ export default function TestTemplatesPage() {
       setIsCreateDialogOpen(false);
       resetForm();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to create template');
       console.error('Error creating template:', err);
     } finally {
@@ -449,6 +458,7 @@ export default function TestTemplatesPage() {
       setIsEditDialogOpen(false);
       resetForm();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to update template');
       console.error('Error updating template:', err);
     } finally {
@@ -473,6 +483,7 @@ export default function TestTemplatesPage() {
       toast.success(`Template "${selectedTemplate.name}" deleted`);
       setIsDeleteDialogOpen(false);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to delete template');
       console.error('Error deleting template:', err);
     } finally {
@@ -508,6 +519,7 @@ export default function TestTemplatesPage() {
       void loadTemplateStats();
       toast.success(`Template duplicated`);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to duplicate template');
       console.error('Error duplicating template:', err);
     } finally {
@@ -529,6 +541,7 @@ export default function TestTemplatesPage() {
       void loadTemplateStats();
       toast.success(`Template ${template.status === 'Active' ? 'deactivated' : 'activated'}`);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to update template status');
       console.error('Error toggling template status:', err);
     }
@@ -761,7 +774,7 @@ export default function TestTemplatesPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Template Details</DialogTitle>
               <DialogDescription>{selectedTemplate?.name}</DialogDescription>
@@ -982,7 +995,7 @@ export default function TestTemplatesPage() {
 
         {/* Create/Edit Dialog */}
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {isEditDialogOpen ? <Edit className="h-5 w-5 text-amber-500" /> : <Plus className="h-5 w-5 text-emerald-500" />}
@@ -1090,7 +1103,7 @@ export default function TestTemplatesPage() {
 
         {/* Field Edit Dialog */}
         <Dialog open={isFieldEditDialogOpen} onOpenChange={setIsFieldEditDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px]">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-blue-500" />

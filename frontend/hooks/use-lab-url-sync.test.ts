@@ -28,8 +28,8 @@ describe('useLabUrlSync', () => {
     renderHook(() =>
       useLabUrlSync({
         search: '',
-        tab: 'all',
-        defaultTab: 'all',
+        tab: 'pending',
+        defaultTab: 'pending',
         onSearchFromUrl,
         onTabFromUrl,
         isValidTab: () => true,
@@ -45,8 +45,8 @@ describe('useLabUrlSync', () => {
     renderHook(() =>
       useLabUrlSync({
         search: '',
-        tab: 'all',
-        defaultTab: 'all',
+        tab: 'pending',
+        defaultTab: 'pending',
         onSearchFromUrl,
         onTabFromUrl,
         isValidTab: (v) => v === 'pending',
@@ -61,8 +61,8 @@ describe('useLabUrlSync', () => {
     renderHook(() =>
       useLabUrlSync({
         search: '',
-        tab: 'all',
-        defaultTab: 'all',
+        tab: 'pending',
+        defaultTab: 'pending',
         onSearchFromUrl: vi.fn(),
         onTabFromUrl,
         isValidTab: (v) => v === 'pending',

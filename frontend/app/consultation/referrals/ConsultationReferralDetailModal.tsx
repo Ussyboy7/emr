@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { Send, User, Phone, Mail, Printer, Pencil } from "lucide-react";
 import type { ResponsibilityFormIssuance } from "@/lib/services/referral-service";
 import {
@@ -96,7 +97,7 @@ export function ConsultationReferralDetailModal(props: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.xl}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-5 w-5 text-emerald-500" />

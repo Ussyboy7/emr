@@ -38,6 +38,11 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/nursing/procedures"}
         self.assertTrue(check_api_page_access("nursing/procedures/", "GET", allowed))
 
+    def test_consultation_api_allowed_for_admin_rooms_page(self):
+        allowed = {"/admin/rooms"}
+        self.assertTrue(check_api_page_access("consultation/rooms/", "GET", allowed))
+        self.assertTrue(check_api_page_access("consultation/rooms/", "POST", allowed))
+
     def test_consultation_api_allowed_for_nursing_room_queue_page(self):
         allowed = {"/nursing/room-queue"}
         self.assertTrue(check_api_page_access("consultation/rooms/", "GET", allowed))
@@ -256,3 +261,49 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/nursing"}
         self.assertFalse(check_api_page_access("organization/security-settings/", "PATCH", allowed))
         self.assertTrue(check_api_page_access("organization/security-settings/", "PATCH", {"/admin/settings"}))
+
+    def test_hr_compliance_api_allowed_for_hr_dashboard_page(self):
+        allowed = {"/hr"}
+        self.assertTrue(check_api_page_access("hr/compliance/", "GET", allowed))
+
+    def test_hr_compliance_api_allowed_for_annual_checkups_page(self):
+        allowed = {"/hr/annual-checkups"}
+        self.assertTrue(check_api_page_access("hr/compliance/", "GET", allowed))
+
+    def test_hr_compliance_api_denied_without_hr_pages(self):
+        allowed = {"/nursing"}
+        self.assertFalse(check_api_page_access("hr/compliance/", "GET", allowed))
+
+    def test_hr_exemptions_api_requires_exemptions_page(self):
+        allowed = {"/hr", "/hr/annual-checkups"}
+        self.assertFalse(check_api_page_access("hr/exemptions/", "GET", allowed))
+        self.assertFalse(check_api_page_access("hr/exemptions/", "POST", allowed))
+
+    def test_hr_exemptions_api_allowed_with_exemptions_page(self):
+        allowed = {"/hr/exemptions"}
+        self.assertTrue(check_api_page_access("hr/exemptions/", "GET", allowed))
+        self.assertTrue(check_api_page_access("hr/exemptions/", "POST", allowed))
+        self.assertTrue(check_api_page_access("hr/exemptions/3/", "DELETE", allowed))
+
+    def test_support_tickets_api_allowed_for_authenticated_module_access(self):
+        allowed = {"/nursing"}
+        self.assertTrue(check_api_page_access("support/tickets/", "POST", allowed))
+
+    def test_support_tickets_api_denied_without_any_pages(self):
+        allowed = set()
+        self.assertFalse(check_api_page_access("support/tickets/", "POST", allowed))
+
+    def test_support_ticket_queue_requires_admin_page(self):
+        allowed = {"/nursing"}
+        self.assertFalse(check_api_page_access("support/tickets/queue/", "GET", allowed))
+        allowed_it = {"/admin/support-tickets"}
+        self.assertTrue(check_api_page_access("support/tickets/queue/", "GET", allowed_it))
+
+    def test_support_ticket_patch_requires_admin_page(self):
+        allowed = {"/admin/audit"}
+        self.assertTrue(check_api_page_access("support/tickets/42/", "PATCH", allowed))
+
+    def test_support_docs_allowed_for_authenticated_users(self):
+        allowed = {"/nursing"}
+        self.assertTrue(check_api_page_access("support/docs/", "GET", allowed))
+        self.assertTrue(check_api_page_access("support/docs/quick-start/", "GET", allowed))

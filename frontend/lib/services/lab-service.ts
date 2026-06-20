@@ -272,6 +272,8 @@ class LabService {
      * order date (e.g. on the "Rework Required" tab).
      */
     date_field?: 'ordered_at' | 'rejected_at';
+    /** Orders with at least one test in this workflow stage (list tabs). */
+    workflow_tab?: 'pending' | 'processing' | 'results_ready' | 'rejected';
     page?: number;
     page_size?: number;
     consultation_session?: number;

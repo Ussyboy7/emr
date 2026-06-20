@@ -16,9 +16,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
 import { countOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { useEyecarePageAuth } from '@/hooks/use-eyecare-page-auth';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { useEyecareUrlSync } from '@/hooks/use-eyecare-url-sync';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import {
   findEyecareOrdersTabForOrders,
@@ -27,9 +28,8 @@ import {
   EYECARE_ORDERS_TAB_LABELS,
   type EyecareOrdersTab,
 } from '@/lib/eyecare/eyecare-workflow-search';
-import { isAuthenticationError } from '@/lib/auth-errors';
-import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { EyeSessionReportDialog } from '@/components/eyecare/EyeSessionReportDialog';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from '@/components/consultation/orders/PrescriptionOrderModal';
@@ -42,7 +42,6 @@ import {
   visualAcuityRows,
   diagnosticAttachmentsForCategory,
 } from '@/lib/eyecare/eye-session-helpers';
-import { EyeSessionReportView } from '@/components/eyecare/EyeSessionReportView';
 import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dates';
 
 import {
@@ -165,13 +164,26 @@ const createSoapNoteFromLegacy = (order: EyeOrder, session: EyeSession): EyeSoap
   soapNote.objective.refraction.subjective.os.sphere = order.refraction_os || '';
   soapNote.assessment.diagnosis = order.diagnosis || '';
   soapNote.plan.managementPlan = order.treatment_plan || '';
-  soapNote.plan.opticalCorrection = session.procedures_performed || '';
+  soapNote.plan.opticalCorrection =
+    (session.soap_note as EyeSoapNote | undefined)?.plan?.opticalCorrection
+    || session.procedures_performed
+    || '';
+  soapNote.plan.managementPlan = order.treatment_plan || soapNote.plan.managementPlan || '';
   return soapNote;
 };
 
+type EyeSessionFormState = {
+  special_instructions: string;
+  soap_note: EyeSoapNote;
+};
+
+const emptySessionForm = (): EyeSessionFormState => ({
+  special_instructions: '',
+  soap_note: createEmptySoapNote(),
+});
+
 export default function EyeClinicOrdersPage() {
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
+  const { ready, handleAuthError } = useEyecarePageAuth();
 
   const [orders, setOrders] = useState<EyeOrder[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -182,7 +194,7 @@ export default function EyeClinicOrdersPage() {
   const [activeTab, setActiveTab] = useState<EyecareOrdersTab>('pending');
   const autoTabRef = useRef<string | null>(null);
 
-  useLabUrlSync({
+  useEyecareUrlSync({
     search: searchQuery,
     tab: activeTab,
     defaultTab: 'pending',
@@ -203,29 +215,14 @@ export default function EyeClinicOrdersPage() {
   const [isSessionReportOpen, setIsSessionReportOpen] = useState(false);
   const [isPrescriptionDialogOpen, setIsPrescriptionDialogOpen] = useState(false);
   const [currentSession, setCurrentSession] = useState<EyeSession | null>(null);
-  const [reportSession, setReportSession] = useState<EyeSession | null>(null);
+  const [reportOrderId, setReportOrderId] = useState<number | undefined>();
+  const [reportSessionId, setReportSessionId] = useState<number | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patientVitals, setPatientVitals] = useState<Record<string, string> | null>(null);
   const [pendingDiagnosticFiles, setPendingDiagnosticFiles] = useState<Record<DiagnosticCategory, File[]>>(
     () => emptyPendingDiagnostics()
   );
-  const [sessionForm, setSessionForm] = useState({
-    chief_complaint: '',
-    visual_acuity_od: '',
-    visual_acuity_os: '',
-    visual_acuity_ou: '',
-    refraction_od: '',
-    refraction_os: '',
-    iop_od: '',
-    iop_os: '',
-    diagnosis: '',
-    treatment_plan: '',
-    special_instructions: '',
-    notes: '',
-    procedures_performed: '',
-    findings: '',
-    soap_note: createEmptySoapNote(),
-  });
+  const [sessionForm, setSessionForm] = useState<EyeSessionFormState>(emptySessionForm);
 
   const [stats, setStats] = useState({
     pending: 0,
@@ -241,7 +238,7 @@ export default function EyeClinicOrdersPage() {
       page_size: itemsPerPage,
       search: searching ? debouncedSearchQuery.trim() : undefined,
     };
-    if (!searching && activeTab !== 'all') {
+    if (activeTab !== 'all') {
       params.status_tab = activeTab as 'pending' | 'in_progress' | 'cancelled' | 'completed';
     }
     if (searching) {
@@ -281,10 +278,14 @@ export default function EyeClinicOrdersPage() {
     return params;
   }, [debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to]);
 
-  const filteredOrders = useMemo(() => {
-    if (!debouncedSearchQuery.trim()) return orders;
-    return orders.filter((o) => orderMatchesEyecareOrdersTab(o, activeTab));
-  }, [orders, debouncedSearchQuery, activeTab]);
+  const pollingPaused = useMemo(
+    () =>
+      isViewDialogOpen ||
+      isSessionDialogOpen ||
+      isSessionReportOpen ||
+      isPrescriptionDialogOpen,
+    [isViewDialogOpen, isSessionDialogOpen, isSessionReportOpen, isPrescriptionDialogOpen]
+  );
 
   useEffect(() => {
     const q = debouncedSearchQuery.trim();
@@ -326,9 +327,8 @@ export default function EyeClinicOrdersPage() {
         });
       } catch (err) {
         console.error('Error loading eye clinic orders:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else if (!silent) {
+        if (handleAuthError(err)) return;
+        if (!silent) {
           setError(err instanceof Error ? err.message : 'Failed to load eye clinic orders');
           toast.error('Failed to load eye clinic orders');
         }
@@ -336,19 +336,21 @@ export default function EyeClinicOrdersPage() {
         if (!silent) setLoading(false);
       }
     },
-    [buildOrdersListParams, buildOrdersStatsBase]
+    [buildOrdersListParams, buildOrdersStatsBase, handleAuthError]
   );
 
   useEffect(() => {
+    if (!ready) return;
     void loadOrders();
-  }, [loadOrders]);
+  }, [ready, loadOrders]);
 
   useEffect(() => {
+    if (!ready || pollingPaused) return;
     const id = setInterval(() => {
       void loadOrders({ silent: true });
     }, 15000);
     return () => clearInterval(id);
-  }, [loadOrders]);
+  }, [ready, loadOrders, pollingPaused]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -394,20 +396,7 @@ export default function EyeClinicOrdersPage() {
     setSelectedOrder(order);
     setPendingDiagnosticFiles(emptyPendingDiagnostics());
     setSessionForm({
-      chief_complaint: soapNote.subjective.chiefComplaint || '',
-      visual_acuity_od: soapNote.objective.visualAcuity.distanceUnaided?.od || '',
-      visual_acuity_os: soapNote.objective.visualAcuity.distanceUnaided?.os || '',
-      visual_acuity_ou: soapNote.objective.visualAcuity.distanceUnaided?.ou || '',
-      refraction_od: soapNote.objective.refraction.subjective.od.sphere || '',
-      refraction_os: soapNote.objective.refraction.subjective.os.sphere || '',
-      iop_od: soapNote.objective.diagnostics.iopOd || '',
-      iop_os: soapNote.objective.diagnostics.iopOs || '',
-      diagnosis: soapNote.assessment.diagnosis || '',
-      treatment_plan: soapNote.plan.managementPlan || '',
       special_instructions: order.special_instructions || '',
-      notes: hydrated.notes || '',
-      procedures_performed: hydrated.procedures_performed || '',
-      findings: hydrated.findings || '',
       soap_note: soapNote,
     });
     setIsSessionDialogOpen(true);
@@ -415,13 +404,14 @@ export default function EyeClinicOrdersPage() {
     void loadPatientVitals(order.patient);
   };
 
-  const openSessionReport = async (session: EyeSession) => {
-    try {
-      const fresh = await eyeCareService.getSession(session.id);
-      setReportSession(fresh);
-    } catch {
-      setReportSession(session);
+  const openSessionReport = (session: EyeSession) => {
+    const orderId = typeof session.order === 'number' ? session.order : session.order_details?.id;
+    if (!orderId) {
+      toast.error('No order linked to this session');
+      return;
     }
+    setReportOrderId(orderId);
+    setReportSessionId(session.id);
     setIsSessionReportOpen(true);
   };
 
@@ -502,7 +492,7 @@ export default function EyeClinicOrdersPage() {
         });
       }
 
-      console.log('startProcessing: updating order', { orderId: order.id, orderStatus: order.status, orderScheduledAt: order.scheduled_at });
+
       await eyeCareService.updateOrder(order.id, {
         status: 'in_progress',
         scheduled_at: order.scheduled_at || new Date().toISOString(),
@@ -641,11 +631,11 @@ export default function EyeClinicOrdersPage() {
       });
       const sessionPayload: Partial<EyeSession> = {
         notes: [
-          soapNote.plan.opticalCorrection && `Optical Correction: ${soapNote.plan.opticalCorrection}`,
+          soapNote.plan.managementPlan && `Management: ${soapNote.plan.managementPlan}`,
           soapNote.plan.medications && `Medications: ${soapNote.plan.medications}`,
           soapNote.plan.followUpDate && `Follow-up Date: ${soapNote.plan.followUpDate}`,
         ].filter(Boolean).join('\n'),
-        procedures_performed: soapNote.plan.managementPlan,
+        procedures_performed: soapNote.plan.opticalCorrection,
         findings: soapNote.assessment.diagnosis,
         soap_note: soapNote,
         status: opts?.complete ? 'completed' : (currentSession.status === 'completed' ? 'completed' : 'in_progress'),
@@ -695,26 +685,10 @@ export default function EyeClinicOrdersPage() {
   };
 
   const updateSoapNote = (updater: (soapNote: EyeSoapNote) => EyeSoapNote) => {
-    setSessionForm((prev) => {
-      const soapNote = updater(prev.soap_note);
-      return {
-        ...prev,
-        soap_note: soapNote,
-        chief_complaint: soapNote.subjective.chiefComplaint,
-        visual_acuity_od: soapNote.objective.visualAcuity.distanceUnaided?.od || '',
-        visual_acuity_os: soapNote.objective.visualAcuity.distanceUnaided?.os || '',
-        visual_acuity_ou: soapNote.objective.visualAcuity.distanceUnaided?.ou || '',
-        refraction_od: soapNote.objective.refraction.subjective.od.sphere,
-        refraction_os: soapNote.objective.refraction.subjective.os.sphere,
-        iop_od: soapNote.objective.diagnostics.iopOd,
-        iop_os: soapNote.objective.diagnostics.iopOs,
-        diagnosis: soapNote.assessment.diagnosis,
-        treatment_plan: soapNote.plan.managementPlan,
-        findings: soapNote.assessment.diagnosis,
-        procedures_performed: soapNote.plan.managementPlan,
-        notes: [soapNote.plan.opticalCorrection, soapNote.plan.medications, soapNote.plan.followUpDate].filter(Boolean).join('\n'),
-      };
-    });
+    setSessionForm((prev) => ({
+      ...prev,
+      soap_note: updater(prev.soap_note),
+    }));
   };
 
   const updateSoapPath = (
@@ -912,6 +886,14 @@ export default function EyeClinicOrdersPage() {
     );
   };
 
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground">Loading…</div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <TooltipProvider>
       <DashboardLayout>
@@ -1065,13 +1047,13 @@ export default function EyeClinicOrdersPage() {
                 <p className="text-red-600 dark:text-red-400">{error}</p>
                 <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
               </CardContent></Card>
-            ) : filteredOrders.length === 0 ? (
+            ) : orders.length === 0 ? (
               <Card><CardContent className="p-8 text-center text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No orders found</p>
               </CardContent></Card>
             ) : (
-              filteredOrders.map((order) => <OrderCard key={order.id} order={order} />)
+              orders.map((order) => <OrderCard key={order.id} order={order} />)
             )}
           </div>
 
@@ -1092,7 +1074,7 @@ export default function EyeClinicOrdersPage() {
           )}
 
           <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-            <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+            <DialogContent className={MODAL_SIZES.xl}>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <Activity className="h-5 w-5 text-teal-500" />
@@ -1310,7 +1292,7 @@ export default function EyeClinicOrdersPage() {
           </Dialog>
 
           <Dialog open={isSessionDialogOpen} onOpenChange={setIsSessionDialogOpen}>
-            <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+            <DialogContent className={MODAL_SIZES.xl}>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <Activity className="h-5 w-5 text-blue-500" />
@@ -1745,27 +1727,18 @@ export default function EyeClinicOrdersPage() {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={isSessionReportOpen} onOpenChange={setIsSessionReportOpen}>
-            <DialogContent className="w-[95vw] sm:max-w-[850px] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-blue-600" />
-                  Eye Session Report - {reportSession?.order_details?.patient_name || selectedOrder?.patient_name}
-                </DialogTitle>
-                <DialogDescription>
-                  {reportSession?.completed_at
-                    ? formatDisplayDateTime(reportSession.completed_at)
-                    : (reportSession?.scheduled_at ? formatDisplayDateTime(reportSession.scheduled_at) : '')}
-                </DialogDescription>
-              </DialogHeader>
-              {reportSession && (
-                <EyeSessionReportView reportSession={reportSession} />
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsSessionReportOpen(false)}>Close</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <EyeSessionReportDialog
+            open={isSessionReportOpen}
+            onOpenChange={(open) => {
+              setIsSessionReportOpen(open);
+              if (!open) {
+                setReportOrderId(undefined);
+                setReportSessionId(undefined);
+              }
+            }}
+            orderId={reportOrderId}
+            initialSessionId={reportSessionId}
+          />
 
           <PrescriptionOrderModal
             open={isPrescriptionDialogOpen}

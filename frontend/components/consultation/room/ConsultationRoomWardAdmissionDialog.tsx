@@ -11,6 +11,7 @@ import {
 import type { WardAdmission } from '@/lib/consultation/room-types';
 import { formatRoomDate as formatDate, formatRoomTime as formatTime } from '@/lib/consultation/room-helpers';
 import { Building2, CheckCircle } from 'lucide-react';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 
 export type ConsultationRoomWardAdmissionDialogProps = {
   open: boolean;
@@ -23,7 +24,7 @@ export function ConsultationRoomWardAdmissionDialog({ open, onOpenChange, select
     <>
       {/* Observation Admission Detail Dialog */}
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.lg}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5 text-blue-500" />

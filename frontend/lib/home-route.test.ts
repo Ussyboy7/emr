@@ -19,7 +19,7 @@ const SIDEBAR_NAV_HREFS = [
   "/pharmacy/requests", "/pharmacy/generics", "/pharmacy/drugs", "/pharmacy/store",
   "/pharmacy/store/requests", "/pharmacy/analytics",
   "/radiology", "/radiology/orders", "/radiology/verification", "/radiology/completed",
-  "/radiology/templates", "/radiology/viewer", "/radiology/analytics",
+  "/radiology/templates", "/radiology/analytics",
   "/physiotherapy", "/physiotherapy/orders", "/physiotherapy/completed", "/physiotherapy/analytics",
   "/eyecare", "/eyecare/orders", "/eyecare/completed", "/eyecare/analytics",
   "/hr", "/hr/annual-checkups", "/hr/exemptions",

@@ -23,6 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import type { ConsultationRoom, ConsultationRoomPatient } from '@/lib/consultation/room-types';
 import type { PausedDuplicateStartDialogState } from '@/hooks/use-consultation-room-session';
 import { formatDisplayDateTime, todayApiDateString } from '@/lib/dates';
@@ -128,7 +129,7 @@ export function ConsultationRoomSessionDialogs({
   return (
     <>
       <AlertDialog open={showEndDialog} onOpenChange={setShowEndDialog}>
-        <AlertDialogContent className="w-[95vw] sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+        <AlertDialogContent className={MODAL_SIZES.ml}>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-orange-500" />
@@ -299,7 +300,7 @@ export function ConsultationRoomSessionDialogs({
           }
         }}
       >
-        <DialogContent className="w-[95vw] sm:max-w-[620px]">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users className="h-5 w-5 text-amber-500" />
@@ -344,7 +345,7 @@ export function ConsultationRoomSessionDialogs({
           }
         }}
       >
-        <DialogContent className="w-[95vw] sm:max-w-[520px]">
+        <DialogContent className={MODAL_SIZES.sm2}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <History className="h-5 w-5 text-amber-500" />
@@ -429,7 +430,7 @@ export function ConsultationRoomSessionDialogs({
       </Dialog>
 
       <AlertDialog open={showLeftWorkflowDialog} onOpenChange={setShowLeftWorkflowDialog}>
-        <AlertDialogContent className="w-[95vw] sm:max-w-[540px]">
+        <AlertDialogContent className={MODAL_SIZES.sm2}>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {leftWorkflowTarget?.kind === 'session' ? 'End as not seen' : 'Mark queue patient as left'}

@@ -3,6 +3,7 @@
  */
 
 import { getMediaUrl } from '@/lib/media-url';
+import { transformPriority } from '@/lib/services/transformers';
 
 export interface CompletedRadiologyReport {
   id: string;
@@ -179,5 +180,133 @@ export function transformApiRadiologyReportToCompleted(apiReport: Record<string,
           url: fileUrl,
         }
       : undefined,
+  };
+}
+
+/** Verification page study row (nested under report). */
+export interface VerificationRadiologyStudy {
+  id: string;
+  procedure: string;
+  category: string;
+  bodyPart: string;
+  status: 'Pending' | 'Scheduled' | 'Acquired' | 'Processing' | 'Reported' | 'Verified';
+  processingMethod?: 'In-house' | 'Outsourced';
+  outsourcedFacility?: string;
+  imagesCount?: number;
+  report?: string;
+  customReports?: CompletedRadiologyReport['customReports'];
+  critical?: boolean;
+  reportAttachments?: Array<{ name: string; url: string }>;
+  reportFile?: { name: string; type: string; uploadedAt: string; url?: string };
+  reportedBy?: string;
+  reportedAt?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+}
+
+/** Verification page row shape. */
+export interface VerificationRadiologyReport {
+  id: string;
+  orderId: string;
+  studyId: string;
+  patient: { id: string; name: string; age: number; gender: string };
+  doctor: { id: string; name: string; specialty: string };
+  study: VerificationRadiologyStudy;
+  priority: 'Routine' | 'Urgent' | 'STAT';
+  clinic: string;
+  location_clinic_name?: string;
+  clinicalIndication?: string;
+  provisionalDiagnosis?: string;
+  lmp?: string;
+}
+
+function mapVerificationStudyStatus(raw: string): VerificationRadiologyStudy['status'] {
+  switch (raw) {
+    case 'pending':
+      return 'Pending';
+    case 'scheduled':
+      return 'Scheduled';
+    case 'acquired':
+      return 'Acquired';
+    case 'processing':
+      return 'Processing';
+    case 'reported':
+    case 'results_ready':
+      return 'Reported';
+    case 'verified':
+      return 'Verified';
+    default:
+      return 'Reported';
+  }
+}
+
+/** Map verification API row using the shared completed-report transform. */
+export function transformApiRowToVerificationRadiologyReport(
+  apiReport: Record<string, unknown>,
+): VerificationRadiologyReport {
+  const completed = transformApiRadiologyReportToCompleted(apiReport);
+  const api = apiReport as Record<string, unknown>;
+  const studyObj = (api.study_details || api.study || {}) as Record<string, unknown>;
+  const orderDetails = (api.order_details || {}) as Record<string, unknown>;
+  const clinicalIndication = String(orderDetails.clinical_notes || api.clinical_notes || '').trim();
+  const provisionalDiagnosis = String(
+    orderDetails.provisional_diagnosis || api.provisional_diagnosis || '',
+  ).trim();
+  const lmp = String(orderDetails.lmp || api.lmp || '').trim();
+  const rf = completed.reportFile;
+  const studyStatusRaw = String(studyObj.status || 'reported').toLowerCase();
+  const processingMethod = studyObj.processing_method as string | undefined;
+
+  return {
+    id: completed.id,
+    orderId: completed.orderId,
+    studyId: studyObj.id != null ? String(studyObj.id) : '',
+    patient: {
+      id: completed.patient.id,
+      name: completed.patient.name,
+      age: completed.age ?? 0,
+      gender: completed.gender,
+    },
+    doctor: completed.doctor,
+    study: {
+      id: studyObj.id != null ? String(studyObj.id) : '',
+      procedure: completed.studyName,
+      category: completed.category,
+      bodyPart: String(studyObj.body_part || ''),
+      status: mapVerificationStudyStatus(studyStatusRaw),
+      processingMethod:
+        processingMethod === 'in_house'
+          ? 'In-house'
+          : processingMethod === 'outsourced'
+            ? 'Outsourced'
+            : undefined,
+      outsourcedFacility: studyObj.outsourced_facility
+        ? String(studyObj.outsourced_facility)
+        : undefined,
+      imagesCount:
+        studyObj.images_count != null ? Number(studyObj.images_count) : undefined,
+      report: completed.report,
+      customReports: completed.customReports,
+      critical: completed.overallStatus === 'Critical' || Boolean(studyObj.critical),
+      reportAttachments: completed.reportAttachments,
+      reportFile: rf
+        ? {
+            name: rf.name,
+            type: 'application/pdf',
+            uploadedAt: String(studyObj.reported_at || ''),
+            url: rf.url,
+          }
+        : undefined,
+      reportedBy: completed.reportedBy !== 'Unknown' ? completed.reportedBy : undefined,
+      reportedAt: studyObj.reported_at ? String(studyObj.reported_at) : undefined,
+      verifiedBy: completed.verifiedBy !== 'Unknown' ? completed.verifiedBy : undefined,
+      verifiedAt: completed.verifiedAt || undefined,
+    },
+    priority: transformPriority(String(api.priority || 'routine')) as 'Routine' | 'Urgent' | 'STAT',
+    clinic: completed.clinic,
+    location_clinic_name: completed.location_clinic_name,
+    clinicalIndication: clinicalIndication || undefined,
+    provisionalDiagnosis: provisionalDiagnosis || undefined,
+    lmp: lmp || undefined,
   };
 }

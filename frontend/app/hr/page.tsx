@@ -8,6 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   Loader2,
@@ -23,16 +30,15 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { hrService, type HRComplianceSummary } from "@/lib/services/hr-service";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
-import { isAuthenticationError } from "@/lib/auth-errors";
+import { useHrPageAuth } from "@/hooks/use-hr-page-auth";
+import { useHrProgrammeYear } from "@/hooks/use-hr-programme-year";
 
 export default function HRDashboardPage() {
   const router = useRouter();
-  const year = new Date().getFullYear();
+  const { ready, handleAuthError } = useHrPageAuth();
+  const { year, setYear, yearOptions } = useHrProgrammeYear();
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<unknown>(null);
   const [summary, setSummary] = useState<(HRComplianceSummary & { programme_year: number }) | null>(null);
-  useAuthRedirect(authError);
 
   const load = useCallback(async () => {
     try {
@@ -40,16 +46,17 @@ export default function HRDashboardPage() {
       const data = await hrService.getSummary(year);
       setSummary(data);
     } catch (err) {
-      if (isAuthenticationError(err)) setAuthError(err);
-      else toast.error("Failed to load HR dashboard. Please try again.");
+      if (handleAuthError(err)) return;
+      toast.error("Failed to load HR dashboard. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, [year, handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     load();
-  }, [load]);
+  }, [ready, load]);
 
   const dueCount = summary ? summary.due + summary.in_progress : 0;
   const pendingCount = dueCount + (summary?.overdue ?? 0);
@@ -63,32 +70,55 @@ export default function HRDashboardPage() {
       const blob = await hrService.exportCsv(year);
       hrService.downloadBlob(blob, `annual_checkup_compliance_${year}.csv`);
       toast.success("Compliance report exported.");
-    } catch {
+    } catch (err) {
+      if (handleAuthError(err)) return;
       toast.error("CSV export failed.");
     }
   };
 
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6 flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header */}
         <Card className="bg-gradient-to-r from-violet-500 to-purple-600 text-white border-0">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
-                <Users className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Users className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold">Human Resources</h1>
+                  <p className="text-sm sm:text-base text-violet-100">
+                    Annual employee check-up compliance — {year} programme year
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold">Human Resources</h1>
-                <p className="text-sm sm:text-base text-violet-100">
-                  Annual employee check-up compliance — {year} programme year
-                </p>
-              </div>
+              <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+                <SelectTrigger className="w-[120px] bg-white/10 border-white/30 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {yearOptions.map((y) => (
+                    <SelectItem key={y} value={String(y)}>
+                      {y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
 
-        {/* Programme Overview */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Clock className="h-5 w-5 text-blue-500 dark:text-blue-400" />
@@ -142,7 +172,7 @@ export default function HRDashboardPage() {
 
                 <Card className={`border-l-4 ${dueCount > 0 ? "border-l-amber-500" : "border-l-green-500"}`}>
                   <CardContent className="p-4">
-                    <p className="text-sm text-muted-foreground">Due</p>
+                    <p className="text-sm text-muted-foreground">Due / in progress</p>
                     <div className="flex items-center gap-2 mt-1">
                       <ClipboardList className={`h-5 w-5 ${dueCount > 0 ? "text-amber-500 dark:text-amber-400" : "text-green-500 dark:text-green-400"}`} />
                       <p className={`text-2xl sm:text-3xl font-bold ${dueCount > 0 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}>
@@ -174,7 +204,6 @@ export default function HRDashboardPage() {
           </div>
         </div>
 
-        {/* Attention Needed */}
         {!loading && summary && (summary.overdue > 0 || dueCount > 0 || summary.exempt > 0) && (
           <div>
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
@@ -193,7 +222,7 @@ export default function HRDashboardPage() {
                         </p>
                       </div>
                       <Button asChild size="sm" variant="outline">
-                        <Link href="/hr/annual-checkups">Review</Link>
+                        <Link href={`/hr/annual-checkups?year=${year}&status=overdue`}>Review</Link>
                       </Button>
                     </div>
                   </CardContent>
@@ -210,7 +239,7 @@ export default function HRDashboardPage() {
                         </p>
                       </div>
                       <Button asChild size="sm" variant="outline">
-                        <Link href="/hr/annual-checkups">View list</Link>
+                        <Link href={`/hr/annual-checkups?year=${year}`}>View list</Link>
                       </Button>
                     </div>
                   </CardContent>
@@ -227,7 +256,7 @@ export default function HRDashboardPage() {
                         </p>
                       </div>
                       <Button asChild size="sm" variant="outline">
-                        <Link href="/hr/exemptions">Manage</Link>
+                        <Link href={`/hr/exemptions?year=${year}`}>Manage</Link>
                       </Button>
                     </div>
                   </CardContent>
@@ -237,7 +266,6 @@ export default function HRDashboardPage() {
           </div>
         )}
 
-        {/* Quick Actions */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
@@ -245,7 +273,7 @@ export default function HRDashboardPage() {
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Button
-              onClick={() => router.push("/hr/annual-checkups")}
+              onClick={() => router.push(`/hr/annual-checkups?year=${year}`)}
               className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white border-l-4 border-l-white/20"
             >
               <div className="flex items-center gap-2">
@@ -261,7 +289,7 @@ export default function HRDashboardPage() {
             </Button>
 
             <Button
-              onClick={() => router.push("/hr/exemptions")}
+              onClick={() => router.push(`/hr/exemptions?year=${year}`)}
               variant="outline"
               className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-violet-500"
             >
@@ -278,7 +306,7 @@ export default function HRDashboardPage() {
             </Button>
 
             <Button
-              onClick={() => router.push("/hr/exemptions")}
+              onClick={() => router.push(`/hr/exemptions?year=${year}&grant=1`)}
               variant="outline"
               className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-purple-500"
             >
@@ -300,7 +328,6 @@ export default function HRDashboardPage() {
           </div>
         </div>
 
-        {/* Programme Progress */}
         {!loading && summary && summary.total_eligible > 0 && (
           <div className="grid gap-6 lg:grid-cols-3">
             <Card className="lg:col-span-2">
@@ -363,7 +390,7 @@ export default function HRDashboardPage() {
                   HR-safe compliance view for the {year} annual check-up programme. Clinical details are not shown here.
                 </p>
                 <Button asChild variant="outline" className="w-full justify-between">
-                  <Link href="/hr/annual-checkups">
+                  <Link href={`/hr/annual-checkups?year=${year}`}>
                     Open compliance list
                     <ArrowRight className="h-4 w-4" />
                   </Link>

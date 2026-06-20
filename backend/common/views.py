@@ -503,7 +503,15 @@ class AdminDashboardStatsView(views.APIView):
     """Server-side admin dashboard stats (replaces client fan-out)."""
 
     def get(self, request):
-        if not (request.user.is_staff or request.user.is_superuser):
+        from permissions.page_paths import user_has_any_page
+        from permissions.user_pages import ADMIN_ROLE_PAGES, SUPERUSER_PAGES, get_user_allowed_pages
+
+        allowed = get_user_allowed_pages(request.user)
+        if not (
+            request.user.is_superuser
+            or allowed & (SUPERUSER_PAGES | ADMIN_ROLE_PAGES)
+            or user_has_any_page(allowed, ("/admin",))
+        ):
             return Response({"error": "Permission denied"}, status=403)
 
         from .admin_dashboard_stats import build_admin_dashboard_stats

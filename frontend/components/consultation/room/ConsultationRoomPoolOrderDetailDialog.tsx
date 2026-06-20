@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { OrderDiagnosesBlock } from "@/components/medical/OrderDiagnosesBlock";
 import { Activity, Eye } from "lucide-react";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 
 export type PoolOrderDetail = {
   id?: string | number;
@@ -61,7 +62,7 @@ export function ConsultationRoomPoolOrderDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] w-[95vw] overflow-y-auto sm:max-w-[700px]">
+      <DialogContent className={MODAL_SIZES.ml}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Icon className={`h-5 w-5 ${isPhysio ? "text-emerald-500" : "text-cyan-500"}`} />

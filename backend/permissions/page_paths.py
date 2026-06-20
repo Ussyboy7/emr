@@ -3,7 +3,7 @@ Canonical page-path normalization and prefix matching (mirrors frontend ``page-p
 """
 from __future__ import annotations
 
-GLOBAL_USER_PAGES = frozenset({"/notifications", "/settings", "/help"})
+GLOBAL_USER_PAGES = frozenset({"/notifications", "/settings", "/help", "/help/tickets", "/help/docs"})
 
 LEGACY_PAGE_PATH_ALIASES = {
     "/consultation/dashboard": "/consultation",
@@ -13,6 +13,7 @@ LEGACY_PAGE_PATH_ALIASES = {
     "/medical-records/reports/attendance-summary": "/medical-records/reports/attendance-statistics",
     "/medical-records/reports/clinic-attendance": "/medical-records/reports/clinic-statistics",
     "/medical-records/reports/gop-attendance": "/medical-records/reports/clinic-statistics",
+    "/physiotherapy/pool-queue": "/physiotherapy/orders",
 }
 
 CLINICAL_MODULE_PREFIXES = (

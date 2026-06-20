@@ -11,6 +11,9 @@ from drf_spectacular.utils import extend_schema
 from django.utils import timezone
 from datetime import timedelta
 
+from permissions.page_paths import user_has_any_page
+from permissions.user_pages import ADMIN_ROLE_PAGES, SUPERUSER_PAGES, get_user_allowed_pages
+
 from .models import ActivityLog
 from .serializers import ActivityLogSerializer
 
@@ -32,10 +35,16 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         
         """Filter logs based on user permissions."""
         queryset = ActivityLog.objects.all().select_related('user')
-        
-        # Non-superusers can only see their own logs
-        if not self.request.user.is_superuser:
-            queryset = queryset.filter(user=self.request.user)
+
+        user = self.request.user
+        if not user.is_superuser:
+            allowed = get_user_allowed_pages(user)
+            audit_admin = bool(
+                allowed & (SUPERUSER_PAGES | ADMIN_ROLE_PAGES)
+                or user_has_any_page(allowed, ("/admin/audit", "/admin"))
+            )
+            if not audit_admin:
+                queryset = queryset.filter(user=user)
         
         # Date range filtering
         date_from = self.request.query_params.get('date_from')

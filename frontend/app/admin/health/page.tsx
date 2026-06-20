@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
+import { useAdminPageAuth } from "@/hooks/use-admin-page-auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -134,6 +135,7 @@ function SectionHeading({ title, description }: { title: string; description?: s
 }
 
 export default function SystemHealthPage() {
+  const { ready, handleAuthError } = useAdminPageAuth();
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState("");
   const [systemHealth, setSystemHealth] = useState<SystemHealthItem[]>([]);
@@ -180,6 +182,7 @@ export default function SystemHealthPage() {
       setReadinessOverall(readinessResult.status === "healthy" ? "healthy" : "error");
       setLastUpdated(formatDisplayTime(new Date()));
     } catch (err: unknown) {
+      if (handleAuthError(err)) return;
       if (!opts.silent) {
         toast.error("Failed to load system health");
       }
@@ -189,9 +192,10 @@ export default function SystemHealthPage() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [handleAuthError]);
 
   useEffect(() => {
+    if (!ready) return;
     isMountedRef.current = true;
     loadData();
 
@@ -204,7 +208,7 @@ export default function SystemHealthPage() {
       isMountedRef.current = false;
       clearInterval(intervalId);
     };
-  }, [loadData]);
+  }, [ready, loadData]);
 
   const coreStatuses: HealthStatus[] = [
     ...systemHealth.map((s) => s.status),
@@ -244,6 +248,16 @@ export default function SystemHealthPage() {
         : overallStatus === "error"
           ? "Service disruption detected"
           : "Status unavailable";
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>

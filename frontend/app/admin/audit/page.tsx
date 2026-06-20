@@ -1,7 +1,10 @@
 "use client";
 import { todayApiDateString, toApiDateFromInstant, formatDisplayDateMedium, formatDisplayTime } from "@/lib/dates";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useAdminPageAuth } from '@/hooks/use-admin-page-auth';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { toast } from "sonner";
 import { adminService, type AuditLog as ApiAuditLog } from "@/lib/services";
 import {
@@ -36,15 +40,20 @@ interface AuditLog {
 }
 
 const actions = ['All Actions', 'CREATE', 'UPDATE', 'DELETE', 'VIEW', 'LOGIN', 'LOGOUT', 'EXPORT', 'IMPORT', 'APPROVE', 'REJECT', 'VERIFY'];
+const resourceTypes = ['All Resources', 'support_ticket', 'patient', 'user', 'visit', 'prescription', 'lab_order'];
 
 export default function AuditTrailPage() {
+  const searchParams = useSearchParams();
+  const { ready, handleAuthError } = useAdminPageAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 400);
   const [moduleFilter, setModuleFilter] = useState('all');
   const [actionFilter, setActionFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [resourceFilter, setResourceFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [modules, setModules] = useState<string[]>(['All Modules']);
@@ -53,6 +62,12 @@ export default function AuditTrailPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [auditStats, setAuditStats] = useState({
+    total: 0,
+    success: 0,
+    failed: 0,
+    today: 0,
+  });
 
   // Dialog states
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
@@ -84,90 +99,128 @@ export default function AuditTrailPage() {
     loadModules();
   }, []);
 
-  // Load audit logs from API
   useEffect(() => {
-    loadLogs();
-  }, [currentPage, itemsPerPage, searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo]);
+    const preset = searchParams.get('object_type');
+    if (preset) {
+      setResourceFilter(preset);
+    }
+  }, [searchParams]);
 
-  const loadLogs = async () => {
+  const buildFilterParams = useCallback((overrides?: { page?: number; page_size?: number }) => {
+    const params: Record<string, string | number> = {
+      page: overrides?.page ?? currentPage,
+      page_size: overrides?.page_size ?? itemsPerPage,
+    };
+
+    if (debouncedSearch) {
+      params.search = debouncedSearch;
+    }
+
+    if (moduleFilter !== 'all') {
+      params.module = moduleFilter
+        .split(' ')
+        .map((word: string) => word.toLowerCase())
+        .join('_');
+    }
+
+    if (actionFilter !== 'all') {
+      params.action = actionFilter.toLowerCase();
+    }
+
+    if (statusFilter !== 'all') {
+      params.result = statusFilter.toLowerCase();
+    }
+
+    if (resourceFilter !== 'all') {
+      params.object_type = resourceFilter;
+    }
+
+    if (dateFrom) {
+      params.date_from = new Date(dateFrom).toISOString();
+    }
+    if (dateTo) {
+      const toDate = new Date(dateTo);
+      toDate.setHours(23, 59, 59, 999);
+      params.date_to = toDate.toISOString();
+    }
+
+    return params;
+  }, [currentPage, itemsPerPage, debouncedSearch, moduleFilter, actionFilter, statusFilter, resourceFilter, dateFrom, dateTo]);
+
+  const transformLog = (log: ApiAuditLog): AuditLog => ({
+    id: log.id.toString(),
+    timestamp: log.created_at,
+    user: log.user_name || log.user_email || 'Unknown',
+    userId: log.user?.toString() || '',
+    role: log.user_role || '',
+    action: log.action.toUpperCase() as AuditLog['action'],
+    module: log.module
+      ? log.module.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+      : 'System',
+    resource: log.object_type || '',
+    resourceId: log.object_id?.toString() || log.object_repr || '',
+    details: log.description || '',
+    ipAddress: log.ip_address || '',
+    userAgent: log.user_agent || '',
+    status: log.result === 'success' ? 'Success' : log.result === 'failure' ? 'Failed' : 'Warning' as AuditLog['status'],
+    changes: log.old_values && log.new_values ? Object.keys(log.new_values).map(key => ({
+      field: key,
+      oldValue: String(log.old_values?.[key] || ''),
+      newValue: String(log.new_values?.[key] || ''),
+    })) : undefined,
+  });
+
+  const loadAuditStats = useCallback(async () => {
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const [stats, todayResp] = await Promise.all([
+        adminService.getAuditStats(30),
+        adminService.getAuditLogs({
+          page: 1,
+          page_size: 1,
+          date_from: todayStart.toISOString(),
+        }),
+      ]);
+      const byResult = stats.by_result || {};
+      setAuditStats({
+        total: stats.total_actions ?? 0,
+        success: byResult.success ?? 0,
+        failed: byResult.failure ?? 0,
+        today: todayResp.count ?? 0,
+      });
+    } catch (err) {
+      if (handleAuthError(err)) return;
+    }
+  }, [handleAuthError]);
+
+  const loadLogs = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      // Build filter params
-      const params: any = {
-        page: currentPage,
-        page_size: itemsPerPage,
-      };
-      
-      if (searchQuery) {
-        params.search = searchQuery;
-      }
-      
-      // Convert module filter back to backend format (e.g., "Medical Records" -> "medical_records")
-      if (moduleFilter !== 'all') {
-        const backendModule = moduleFilter
-          .split(' ')
-          .map((word: string) => word.toLowerCase())
-          .join('_');
-        params.module = backendModule;
-      }
-      
-      if (actionFilter !== 'all') {
-        params.action = actionFilter.toLowerCase();
-      }
-      
-      if (statusFilter !== 'all') {
-        params.result = statusFilter.toLowerCase();
-      }
-      
-      // Add date filters (server-side)
-      if (dateFrom) {
-        params.date_from = new Date(dateFrom).toISOString();
-      }
-      if (dateTo) {
-        // Include entire day
-        const toDate = new Date(dateTo);
-        toDate.setHours(23, 59, 59, 999);
-        params.date_to = toDate.toISOString();
-      }
-      
-      const response = await adminService.getAuditLogs(params);
+
+      const response = await adminService.getAuditLogs(buildFilterParams());
       setTotalCount(response.count || response.results.length);
-      
-      // Transform API logs to frontend format
-      const transformedLogs: AuditLog[] = response.results.map((log: ApiAuditLog) => ({
-        id: log.id.toString(),
-        timestamp: log.created_at,
-        user: log.user_name || log.user_email || 'Unknown',
-        userId: log.user?.toString() || '',
-        role: log.user_role || '',
-        action: log.action.toUpperCase() as AuditLog['action'],
-        module: log.module 
-          ? log.module.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-          : 'System',
-        resource: log.object_type || '',
-        resourceId: log.object_id?.toString() || log.object_repr || '',
-        details: log.description || '',
-        ipAddress: log.ip_address || '',
-        userAgent: log.user_agent || '',
-        status: log.result === 'success' ? 'Success' : log.result === 'failure' ? 'Failed' : 'Warning' as AuditLog['status'],
-        changes: log.old_values && log.new_values ? Object.keys(log.new_values).map(key => ({
-          field: key,
-          oldValue: String(log.old_values?.[key] || ''),
-          newValue: String(log.new_values?.[key] || ''),
-        })) : undefined,
-      }));
-      
-      setLogs(transformedLogs);
+      setLogs(response.results.map(transformLog));
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load audit logs');
       toast.error('Failed to load audit logs. Please try again.');
       console.error('Error loading audit logs:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [buildFilterParams, handleAuthError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadLogs();
+  }, [ready, loadLogs]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadAuditStats();
+  }, [ready, loadAuditStats]);
 
   // Server-side filtering is now handled in loadLogs, so we use logs directly
   const paginatedLogs = logs;
@@ -177,17 +230,9 @@ export default function AuditTrailPage() {
     if (currentPage !== 1) {
       setCurrentPage(1);
     }
-  }, [searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo, itemsPerPage]);
+  }, [debouncedSearch, moduleFilter, actionFilter, statusFilter, resourceFilter, dateFrom, dateTo, itemsPerPage]);
 
-  const stats = useMemo(() => {
-    const today = new Date().toDateString();
-    return {
-      total: totalCount,
-      success: logs.filter(l => l.status === 'Success').length,
-      failed: logs.filter(l => l.status === 'Failed').length,
-      today: logs.filter(l => new Date(l.timestamp).toDateString() === today).length,
-    };
-  }, [logs, totalCount]);
+  const stats = useMemo(() => auditStats, [auditStats]);
 
   const getActionIcon = (action: string) => {
     switch (action) {
@@ -255,11 +300,23 @@ export default function AuditTrailPage() {
     setIsViewDialogOpen(true);
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
-      // Build CSV content
+      const allRows: AuditLog[] = [];
+      let page = 1;
+      const pageSize = 200;
+      let total = 0;
+
+      do {
+        const response = await adminService.getAuditLogs(buildFilterParams({ page, page_size: pageSize }));
+        total = response.count || response.results.length;
+        allRows.push(...response.results.map(transformLog));
+        if (allRows.length >= total || response.results.length === 0) break;
+        page += 1;
+      } while (allRows.length < total);
+
       const headers = ['Timestamp', 'User', 'Action', 'Module', 'Resource', 'Resource ID', 'Details', 'Status', 'IP Address'];
-      const rows = logs.map(log => {
+      const rows = allRows.map(log => {
         const ts = formatTimestamp(log.timestamp);
         return [
           `${ts.date} ${ts.time}`,
@@ -268,18 +325,13 @@ export default function AuditTrailPage() {
           log.module,
           log.resource,
           log.resourceId,
-          log.details.replace(/"/g, '""'), // Escape quotes
+          log.details.replace(/"/g, '""'),
           log.status,
           log.ipAddress,
         ].map(field => `"${field}"`).join(',');
       });
-      
-      const csvContent = [
-        headers.map(h => `"${h}"`).join(','),
-        ...rows
-      ].join('\n');
-      
-      // Create download link
+
+      const csvContent = [headers.map(h => `"${h}"`).join(','), ...rows].join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
@@ -289,13 +341,25 @@ export default function AuditTrailPage() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
-      toast.success(`Exported ${logs.length} audit logs successfully`);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Exported ${allRows.length} audit logs`);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('Export error:', err);
       toast.error('Failed to export audit logs');
     }
   };
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -370,7 +434,7 @@ export default function AuditTrailPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
               <div className="md:col-span-2 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Search by user, details, or ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
@@ -379,6 +443,16 @@ export default function AuditTrailPage() {
                 <SelectTrigger><SelectValue placeholder="Module" /></SelectTrigger>
                 <SelectContent>
                   {modules.map(m => <SelectItem key={m} value={m === 'All Modules' ? 'all' : m}>{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={resourceFilter} onValueChange={setResourceFilter}>
+                <SelectTrigger><SelectValue placeholder="Resource" /></SelectTrigger>
+                <SelectContent>
+                  {resourceTypes.map((r) => (
+                    <SelectItem key={r} value={r === 'All Resources' ? 'all' : r}>
+                      {r === 'All Resources' ? r : r.replace(/_/g, ' ')}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select value={actionFilter} onValueChange={setActionFilter}>
@@ -499,7 +573,7 @@ export default function AuditTrailPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-violet-500" />Audit Log Details</DialogTitle>
               <DialogDescription>{selectedLog?.id}</DialogDescription>

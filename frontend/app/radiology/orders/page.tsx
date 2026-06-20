@@ -19,11 +19,14 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { useRadiologyUrlSync } from '@/hooks/use-radiology-url-sync';
+import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   findRadiologyOrdersTabForOrders,
   isValidRadiologyOrdersTab,
   orderMatchesRadiologyOrdersTab,
+  radiologyOrdersTabToStudyStatus,
   RADIOLOGY_ORDERS_TAB_LABELS,
   type RadiologyOrdersTab,
 } from '@/lib/radiology/radiology-workflow-search';
@@ -119,6 +122,7 @@ const parseCustomRadiologyNames = (study: any, order?: any): string[] => {
 
 export default function RadiologyOrdersPage() {
   const serverToday = useServerToday();
+  const { ready, handleAuthError } = useRadiologyPageAuth();
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +136,7 @@ export default function RadiologyOrdersPage() {
   const [activeTab, setActiveTab] = useState<RadiologyOrdersTab>('all');
   const autoTabRef = useRef<string | null>(null);
 
-  useLabUrlSync({
+  useRadiologyUrlSync({
     search: searchQuery,
     tab: activeTab,
     defaultTab: 'all',
@@ -284,6 +288,7 @@ export default function RadiologyOrdersPage() {
       // inside the detail dialog renders without a blocking await.
       void loadOrderDispatches(Number(fullOrder.id));
     } catch (error: any) {
+      if (handleAuthError(error)) return;
       toast.error(error.message || 'Failed to load order details');
     }
   };
@@ -325,6 +330,7 @@ export default function RadiologyOrdersPage() {
         })(),
       ]);
     } catch (error: any) {
+      if (handleAuthError(error)) return;
       console.error('Error starting study processing:', error);
       toast.error(error.message || 'Failed to start study processing');
     } finally {
@@ -339,6 +345,7 @@ export default function RadiologyOrdersPage() {
       const res = await radiologyService.getImagingPartners();
       setImagingPartners(res.results || []);
     } catch (e: any) {
+      if (handleAuthError(e)) return;
       console.error('getImagingPartners failed', e?.status, e?.body, e);
       toast.error('Failed to load imaging partners');
       setImagingPartners([]);
@@ -424,6 +431,7 @@ export default function RadiologyOrdersPage() {
       resetPartnerForm();
       setIsAddPartnerDialogOpen(false);
     } catch (error: any) {
+      if (handleAuthError(error)) return;
       console.error('Save imaging partner error:', error);
       toast.error(error?.message || 'Failed to save imaging partner');
     } finally {
@@ -447,6 +455,7 @@ export default function RadiologyOrdersPage() {
       setImagingPartners((prev) => prev.filter((p) => p.id !== deleteConfirmPartnerId));
       toast.success(`Imaging partner "${deleteConfirmPartnerName}" deleted successfully`);
     } catch (error: any) {
+      if (handleAuthError(error)) return;
       console.error('Delete imaging partner error:', error);
       toast.error(error?.message || 'Failed to delete imaging partner');
     } finally {
@@ -580,6 +589,7 @@ export default function RadiologyOrdersPage() {
       const dispatches = await radiologyService.getOrderDispatches(orderId);
       setOrderDispatches(dispatches);
     } catch (e: any) {
+      if (handleAuthError(e)) return;
       console.error('getOrderDispatches failed', e);
       // 404 likely means migrations haven't run yet — keep the rest of the page usable.
       if (e?.status !== 404) {
@@ -654,6 +664,7 @@ export default function RadiologyOrdersPage() {
         loadOrderDispatches(Number(selectedOrder.id)),
       ]);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('dispatchOutsourced failed', err);
       const msg = err?.apiMessage || err?.message || 'Failed to create dispatch';
       toast.error(msg);
@@ -695,6 +706,7 @@ export default function RadiologyOrdersPage() {
       // Refresh history so the printed-at timestamp shows up in the table.
       await loadOrderDispatches(Number(selectedOrder.id));
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('openDispatchPdf failed', err);
       toast.error(err?.apiMessage || err?.message || 'Failed to open PDF');
     } finally {
@@ -757,6 +769,7 @@ export default function RadiologyOrdersPage() {
       setCancelDispatchTarget(null);
       setCancelDispatchReason('');
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('cancelDispatch failed', err);
       toast.error(err?.apiMessage || err?.message || 'Failed to cancel dispatch');
     } finally {
@@ -853,13 +866,6 @@ export default function RadiologyOrdersPage() {
         !searching && (dateRange.from || dateRange.to)
           ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
           : {};
-      const studyStatusByTab: Record<RadiologyOrdersTab, 'pending' | 'processing' | 'reported' | 'rejected' | undefined> = {
-        pending: 'pending',
-        processing: 'processing',
-        results: 'reported',
-        rejected: 'rejected',
-        all: undefined,
-      };
       const commonFilters = {
         ...(searching ? { search: debouncedSearch } : {}),
         ...(processingFilter !== 'all' ? { processing_method: processingFilter } : {}),
@@ -869,12 +875,10 @@ export default function RadiologyOrdersPage() {
         ...dateQuery,
         ...rangeQuery,
       };
-
-      // On the Rejected tab, filter the list by rejection date rather than
-      // order date so "Today" reflects today's rejections.
+      const studyStatus = radiologyOrdersTabToStudyStatus(activeTab);
       const listFilters = {
         ...commonFilters,
-        ...(searching ? {} : studyStatusByTab[activeTab] ? { study_status: studyStatusByTab[activeTab] } : {}),
+        ...(searching ? {} : studyStatus ? { study_status: studyStatus } : {}),
         ...(!searching && activeTab === 'rejected' ? { date_field: 'rejected_at' as const } : {}),
       };
 
@@ -898,8 +902,10 @@ export default function RadiologyOrdersPage() {
         stat: statsResponse.stat || 0,
       });
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       if (!silent) {
         setError(err.message || 'Failed to load radiology orders');
+        toast.error('Failed to load radiology orders. Please try again.');
       }
       console.error('Error loading radiology orders:', err);
     } finally {
@@ -907,7 +913,7 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery]);
+  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery, handleAuthError]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -915,8 +921,9 @@ export default function RadiologyOrdersPage() {
   }, [searchQuery]);
 
   useEffect(() => {
+    if (!ready) return;
     loadOrders();
-  }, [loadOrders]);
+  }, [ready, loadOrders]);
 
   const pollingPaused = useMemo(
     () =>
@@ -925,7 +932,8 @@ export default function RadiologyOrdersPage() {
       isProcessDialogOpen ||
       isResultsDialogOpen ||
       isAddStudyDialogOpen ||
-      isExternalOrderDialogOpen,
+      isExternalOrderDialogOpen ||
+      isDispatchDialogOpen,
     [
       isDateFilterDialogOpen,
       isViewDialogOpen,
@@ -933,16 +941,17 @@ export default function RadiologyOrdersPage() {
       isResultsDialogOpen,
       isAddStudyDialogOpen,
       isExternalOrderDialogOpen,
+      isDispatchDialogOpen,
     ]
   );
 
   useEffect(() => {
-    if (pollingPaused) return;
+    if (!ready || pollingPaused) return;
     const id = setInterval(() => {
       void loadOrders({ silent: true });
     }, 15000);
     return () => clearInterval(id);
-  }, [loadOrders, pollingPaused]);
+  }, [ready, loadOrders, pollingPaused]);
 
   useEffect(() => {
     if (!isViewDialogOpen) {
@@ -992,6 +1001,7 @@ export default function RadiologyOrdersPage() {
       const response = await radiologyService.getTemplates();
       setTemplates(response.results || []);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err?.message || 'Failed to load templates');
       setTemplates([]);
     } finally {
@@ -1013,6 +1023,7 @@ export default function RadiologyOrdersPage() {
         const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
         setExternalClinics(res.results || []);
       } catch (err: any) {
+        if (handleAuthError(err)) return;
         toast.error(err?.message || 'Failed to load originating clinics');
         setExternalClinics([]);
       }
@@ -1144,6 +1155,7 @@ export default function RadiologyOrdersPage() {
       setCurrentPage(1);
       await loadOrders();
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       console.error('Failed to create external radiology request:', err);
       toast.error(err?.message || 'Failed to create external radiology request');
     } finally {
@@ -1185,13 +1197,13 @@ export default function RadiologyOrdersPage() {
       const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
       setSelectedOrder(updatedOrder);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err?.message || 'Failed to add study');
     } finally {
       setIsAddingStudy(false);
     }
   };
 
-  // Helper function to determine order status (simplified like lab)
   const getOrderStatus = (order: any): string => {
     const studies = order.studies || [];
     if (studies.length === 0) return 'pending';
@@ -1205,11 +1217,6 @@ export default function RadiologyOrdersPage() {
     // Otherwise, pending
     return 'pending';
   };
-
-  const paginatedOrders = useMemo(() => {
-    if (!debouncedSearch.trim()) return orders;
-    return orders.filter((o) => orderMatchesRadiologyOrdersTab(o, activeTab));
-  }, [orders, debouncedSearch, activeTab]);
 
   // When searching, switch to the tab that contains matches.
   useEffect(() => {
@@ -1334,6 +1341,7 @@ export default function RadiologyOrdersPage() {
         })(),
       ]);
     } catch (error: any) {
+      if (handleAuthError(error)) return;
       toast.error(error.message || 'Failed to submit study results');
     } finally {
       setIsSubmittingResults(false);
@@ -1346,6 +1354,7 @@ export default function RadiologyOrdersPage() {
       toast.success('Order status updated to Processing');
       loadOrders();
     } catch (error: any) {
+      if (handleAuthError(error)) return;
       console.error('Error updating order status:', error);
       toast.error(error.message || 'Failed to update order status');
     }
@@ -1565,8 +1574,8 @@ export default function RadiologyOrdersPage() {
                 <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
               </CardContent>
             </Card>
-          ) : paginatedOrders.length > 0 ? (
-            paginatedOrders.map((order) => <OrderCard key={order.id} order={order} />)
+          ) : orders.length > 0 ? (
+            orders.map((order) => <OrderCard key={order.id} order={order} />)
           ) : (
             <Card>
               <CardContent className="py-12 text-center">
@@ -1593,13 +1602,13 @@ export default function RadiologyOrdersPage() {
               itemName="orders"
             />
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Showing {paginatedOrders.length} of {totalCount} order{totalCount !== 1 ? 's' : ''} (page {currentPage} of {Math.max(1, Math.ceil(totalCount / itemsPerPage))})
+              Showing {totalCount} order{totalCount !== 1 ? 's' : ''} (page {currentPage} of {Math.max(1, Math.ceil(totalCount / itemsPerPage))})
             </p>
           </Card>
         )}
 
         <Dialog open={isExternalOrderDialogOpen} onOpenChange={setIsExternalOrderDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.xl}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5 text-amber-500" />
@@ -1837,7 +1846,7 @@ export default function RadiologyOrdersPage() {
 
         {/* Process Study Dialog (like lab) */}
         <Dialog open={isProcessDialogOpen} onOpenChange={setIsProcessDialogOpen}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className={MODAL_SIZES.sm}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Play className="h-5 w-5 text-blue-500" />
@@ -1936,7 +1945,7 @@ export default function RadiologyOrdersPage() {
 
         {/* Enter Results Dialog (like lab) */}
         <Dialog open={isResultsDialogOpen} onOpenChange={setIsResultsDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.md}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-amber-500" />
@@ -2248,7 +2257,7 @@ export default function RadiologyOrdersPage() {
 
         {/* View & Manage Order Dialog - All actions happen here (like lab) */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ClipboardList className="h-5 w-5 text-amber-500" />
@@ -2784,7 +2793,7 @@ export default function RadiologyOrdersPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.ml}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5 text-amber-500" />
@@ -2901,7 +2910,7 @@ export default function RadiologyOrdersPage() {
             if (!open) resetPartnerForm();
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {editingPartnerId !== null ? (
@@ -3044,7 +3053,7 @@ export default function RadiologyOrdersPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Building2 className="h-5 w-5 text-blue-500" />
@@ -3143,7 +3152,7 @@ export default function RadiologyOrdersPage() {
             setDeleteConfirmPartnerName('');
           }
         }}>
-          <DialogContent className="w-[95vw] sm:max-w-[400px]">
+          <DialogContent className={MODAL_SIZES.sm}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-red-500" />
@@ -3205,7 +3214,7 @@ export default function RadiologyOrdersPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.ml}>
             {confirmedDispatch ? (
               <>
                 <DialogHeader>
@@ -3547,7 +3556,7 @@ export default function RadiologyOrdersPage() {
             if (!open) setSkipPrintConfirmOpen(false);
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[440px]">
+          <DialogContent className={MODAL_SIZES.sm}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -3601,7 +3610,7 @@ export default function RadiologyOrdersPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[480px]">
+          <DialogContent className={MODAL_SIZES.xs}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <X className="h-5 w-5 text-rose-500" />

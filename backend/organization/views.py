@@ -31,6 +31,8 @@ from .session_policy import (
     MIN_IDLE_SESSION_TIMEOUT_MINUTES,
 )
 from permissions.user_capabilities import user_has_capability
+from permissions.user_pages import get_user_allowed_pages
+from permissions.page_paths import user_has_any_page
 from audit.services import AuditService
 from common.openapi import document_viewset
 
@@ -447,9 +449,10 @@ class SecuritySettingsView(APIView):
     )
     def patch(self, request):
         user = request.user
+        allowed = get_user_allowed_pages(user)
         if not (
             getattr(user, "is_superuser", False)
-            or user_has_capability(user, "notification_routing_manage")
+            or user_has_any_page(allowed, ("/admin/settings", "/admin"))
         ):
             return Response(
                 {"detail": "You do not have permission to update security settings."},

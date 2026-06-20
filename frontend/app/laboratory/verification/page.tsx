@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getMediaUrl, openMediaInNewTab } from '@/lib/media-url';
+import { openMediaInNewTab } from '@/lib/media-url';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,28 +15,25 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { labService, type LabResult as ApiLabResult } from '@/lib/services';
-import { DEFAULT_CATALOG_PAGE_SIZE } from '@/lib/pagination-constants';
+import { labService } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { StandardPagination } from '@/components/shared/StandardPagination';
-import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
+import { transformToBackendPriority } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
+import { useLabPageAuth } from '@/hooks/use-lab-page-auth';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   isValidLabVerificationTab,
   LAB_VERIFICATION_TAB_LABELS,
   type LabVerificationTab,
 } from '@/lib/laboratory/lab-workflow-search';
 import {
-  buildOrderedLabResultViewRows,
-  deriveOverallStatus,
-  type ResultStatus,
-} from '@/lib/laboratory/template-utils';
-import {
   downloadOfficialLabReportPdf,
-  resolveLabResultFileUrl,
+  transformApiRowToVerificationLabResult,
+  type VerificationLabResult,
 } from '@/lib/laboratory/completedLabReport';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
@@ -53,206 +50,11 @@ function formatLabDateTime(isoString: string | undefined): string {
   return `${datePart}, ${timePart}`;
 }
 
-interface TestResult {
-  parameter: string;
-  value: string;
-  unit: string;
-  normalRange: string;
-  status: 'Normal' | 'Abnormal' | 'Critical';
-  attachment?: {
-    url: string;
-    name: string;
-  } | null;
-}
-
-interface LabResult {
-  id: string;
-  testId: string; // Store test ID for API operations
-  orderId: string;
-  patient: { id: string; name: string; age: number; gender: string; };
-  doctor: { id: string; name: string; specialty: string; };
-  testName: string;
-  testCode: string;
-  results: TestResult[];
-  reportAttachments?: Array<{ name: string; url: string }>;
-  resultFile?: string; // PDF file URL
-  resultFileExists?: boolean;
-  overallStatus: 'Normal' | 'Abnormal' | 'Critical';
-  priority: 'Routine' | 'Urgent' | 'STAT';
-  status: 'Results Ready' | 'Verified' | 'Completed';
-  submittedBy: string;
-  submittedAt: string;
-  verifiedBy?: string;
-  verifiedAt?: string;
-  clinic: string;
-  location_clinic_name?: string;
-  clinicalNotes?: string;
-  processing_method?: 'in_house' | 'outsourced';
-  outsourced_lab?: string;
-}
-
-// Transform backend LabResult to frontend format
-const transformResult = (
-  apiResult: ApiLabResult,
-  templateNormalRangesByCode?: Record<string, any>
-): LabResult => {
-  // Prioritize test_details over test (test might just be an ID)
-  const test = (apiResult as any).test_details || apiResult.test;
-  const results: TestResult[] = [];
-
-  // Get test details early to avoid temporal dead zone
-  const testDetails = (apiResult as any).test_details || (test && typeof test === 'object' ? test : null);
-  const testName = testDetails?.name || test?.name || '';
-
-  const testCodeForTemplate = (testDetails as any)?.code || (test as any)?.code || '';
-  const normalRangeObj: Record<string, any> | undefined =
-    (testDetails as any)?.template_normal_range ||
-    (testDetails as any)?.template?.normal_range ||
-    (testCodeForTemplate ? templateNormalRangesByCode?.[testCodeForTemplate] : undefined);
-
-  const toAbsoluteResultFileUrl = (url: string): string => getMediaUrl(url) ?? url;
-  const displayNameFromResultFileUrl = (url: string): string => {
-    try {
-      return decodeURIComponent(url.split('?')[0].split('/').filter(Boolean).pop() || 'Result file');
-    } catch {
-      return 'Result file';
-    }
-  };
-
-  // Transform results from JSON format to TestResult array
-  let resultsObj: Record<string, any> | null = null;
-
-  if (test && typeof test === 'object' && !Array.isArray(test)) {
-    if (test.results && typeof test.results === 'object' && !Array.isArray(test.results)) {
-      resultsObj = test.results;
-    }
-  }
-
-  if (!resultsObj && (apiResult as any).test_details) {
-    const td = (apiResult as any).test_details;
-    if (td.results && typeof td.results === 'object' && !Array.isArray(td.results)) {
-      resultsObj = td.results;
-    }
-  }
-
-  if (!resultsObj && (apiResult as any).results && typeof (apiResult as any).results === 'object') {
-    resultsObj = (apiResult as any).results;
-  }
-
-  const attachments = (testDetails as any)?.result_attachments || (test as any)?.result_attachments;
-  const attachmentList = Array.isArray(attachments) ? attachments : [];
-
-  if (resultsObj && Object.keys(resultsObj).length > 0) {
-    const built = buildOrderedLabResultViewRows(resultsObj, normalRangeObj, {
-      resultAttachments: attachmentList,
-      resolveFileUrl: toAbsoluteResultFileUrl,
-      attachmentDisplayName: displayNameFromResultFileUrl,
-    });
-    results.push(...built);
-  }
-
-  const usedUrls = new Set<string>();
-  results.forEach((r) => { if (r.attachment?.url) usedUrls.add(r.attachment.url); });
-  const reportAttachments = attachmentList
-    .filter((att: any) => {
-      if (!att.file) return false;
-      const url = toAbsoluteResultFileUrl(String(att.file));
-      return !usedUrls.has(url);
-    })
-    .map((att: any) => ({
-      name: att.row_name || att.file?.split('/').filter(Boolean).pop() || 'Additional file',
-      url: toAbsoluteResultFileUrl(String(att.file)),
-    }));
-
-  // Determine overall status from individual results or use API value
-  let overallStatus: ResultStatus = 'Normal';
-  if (apiResult.overall_status) {
-    const statusMap: Record<string, ResultStatus> = {
-      normal: 'Normal',
-      abnormal: 'Abnormal',
-      critical: 'Critical',
-    };
-    overallStatus = statusMap[apiResult.overall_status] || deriveOverallStatus(results);
-  } else if (results.length > 0) {
-    overallStatus = deriveOverallStatus(results);
-  }
-
-  const order = (apiResult as any).order || (test as any).order;
-  const patient = apiResult.patient || order?.patient || {};
-
-  // Get test details - handle case where test might be just an ID
-  const testId = typeof test === 'number' ? test.toString() : (testDetails?.id?.toString() || test?.id?.toString() || apiResult.id.toString());
-  const testCode = testDetails?.code || test?.code || '';
-
-  // Extract result file URL if available
-  let resultFileUrl: string | undefined = undefined;
-  const resultFileExists = (testDetails as any)?.result_file_exists !== false;
-  if (testDetails?.result_file || (testDetails as any)?.result_file_url) {
-    const fileField = (testDetails as any).result_file_url || testDetails.result_file;
-    if (typeof fileField === 'string') {
-      resultFileUrl = resolveLabResultFileUrl(fileField) || undefined;
-    } else if (fileField) {
-      const raw = fileField.url || fileField.name || undefined;
-      resultFileUrl = raw ? resolveLabResultFileUrl(raw) || undefined : undefined;
-    }
-  }
-
-  return {
-    id: apiResult.id.toString(),
-    testId: testId, // Store test ID for API operations
-    orderId: order?.lab_number || (apiResult as any).order_id || order?.order_id || '',
-    patient: {
-      id: (patient as any)?.id?.toString() || '',
-      name: (apiResult as any).patient_name ?? (patient as any)?.name ?? '',
-      age: (patient as any)?.age || 0,
-      gender: (patient as any)?.gender || 'Unknown',
-    },
-    doctor: {
-      id: order?.doctor?.id?.toString() || '',
-      name: order?.doctor_name || order?.doctor?.name || '',
-      specialty: order?.doctor?.specialty || '',
-    },
-    testName: testName,
-    testCode: testCode,
-    results,
-    reportAttachments: reportAttachments.length > 0 ? reportAttachments : undefined,
-    resultFile: resultFileUrl,
-    resultFileExists,
-    overallStatus,
-    priority: transformPriority(apiResult.priority || order?.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
-    status: (() => {
-      const rawStatus = String(testDetails?.status || (test as any)?.status || '').toLowerCase();
-      if (rawStatus === 'verified') return LAB_TEST_STATUS.VERIFIED;
-      if (rawStatus === 'completed') return 'Completed';
-      return LAB_TEST_STATUS.RESULTS_READY;
-    })(),
-    submittedBy: testDetails?.processed_by_name || testDetails?.processed_by || test?.processed_by_name || test?.processed_by || 'Lab Tech',
-    submittedAt: testDetails?.processed_at || testDetails?.created_at || test?.processed_at || test?.created_at || new Date().toISOString(),
-    clinic: order?.clinic || '',
-    location_clinic_name: (testDetails as any)?.location_clinic_name || (order as any)?.location_clinic_name || (apiResult as any).location_clinic_name || '',
-    clinicalNotes: (() => {
-      // Get clinical notes, avoiding duplication
-      const notes = order?.clinical_notes || testDetails?.notes || test?.notes || '';
-      // If notes contain repeated content, clean it up
-      if (notes.includes('; ')) {
-        const parts = notes.split('; ')
-          .map((part: string) => part.trim()) // Trim whitespace
-          .filter((part: string) => part.length > 0) // Remove empty parts
-          .filter((part: string, index: number, arr: string[]) => arr.indexOf(part) === index); // Remove duplicates
-        return parts.join('; ');
-      }
-      return notes;
-    })(),
-    processing_method: testDetails?.processing_method,
-    outsourced_lab: testDetails?.outsourced_lab,
-  };
-};
-
 export default function ResultsVerificationPage() {
   const serverToday = useServerToday();
-  const [results, setResults] = useState<LabResult[]>([]);
-  const [verifiedResults, setVerifiedResults] = useState<LabResult[]>([]);
-  const [templateNormalRangesByCode, setTemplateNormalRangesByCode] = useState<Record<string, any>>({});
+  const { ready, handleAuthError } = useLabPageAuth();
+  const [results, setResults] = useState<VerificationLabResult[]>([]);
+  const [verifiedResults, setVerifiedResults] = useState<VerificationLabResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [verifiedLoading, setVerifiedLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -287,7 +89,7 @@ export default function ResultsVerificationPage() {
   });
 
   // Dialog states
-  const [selectedResult, setSelectedResult] = useState<LabResult | null>(null);
+  const [selectedResult, setSelectedResult] = useState<VerificationLabResult | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isVerifyDialogOpen, setIsVerifyDialogOpen] = useState(false);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
@@ -301,18 +103,10 @@ export default function ResultsVerificationPage() {
   const [verificationNotes, setVerificationNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
-  const pendingResults = results.filter(r => r.status === LAB_TEST_STATUS.RESULTS_READY);
-
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
     return () => clearTimeout(t);
   }, [searchQuery]);
-
-  // Server-side pagination and filters are canonical.
-  const paginatedResults = pendingResults;
-
-  // Verified tab: filters applied server-side in loadVerifiedResults
-  const verifiedPaginatedResults = verifiedResults;
 
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
@@ -324,29 +118,10 @@ export default function ResultsVerificationPage() {
     setVerifiedCurrentPage(1);
   }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
 
-  const ensureTemplateRangesMap = useCallback(async (): Promise<Record<string, any>> => {
-    if (Object.keys(templateNormalRangesByCode).length > 0) return templateNormalRangesByCode;
-    try {
-      const templatesRes = await labService.getTemplates({ page_size: DEFAULT_CATALOG_PAGE_SIZE });
-      const map: Record<string, any> = {};
-      for (const t of templatesRes.results || []) {
-        const code = (t as any)?.code;
-        if (code) map[String(code)] = (t as any)?.normal_range || {};
-      }
-      setTemplateNormalRangesByCode(map);
-      return map;
-    } catch {
-      return {};
-    }
-  }, [templateNormalRangesByCode]);
-
-  // Load results function - memoized to prevent infinite loops
   const loadResults = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-
-      const templatesMap = await ensureTemplateRangesMap();
 
       const params: any = {
         page: currentPage,
@@ -368,23 +143,24 @@ export default function ResultsVerificationPage() {
 
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
-      const transformedResults = response.results.map((r) => transformResult(r, templatesMap));
+      const transformedResults = response.results.map((r) =>
+        transformApiRowToVerificationLabResult(r as unknown as Record<string, unknown>),
+      );
       setResults(transformedResults);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load results');
       toast.error('Failed to load verification results. Please try again.');
       console.error('Error loading results:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, serverToday, ensureTemplateRangesMap]);
+  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, serverToday, handleAuthError]);
 
   const loadVerifiedResults = useCallback(async () => {
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
-
-      const templatesMap = await ensureTemplateRangesMap();
 
       const params: any = {
         page: verifiedCurrentPage,
@@ -408,15 +184,19 @@ export default function ResultsVerificationPage() {
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);
-      const transformedResults = response.results.map((r) => transformResult(r, templatesMap));
+      const transformedResults = response.results.map((r) =>
+        transformApiRowToVerificationLabResult(r as unknown as Record<string, unknown>),
+      );
       setVerifiedResults(transformedResults);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setVerifiedError(err.message || 'Failed to load verified results');
+      toast.error('Failed to load verified results. Please try again.');
       console.error('Error loading verified results:', err);
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter, ensureTemplateRangesMap]);
+  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter, handleAuthError]);
 
   const loadVerificationCounts = useCallback(async () => {
     const searching = Boolean(debouncedSearch);
@@ -440,19 +220,20 @@ export default function ResultsVerificationPage() {
 
   // Load results from API when page or filters change
   useEffect(() => {
+    if (!ready) return;
     loadResults();
-  }, [loadResults]);
+  }, [ready, loadResults]);
 
   useEffect(() => {
+    if (!ready) return;
     loadVerificationCounts();
-  }, [loadVerificationCounts]);
+  }, [ready, loadVerificationCounts]);
 
   // Load verified results when tab changes or filters change
   useEffect(() => {
-    if (activeTab === 'verified') {
-      loadVerifiedResults();
-    }
-  }, [activeTab, loadVerifiedResults]);
+    if (!ready || activeTab !== 'verified') return;
+    loadVerifiedResults();
+  }, [ready, activeTab, loadVerifiedResults]);
 
   // When searching, switch tab if the current one has no matches but the other does.
   useEffect(() => {
@@ -461,7 +242,7 @@ export default function ResultsVerificationPage() {
       autoTabRef.current = null;
       return;
     }
-    const pendingEmpty = activeTab === 'pending' && !loading && pendingResults.length === 0 && pendingTotalCount === 0;
+    const pendingEmpty = activeTab === 'pending' && !loading && results.length === 0 && pendingTotalCount === 0;
     const verifiedEmpty =
       activeTab === 'verified' && !verifiedLoading && verifiedResults.length === 0 && verifiedTotalCount === 0;
     if (!pendingEmpty && !verifiedEmpty) return;
@@ -481,7 +262,7 @@ export default function ResultsVerificationPage() {
     activeTab,
     loading,
     verifiedLoading,
-    pendingResults.length,
+    results.length,
     verifiedResults.length,
     pendingTotalCount,
     verifiedTotalCount,
@@ -539,6 +320,7 @@ export default function ResultsVerificationPage() {
       setIsVerifyDialogOpen(false);
       setVerificationNotes('');
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to verify result');
       console.error('Error verifying result:', err);
     } finally {
@@ -570,6 +352,7 @@ export default function ResultsVerificationPage() {
       setIsRejectDialogOpen(false);
       setRejectionReason('');
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to reject result');
       console.error('Error rejecting result:', err);
     } finally {
@@ -610,6 +393,7 @@ export default function ResultsVerificationPage() {
       setIsBatchVerifyOpen(false);
       setSelectedIds([]);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       toast.error(err.message || 'Failed to verify results');
       console.error('Error batch verifying:', err);
     } finally {
@@ -617,7 +401,7 @@ export default function ResultsVerificationPage() {
     }
   };
 
-  const downloadResult = async (result: LabResult) => {
+  const downloadResult = async (result: VerificationLabResult) => {
     try {
       await downloadOfficialLabReportPdf({
         labResultId: result.id,
@@ -626,6 +410,7 @@ export default function ResultsVerificationPage() {
         patientName: result.patient.name,
       });
     } catch (error) {
+      if (handleAuthError(error)) return;
       console.error('Error downloading PDF report:', error);
       toast.error('Failed to download PDF report');
     }
@@ -636,7 +421,7 @@ export default function ResultsVerificationPage() {
   };
 
   const toggleSelectAll = () => {
-    const visibleIds = paginatedResults.map(r => r.id);
+    const visibleIds = results.map(r => r.id);
     const allSelected = visibleIds.every(id => selectedIds.includes(id));
     if (allSelected) {
       setSelectedIds(prev => prev.filter(id => !visibleIds.includes(id)));
@@ -649,12 +434,12 @@ export default function ResultsVerificationPage() {
     }
   };
 
-  const allIdsSelected = paginatedResults.length > 0 && paginatedResults.every(r => selectedIds.includes(r.id));
+  const allIdsSelected = results.length > 0 && results.every(r => selectedIds.includes(r.id));
   const someIdsSelected = selectedIds.length > 0 && !allIdsSelected;
 
-  const openViewDialog = (result: LabResult) => { setSelectedResult(result); setIsViewDialogOpen(true); };
-  const openVerifyDialog = (result: LabResult) => { setSelectedResult(result); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
-  const openRejectDialog = (result: LabResult) => { setSelectedResult(result); setRejectionReason(''); setIsRejectDialogOpen(true); };
+  const openViewDialog = (result: VerificationLabResult) => { setSelectedResult(result); setIsViewDialogOpen(true); };
+  const openVerifyDialog = (result: VerificationLabResult) => { setSelectedResult(result); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
+  const openRejectDialog = (result: VerificationLabResult) => { setSelectedResult(result); setRejectionReason(''); setIsRejectDialogOpen(true); };
   const isSelectedResultMutable = selectedResult?.status === LAB_TEST_STATUS.RESULTS_READY;
   const canVerifySelectedResult = Boolean(
     selectedResult &&
@@ -673,17 +458,15 @@ export default function ResultsVerificationPage() {
           <p className="text-muted-foreground mt-1">Senior Admin / Pathologist - Verify lab results before completion</p>
         </div>
 
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LabVerificationTab)} className="w-full space-y-4 sm:space-y-6">
         {/* Tabs & Filters */}
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LabVerificationTab)} className="w-full">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending Review ({pendingTotalCount})</TabsTrigger>
-                  <TabsTrigger value="verified">Verified ({verifiedTotalCount})</TabsTrigger>
-                  <TabsTrigger value="all">All</TabsTrigger>
-                </TabsList>
-              </Tabs>
+              <TabsList>
+                <TabsTrigger value="pending">Pending Review ({pendingTotalCount})</TabsTrigger>
+                <TabsTrigger value="verified">Verified ({verifiedTotalCount})</TabsTrigger>
+              </TabsList>
               <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
                 <div className="relative flex-1 min-w-[min(100%,16rem)]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -747,8 +530,6 @@ export default function ResultsVerificationPage() {
           </CardContent>
         </Card>
 
-        {/* Tab Content */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LabVerificationTab)} className="w-full">
           {/* Pending Review Tab */}
           <TabsContent value="pending" className="space-y-6">
 
@@ -776,14 +557,14 @@ export default function ResultsVerificationPage() {
             )}
 
             {/* Pending Results List */}
-        {!loading && !error && paginatedResults.length > 0 && (
+        {!loading && !error && results.length > 0 && (
           <div className="flex items-center gap-2 px-1 py-2 border rounded-lg bg-background">
             <Checkbox
               checked={allIdsSelected}
               onCheckedChange={toggleSelectAll}
             />
             <span className="text-xs font-medium text-muted-foreground">
-              {allIdsSelected ? `${paginatedResults.length} selected` : someIdsSelected ? `${selectedIds.length} selected` : 'Select All'}
+              {allIdsSelected ? `${results.length} selected` : someIdsSelected ? `${selectedIds.length} selected` : 'Select All'}
             </span>
           </div>
         )}
@@ -799,13 +580,13 @@ export default function ResultsVerificationPage() {
               <p className="text-red-600 dark:text-red-400">{error}</p>
               <Button variant="outline" className="mt-4" onClick={loadResults}>Retry</Button>
             </CardContent></Card>
-          ) : paginatedResults.length === 0 ? (
+          ) : results.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No results pending verification</p>
             </CardContent></Card>
           ) : (
-            paginatedResults
+            results
               .sort((a, b) => {
                 const statusOrder = { Critical: 0, Abnormal: 1, Normal: 2 };
                 const priorityOrder = { STAT: 0, Urgent: 1, Routine: 2 };
@@ -913,7 +694,7 @@ export default function ResultsVerificationPage() {
                   <p>No verified results found</p>
                 </CardContent></Card>
               ) : (
-                verifiedPaginatedResults
+                verifiedResults
                   .sort((a, b) => {
                     const statusOrder = { Critical: 0, Abnormal: 1, Normal: 2 };
                     const priorityOrder = { STAT: 0, Urgent: 1, Routine: 2 };
@@ -993,20 +774,11 @@ export default function ResultsVerificationPage() {
               </Card>
             )}
           </TabsContent>
-
-          {/* All Tab */}
-          <TabsContent value="all" className="space-y-6">
-            <div className="text-center py-12 text-muted-foreground">
-              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">All Results</p>
-              <p className="text-sm">Combined view of pending and verified results</p>
-            </div>
-          </TabsContent>
         </Tabs>
 
         {/* Dialogs */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Result Details</DialogTitle>
               <DialogDescription>{selectedResult?.testName} - {selectedResult?.patient.name}</DialogDescription>
@@ -1187,7 +959,7 @@ export default function ResultsVerificationPage() {
 
         {/* Verify Dialog */}
         <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-500" />Verify Result</DialogTitle>
               <DialogDescription>Confirm verification for {selectedResult?.patient.name}</DialogDescription>
@@ -1225,7 +997,7 @@ export default function ResultsVerificationPage() {
 
         {/* Reject Dialog */}
         <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-rose-600"><XCircle className="h-5 w-5" />Reject Result</DialogTitle>
               <DialogDescription>Send back for correction</DialogDescription>

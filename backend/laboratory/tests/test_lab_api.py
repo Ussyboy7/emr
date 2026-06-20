@@ -154,6 +154,99 @@ class LabOrderListFilterTests(APITestCase):
             self.assertIn(key, resp.data)
 
 
+class LabOrderWorkflowTabFilterTests(APITestCase):
+    """GET /api/v1/laboratory/orders/?workflow_tab=… — tab-scoped list."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = create_test_user(
+            "lab_api_wf_tab",
+            pages=["/laboratory"],
+            system_role="Laboratory Scientist",
+        )
+        cls.patient, _ = create_test_patient_visit(patient_id="LABAPI-WF-01")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+        self.order_pending = LabOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        LabTest.objects.create(
+            order=self.order_pending,
+            name="FBC",
+            code="FBC",
+            sample_type="Blood",
+            status="pending",
+        )
+        self.order_processing = LabOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        LabTest.objects.create(
+            order=self.order_processing,
+            name="Glucose",
+            code="GLU",
+            sample_type="Blood",
+            status="processing",
+        )
+        self.order_results = LabOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        LabTest.objects.create(
+            order=self.order_results,
+            name="LFT",
+            code="LFT",
+            sample_type="Blood",
+            status="results_ready",
+        )
+        self.order_rejected = LabOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        LabTest.objects.create(
+            order=self.order_rejected,
+            name="ESR",
+            code="ESR",
+            sample_type="Blood",
+            status="rejected",
+        )
+
+    def test_workflow_tab_pending(self):
+        resp = self.client.get(f"{BASE}/orders/", {"workflow_tab": "pending"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in resp.data["results"]}
+        self.assertEqual(ids, {self.order_pending.pk})
+
+    def test_workflow_tab_processing(self):
+        resp = self.client.get(f"{BASE}/orders/", {"workflow_tab": "processing"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in resp.data["results"]}
+        self.assertEqual(ids, {self.order_processing.pk})
+
+    def test_workflow_tab_results_ready_alias(self):
+        for tab in ("results", "results_ready"):
+            resp = self.client.get(f"{BASE}/orders/", {"workflow_tab": tab})
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+            ids = {row["id"] for row in resp.data["results"]}
+            self.assertEqual(ids, {self.order_results.pk})
+
+    def test_workflow_tab_rejected(self):
+        resp = self.client.get(f"{BASE}/orders/", {"workflow_tab": "rejected"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in resp.data["results"]}
+        self.assertEqual(ids, {self.order_rejected.pk})
+
+
 class LabSampleCollectionTests(APITestCase):
     """POST /api/v1/laboratory/orders/{id}/collect_samples/"""
 

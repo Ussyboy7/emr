@@ -28,6 +28,20 @@ class AuditLogListTest(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertGreaterEqual(resp.data["count"], 2)
 
+    def test_admin_audit_page_user_sees_org_wide_logs(self):
+        audit_user = create_test_user("audit_page_user", pages=["/admin/audit"])
+        self.client.force_authenticate(user=audit_user)
+        resp = self.client.get("/api/v1/audit/logs/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(resp.data["count"], 2)
+
+    def test_admin_dashboard_page_user_sees_org_wide_logs(self):
+        admin_user = create_test_user("admin_hub_user", pages=["/admin"])
+        self.client.force_authenticate(user=admin_user)
+        resp = self.client.get("/api/v1/audit/logs/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(resp.data["count"], 2)
+
     def test_normal_user_sees_own_logs_only(self):
         self.client.force_authenticate(user=self.normal)
         resp = self.client.get("/api/v1/audit/logs/")

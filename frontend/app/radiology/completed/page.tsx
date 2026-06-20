@@ -22,6 +22,8 @@ import {
 } from '@/lib/radiology/completedRadiologyReport';
 import { downloadRadiologyReportFile, printRadiologyReport } from '@/lib/radiology/radiologyReportActions';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
 import { useServerToday } from '@/hooks/use-server-today';
 
 import {
@@ -33,6 +35,7 @@ import { useClinic } from "@/hooks/use-clinic";
 import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 
 export default function CompletedReportsPage() {
+  const { ready, handleAuthError } = useRadiologyPageAuth();
   const serverToday = useServerToday();
   const searchParams = useSearchParams();
   const urlHydrated = useRef(false);
@@ -40,6 +43,7 @@ export default function CompletedReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
@@ -99,10 +103,12 @@ export default function CompletedReportsPage() {
     try {
       const clinicsResult = await adminService.getClinics({ page_size: MAX_LIST_PAGE_SIZE });
       setClinics(clinicsResult.results);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to load clinics:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to load clinics');
     }
-  }, []);
+  }, [handleAuthError]);
 
   // Load completed reports function - memoized to prevent infinite loops
   const loadReports = useCallback(async () => {
@@ -112,14 +118,14 @@ export default function CompletedReportsPage() {
       const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
-        search: searchQuery.trim() || undefined,
+        search: debouncedSearchQuery.trim() || undefined,
         clinic: !isMultiClinic && clinicFilter !== 'all' ? clinicFilter : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
       };
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
       }
-      const searching = Boolean(searchQuery.trim());
+      const searching = Boolean(debouncedSearchQuery.trim());
       const allTime = dateFilter === 'all' || searching;
       if (!allTime) {
         Object.assign(params, buildDateQuery(dateFilter));
@@ -135,7 +141,7 @@ export default function CompletedReportsPage() {
         radiologyService.getVerificationStats({
           status: 'verified',
           overall_status: statusFilter !== 'all' ? statusFilter : undefined,
-          search: searchQuery.trim() || undefined,
+          search: debouncedSearchQuery.trim() || undefined,
           clinic: !isMultiClinic && clinicFilter !== 'all' ? clinicFilter : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
           ...(allTime
@@ -162,28 +168,29 @@ export default function CompletedReportsPage() {
 
       setReports(transformedReports);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load completed reports');
       toast.error('Failed to load completed reports. Please try again.');
       console.error('Error loading reports:', err);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to, buildDateQuery]);
+  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to, buildDateQuery, isMultiClinic, handleAuthError]);
 
-  // Load clinics on component mount
   useEffect(() => {
-    loadClinics();
-  }, [loadClinics]);
-
-  // Load reports from API when page or filters change
-  useEffect(() => {
+    if (!ready) return;
     loadReports();
-  }, [loadReports]);
+  }, [ready, loadReports]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadClinics();
+  }, [ready, loadClinics]);
 
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });

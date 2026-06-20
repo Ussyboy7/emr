@@ -77,6 +77,7 @@ ICT_SUPPORT_PAGES: tuple[str, ...] = (
     "/admin/users",
     "/admin/clinics",
     "/admin/health",
+    "/admin/support-tickets",
 )
 ICT_SUPPORT_DESCRIPTION = (
     "ICT helpdesk access — user and clinic administration, system health. "

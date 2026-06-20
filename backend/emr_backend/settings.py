@@ -288,8 +288,13 @@ REST_FRAMEWORK = {
         "auth_password_reset": os.getenv("THROTTLE_AUTH_PW_RESET", "5/hour"),
         "file_upload": os.getenv("THROTTLE_FILE_UPLOAD", "60/hour"),
         "reports_export": os.getenv("THROTTLE_REPORTS_EXPORT", "30/hour"),
+        "support_ticket": os.getenv("THROTTLE_SUPPORT_TICKET", "10/hour"),
     },
 }
+
+# Help desk notification target for support tickets (audit log is always written).
+EMR_SUPPORT_EMAIL = os.getenv("EMR_SUPPORT_EMAIL", "emr-support@nigerianports.gov.ng")
+EMR_SUPPORT_PHONE = os.getenv("EMR_SUPPORT_PHONE", "Contact your site IT desk for the helpdesk extension")
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "NPA EMR API",

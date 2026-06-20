@@ -39,7 +39,7 @@ docs-check:
 TEST_DB_ENV=DB_HOST=localhost DB_PORT=5435 DB_NAME=emr_db_local DB_USER=emradmin DB_PASSWORD=emradmin DJANGO_SETTINGS_MODULE=emr_backend.settings_test
 
 test-backend:
-	cd backend && $(TEST_DB_ENV) $(PYTHON) manage.py test accounts analytics.tests appointments audit.tests consultation common dashboard.tests eyecare hr.tests laboratory notifications nursing organization.tests patients permissions pharmacy physiotherapy radiology reports.tests wards --verbosity=1
+	cd backend && $(TEST_DB_ENV) $(PYTHON) manage.py test accounts analytics.tests appointments audit.tests consultation common dashboard.tests eyecare hr.tests laboratory notifications nursing organization.tests patients permissions pharmacy physiotherapy radiology reports.tests support.tests wards --verbosity=1
 
 test-backend-coverage:
 	cd backend && $(TEST_DB_ENV) $(PYTHON) -m coverage run --source=. manage.py test --verbosity=0

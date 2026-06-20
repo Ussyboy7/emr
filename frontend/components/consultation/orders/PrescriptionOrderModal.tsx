@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertTriangle, Loader2, Pill, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { pharmacyService } from "@/lib/services";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 
 /** Match consultation room: "Name (strength, form)" */
 function formatMedicationVariantLabel(med: { name?: string; strength?: string; form?: string; dosage_form?: string }): string {
@@ -475,7 +476,7 @@ export function PrescriptionOrderModal({
         if (!next) reset();
       }}
     >
-      <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.ml}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Pill className="h-5 w-5 text-violet-500" />

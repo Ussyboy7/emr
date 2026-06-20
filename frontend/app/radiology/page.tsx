@@ -20,13 +20,12 @@ import {
 } from "lucide-react";
 import { radiologyService, type RadiologyOrder } from "@/lib/services";
 import { PREVIEW_PAGE_SIZE } from "@/lib/pagination-constants";
-import { useAuthRedirect } from "@/hooks/use-auth-redirect";
+import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
 import {
   DEFAULT_CLINIC_DASHBOARD_POLL_MS,
   useReloadOnFocus,
-} from "@/hooks/use-reload-on-focus";
-import { isAuthenticationError } from "@/lib/auth-errors";
-import { useServerToday } from "@/hooks/use-server-today";
+} from '@/hooks/use-reload-on-focus';
+import { useServerToday } from '@/hooks/use-server-today';
 import { joinDisplayParts } from "@/lib/utils/clinic-utils";
 import { toast } from "sonner";
 import { RadiologyPatientFinder } from "@/components/radiology/RadiologyPatientFinder";
@@ -57,9 +56,8 @@ function formatOrderedAt(iso?: string): string {
 export default function RadiologyPage() {
   const router = useRouter();
   const serverToday = useServerToday();
+  const { ready, handleAuthError } = useRadiologyPageAuth();
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<unknown>(null);
-  useAuthRedirect(authError);
 
   const [stats, setStats] = useState<RadiologyDashboardStats>({
     pending: 0,
@@ -68,20 +66,28 @@ export default function RadiologyPage() {
     critical: 0,
     stat: 0,
   });
+  const [pendingPreview, setPendingPreview] = useState<RadiologyOrder[]>([]);
   const [recentOrders, setRecentOrders] = useState<RadiologyOrder[]>([]);
 
   const loadData = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!serverToday) return;
     try {
       if (!opts.silent) setLoading(true);
-      const [orderStats, verificationStats, ordersRes] = await Promise.all([
-        radiologyService.getOrderStats({ date: serverToday }),
-        radiologyService.getVerificationStats({ date: serverToday }).catch(() => ({
-          total: 0,
-          normal: 0,
-          abnormal: 0,
-          critical: 0,
-        })),
-        radiologyService.getOrders({ date: serverToday, page: 1, page_size: PREVIEW_PAGE_SIZE }),
+      const dateQuery = { date: serverToday };
+      const [orderStats, verificationStats, pendingRes, activityRes] = await Promise.all([
+        radiologyService.getOrderStats(dateQuery),
+        radiologyService.getVerificationStats({ ...dateQuery, status: 'verified' }),
+        radiologyService.getOrders({
+          ...dateQuery,
+          study_status: 'pending',
+          page: 1,
+          page_size: PREVIEW_PAGE_SIZE,
+        }),
+        radiologyService.getOrders({
+          ...dateQuery,
+          page: 1,
+          page_size: PREVIEW_PAGE_SIZE,
+        }),
       ]);
 
       setStats({
@@ -91,26 +97,33 @@ export default function RadiologyPage() {
         critical: verificationStats.critical ?? 0,
         stat: orderStats.stat ?? 0,
       });
-      setRecentOrders(ordersRes.results ?? []);
+      setPendingPreview(pendingRes.results ?? []);
+      setRecentOrders(activityRes.results ?? []);
     } catch (error) {
-      console.error("Failed to load radiology dashboard:", error);
-      if (isAuthenticationError(error)) {
-        setAuthError(error);
-      } else if (!opts.silent) {
-        toast.error("Failed to load radiology dashboard. Please try again.");
+      console.error('Failed to load radiology dashboard:', error);
+      if (handleAuthError(error)) return;
+      if (!opts.silent) {
+        toast.error('Failed to load radiology dashboard. Please try again.');
       }
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, [serverToday]);
+  }, [serverToday, handleAuthError]);
 
   useEffect(() => {
+    if (!ready || !serverToday) return;
     void loadData();
-  }, [loadData]);
+  }, [ready, serverToday, loadData]);
 
-  useReloadOnFocus(() => loadData({ silent: true }), {
-    pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
-  });
+  useReloadOnFocus(
+    () => {
+      if (!ready || !serverToday) return;
+      void loadData({ silent: true });
+    },
+    {
+      pollIntervalMs: DEFAULT_CLINIC_DASHBOARD_POLL_MS,
+    },
+  );
 
   const activeWorkCount = useMemo(
     () => stats.pending + stats.inProgress + stats.awaitingReport + stats.stat,
@@ -417,10 +430,10 @@ export default function RadiologyPage() {
                         onView={() => router.push("/radiology/verification")}
                       />
                     )}
-                    {recentOrders.length > 0 && (
+                    {pendingPreview.length > 0 && (
                       <div className="pt-2 border-t space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">Recent orders today</p>
-                        {recentOrders.slice(0, 3).map((order) => (
+                        <p className="text-xs font-medium text-muted-foreground">Pending workflow preview</p>
+                        {pendingPreview.slice(0, 3).map((order) => (
                           <div
                             key={order.id}
                             className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"

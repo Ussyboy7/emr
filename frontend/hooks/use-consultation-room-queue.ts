@@ -4,9 +4,8 @@ import type { ConsultationRoomPatient } from '@/lib/consultation/room-types';
 import { mapQueueItemsToPatients } from '@/lib/consultation/room-queue';
 import {
   filterPausedSessionsForPatient,
-  PAUSED_SESSIONS_LIST_PAGE_SIZE,
 } from '@/lib/consultation/room-paused-sessions';
-import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
 import { consultationService, type ConsultationSession } from '@/lib/services';
 
 export type RoomQueueDialogEntry = {
@@ -36,15 +35,17 @@ export function useConsultationRoomQueue(
 
     setLoadingPausedSessions(true);
     try {
-      const resp = await consultationService.getSessions({
-        room: numericRoomId,
-        status: 'paused',
-        page: 1,
-        page_size: PAUSED_SESSIONS_LIST_PAGE_SIZE,
-        ordering: 'started_at',
-      });
-      setPausedSessions(resp.results || []);
-      setPausedSessionsTotalCount(typeof resp.count === 'number' ? resp.count : null);
+      const sessions = await fetchAllPaginatedResults((page, pageSize) =>
+        consultationService.getSessions({
+          room: numericRoomId,
+          status: 'paused',
+          page,
+          page_size: pageSize,
+          ordering: 'started_at',
+        })
+      );
+      setPausedSessions(sessions);
+      setPausedSessionsTotalCount(sessions.length);
     } catch (err) {
       console.error('Error loading paused sessions:', err);
       setPausedSessions([]);
@@ -62,11 +63,9 @@ export function useConsultationRoomQueue(
     [pausedSessions],
   );
 
-  const pausedSessionsListIncomplete =
-    pausedSessionsTotalCount != null && pausedSessionsTotalCount > pausedSessionsSorted.length;
+  const pausedSessionsListIncomplete = false;
 
-  const pausedSessionsUnknownTotal =
-    pausedSessionsSorted.length >= PAUSED_SESSIONS_LIST_PAGE_SIZE && pausedSessionsTotalCount == null;
+  const pausedSessionsUnknownTotal = false;
 
   const findPausedSessionsForPatient = useCallback(
     (patient: ConsultationRoomPatient): ConsultationSession[] => {
@@ -108,12 +107,15 @@ export function useConsultationRoomQueue(
         const numericRoomId = parseInt(roomId, 10);
         if (Number.isNaN(numericRoomId)) return;
 
-        const queueResult = await consultationService.getQueue({
-          room: numericRoomId,
-          is_active: true,
-          page_size: MAX_LIST_PAGE_SIZE,
-        });
-        setPatients(mapQueueItemsToPatients(queueResult.results || []));
+        const queueItems = await fetchAllPaginatedResults((page, pageSize) =>
+          consultationService.getQueue({
+            room: numericRoomId,
+            is_active: true,
+            page,
+            page_size: pageSize,
+          })
+        );
+        setPatients(mapQueueItemsToPatients(queueItems));
         await loadPausedSessions();
       } catch (err) {
         console.error('Error refreshing queue:', err);

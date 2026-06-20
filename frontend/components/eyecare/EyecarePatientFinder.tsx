@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { isAuthenticationError } from '@/lib/auth-errors';
 import { eyeCareService } from '@/lib/services/eye-care-service';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import {
@@ -27,6 +29,7 @@ type TrackerHit = {
   tab: string;
   screen_label: string;
   tab_label: string;
+  href_screen?: string;
   is_active: boolean;
 };
 
@@ -49,7 +52,9 @@ export function EyecarePatientFinder() {
     try {
       const res = await eyeCareService.getPatientTracker(q);
       setHits(res.results || []);
-    } catch {
+    } catch (err) {
+      if (isAuthenticationError(err)) return;
+      toast.error('Patient search failed');
       setHits([]);
     } finally {
       setLoading(false);
@@ -121,7 +126,13 @@ export function EyecarePatientFinder() {
                   </div>
                 </div>
                 <Button variant="outline" size="sm" className="shrink-0" asChild>
-                  <Link href={buildEyecareOrdersHref(searchTerm, hit.tab as EyecareOrdersTab)}>
+                  <Link
+                    href={
+                      hit.screen === 'completed' || hit.href_screen === 'completed'
+                        ? buildEyecareCompletedHref(searchTerm)
+                        : buildEyecareOrdersHref(searchTerm, hit.tab as EyecareOrdersTab)
+                    }
+                  >
                     Open
                     <ArrowRight className="h-3.5 w-3.5 ml-1" />
                   </Link>

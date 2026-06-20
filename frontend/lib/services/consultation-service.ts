@@ -309,6 +309,7 @@ class ConsultationService {
   /** History page stat cards (replaces 4 parallel COUNT list calls). */
   async getHistoryStats(params?: {
     clinic?: string;
+    doctor?: number;
     date?: string;
     start_date?: string;
     end_date?: string;

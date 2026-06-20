@@ -16,7 +16,15 @@ from django_filters.rest_framework import DjangoFilterBackend
 from audit.services import AuditService
 from patients.models import AnnualCheckup, AnnualCheckupExemption
 
-from .compliance import build_compliance_rows, compliance_summary
+from django.db.models import Q
+
+from .compliance import (
+    DEFAULT_COMPLIANCE_PAGE_SIZE,
+    MAX_COMPLIANCE_PAGE_SIZE,
+    build_compliance_rows,
+    compliance_summary,
+    paginate_compliance,
+)
 from .permissions import IsHumanResources
 from permissions.drf_permissions import ApiPageAccessPermission
 from drf_spectacular.utils import extend_schema, extend_schema_view
@@ -40,11 +48,23 @@ class HRComplianceViewSet(viewsets.ViewSet):
 
     def list(self, request):
         year = int(request.query_params.get("programme_year") or timezone.now().year)
-        rows = build_compliance_rows(
+        try:
+            page = max(1, int(request.query_params.get("page") or 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.query_params.get("page_size") or DEFAULT_COMPLIANCE_PAGE_SIZE)
+        except (TypeError, ValueError):
+            page_size = DEFAULT_COMPLIANCE_PAGE_SIZE
+        page_size = min(MAX_COMPLIANCE_PAGE_SIZE, max(1, page_size))
+
+        rows, summary, count = paginate_compliance(
             year,
             division=request.query_params.get("division") or None,
             compliance_status=request.query_params.get("status") or None,
             search=request.query_params.get("search") or None,
+            page=page,
+            page_size=page_size,
         )
         serializer = HRComplianceRowSerializer(rows, many=True)
         AuditService.log_activity(
@@ -60,9 +80,11 @@ class HRComplianceViewSet(viewsets.ViewSet):
         return Response(
             {
                 "programme_year": year,
-                "summary": compliance_summary(year),
+                "summary": summary,
                 "results": serializer.data,
-                "count": len(serializer.data),
+                "count": count,
+                "page": page,
+                "page_size": page_size,
             }
         )
 
@@ -149,7 +171,7 @@ class HRComplianceViewSet(viewsets.ViewSet):
             try:
                 with checkup.outcome_letter_pdf.open("rb") as fh:
                     pdf_bytes = fh.read()
-            except Exception:
+            except OSError:
                 pdf_bytes = build_hr_outcome_letter_pdf(checkup)
         else:
             pdf_bytes = build_hr_outcome_letter_pdf(checkup)
@@ -181,12 +203,21 @@ class AnnualCheckupExemptionViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        if getattr(self, 'swagger_fake_view', False):
+        if getattr(self, "swagger_fake_view", False):
             return AnnualCheckupExemption.objects.none()
-        
-        return AnnualCheckupExemption.objects.select_related(
-            "patient", "granted_by"
-        )
+
+        qs = AnnualCheckupExemption.objects.select_related("patient", "granted_by")
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(patient__surname__icontains=search)
+                | Q(patient__first_name__icontains=search)
+                | Q(patient__patient_id__icontains=search)
+                | Q(patient__personal_number__icontains=search)
+                | Q(notes__icontains=search)
+                | Q(reason__icontains=search)
+            )
+        return qs
 
     def perform_create(self, serializer):
         exemption = serializer.save()

@@ -1,8 +1,0 @@
-export default function RadiologyStudiesPage() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Radiology Studies</h1>
-      <p className="text-muted-foreground">Radiology studies and orders will be displayed here.</p>
-    </div>
-  );
-}

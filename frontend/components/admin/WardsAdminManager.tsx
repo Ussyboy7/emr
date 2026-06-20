@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import {
   BedDouble,
   Building2,
@@ -458,7 +459,7 @@ export const WardsAdminManager = forwardRef<
 
       {/* Ward create / edit */}
       <Dialog open={wardDialogOpen} onOpenChange={setWardDialogOpen}>
-        <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle>{editingWardId ? "Edit ward" : "Add ward"}</DialogTitle>
             <DialogDescription>
@@ -620,7 +621,7 @@ export const WardsAdminManager = forwardRef<
           if (!o) setBedsWard(null);
         }}
       >
-        <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BedDouble className="h-5 w-5" />
@@ -700,7 +701,7 @@ export const WardsAdminManager = forwardRef<
 
       {/* Bed create / edit */}
       <Dialog open={bedDialogOpen} onOpenChange={setBedDialogOpen}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className={MODAL_SIZES.xs}>
           <DialogHeader>
             <DialogTitle>{editingBed ? "Edit bed" : "Add bed"}</DialogTitle>
           </DialogHeader>

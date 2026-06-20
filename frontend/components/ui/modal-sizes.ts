@@ -70,6 +70,12 @@ export const MODAL_SIZES = {
   full: "w-[95vw] max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col",
 } as const;
 
+/** Right-side sheets — width aligned with dialog scale. */
+export const SHEET_SIZES = {
+  md: "w-full sm:max-w-[600px] overflow-y-auto",
+  lg: "w-full sm:max-w-[800px] overflow-y-auto",
+} as const;
+
 /**
  * Modal with custom max-height
  * Use when content needs specific height constraints

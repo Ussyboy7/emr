@@ -34,8 +34,19 @@ export function complianceStatusBorderClass(status: ComplianceStatus | string): 
   }
 }
 
-export function exemptionReasonBadgeClass(_reason?: string): string {
-  return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
+export function exemptionReasonBadgeClass(reason?: string): string {
+  switch (reason) {
+    case 'maternity':
+      return 'border-pink-500/50 text-pink-600 dark:text-pink-400 bg-pink-500/10';
+    case 'medical':
+      return 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-500/10';
+    case 'on_leave':
+      return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
+    case 'secondment':
+      return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
+    default:
+      return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
+  }
 }
 
 export function employeeInitials(name: string): string {

@@ -61,9 +61,8 @@ class PhysioTemplateViewSet(viewsets.ModelViewSet):
 @document_viewset(tag="Physiotherapy", resource="physio orders")
 class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     pagination_class = StandardPageNumberPagination
-    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = PhysioOrderFilter
-    search_fields = ["patient__surname", "patient__first_name", "patient__middle_name", "patient__patient_id"]
     ordering_fields = ["ordered_at", "scheduled_at", "status"]
     ordering = ["-ordered_at"]
 

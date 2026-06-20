@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useAdminPageAuth } from "@/hooks/use-admin-page-auth";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { toApiDateFromInstant } from "@/lib/dates";
@@ -42,6 +44,7 @@ interface Role {
   name: string;
   description: string;
   type: 'System' | 'Clinical' | 'Administrative' | 'Custom';
+  backendType: 'admin' | 'doctor' | 'nurse' | 'lab_tech' | 'pharmacist' | 'radiologist' | 'records' | 'custom';
   permissions: string[];
   capabilities: string[];
   userCount: number;
@@ -49,6 +52,9 @@ interface Role {
   createdAt: string;
   updatedAt: string;
 }
+
+type BackendRoleType = Role['backendType'];
+const CLINICAL_BACKEND_TYPES: BackendRoleType[] = ['doctor', 'nurse', 'lab_tech', 'pharmacist', 'radiologist'];
 
 interface SystemRole {
   id: number;
@@ -74,6 +80,7 @@ function mapTypeFilterToTypeGroup(typeFilter: string): string | undefined {
 }
 
 export default function RolesPermissionsPage() {
+  const { ready, handleAuthError } = useAdminPageAuth();
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +118,7 @@ export default function RolesPermissionsPage() {
     name: '',
     description: '',
     type: 'Clinical' as Role['type'],
+    clinicalSubtype: 'doctor' as BackendRoleType,
     permissions: [] as string[],
     capabilities: [] as string[],
     isActive: true,
@@ -135,15 +143,20 @@ export default function RolesPermissionsPage() {
     return typeMap[backendType] || 'Custom';
   };
 
-  // Map frontend role types to backend types
-  const mapToBackendType = (frontendType: Role['type']): 'admin' | 'doctor' | 'nurse' | 'lab_tech' | 'pharmacist' | 'radiologist' | 'records' | 'custom' => {
-    const typeMap: Record<Role['type'], 'admin' | 'doctor' | 'nurse' | 'lab_tech' | 'pharmacist' | 'radiologist' | 'records' | 'custom'> = {
-      'System': 'admin',
-      'Clinical': 'doctor', // Default to doctor for clinical
-      'Administrative': 'records',
-      'Custom': 'custom',
+  // Map frontend role types to backend types (preserve clinical subtype on edit)
+  const mapToBackendType = (
+    frontendType: Role['type'],
+    clinicalSubtype: BackendRoleType = 'doctor',
+  ): BackendRoleType => {
+    if (frontendType === 'Clinical') {
+      return CLINICAL_BACKEND_TYPES.includes(clinicalSubtype) ? clinicalSubtype : 'doctor';
+    }
+    const typeMap: Record<Exclude<Role['type'], 'Clinical'>, BackendRoleType> = {
+      System: 'admin',
+      Administrative: 'records',
+      Custom: 'custom',
     };
-    return typeMap[frontendType] || 'custom';
+    return typeMap[frontendType as Exclude<Role['type'], 'Clinical'>] || 'custom';
   };
 
   // Convert permissions from frontend array format to backend page-based format
@@ -186,6 +199,7 @@ export default function RolesPermissionsPage() {
         name: role.name,
         description: role.description || '',
         type: mapRoleType(role.type),
+        backendType: (role.type || 'custom') as BackendRoleType,
         permissions: normalizeRolePagePaths(convertPermissionsFromBackend(role.permissions)),
         capabilities: convertCapabilitiesFromBackend(role.permissions),
         userCount: role.user_count || 0,
@@ -196,6 +210,7 @@ export default function RolesPermissionsPage() {
 
       setRoles(transformedRoles);
     } catch (err: any) {
+      if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load roles');
       toast.error('Failed to load roles. Please try again.');
       console.error('Error loading roles:', err);
@@ -261,7 +276,17 @@ export default function RolesPermissionsPage() {
     }));
   };
 
-  const resetForm = () => { setFormData({ name: '', description: '', type: 'Clinical', permissions: [], capabilities: [], isActive: true }); };
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      description: '',
+      type: 'Clinical',
+      clinicalSubtype: 'doctor',
+      permissions: [],
+      capabilities: [],
+      isActive: true,
+    });
+  };
   const openCreate = () => { resetForm(); setIsCreateDialogOpen(true); };
   const openView = (role: Role) => { setSelectedRole(role); setIsViewDialogOpen(true); };
   const openEdit = (role: Role) => {
@@ -270,6 +295,7 @@ export default function RolesPermissionsPage() {
       name: role.name,
       description: role.description,
       type: role.type,
+      clinicalSubtype: CLINICAL_BACKEND_TYPES.includes(role.backendType) ? role.backendType : 'doctor',
       permissions: role.permissions,
       capabilities: role.capabilities,
       isActive: role.isActive,
@@ -287,6 +313,7 @@ export default function RolesPermissionsPage() {
         ? `${role.description} — support-level access (review pages and capabilities).`
         : 'Support-level access — review pages and capabilities before assigning.',
       type: role.type === 'System' ? 'Custom' : role.type,
+      clinicalSubtype: CLINICAL_BACKEND_TYPES.includes(role.backendType) ? role.backendType : 'doctor',
       permissions: [...role.permissions],
       capabilities: role.capabilities.filter((cap) => !SENSITIVE_CAPABILITY_IDS.includes(cap as typeof SENSITIVE_CAPABILITY_IDS[number])),
       isActive: true,
@@ -378,7 +405,7 @@ export default function RolesPermissionsPage() {
       await adminService.createRole({
         name: formData.name,
         description: formData.description,
-        type: mapToBackendType(formData.type),
+        type: mapToBackendType(formData.type, formData.clinicalSubtype),
         permissions: convertPermissionsToBackend(formData.permissions, formData.capabilities),
         is_active: formData.isActive,
       });
@@ -404,7 +431,7 @@ export default function RolesPermissionsPage() {
       await adminService.updateRole(roleId, {
         name: formData.name,
         description: formData.description,
-        type: mapToBackendType(formData.type),
+        type: mapToBackendType(formData.type, formData.clinicalSubtype),
         permissions: convertPermissionsToBackend(formData.permissions, formData.capabilities),
         is_active: formData.isActive,
       });
@@ -440,6 +467,16 @@ export default function RolesPermissionsPage() {
       setIsSubmitting(false);
     }
   };
+
+  if (!ready) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -725,7 +762,7 @@ export default function RolesPermissionsPage() {
         </Tabs>
 
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{isCreateDialogOpen ? 'Create Role' : 'Edit Role'}</DialogTitle><DialogDescription>{isCreateDialogOpen ? 'Define a new role with specific permissions' : `Update "${selectedRole?.name}" role settings`}</DialogDescription></DialogHeader>
             <Tabs defaultValue="details" className="mt-4">
               <TabsList className="grid w-full grid-cols-3">
@@ -738,6 +775,24 @@ export default function RolesPermissionsPage() {
                 <div className="space-y-2"><Label>Description</Label><Input value={formData.description} onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))} placeholder="Brief description" /></div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2"><Label>Role Type</Label><Select value={formData.type} onValueChange={(v) => setFormData(prev => ({ ...prev, type: v as Role['type'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Clinical">Clinical</SelectItem><SelectItem value="Administrative">Administrative</SelectItem><SelectItem value="Custom">Custom</SelectItem></SelectContent></Select></div>
+                  {formData.type === 'Clinical' ? (
+                    <div className="space-y-2">
+                      <Label>Clinical specialty</Label>
+                      <Select
+                        value={formData.clinicalSubtype}
+                        onValueChange={(v) => setFormData(prev => ({ ...prev, clinicalSubtype: v as BackendRoleType }))}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="doctor">Doctor</SelectItem>
+                          <SelectItem value="nurse">Nurse</SelectItem>
+                          <SelectItem value="lab_tech">Laboratory</SelectItem>
+                          <SelectItem value="pharmacist">Pharmacist</SelectItem>
+                          <SelectItem value="radiologist">Radiologist</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
                   <div className="space-y-2"><Label>Status</Label><Select value={formData.isActive ? 'active' : 'inactive'} onValueChange={(v) => setFormData(prev => ({ ...prev, isActive: v === 'active' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent></Select></div>
                 </div>
                 <EffectiveAccessPreview pages={formData.permissions} capabilities={formData.capabilities} />
@@ -826,7 +881,7 @@ export default function RolesPermissionsPage() {
         </Dialog>
 
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className={MODAL_SIZES.lg}>
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{selectedRole?.name}</DialogTitle><DialogDescription>{selectedRole?.description}</DialogDescription></DialogHeader>
             {selectedRole && (<div className="space-y-6 mt-4">
               <div className="flex items-center gap-4"><Badge variant="outline" className={getTypeBadgeColor(selectedRole.type)}>{getRoleIcon(selectedRole.type)} {selectedRole.type}</Badge><Badge variant={selectedRole.isActive ? 'default' : 'secondary'}>{selectedRole.isActive ? 'Active' : 'Inactive'}</Badge><span className="text-sm text-muted-foreground">{selectedRole.userCount} users assigned</span></div>
