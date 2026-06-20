@@ -17,7 +17,7 @@ def stable_generic_id(generic: GenericMedication) -> str:
             (generic.route or "").strip().lower(),
         ]
     )
-    digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(basis.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
     return f"G{digest}"
 
 
