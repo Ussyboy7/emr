@@ -84,12 +84,12 @@ export default function AttendanceStatisticsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [buildQuery]);
+  }, [buildQuery, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) void fetchReport();
-  }, [fetchReport, reportRange, metric, viewMode]);
+  }, [ready, fetchReport, reportRange, metric, viewMode]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
