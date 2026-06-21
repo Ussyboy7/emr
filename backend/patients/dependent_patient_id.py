@@ -45,21 +45,70 @@ def find_principal_for_dependent_id(patient_id: str | None) -> Patient | None:
     return find_principal_by_personal_number(personal_number, preferred_category)
 
 
+def personal_number_lookup_variants(personal_number: str) -> list[str]:
+    pn = (personal_number or "").strip().upper()
+    if not pn:
+        return []
+    variants: list[str] = []
+    for candidate in (pn, f"R-{pn}" if not pn.startswith("R-") else pn[2:]):
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+def _principal_base_qs(*, include_inactive: bool = False):
+    qs = Patient.objects.filter(
+        category__in=["employee", "retiree"],
+        merged_into__isnull=True,
+    )
+    if not include_inactive:
+        qs = qs.filter(is_active=True)
+    return qs
+
+
+def _pick_principal(qs, preferred_category: str | None):
+    if preferred_category:
+        match = qs.filter(category=preferred_category).first()
+        if match:
+            return match
+    return qs.first()
+
+
 def find_principal_by_personal_number(
     personal_number: str,
     preferred_category: str | None = None,
 ) -> Patient | None:
-    base_qs = Patient.objects.filter(
-        personal_number__iexact=personal_number.strip(),
-        category__in=["employee", "retiree"],
-        merged_into__isnull=True,
-        is_active=True,
+    variants = personal_number_lookup_variants(personal_number)
+    if not variants:
+        return None
+
+    for include_inactive in (False, True):
+        base_qs = _principal_base_qs(include_inactive=include_inactive)
+
+        for variant in variants:
+            hit = _pick_principal(
+                base_qs.filter(personal_number__iexact=variant),
+                preferred_category,
+            )
+            if hit:
+                return hit
+
+        for variant in variants:
+            for prefix in ("R", "E"):
+                hit = base_qs.filter(patient_id__iexact=f"{prefix}-{variant}").first()
+                if hit:
+                    return hit
+
+    return None
+
+
+def describe_principal_lookup(personal_number: str, preferred_category: str | None = None) -> str:
+    variants = personal_number_lookup_variants(personal_number)
+    patient_ids = [f"R-{variant}" for variant in variants] + [f"E-{variant}" for variant in variants]
+    return (
+        f"tried personal_number in {variants}, patient_id in {patient_ids}"
+        + (f", preferred_category={preferred_category}" if preferred_category else "")
     )
-    if preferred_category:
-        match = base_qs.filter(category=preferred_category).first()
-        if match:
-            return match
-    return base_qs.first()
 
 
 def normalize_person_name(patient: Patient) -> str:

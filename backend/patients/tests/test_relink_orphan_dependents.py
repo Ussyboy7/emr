@@ -7,6 +7,7 @@ from django.test import TestCase
 from io import StringIO
 
 from patients.dependent_patient_id import (
+    find_principal_by_personal_number,
     find_principal_for_dependent_id,
     normalize_dependent_patient_id_format,
     parse_dependent_patient_id,
@@ -14,6 +15,35 @@ from patients.dependent_patient_id import (
 from patients.models import Patient
 
 User = get_user_model()
+
+
+class PrincipalLookupTests(TestCase):
+    def test_find_principal_by_patient_id_when_personal_number_differs(self):
+        retiree = Patient.objects.create(
+            patient_id="R-88297",
+            category="retiree",
+            surname="IBRAHIM",
+            first_name="SPOUSE",
+            gender="male",
+            date_of_birth=date(1950, 1, 1),
+            personal_number="LEGACY-PN",
+        )
+        found = find_principal_by_personal_number("88297", "retiree")
+        self.assertEqual(found.id, retiree.id)
+
+    def test_find_principal_by_patient_id_when_inactive(self):
+        retiree = Patient.objects.create(
+            patient_id="R-8944",
+            category="retiree",
+            surname="OREKHA",
+            first_name="SPOUSE",
+            gender="male",
+            date_of_birth=date(1950, 1, 1),
+            personal_number="8944",
+            is_active=False,
+        )
+        found = find_principal_by_personal_number("8944", "retiree")
+        self.assertEqual(found.id, retiree.id)
 
 
 class DependentPatientIdParsingTests(TestCase):

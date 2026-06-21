@@ -14,6 +14,7 @@ from django.db import transaction
 
 from patients.dependent_ids import sync_dependent_patient_ids
 from patients.dependent_patient_id import (
+    describe_principal_lookup,
     find_principal_for_dependent_id,
     normalize_dependent_patient_id_format,
     normalize_person_name,
@@ -104,8 +105,10 @@ class Command(BaseCommand):
             principal = find_principal_for_dependent_id(orphan.patient_id)
             if not principal:
                 skipped += 1
+                _prefix, personal_number, _sequence, preferred_category = parsed
                 self.stdout.write(
-                    f"skip {orphan.id} {orphan.patient_id} ({orphan.get_full_name()}): principal not found"
+                    f"skip {orphan.id} {orphan.patient_id} ({orphan.get_full_name()}): "
+                    f"principal not found ({describe_principal_lookup(personal_number, preferred_category)})"
                 )
                 continue
 
