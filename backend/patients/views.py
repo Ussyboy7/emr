@@ -429,6 +429,15 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             if id_changed:
                 patient.save()  # Save the new patient ID
 
+        personal_number_changed = (
+            'personal_number' in serializer.validated_data
+            and (serializer.validated_data['personal_number'] or '').strip()
+            != (old_instance.personal_number or '').strip()
+        )
+        if personal_number_changed and patient.category in ('employee', 'retiree'):
+            from .dependent_ids import sync_dependent_patient_ids
+            sync_dependent_patient_ids(patient)
+
         new_values = {
             'surname': patient.surname,
             'first_name': patient.first_name,
@@ -601,11 +610,9 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         patient.regenerate_patient_id()
         patient.save()
 
-        # Update dependents' patient IDs to reflect the new personal number
-        dependents = Patient.objects.filter(principal_staff=patient, category='dependent')
-        for dep in dependents:
-            dep.regenerate_patient_id()
-            dep.save(update_fields=['patient_id'])
+        from .dependent_ids import sync_dependent_patient_ids
+
+        dependents_updated = sync_dependent_patient_ids(patient)
 
         AuditService.log_patient_action(
             user=request.user,
@@ -623,7 +630,10 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
 
         serializer = self.get_serializer(patient)
-        return Response(serializer.data)
+        return Response({
+            'patient': serializer.data,
+            'dependents_updated': dependents_updated,
+        })
 
     @extend_schema(tags=["Patients"], summary="Convert to csr", description="Convert a Retiree patient to NonNPA (CSR) along with their dependents.")
     @action(detail=True, methods=['patch'], url_path='convert-to-csr')

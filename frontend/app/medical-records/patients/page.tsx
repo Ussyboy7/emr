@@ -536,8 +536,14 @@ function PatientsListPageContent() {
     setPromotingOfficer(true);
     try {
       const numericId = Number(patientToPromote.numericId || patientToPromote.id);
-      await patientService.promoteToOfficer(numericId, newPersonalNumber.trim());
-      toast.success(`${patientToPromote.name} has been promoted to Officer (PN: ${newPersonalNumber.trim()})`);
+      const result = await patientService.promoteToOfficer(numericId, newPersonalNumber.trim());
+      const depNote =
+        result.dependents_updated > 0
+          ? ` (${result.dependents_updated} dependent ID${result.dependents_updated === 1 ? '' : 's'} updated)`
+          : '';
+      toast.success(
+        `${patientToPromote.name} has been promoted to Officer (PN: ${newPersonalNumber.trim()})${depNote}`,
+      );
       setIsPromoteOpen(false);
       setPatientToPromote(null);
       setNewPersonalNumber('');
@@ -2311,6 +2317,7 @@ function PatientsListPageContent() {
                       <li>• Employee type changes from "Staff" to "Officer"</li>
                       <li>• A new personal number will be assigned</li>
                       <li>• Patient ID will update (E-old# → E-new#)</li>
+                      <li>• Linked dependents keep the same records; their patient IDs update to match the new personal number</li>
                       <li>• All existing medical records and history are preserved</li>
                     </ul>
                   </div>

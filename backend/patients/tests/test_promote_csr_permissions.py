@@ -107,6 +107,7 @@ class PromoteCsrPermissionTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn("patient", res.data)
         self.staff_patient.refresh_from_db()
         self.assertEqual(self.staff_patient.employee_type, "Officer")
         self.assertEqual(self.staff_patient.personal_number, "PN-OFF-999")

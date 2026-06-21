@@ -107,6 +107,16 @@ class PatientSerializer(serializers.ModelSerializer):
                 category=category
             )
 
+        if self.instance and self.instance.category == 'employee':
+            old_type = (self.instance.employee_type or '').strip().lower()
+            new_type = (attrs.get('employee_type', self.instance.employee_type) or '').strip().lower()
+            if old_type == 'staff' and new_type == 'officer':
+                raise serializers.ValidationError({
+                    'employee_type': (
+                        'Use Promote to Officer so linked dependents receive updated patient IDs.'
+                    ),
+                })
+
         if category == 'dependent':
             if not principal_staff:
                 raise serializers.ValidationError({

@@ -1,45 +1,96 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import Exists, OuterRef
+
+from patients.dependent_ids import planned_dependent_patient_ids, sync_dependent_patient_ids
 from patients.models import Patient
 
 
 class Command(BaseCommand):
-    help = "Normalize dependent patient IDs to ED-/RD- format based on principal category and personal number"
+    help = (
+        "Normalize dependent patient IDs to ED-/RD- format based on each "
+        "principal's category and personal number."
+    )
 
-    @transaction.atomic
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--principal-id",
+            type=int,
+            default=None,
+            help="Only normalize dependents for this principal patient PK.",
+        )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show planned ID changes without writing to the database.",
+        )
+
     def handle(self, *args, **options):
-        dependents = Patient.objects.filter(category="dependent").select_related("principal_staff").order_by("principal_staff_id", "created_at")
-        updated = 0
-        skipped = 0
+        principal_id = options.get("principal_id")
+        dry_run = options.get("dry_run", False)
+
+        principals = Patient.objects.filter(
+            category__in=["employee", "retiree"],
+            merged_into__isnull=True,
+        ).filter(
+            Exists(
+                Patient.objects.filter(
+                    category="dependent",
+                    principal_staff_id=OuterRef("pk"),
+                    merged_into__isnull=True,
+                )
+            )
+        )
+
+        if principal_id is not None:
+            principals = principals.filter(pk=principal_id)
+            if not principals.exists():
+                self.stderr.write(
+                    self.style.ERROR(f"No principal patient found with id={principal_id}.")
+                )
+                return
+
+        principals = principals.order_by("id")
+
+        updated_dependents = 0
+        principals_touched = 0
+        skipped_principals = 0
         errors = 0
 
-        current_principal_id = None
-        sequence_by_principal = {}
-
-        for dep in dependents:
-            principal = dep.principal_staff
-            if not principal:
-                skipped += 1
+        for principal in principals:
+            planned = planned_dependent_patient_ids(principal)
+            if not planned:
+                skipped_principals += 1
                 continue
 
-            base_number = (principal.personal_number or "").strip().upper()
-            if not base_number:
-                skipped += 1
+            changes = [(dep.id, dep.patient_id, target) for dep, target in planned if dep.patient_id != target]
+            if not changes:
                 continue
 
-            prefix = "ED" if principal.category == "employee" else "RD"
+            principals_touched += 1
+            label = f"{principal.patient_id} ({principal.get_full_name()})"
 
-            seq = sequence_by_principal.get(principal.id, 0) + 1
-            sequence_by_principal[principal.id] = seq
+            if dry_run:
+                self.stdout.write(f"[dry-run] {label}:")
+                for dep_id, old_id, new_id in changes:
+                    self.stdout.write(f"  dependent {dep_id}: {old_id} -> {new_id}")
+                updated_dependents += len(changes)
+                continue
 
-            new_id = f"{prefix}-{base_number}-{seq}"
-            if dep.patient_id != new_id:
-                try:
-                    dep.patient_id = new_id
-                    dep.save(update_fields=["patient_id"])
-                    updated += 1
-                except Exception as e:
-                    errors += 1
-                    self.stderr.write(f"Failed to update {dep.id}: {e}")
+            try:
+                with transaction.atomic():
+                    count = sync_dependent_patient_ids(principal)
+                updated_dependents += count
+                self.stdout.write(f"Updated {count} dependent(s) for {label}")
+            except Exception as exc:
+                errors += 1
+                self.stderr.write(f"Failed principal {principal.id} ({label}): {exc}")
 
-        self.stdout.write(self.style.SUCCESS(f"Normalization complete. Updated: {updated}, Skipped: {skipped}, Errors: {errors}"))
+        mode = "Dry run" if dry_run else "Normalization"
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"{mode} complete. Principals touched: {principals_touched}, "
+                f"dependents updated: {updated_dependents}, "
+                f"principals skipped (no PN/deps): {skipped_principals}, errors: {errors}"
+            )
+        )

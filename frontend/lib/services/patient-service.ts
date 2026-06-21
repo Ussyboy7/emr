@@ -443,11 +443,17 @@ class PatientService {
     });
   }
 
-  async promoteToOfficer(patientId: number, newPersonalNumber: string): Promise<Patient> {
-    return apiFetch<Patient>(`/patients/${patientId}/promote/`, {
-      method: 'PATCH',
-      body: JSON.stringify({ new_personal_number: newPersonalNumber }),
-    });
+  async promoteToOfficer(
+    patientId: number,
+    newPersonalNumber: string,
+  ): Promise<{ patient: Patient; dependents_updated: number }> {
+    return apiFetch<{ patient: Patient; dependents_updated: number }>(
+      `/patients/${patientId}/promote/`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ new_personal_number: newPersonalNumber }),
+      },
+    );
   }
 
   async convertToCsr(patientId: number): Promise<{ patient: Patient; dependents_converted: number }> {
