@@ -56,6 +56,7 @@ export type {
   ICD10Category,
   ICD10Stats,
   Diagnosis,
+  DiagnosisCorrectionReason,
   PresentingComplaintCategory,
   PresentingComplaint,
   ConsultationAnalytics,
@@ -93,7 +94,7 @@ export { analyticsService } from './analytics-service';
 export { adminService } from './admin-service';
 export { helpService } from './help-service';
 export { referralService } from './referral-service';
-export { consultationService } from './consultation-service';
+export { consultationService, DIAGNOSIS_CORRECTION_REASONS } from './consultation-service';
 export { appointmentService } from './appointment-service';
 export { wardService } from './ward-service';
 export { physioService } from './physio-service';

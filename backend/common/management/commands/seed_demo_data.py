@@ -239,7 +239,7 @@ class Command(BaseCommand):
                     "/hr", "/hr/annual-checkups", "/hr/exemptions",
                     "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/room", "/consultation/start", "/consultation/wards",
                     "/laboratory", "/laboratory/completed", "/laboratory/orders", "/laboratory/templates", "/laboratory/verification",
-                    "/medical-records", "/medical-records/appointments", "/medical-records/coding", "/medical-records/patient-records", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/referrals", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
+                    "/medical-records", "/medical-records/appointments", "/medical-records/coding", "/medical-records/diagnosis-review", "/medical-records/patient-records", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/referrals", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
                     "/nursing", "/nursing/analytics", "/nursing/vitals-history", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
                     "/pharmacy", "/pharmacy/history", "/pharmacy/inventory", "/pharmacy/prescriptions",
                     "/physiotherapy", "/physiotherapy/completed", "/physiotherapy/orders",
@@ -457,7 +457,7 @@ class Command(BaseCommand):
                     # Medical Records - All pages
                     '/medical-records', '/medical-records/patients/new', '/medical-records/patients',
                     '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
-                    '/medical-records/coding', '/medical-records/patient-records', '/medical-records/referrals', '/medical-records/reports',
+                    '/medical-records/coding', '/medical-records/diagnosis-review', '/medical-records/patient-records', '/medical-records/referrals', '/medical-records/reports',
                     # No other modules
                 ],
                 'is_active': True,

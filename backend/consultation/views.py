@@ -42,6 +42,7 @@ from .serializers import (
     ReferralFacilitySerializer,
     ResponsibilityFormIssuanceSerializer,
     DiagnosisSerializer,
+    DiagnosisCorrectionSerializer,
     ICD10CodeSerializer,
     PresentingComplaintCategorySerializer,
     PresentingComplaintSerializer,
@@ -52,6 +53,19 @@ from common.mixins import ClinicScopedMixin
 from common.openapi import REFERRAL_FORM_PK_PARAMS, document_viewset
 from accounts.utils import resolve_clinic_id
 from organization.models import SystemConfig
+
+DIAGNOSIS_REVIEW_PAGE = "/medical-records/diagnosis-review"
+
+
+def user_can_correct_diagnoses(user) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    from permissions.page_paths import user_has_exact_page
+    from permissions.user_pages import get_user_allowed_pages
+
+    return user_has_exact_page(get_user_allowed_pages(user), DIAGNOSIS_REVIEW_PAGE)
 
 
 @document_viewset(tag="Consultation", resource="referral facilities")
@@ -2088,17 +2102,53 @@ class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     serializer_class = DiagnosisSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'visit', 'session', 'icd10_code', 'status', 'certainty']
-    search_fields = ['diagnosis_text', 'icd10_code__code', 'icd10_code__description']
+    search_fields = [
+        'diagnosis_text',
+        'icd10_code__code',
+        'icd10_code__description',
+        'patient__patient_id',
+        'patient__surname',
+        'patient__first_name',
+    ]
     ordering_fields = ['diagnosed_at', 'status']
     ordering = ['-diagnosed_at']
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return Diagnosis.objects.none()
-        
+
         return self.scope_queryset(
-            Diagnosis.objects.all().select_related('patient', 'visit', 'session', 'icd10_code', 'diagnosed_by')
+            Diagnosis.objects.all().select_related(
+                'patient',
+                'visit',
+                'session',
+                'icd10_code',
+                'original_icd10_code',
+                'diagnosed_by',
+                'corrected_by',
+            )
         )
+
+    def _review_queryset(self):
+        qs = self.get_queryset().filter(session__status='completed')
+        params = self.request.query_params
+
+        date_from = parse_date(params.get('date_from') or '')
+        date_to = parse_date(params.get('date_to') or '')
+        if date_from:
+            qs = qs.filter(session__started_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(session__started_at__date__lte=date_to)
+
+        corrected_only = (params.get('corrected_only') or '').lower()
+        if corrected_only in ('1', 'true', 'yes'):
+            qs = qs.filter(corrected_at__isnull=False)
+
+        code = (params.get('code') or '').strip()
+        if code:
+            qs = qs.filter(icd10_code__code__iexact=code)
+
+        return qs
 
     @extend_schema(tags=["Consultation"], summary="Exists", description="Whether a consultation session has at least one diagnosis.")
     @action(detail=False, methods=['get'], url_path='exists')
@@ -2109,6 +2159,113 @@ class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response({'detail': 'session is required'}, status=status.HTTP_400_BAD_REQUEST)
         qs = self.filter_queryset(self.get_queryset()).filter(session_id=session_id)
         return Response({'exists': qs.exists()})
+
+    @extend_schema(
+        tags=["Consultation"],
+        summary="Review list",
+        description="Completed consultation diagnoses for Medical Records coding review.",
+    )
+    @action(detail=False, methods=['get'], url_path='review')
+    def review(self, request):
+        if not user_can_correct_diagnoses(request.user):
+            return Response({'detail': 'Not permitted.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = self.filter_queryset(self._review_queryset())
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=["Consultation"],
+        summary="Correct ICD-10 code",
+        description="Medical Records coding correction on a completed consultation diagnosis.",
+    )
+    @action(detail=True, methods=['post'], url_path='correct')
+    def correct(self, request, pk=None):
+        if not user_can_correct_diagnoses(request.user):
+            return Response({'detail': 'Not permitted.'}, status=status.HTTP_403_FORBIDDEN)
+
+        diagnosis = self.get_object()
+        if not diagnosis.session_id or diagnosis.session.status != 'completed':
+            return Response(
+                {'detail': 'Only diagnoses on completed consultations can be corrected.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = DiagnosisCorrectionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        new_code = payload.validated_data['icd10_code']
+        reason = payload.validated_data['reason']
+        notes = (payload.validated_data.get('notes') or '').strip()
+
+        if new_code.id == diagnosis.icd10_code_id:
+            return Response({'detail': 'Select a different ICD-10 code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        duplicate = Diagnosis.objects.filter(
+            patient_id=diagnosis.patient_id,
+            visit_id=diagnosis.visit_id,
+            icd10_code_id=new_code.id,
+        ).exclude(pk=diagnosis.pk).exists()
+        if duplicate:
+            return Response(
+                {'detail': 'This patient already has that ICD-10 code on this visit.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_code = diagnosis.icd10_code
+        if diagnosis.original_icd10_code_id is None:
+            diagnosis.original_icd10_code = old_code
+
+        diagnosis.icd10_code = new_code
+        diagnosis.corrected_by = request.user
+        diagnosis.corrected_at = timezone.now()
+        diagnosis.correction_reason = reason
+        diagnosis.correction_notes = notes
+
+        try:
+            diagnosis.save(
+                update_fields=[
+                    'icd10_code',
+                    'original_icd10_code',
+                    'corrected_by',
+                    'corrected_at',
+                    'correction_reason',
+                    'correction_notes',
+                ]
+            )
+        except IntegrityError:
+            return Response(
+                {'detail': 'This patient already has that ICD-10 code on this visit.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        AuditService.log_activity(
+            user=request.user,
+            action='update',
+            object_type='diagnosis',
+            object_id=str(diagnosis.id),
+            module='consultation',
+            object_repr=f'Diagnosis corrected to {new_code.code}',
+            description=(
+                f'Records corrected diagnosis for {diagnosis.patient.get_full_name()} '
+                f'from {old_code.code} to {new_code.code}'
+            ),
+            old_values={
+                'icd10_code': old_code.code,
+                'icd10_description': old_code.description,
+            },
+            new_values={
+                'icd10_code': new_code.code,
+                'icd10_description': new_code.description,
+                'correction_reason': reason,
+                'correction_notes': notes,
+            },
+            request=request,
+        )
+
+        return Response(self.get_serializer(diagnosis).data)
 
     def perform_create(self, serializer):
         """Create diagnosis and log audit."""
@@ -2122,6 +2279,41 @@ class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             object_repr=f'Diagnosis {diagnosis.icd10_code.code if diagnosis.icd10_code else "Unknown"}',
             description=f'Created diagnosis {diagnosis.icd10_code.code if diagnosis.icd10_code else "Unknown"} for patient {diagnosis.patient.get_full_name()}',
             new_values={'icd10_code': diagnosis.icd10_code.code if diagnosis.icd10_code else '', 'status': diagnosis.status, 'certainty': diagnosis.certainty},
+            request=self.request,
+        )
+
+    def perform_update(self, serializer):
+        diagnosis = self.get_object()
+        old_code = diagnosis.icd10_code.code if diagnosis.icd10_code else ''
+        updated = serializer.save()
+        new_code = updated.icd10_code.code if updated.icd10_code else ''
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='diagnosis',
+            object_id=str(updated.id),
+            module='consultation',
+            object_repr=f'Diagnosis {new_code or "Unknown"}',
+            description=f'Updated diagnosis for patient {updated.patient.get_full_name()}',
+            old_values={'icd10_code': old_code, 'status': diagnosis.status, 'certainty': diagnosis.certainty},
+            new_values={'icd10_code': new_code, 'status': updated.status, 'certainty': updated.certainty},
+            request=self.request,
+        )
+
+    def perform_destroy(self, instance):
+        code = instance.icd10_code.code if instance.icd10_code else 'Unknown'
+        patient_name = instance.patient.get_full_name()
+        diagnosis_id = str(instance.id)
+        instance.delete()
+        AuditService.log_activity(
+            user=self.request.user,
+            action='delete',
+            object_type='diagnosis',
+            object_id=diagnosis_id,
+            module='consultation',
+            object_repr=f'Diagnosis {code}',
+            description=f'Deleted diagnosis {code} for patient {patient_name}',
+            old_values={'icd10_code': code},
             request=self.request,
         )
 

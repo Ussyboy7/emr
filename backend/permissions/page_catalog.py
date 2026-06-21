@@ -36,6 +36,7 @@ ALL_PAGE_IDS: tuple[str, ...] = (
     "/medical-records/reports/patient-demographics",
     "/medical-records/referrals",
     "/medical-records/coding",
+    "/medical-records/diagnosis-review",
     "/medical-records/settings/referral-facilities",
     "/nursing",
     "/nursing/pool-queue",

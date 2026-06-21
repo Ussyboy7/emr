@@ -35,6 +35,7 @@ MEDICAL_RECORDS_PAGES = (
     "/medical-records/appointments",
     "/medical-records/referrals",
     "/medical-records/coding",
+    "/medical-records/diagnosis-review",
     "/medical-records/reports",
 )
 
@@ -62,6 +63,7 @@ MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "/consultation",
             "/medical-records/referrals",
             "/medical-records/coding",
+            "/medical-records/diagnosis-review",
             # Admin room management uses consultation/rooms/ (ConsultationRoom model).
             "/admin/rooms",
             # Nursing room queue page fetches consultation rooms/sessions/queue APIs.

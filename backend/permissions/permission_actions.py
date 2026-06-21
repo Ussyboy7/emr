@@ -14,6 +14,8 @@ PAGE_TO_PERMISSION_MAP: dict[str, str] = {
     "/medical-records/visits": "visit_view",
     "/medical-records/appointments": "visit_view",
     "/medical-records/referrals": "patient_view",
+    "/medical-records/coding": "patient_view",
+    "/medical-records/diagnosis-review": "patient_edit",
     "/medical-records/reports": "reports_view",
     "/medical-records/settings/referral-facilities": "patient_view",
     "/nursing": "nursing_vitals",

@@ -7,7 +7,7 @@ const SIDEBAR_NAV_HREFS = [
   "/medical-records", "/medical-records/patients/new", "/medical-records/patients",
   "/medical-records/patient-records", "/medical-records/visits/new", "/medical-records/visits",
   "/medical-records/appointments", "/medical-records/referrals", "/medical-records/coding",
-  "/medical-records/reports",
+  "/medical-records/diagnosis-review", "/medical-records/reports",
   "/nursing", "/nursing/pool-queue", "/nursing/room-queue", "/nursing/vitals-history",
   "/nursing/procedures", "/nursing/procedures/history", "/nursing/wards", "/nursing/analytics",
   "/nursing/inventory", "/nursing/requests",

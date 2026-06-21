@@ -44,6 +44,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/medical-records/reports/patient-demographics", name: "Patient Demographics", description: "Register distribution by category, gender, age, and blood group", module: "Medical Records" },
   { id: "/medical-records/referrals", name: "Referral queue (records)", description: "Review referrals for stamping and records workflow (same data as consultation referrals)", module: "Medical Records" },
   { id: "/medical-records/coding", name: "ICD-10 Coding", description: "Browse and search the ICD-10 code catalog", module: "Medical Records" },
+  { id: "/medical-records/diagnosis-review", name: "Diagnosis Review", description: "Review and correct ICD-10 codes on completed consultations", module: "Medical Records" },
   { id: "/medical-records/settings/referral-facilities", name: "Referral Facilities", description: "Manage referral facilities and contacts", module: "Medical Records" },
 
   // Nursing

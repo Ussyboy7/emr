@@ -162,4 +162,40 @@ describe('consultationService Diagnosis methods', () => {
       expect(res).toBe(false);
     });
   });
+
+  describe('getDiagnosisReviewList', () => {
+    it('calls review endpoint with filters', async () => {
+      mockApiFetch.mockResolvedValue({ results: [], count: 0 });
+
+      await consultationService.getDiagnosisReviewList({
+        search: 'J00',
+        date_from: '2026-01-01',
+        corrected_only: true,
+        page: 2,
+        page_size: 25,
+      });
+
+      const callArg = mockApiFetch.mock.calls[0][0] as string;
+      expect(callArg).toContain('/consultation/diagnoses/review/');
+      expect(callArg).toContain('search=J00');
+      expect(callArg).toContain('corrected_only=true');
+    });
+  });
+
+  describe('correctDiagnosis', () => {
+    it('posts correction payload', async () => {
+      mockApiFetch.mockResolvedValue({ id: 3, icd10_code: 12 });
+
+      await consultationService.correctDiagnosis(3, {
+        icd10_code: 12,
+        reason: 'wrong_code',
+        notes: 'Updated for reporting',
+      });
+
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/consultation/diagnoses/3/correct/',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+  });
 });

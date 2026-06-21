@@ -551,11 +551,27 @@ class Diagnosis(models.Model):
         ('possible', 'Possible'),
     ]
 
+    CORRECTION_REASON_CHOICES = [
+        ('wrong_code', 'Wrong code selected'),
+        ('non_specific', 'More specific code available'),
+        ('duplicate', 'Duplicate or redundant code'),
+        ('typo', 'Typo / search mistake'),
+        ('other', 'Other'),
+    ]
+
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='diagnoses')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='diagnoses')
     session = models.ForeignKey(ConsultationSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='diagnoses')
 
     icd10_code = models.ForeignKey(ICD10Code, on_delete=models.PROTECT, related_name='diagnoses')
+    original_icd10_code = models.ForeignKey(
+        ICD10Code,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='diagnoses_original',
+        help_text="ICD-10 code before the first records correction (if any).",
+    )
     diagnosis_text = models.TextField(blank=True, help_text="Additional diagnosis details or free text")
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='confirmed')
@@ -563,6 +579,17 @@ class Diagnosis(models.Model):
 
     diagnosed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='diagnoses_made')
     diagnosed_at = models.DateTimeField(auto_now_add=True)
+
+    corrected_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='diagnoses_corrected',
+    )
+    corrected_at = models.DateTimeField(null=True, blank=True)
+    correction_reason = models.CharField(max_length=20, choices=CORRECTION_REASON_CHOICES, blank=True)
+    correction_notes = models.TextField(blank=True)
 
     notes = models.TextField(blank=True)
 

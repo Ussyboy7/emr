@@ -387,24 +387,52 @@ class DiagnosisSerializer(serializers.ModelSerializer):
     """Serializer for Diagnosis model."""
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_chart_id = serializers.CharField(source='patient.patient_id', read_only=True)
     diagnosed_by_name = serializers.CharField(source='diagnosed_by.get_full_name', read_only=True, allow_null=True)
+    corrected_by_name = serializers.CharField(source='corrected_by.get_full_name', read_only=True, allow_null=True)
     icd10_code_details = serializers.SerializerMethodField()
+    original_icd10_code_details = serializers.SerializerMethodField()
+    session_status = serializers.CharField(source='session.status', read_only=True, allow_null=True)
+    visit_date = serializers.DateField(source='visit.date', read_only=True, allow_null=True)
 
     class Meta:
         model = Diagnosis
         fields = '__all__'
-        read_only_fields = ['diagnosed_at']
+        read_only_fields = [
+            'diagnosed_at',
+            'original_icd10_code',
+            'corrected_by',
+            'corrected_at',
+            'correction_reason',
+            'correction_notes',
+        ]
+
+    def _icd10_details(self, icd):
+        if not icd:
+            return None
+        return {
+            'code': icd.code,
+            'description': icd.description,
+            'category': icd.category,
+        }
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_icd10_code_details(self, obj):
         """Get full ICD-10 code details."""
-        if obj.icd10_code:
-            return {
-                'code': obj.icd10_code.code,
-                'description': obj.icd10_code.description,
-                'category': obj.icd10_code.category,
-            }
-        return None
+        return self._icd10_details(obj.icd10_code)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_original_icd10_code_details(self, obj):
+        """Get original ICD-10 code details before records correction."""
+        return self._icd10_details(obj.original_icd10_code)
+
+
+class DiagnosisCorrectionSerializer(serializers.Serializer):
+    """Payload for records staff ICD-10 coding corrections."""
+
+    icd10_code = serializers.PrimaryKeyRelatedField(queryset=ICD10Code.objects.filter(is_active=True))
+    reason = serializers.ChoiceField(choices=Diagnosis.CORRECTION_REASON_CHOICES)
+    notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
 
 
 class PresentingComplaintSerializer(serializers.ModelSerializer):

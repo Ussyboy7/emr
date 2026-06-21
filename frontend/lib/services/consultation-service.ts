@@ -72,13 +72,44 @@ export interface Diagnosis {
   diagnosed_at: string;
   notes: string;
   patient_name?: string;
+  patient_chart_id?: string;
+  visit_date?: string;
+  session_status?: string;
   diagnosed_by_name?: string;
+  corrected_by?: number | null;
+  corrected_at?: string | null;
+  correction_reason?: DiagnosisCorrectionReason | '';
+  correction_notes?: string;
+  corrected_by_name?: string | null;
   icd10_code_details?: {
     code: string;
     description: string;
     category: string;
   };
+  original_icd10_code_details?: {
+    code: string;
+    description: string;
+    category: string;
+  } | null;
 }
+
+export type DiagnosisCorrectionReason =
+  | 'wrong_code'
+  | 'non_specific'
+  | 'duplicate'
+  | 'typo'
+  | 'other';
+
+export const DIAGNOSIS_CORRECTION_REASONS: {
+  value: DiagnosisCorrectionReason;
+  label: string;
+}[] = [
+  { value: 'wrong_code', label: 'Wrong code selected' },
+  { value: 'non_specific', label: 'More specific code available' },
+  { value: 'duplicate', label: 'Duplicate or redundant code' },
+  { value: 'typo', label: 'Typo / search mistake' },
+  { value: 'other', label: 'Other' },
+];
 
 export interface ConsultationSession {
   id: number;
@@ -489,6 +520,38 @@ class ConsultationService {
   async deleteDiagnosis(id: number): Promise<void> {
     await apiFetch(`/consultation/diagnoses/${id}/`, {
       method: 'DELETE',
+    });
+  }
+
+  async getDiagnosisReviewList(params?: {
+    search?: string;
+    date_from?: string;
+    date_to?: string;
+    code?: string;
+    corrected_only?: boolean;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: Diagnosis[]; count: number }> {
+    const query = buildQueryString({
+      ...params,
+      corrected_only: params?.corrected_only ? 'true' : undefined,
+    });
+    return apiFetch<{ results: Diagnosis[]; count: number }>(
+      `/consultation/diagnoses/review/${query}`,
+    );
+  }
+
+  async correctDiagnosis(
+    id: number,
+    data: {
+      icd10_code: number;
+      reason: DiagnosisCorrectionReason;
+      notes?: string;
+    },
+  ): Promise<Diagnosis> {
+    return apiFetch<Diagnosis>(`/consultation/diagnoses/${id}/correct/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 

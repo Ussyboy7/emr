@@ -78,6 +78,7 @@ class Command(BaseCommand):
                     "/medical-records/patients",
                     "/medical-records/patient-records",
                     "/medical-records/coding",
+                    "/medical-records/diagnosis-review",
                 ):
                     if required not in deduped:
                         deduped.append(required)
