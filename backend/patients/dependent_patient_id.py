@@ -7,11 +7,27 @@ import re
 from patients.models import Patient
 
 DEPENDENT_ID_RE = re.compile(r"^(ED|RD)-([^-]+)-(\d+)$", re.IGNORECASE)
+# Legacy typo: retiree dependent stored as RD-R-{personal_number}-{seq}
+MALFORMED_RD_R_RE = re.compile(r"^RD-R-([^-]+)-(\d+)$", re.IGNORECASE)
+
+
+def normalize_dependent_patient_id_format(patient_id: str | None) -> str | None:
+    """Return a canonical ED-/RD- patient_id, fixing known legacy typos."""
+    raw = (patient_id or "").strip()
+    if not raw:
+        return raw
+    if DEPENDENT_ID_RE.match(raw):
+        return raw
+    malformed = MALFORMED_RD_R_RE.match(raw)
+    if malformed:
+        return f"RD-{malformed.group(1).upper()}-{malformed.group(2)}"
+    return raw
 
 
 def parse_dependent_patient_id(patient_id: str | None):
     """Return (prefix, personal_number, sequence, preferred_principal_category) or None."""
-    match = DEPENDENT_ID_RE.match((patient_id or "").strip())
+    canonical = normalize_dependent_patient_id_format(patient_id)
+    match = DEPENDENT_ID_RE.match(canonical or "")
     if not match:
         return None
     prefix = match.group(1).upper()

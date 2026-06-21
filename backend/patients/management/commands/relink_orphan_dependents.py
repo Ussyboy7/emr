@@ -15,6 +15,7 @@ from django.db import transaction
 from patients.dependent_ids import sync_dependent_patient_ids
 from patients.dependent_patient_id import (
     find_principal_for_dependent_id,
+    normalize_dependent_patient_id_format,
     normalize_person_name,
     parse_dependent_patient_id,
 )
@@ -79,6 +80,21 @@ class Command(BaseCommand):
         principals_to_sync: set[int] = set()
 
         for orphan in orphans:
+            corrected_id = normalize_dependent_patient_id_format(orphan.patient_id)
+            if corrected_id and corrected_id != orphan.patient_id:
+                label = f"fix patient_id {orphan.id}: {orphan.patient_id} -> {corrected_id}"
+                if dry_run:
+                    self.stdout.write(f"[dry-run] {label}")
+                else:
+                    try:
+                        orphan.patient_id = corrected_id
+                        orphan.save(update_fields=["patient_id"])
+                        self.stdout.write(self.style.SUCCESS(label))
+                    except Exception as exc:
+                        errors += 1
+                        self.stderr.write(f"failed {label}: {exc}")
+                        continue
+
             parsed = parse_dependent_patient_id(orphan.patient_id)
             if not parsed:
                 skipped += 1

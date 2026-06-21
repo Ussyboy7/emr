@@ -6,7 +6,11 @@ from django.core.management import call_command
 from django.test import TestCase
 from io import StringIO
 
-from patients.dependent_patient_id import find_principal_for_dependent_id, parse_dependent_patient_id
+from patients.dependent_patient_id import (
+    find_principal_for_dependent_id,
+    normalize_dependent_patient_id_format,
+    parse_dependent_patient_id,
+)
 from patients.models import Patient
 
 User = get_user_model()
@@ -21,6 +25,14 @@ class DependentPatientIdParsingTests(TestCase):
         self.assertEqual(
             parse_dependent_patient_id("rd-9697-1"),
             ("RD", "9697", 1, "retiree"),
+        )
+        self.assertEqual(
+            parse_dependent_patient_id("RD-R-88297-1"),
+            ("RD", "88297", 1, "retiree"),
+        )
+        self.assertEqual(
+            normalize_dependent_patient_id_format("RD-R-8944-1"),
+            "RD-8944-1",
         )
         self.assertIsNone(parse_dependent_patient_id("E-A2331"))
 
