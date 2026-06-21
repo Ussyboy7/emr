@@ -10,4 +10,4 @@ APPS=($("${SCRIPT_DIR}/backend-test-apps.sh"))
 
 cd "${PROJECT_ROOT}/backend"
 PYTHON_BIN="${PYTHON:-python}"
-"${PYTHON_BIN}" manage.py test "${APPS[@]}" --verbosity="${VERBOSITY}"
+"${PYTHON_BIN}" manage.py test "${APPS[@]}" --verbosity="${VERBOSITY}" --noinput

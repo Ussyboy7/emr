@@ -37,22 +37,23 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: test_emr_db
+          POSTGRES_DB: emr_ci
           POSTGRES_USER: emradmin
           POSTGRES_PASSWORD: emradmin
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U emradmin -d test_emr_db"
+          --health-cmd "pg_isready -U emradmin -d emr_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
       DB_HOST: localhost
       DB_PORT: 5432
-      DB_NAME: test_emr_db
+      DB_NAME: emr_ci
       DB_USER: emradmin
       DB_PASSWORD: emradmin
+      TEST_DB_NAME: test_emr_db
       DJANGO_SETTINGS_MODULE: emr_backend.settings_test
       DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
     steps:
