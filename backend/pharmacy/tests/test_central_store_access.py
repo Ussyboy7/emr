@@ -2,7 +2,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from organization.models import Clinic
+from organization.models import Clinic, SystemConfig
 from pharmacy.central_store import (
     CENTRAL_STORE_CLINIC_CODE,
     get_central_store_clinic_id,
@@ -16,6 +16,13 @@ User = get_user_model()
 class CentralStoreAccessTests(TestCase):
     @classmethod
     def setUpTestData(cls):
+        SystemConfig.objects.update_or_create(
+            key="multi_clinic_enabled",
+            defaults={
+                "value": "true",
+                "description": "Enable multi-clinic mode (test)",
+            },
+        )
         cls.central, _ = Clinic.objects.get_or_create(
             code=CENTRAL_STORE_CLINIC_CODE,
             defaults={"name": "Bode Thomas Clinic"},

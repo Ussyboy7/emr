@@ -1,11 +1,11 @@
 """Support ticket API tests."""
 from unittest.mock import patch
 
-from django.test import override_settings
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from audit.models import ActivityLog
+from rest_framework.throttling import ScopedRateThrottle
 from common.tests.support import create_test_user
 
 
@@ -124,14 +124,10 @@ class SupportTicketTest(APITestCase):
         resp = self.client.get("/api/v1/support/tickets/queue/")
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    @override_settings(
-        REST_FRAMEWORK={
-            "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
-            "DEFAULT_THROTTLE_RATES": {"support_ticket": "2/hour"},
-        }
-    )
+    @patch.object(ScopedRateThrottle, "get_rate", return_value="1/min")
     @patch("support.views.EmailService.send_email", return_value=True)
-    def test_ticket_submission_is_throttled(self, _mock_send_email):
+    def test_ticket_submission_is_throttled(self, _mock_send_email, _mock_rate):
+        cache.clear()
         self.client.force_authenticate(user=self.user)
         payload = {
             "category": "technical",
@@ -139,9 +135,8 @@ class SupportTicketTest(APITestCase):
             "subject": "Throttle test",
             "description": "Body",
         }
-        for _ in range(2):
-            resp = self.client.post("/api/v1/support/tickets/", payload, format="json")
-            self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        resp = self.client.post("/api/v1/support/tickets/", payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         resp = self.client.post("/api/v1/support/tickets/", payload, format="json")
         self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 

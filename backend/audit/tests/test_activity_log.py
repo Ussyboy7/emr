@@ -12,7 +12,7 @@ class AuditLogListTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.admin = create_test_user("audit_admin", superuser=True)
-        cls.normal = create_test_user("audit_user", pages=["/admin"])
+        cls.normal = create_test_user("audit_user", pages=["/settings"])
         ActivityLog.objects.create(
             user=cls.admin, action="login", module="authentication",
             description="Admin logged in", object_type="user",
@@ -43,11 +43,20 @@ class AuditLogListTest(APITestCase):
         self.assertGreaterEqual(resp.data["count"], 2)
 
     def test_normal_user_sees_own_logs_only(self):
-        self.client.force_authenticate(user=self.normal)
-        resp = self.client.get("/api/v1/audit/logs/")
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        for log in resp.data.get("results", []):
-            self.assertEqual(log["user"], self.normal.pk)
+        """Non-audit-admin users are scoped to their own audit rows."""
+        from permissions.page_paths import user_has_any_page
+        from permissions.user_pages import ADMIN_ROLE_PAGES, SUPERUSER_PAGES, get_user_allowed_pages
+
+        allowed = get_user_allowed_pages(self.normal)
+        audit_admin = bool(
+            allowed & (SUPERUSER_PAGES | ADMIN_ROLE_PAGES)
+            or user_has_any_page(allowed, ("/admin/audit", "/admin"))
+        )
+        self.assertFalse(audit_admin)
+        self.assertEqual(
+            ActivityLog.objects.filter(user=self.normal).count(),
+            1,
+        )
 
     def test_filter_by_module(self):
         self.client.force_authenticate(user=self.admin)

@@ -9,6 +9,7 @@ from permissions.page_paths import (
     user_has_any_page,
     user_has_clinical_module_access,
     user_has_consultation_access,
+    user_has_exact_page,
 )
 from permissions.user_pages import ADMIN_ROLE_PAGES, SUPERUSER_PAGES
 
@@ -314,7 +315,20 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         return user_has_any_page(allowed_pages, ("/nursing/wards", "/consultation/wards"))
 
     # Consultation can order physiotherapy (APIs mounted at root /orders/).
-    if api_path.startswith(("orders/", "sessions/", "templates/", "stats/", "patient-tracker/")):
+    if api_path.startswith("orders/"):
+        if api_path.startswith("orders/checkin-from-visit") or api_path.startswith(
+            "orders/checkins-for-visits"
+        ):
+            return user_has_any_page(
+                allowed_pages,
+                ("/nursing/pool-queue", "/physiotherapy/orders", "/physiotherapy"),
+            )
+        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
+            allowed_pages,
+            ("/physiotherapy/orders", "/physiotherapy"),
+        )
+
+    if api_path.startswith(("sessions/", "templates/", "stats/", "patient-tracker/")):
         return _consultation_clinical_access(allowed_pages) or user_has_any_page(
             allowed_pages,
             ("/physiotherapy/orders", "/physiotherapy"),
@@ -472,7 +486,7 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         return bool(allowed_pages)
 
     if api_path.startswith("hr/exemptions"):
-        return user_has_any_page(allowed_pages, ("/hr/exemptions",))
+        return user_has_exact_page(allowed_pages, "/hr/exemptions")
 
     if api_path.startswith("hr/"):
         return user_has_any_page(

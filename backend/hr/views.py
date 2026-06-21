@@ -25,7 +25,7 @@ from .compliance import (
     compliance_summary,
     paginate_compliance,
 )
-from .permissions import IsHumanResources
+from .permissions import HasHRExemptionsPage, IsHumanResources
 from permissions.drf_permissions import ApiPageAccessPermission
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from common.openapi import CHECKUP_PK_PARAM, document_viewset
@@ -194,7 +194,7 @@ class HRComplianceViewSet(viewsets.ViewSet):
 
 @document_viewset(tag="HR", resource="annual check-up exemptions")
 class AnnualCheckupExemptionViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated, ApiPageAccessPermission, IsHumanResources]
+    permission_classes = [IsAuthenticated, ApiPageAccessPermission, HasHRExemptionsPage]
     serializer_class = AnnualCheckupExemptionSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ["patient", "programme_year", "reason"]

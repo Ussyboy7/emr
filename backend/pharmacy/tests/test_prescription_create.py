@@ -14,7 +14,7 @@ class PrescriptionCreateTest(APITestCase):
         cls.doctor = create_test_user("rx_dr", pages=["/consultation", "/pharmacy"], system_role="Medical Doctor")
         cls.patient, cls.visit = create_test_patient_visit(patient_id="RX-PT-01")
         cls.generic = GenericMedication.objects.create(
-            name="Paracetamol", inn="paracetamol", category="analgesic",
+            name="Paracetamol", active_ingredient="paracetamol", category="analgesic",
         )
 
     def setUp(self):

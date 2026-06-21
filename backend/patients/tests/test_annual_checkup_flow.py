@@ -5,6 +5,8 @@ from datetime import date, time
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from common.tests.support import create_test_user
+from permissions.models import Role, UserRole
 from patients.annual_checkup_pdfs import (
     build_annual_checkup_report_pdf,
     build_hr_outcome_letter_pdf,
@@ -20,13 +22,20 @@ User = get_user_model()
 
 class AnnualCheckupFlowTests(TestCase):
     def setUp(self):
-        self.doctor = User.objects.create_user(
-            username="dr_checkup",
-            password="testpass123",
+        self.doctor = create_test_user(
+            "dr_checkup",
+            pages=["/consultation/start"],
             system_role="Medical Doctor",
-            first_name="Test",
-            last_name="Doctor",
         )
+        role = Role.objects.create(
+            name="annual-checkup-signoff",
+            type="custom",
+            permissions={
+                "pages": ["/consultation/start"],
+                "capabilities": ["annual_checkup_signoff"],
+            },
+        )
+        UserRole.objects.create(user=self.doctor, role=role)
         self.patient = Patient.objects.create(
             patient_id="E-TEST001",
             category="employee",

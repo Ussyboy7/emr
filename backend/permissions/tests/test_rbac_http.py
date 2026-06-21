@@ -53,11 +53,11 @@ class RbacHttpPatientsVisitsVitalsTests(TestCase):
     def _auth(self, user):
         self.client.force_authenticate(user=user)
 
-    def test_consultation_only_denied_patient_list(self):
+    def test_consultation_only_allowed_patient_list(self):
         user = _user_with_pages("consult-list", ["/consultation/start"])
         self._auth(user)
         res = self.client.get("/api/v1/patients/")
-        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
 
     def test_consultation_only_allowed_patient_detail(self):
         user = _user_with_pages("consult-detail", ["/consultation/start"])

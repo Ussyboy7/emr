@@ -55,18 +55,18 @@ class EmailOrUsernameTokenRefreshSerializer(TokenRefreshSerializer):
     """Re-issue access tokens with the current permissions_version claim."""
 
     def validate(self, attrs):
-        data = super().validate(attrs)
-        refresh = self.token_class(attrs["refresh"])
-        user = User.objects.filter(pk=refresh["user_id"]).first()
-        if user is None:
-            return data
-        if user_idle_session_expired(user):
+        incoming = self.token_class(attrs["refresh"])
+        user = User.objects.filter(pk=incoming["user_id"]).first()
+        if user is not None and user_idle_session_expired(user):
             raise InvalidToken(
                 {
                     "detail": "Session expired due to inactivity.",
                     "code": "idle_timeout",
                 }
             )
+        data = super().validate(attrs)
+        if user is None:
+            return data
         access = AccessToken.for_user(user)
         access["pv"] = getattr(user, "permissions_version", 1)
         data["access"] = str(access)

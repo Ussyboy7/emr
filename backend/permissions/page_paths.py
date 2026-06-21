@@ -67,6 +67,12 @@ def is_path_allowed_by_pages(pathname: str, allowed_pages: set[str]) -> bool:
     return False
 
 
+def user_has_exact_page(allowed_pages: set[str], required_page: str) -> bool:
+    """True only when ``required_page`` is explicitly granted (no parent prefix match)."""
+    needle = normalize_role_page_path(required_page)
+    return needle in {normalize_role_page_path(p) for p in allowed_pages}
+
+
 def user_has_any_page(allowed_pages: set[str], required_pages: list[str] | tuple[str, ...]) -> bool:
     return any(is_path_allowed_by_pages(page, allowed_pages) for page in required_pages)
 
