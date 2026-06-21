@@ -98,13 +98,19 @@ def find_principal_by_personal_number(
                 hit = base_qs.filter(patient_id__iexact=f"{prefix}-{variant}").first()
                 if hit:
                     return hit
+            # Legacy typo on retiree principals: patient_id R-R-{personal_number}
+            hit = base_qs.filter(patient_id__iexact=f"R-R-{variant}").first()
+            if hit:
+                return hit
 
     return None
 
 
 def describe_principal_lookup(personal_number: str, preferred_category: str | None = None) -> str:
     variants = personal_number_lookup_variants(personal_number)
-    patient_ids = [f"R-{variant}" for variant in variants] + [f"E-{variant}" for variant in variants]
+    patient_ids = []
+    for variant in variants:
+        patient_ids.extend([f"R-{variant}", f"E-{variant}", f"R-R-{variant}"])
     return (
         f"tried personal_number in {variants}, patient_id in {patient_ids}"
         + (f", preferred_category={preferred_category}" if preferred_category else "")

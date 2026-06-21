@@ -46,6 +46,20 @@ class PrincipalLookupTests(TestCase):
         self.assertEqual(found.id, retiree.id)
 
 
+    def test_find_principal_by_legacy_rr_patient_id(self):
+        retiree = Patient.objects.create(
+            patient_id="R-R-88297",
+            category="retiree",
+            surname="IBRAHIM",
+            first_name="MUSA",
+            gender="male",
+            date_of_birth=date(1950, 1, 1),
+            personal_number="R-88297",
+        )
+        found = find_principal_by_personal_number("88297", "retiree")
+        self.assertEqual(found.id, retiree.id)
+
+
 class DependentPatientIdParsingTests(TestCase):
     def test_parse_dependent_patient_id(self):
         self.assertEqual(
