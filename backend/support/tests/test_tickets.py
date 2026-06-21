@@ -6,6 +6,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from rest_framework.throttling import ScopedRateThrottle
+
+from audit.models import ActivityLog
 from common.tests.support import create_test_user
 
 
