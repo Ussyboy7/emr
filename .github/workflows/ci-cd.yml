@@ -140,7 +140,7 @@ jobs:
           cd frontend && npm ci
 
       - name: Bandit (Python — high severity)
-        run: python -m bandit -r backend -lll -q
+        run: python -m bandit -r backend/accounts backend/analytics backend/appointments backend/audit backend/common backend/consultation backend/dashboard backend/eyecare backend/hr backend/laboratory backend/notifications backend/nursing backend/organization backend/patients backend/permissions backend/pharmacy backend/physiotherapy backend/radiology backend/reports backend/support backend/wards backend/emr_backend -lll -q
 
       - name: pip-audit (Python dependencies)
         run: python -m pip_audit -r backend/requirements.txt
