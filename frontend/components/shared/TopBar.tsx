@@ -32,9 +32,10 @@ export const TopBar = () => {
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
+  const deniedPages = currentUser?.deniedPages ?? [];
   const canViewOverviewDashboard =
     Boolean(currentUser?.isSuperuser) ||
-    isPathAllowedByPages("/dashboard", currentUser?.permissions ?? []);
+    isPathAllowedByPages("/dashboard", currentUser?.permissions ?? [], deniedPages);
   const authenticated = useMemo(() => hydrated && !!currentUser && hasTokens(), [currentUser, hydrated]);
 
   useEffect(() => {

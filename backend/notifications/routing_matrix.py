@@ -20,7 +20,10 @@ ROLE_DEPARTMENT_HINTS: Dict[str, List[str]] = {
     "Pharmacist": ["PHARM", "Pharmacy"],
     "Medical Records Officer": ["MED-REC", "Medical Records"],
     "Physiotherapist": ["PHYSIO", "Physiotherapy"],
+    "Ophthalmologist": ["EYE", "Eye Clinic"],
+    # Legacy typo aliases kept for backward compatibility until RBAC cleanup runs.
     "Optamologist": ["EYE", "Eye Clinic"],
+    "Optamology": ["EYE", "Eye Clinic"],
     "Human Resources Officer": ["HR", "Human Resources"],
 }
 

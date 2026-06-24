@@ -57,7 +57,8 @@ function AuthzGate({ children }: { children: React.ReactNode }) {
     }
 
     const allowedPages = currentUser.permissions || [];
-    const allowed = isPathAllowedByPages(pathname, allowedPages);
+    const deniedPages = currentUser.deniedPages || [];
+    const allowed = isPathAllowedByPages(pathname, allowedPages, deniedPages);
     if (!allowed) {
       setCanRender(false);
       router.replace(homeRoute || "/no-access");

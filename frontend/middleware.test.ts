@@ -4,6 +4,7 @@ import {
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_EXP_COOKIE,
   AUTH_ALLOWED_PAGES_COOKIE,
+  AUTH_DENIED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
   AUTH_IS_SUPERUSER_COOKIE,
   AUTH_NEXT_REDIRECT_COOKIE,
@@ -60,7 +61,7 @@ describe('middleware', () => {
   });
 
   it('allows global pages for authenticated users', () => {
-    const response = makeRequest('/notifications', authCookies(['/nursing']));
+    const response = makeRequest('/notifications', authCookies(['/nursing', '/notifications']));
     expect(response.status).toBe(200);
   });
 
@@ -87,6 +88,29 @@ describe('middleware', () => {
     );
     expect(response.status).toBe(307);
     expect(response.headers.get('location')).toContain('/nursing');
+  });
+
+  it('blocks nested routes when parent is allowed but page is per-user denied', () => {
+    const response = makeRequest(
+      '/nursing/pool-queue',
+      {
+        ...authCookies(['/nursing', '/nursing/procedures']),
+        [AUTH_DENIED_PAGES_COOKIE]: encodeURIComponent(JSON.stringify(['/nursing/pool-queue'])),
+      },
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('/nursing');
+  });
+
+  it('allows sibling routes when only one child page is denied', () => {
+    const response = makeRequest(
+      '/nursing/procedures',
+      {
+        ...authCookies(['/nursing', '/nursing/procedures']),
+        [AUTH_DENIED_PAGES_COOKIE]: encodeURIComponent(JSON.stringify(['/nursing/pool-queue'])),
+      },
+    );
+    expect(response.status).toBe(200);
   });
 
   it('accepts unexpired access token without session cookie', () => {

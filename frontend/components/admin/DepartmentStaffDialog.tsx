@@ -44,15 +44,16 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
   const deputyHeadName = department?.deputyHeadName ?? null;
 
   const allowedPages = currentUser?.permissions ?? [];
+  const deniedPages = currentUser?.deniedPages ?? [];
   const canManageStructure =
     Boolean(currentUser?.isSuperuser) ||
-    isPathAllowedByPages('/admin/clinics', allowedPages);
+    isPathAllowedByPages('/admin/clinics', allowedPages, deniedPages);
 
   const canManageStaff =
     canManageStructure ||
     Boolean(currentUser?.isStaff) ||
     (Boolean(currentUser?.isDepartmentHead) &&
-      isPathAllowedByPages('/admin/users', allowedPages) &&
+      isPathAllowedByPages('/admin/users', allowedPages, deniedPages) &&
       Boolean(department?.id) &&
       (currentUser?.headedDepartments ?? []).some((d) => d.id === department?.id));
 

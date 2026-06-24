@@ -36,9 +36,32 @@ def normalize_role_page_path(path: str) -> str:
     return LEGACY_PAGE_PATH_ALIASES.get(no_trailing, LEGACY_PAGE_PATH_ALIASES.get(raw, no_trailing))
 
 
-def is_path_allowed_by_pages(pathname: str, allowed_pages: set[str]) -> bool:
+def is_path_denied_by_pages(pathname: str, denied_pages: set[str]) -> bool:
+    """Return True when ``pathname`` is explicitly denied (exact or child of a denied path)."""
+    if not pathname or not denied_pages:
+        return False
+
+    normalized_path = normalize_role_page_path(pathname)
+    normalized_denied = {normalize_role_page_path(p) for p in denied_pages}
+
+    for denied in normalized_denied:
+        if not denied:
+            continue
+        if normalized_path == denied or normalized_path.startswith(denied + "/"):
+            return True
+    return False
+
+
+def is_path_allowed_by_pages(
+    pathname: str,
+    allowed_pages: set[str],
+    denied_pages: set[str] | None = None,
+) -> bool:
     """Return True when ``pathname`` is allowed by any entry in ``allowed_pages``."""
     if not pathname or pathname == "/":
+        return False
+
+    if is_path_denied_by_pages(pathname, denied_pages or set()):
         return False
 
     normalized_path = normalize_role_page_path(pathname)
@@ -73,8 +96,14 @@ def user_has_exact_page(allowed_pages: set[str], required_page: str) -> bool:
     return needle in {normalize_role_page_path(p) for p in allowed_pages}
 
 
-def user_has_any_page(allowed_pages: set[str], required_pages: list[str] | tuple[str, ...]) -> bool:
-    return any(is_path_allowed_by_pages(page, allowed_pages) for page in required_pages)
+def user_has_any_page(
+    allowed_pages: set[str],
+    required_pages: list[str] | tuple[str, ...],
+    denied_pages: set[str] | None = None,
+) -> bool:
+    return any(
+        is_path_allowed_by_pages(page, allowed_pages, denied_pages) for page in required_pages
+    )
 
 
 def user_has_clinical_module_access(allowed_pages: set[str]) -> bool:

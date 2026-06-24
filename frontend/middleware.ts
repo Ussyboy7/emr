@@ -3,6 +3,7 @@ import {
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_EXP_COOKIE,
   AUTH_ALLOWED_PAGES_COOKIE,
+  AUTH_DENIED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
   AUTH_IS_SUPERUSER_COOKIE,
   AUTH_NEXT_REDIRECT_COOKIE,
@@ -10,6 +11,7 @@ import {
   LEGACY_ACCESS_TOKEN_COOKIE,
   LEGACY_ACCESS_TOKEN_EXP_COOKIE,
   LEGACY_AUTH_ALLOWED_PAGES_COOKIE,
+  LEGACY_AUTH_DENIED_PAGES_COOKIE,
   LEGACY_AUTH_HOME_ROUTE_COOKIE,
   LEGACY_AUTH_IS_SUPERUSER_COOKIE,
   LEGACY_AUTH_NEXT_REDIRECT_COOKIE,
@@ -112,6 +114,21 @@ export function middleware(request: NextRequest) {
     allowedPages = [];
   }
 
+  const deniedRaw =
+    request.cookies.get(AUTH_DENIED_PAGES_COOKIE)?.value ??
+    request.cookies.get(LEGACY_AUTH_DENIED_PAGES_COOKIE)?.value;
+  let deniedPages: string[] = [];
+  if (deniedRaw) {
+    try {
+      const parsed = JSON.parse(decodeURIComponent(deniedRaw));
+      if (Array.isArray(parsed)) {
+        deniedPages = parsed.filter((p) => typeof p === "string");
+      }
+    } catch {
+      deniedPages = [];
+    }
+  }
+
   if (allowedPages.length === 0) {
     const url = request.nextUrl.clone();
     url.pathname = "/no-access";
@@ -119,12 +136,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Always allow global user pages for authenticated users
-  const globalPages = ['/notifications', '/settings', '/help', '/help/tickets', '/help/docs'];
-  const isGlobalPage = globalPages.some(
-    (page) => pathname === page || pathname.startsWith(`${page}/`),
-  );
-  if (isPathAllowedByPages(pathname, allowedPages) || isGlobalPage) {
+  if (isPathAllowedByPages(pathname, allowedPages, deniedPages)) {
     return NextResponse.next();
   }
 

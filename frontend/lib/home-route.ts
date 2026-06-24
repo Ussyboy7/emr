@@ -44,8 +44,27 @@ export const MODULE_ROUTE_PRIORITY: ModuleRoute[] = (() => {
   return ordered;
 })();
 
-export function isPathAllowedByPages(pathname: string, allowedPages: string[]): boolean {
+export function isPathDeniedByPages(pathname: string, deniedPages: string[]): boolean {
+  if (!pathname || !deniedPages?.length) return false;
+  const normalizedPath = normalizeRolePagePath(pathname);
+  const normalizedDenied = deniedPages.map(normalizeRolePagePath);
+
+  return normalizedDenied.some((denied) => {
+    if (!denied) return false;
+    if (normalizedPath === denied) return true;
+    if (normalizedPath.startsWith(denied + "/")) return true;
+    return false;
+  });
+}
+
+export function isPathAllowedByPages(
+  pathname: string,
+  allowedPages: string[],
+  deniedPages: string[] = [],
+): boolean {
   if (!pathname || pathname === "/") return false;
+  if (isPathDeniedByPages(pathname, deniedPages)) return false;
+
   const allowed = Array.isArray(allowedPages) ? allowedPages : [];
   const normalizedPath = normalizeRolePagePath(pathname);
   const normalizedAllowed = allowed.map(normalizeRolePagePath);

@@ -42,6 +42,7 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 import { getLoginRedirectToastMessage } from "@/lib/auth-session-settings";
 import {
   AUTH_ALLOWED_PAGES_COOKIE,
+  AUTH_DENIED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
   AUTH_IS_SUPERUSER_COOKIE,
   AUTH_SESSION_COOKIE,
@@ -146,9 +147,10 @@ export default function LoginPage() {
       
       // Fetch current user to get permissions for role-based redirect (permission-only).
       try {
-        interface AuthMeResponse { permissions?: { pages?: string[] }; is_superuser?: boolean }
+        interface AuthMeResponse { permissions?: { pages?: string[]; denied_pages?: string[] }; is_superuser?: boolean }
         const userResponse = await apiFetch<AuthMeResponse>("/accounts/auth/me/");
         const allowedPages = userResponse.permissions?.pages || [];
+        const deniedPages = userResponse.permissions?.denied_pages || [];
         const isSuperuser = Boolean(userResponse.is_superuser);
 
         const storedRedirect = getStoredRedirectPath();
@@ -163,6 +165,7 @@ export default function LoginPage() {
         const cookieMaxAge = `; Max-Age=${AUTH_REFRESH_SESSION_MAX_AGE_SECONDS}`;
         document.cookie = `${AUTH_SESSION_COOKIE}=1; Path=/; SameSite=Lax${cookieMaxAge}`;
         document.cookie = `${AUTH_ALLOWED_PAGES_COOKIE}=${encodeURIComponent(JSON.stringify(allowedPages))}; Path=/; SameSite=Lax${cookieMaxAge}`;
+        document.cookie = `${AUTH_DENIED_PAGES_COOKIE}=${encodeURIComponent(JSON.stringify(deniedPages))}; Path=/; SameSite=Lax${cookieMaxAge}`;
         document.cookie = `${AUTH_IS_SUPERUSER_COOKIE}=${isSuperuser ? "1" : "0"}; Path=/; SameSite=Lax${cookieMaxAge}`;
         if (home) {
           document.cookie = `${AUTH_HOME_ROUTE_COOKIE}=${encodeURIComponent(home)}; Path=/; SameSite=Lax${cookieMaxAge}`;
@@ -175,7 +178,7 @@ export default function LoginPage() {
         }
 
         // Only honor stored redirect if it's permitted by pages.
-        if (storedRedirect && isPathAllowedByPages(storedRedirect, allowedPages)) {
+        if (storedRedirect && isPathAllowedByPages(storedRedirect, allowedPages, deniedPages)) {
           window.location.href = storedRedirect;
           return;
         }

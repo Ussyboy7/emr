@@ -31,7 +31,9 @@ Each access role holds a list of page paths (e.g. `/nursing`, `/consultation/sta
 - `custom_pages_mode`: `restrict` (only mode exposed in admin UI; `add`/`replace` exist in backend)
 - `custom_pages`: paths subtracted from the role when mode is `restrict`
 
-Middleware uses `isPathAllowedByPages()` (`lib/home-route.ts`) — exact match or prefix match.
+`/auth/me` also returns `permissions.denied_pages` for per-user restrict overrides. Denied paths are checked **before** parent prefix grants in `isPathAllowedByPages()` / `is_path_allowed_by_pages()` so restricting e.g. `/nursing/pool-queue` blocks that page even when `/nursing` remains on the role.
+
+Middleware uses `isPathAllowedByPages()` (`lib/home-route.ts`) — exact match or prefix match, minus `denied_pages`.
 
 Global pages for all authenticated users: `/notifications`, `/settings`, `/help`.
 

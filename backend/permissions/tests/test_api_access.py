@@ -22,6 +22,17 @@ class PagePathMatchingTests(SimpleTestCase):
         allowed = {"/nursing"}
         self.assertFalse(is_path_allowed_by_pages("/consultation/room/12", allowed))
 
+    def test_deny_overrides_parent_prefix(self):
+        allowed = {"/nursing", "/nursing/procedures"}
+        denied = {"/nursing/pool-queue"}
+        self.assertFalse(is_path_allowed_by_pages("/nursing/pool-queue", allowed, denied))
+        self.assertTrue(is_path_allowed_by_pages("/nursing/procedures", allowed, denied))
+
+    def test_deny_parent_blocks_children(self):
+        allowed = {"/nursing", "/nursing/pool-queue", "/nursing/procedures"}
+        denied = {"/nursing"}
+        self.assertFalse(is_path_allowed_by_pages("/nursing/procedures", allowed, denied))
+
     def test_consultation_referrals_grants_consultation_api_pages(self):
         from permissions.page_paths import user_has_consultation_access
 
@@ -54,6 +65,12 @@ class ApiAccessTests(SimpleTestCase):
         self.assertTrue(check_api_page_access("consultation/rooms/", "GET", allowed))
         self.assertTrue(check_api_page_access("consultation/sessions/", "GET", allowed))
         self.assertTrue(check_api_page_access("consultation/queue/", "GET", allowed))
+
+    def test_consultation_api_denied_when_pool_queue_restricted_per_user(self):
+        allowed = {"/nursing", "/nursing/procedures"}
+        denied = {"/nursing/pool-queue"}
+        self.assertFalse(check_api_page_access("consultation/queue/", "GET", allowed, denied))
+        self.assertTrue(check_api_page_access("nursing/procedures/", "GET", allowed, denied))
 
     def test_physio_checkin_api_allowed_for_nursing_pool_queue_page(self):
         allowed = {"/nursing/pool-queue"}

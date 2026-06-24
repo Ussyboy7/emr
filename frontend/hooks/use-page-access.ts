@@ -23,7 +23,7 @@ export function usePageAccess(path: string): {
       return { allowed: true, hydrated, permissions };
     }
     return {
-      allowed: isPathAllowedByPages(path, permissions),
+      allowed: isPathAllowedByPages(path, permissions, currentUser.deniedPages ?? []),
       hydrated,
       permissions,
     };

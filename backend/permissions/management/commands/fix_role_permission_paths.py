@@ -79,9 +79,17 @@ class Command(BaseCommand):
                     "/medical-records/patient-records",
                     "/medical-records/coding",
                     "/medical-records/diagnosis-review",
+                    "/medical-records/reports/new-registrations",
+                    "/medical-records/reports/lab-statistics",
+                    "/medical-records/reports/patient-demographics",
                 ):
                     if required not in deduped:
                         deduped.append(required)
+
+            # Diagnosis Review is records governance workflow; remove from doctor roles.
+            is_doctor_role = role.type == "doctor" or role.name.strip().lower() == "medical doctor"
+            if is_doctor_role and "/medical-records/diagnosis-review" in deduped:
+                deduped = [p for p in deduped if p != "/medical-records/diagnosis-review"]
 
             has_consultation_start = any(
                 isinstance(p, str) and p in ("/consultation/start", "/consultation/room")

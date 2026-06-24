@@ -8,7 +8,8 @@ export function userHasCentralStorePage(user?: User | null): boolean {
   if (!user) return false;
   if (user.isSuperuser) return true;
   const pages = Array.isArray(user.permissions) ? user.permissions : [];
-  return isPathAllowedByPages("/pharmacy/store", pages);
+  const deniedPages = user.deniedPages ?? [];
+  return isPathAllowedByPages("/pharmacy/store", pages, deniedPages);
 }
 
 /**

@@ -43,6 +43,21 @@ describe('isPathAllowedByPages', () => {
     expect(isPathAllowedByPages('/nursing/pool-queue/123', ['/nursing/pool-queue'])).toBe(true);
   });
 
+  it('deny list overrides parent prefix grant', () => {
+    expect(
+      isPathAllowedByPages('/nursing/pool-queue', ['/nursing', '/nursing/procedures'], ['/nursing/pool-queue']),
+    ).toBe(false);
+    expect(
+      isPathAllowedByPages('/nursing/procedures', ['/nursing'], ['/nursing/pool-queue']),
+    ).toBe(true);
+  });
+
+  it('denying a parent blocks all child routes', () => {
+    expect(
+      isPathAllowedByPages('/nursing/procedures', ['/nursing', '/nursing/procedures'], ['/nursing']),
+    ).toBe(false);
+  });
+
   it('allows module dashboard when a child page is granted', () => {
     expect(isPathAllowedByPages('/medical-records', ['/medical-records/patients'])).toBe(true);
     expect(isPathAllowedByPages('/nursing', ['/nursing/inventory'])).toBe(true);

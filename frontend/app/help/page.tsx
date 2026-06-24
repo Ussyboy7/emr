@@ -115,7 +115,7 @@ export default function HelpPage() {
       Boolean(
         currentUser &&
           (currentUser.isSuperuser ||
-            isPathAllowedByPages("/admin/health", currentUser.permissions ?? [])),
+            isPathAllowedByPages("/admin/health", currentUser.permissions ?? [], currentUser.deniedPages ?? [])),
       ),
     [currentUser],
   );

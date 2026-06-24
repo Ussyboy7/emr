@@ -12,10 +12,12 @@ import {
 } from "@/lib/api-client";
 import {
   AUTH_ALLOWED_PAGES_COOKIE,
+  AUTH_DENIED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
   AUTH_IS_SUPERUSER_COOKIE,
   AUTH_SESSION_COOKIE,
   LEGACY_AUTH_ALLOWED_PAGES_COOKIE,
+  LEGACY_AUTH_DENIED_PAGES_COOKIE,
   LEGACY_AUTH_HOME_ROUTE_COOKIE,
   LEGACY_AUTH_IS_SUPERUSER_COOKIE,
   LEGACY_AUTH_SESSION_COOKIE,
@@ -41,6 +43,7 @@ interface ApiUser {
   access_role_name?: string;
   permissions?: {
     pages?: string[];
+    denied_pages?: string[];
     actions?: Record<string, unknown>;
     capabilities?: string[];
   };
@@ -84,6 +87,9 @@ const mapApiUserToUser = (data: ApiUser): User => {
     systemRole: displayRole,
     accessRoleName: accessRoleName || undefined,
     permissions: (data.permissions as any)?.pages || [],
+    deniedPages: Array.isArray((data.permissions as any)?.denied_pages)
+      ? ((data.permissions as any).denied_pages as string[])
+      : [],
     capabilities: Array.isArray((data.permissions as any)?.capabilities)
       ? ((data.permissions as any).capabilities as string[])
       : [],
@@ -127,12 +133,14 @@ const writeAuthMirrorCookies = (mapped: User) => {
     // Ensure middleware can treat this browser session as authenticated.
     setCookie(AUTH_SESSION_COOKIE, "1", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     setCookie(AUTH_ALLOWED_PAGES_COOKIE, JSON.stringify(mapped.permissions || []), AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
+    setCookie(AUTH_DENIED_PAGES_COOKIE, JSON.stringify(mapped.deniedPages || []), AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     setCookie(AUTH_IS_SUPERUSER_COOKIE, mapped.isSuperuser ? "1" : "0", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     const home = getHomeRouteForUser(mapped);
     if (home) setCookie(AUTH_HOME_ROUTE_COOKIE, home, AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
 
     // Cleanup legacy cookie names to avoid confusion / stale state.
     clearCookie(LEGACY_AUTH_ALLOWED_PAGES_COOKIE);
+    clearCookie(LEGACY_AUTH_DENIED_PAGES_COOKIE);
     clearCookie(LEGACY_AUTH_IS_SUPERUSER_COOKIE);
     clearCookie(LEGACY_AUTH_HOME_ROUTE_COOKIE);
     clearCookie(LEGACY_AUTH_SESSION_COOKIE);
@@ -210,6 +218,7 @@ export const useCurrentUser = () => {
       accessRoleName: remoteUser.accessRoleName,
       capabilities: remoteUser.capabilities,
       permissions: remoteUser.permissions,
+      deniedPages: remoteUser.deniedPages,
       permissionActions: remoteUser.permissionActions,
       isSuperuser: remoteUser.isSuperuser ?? false,
       isStaff: remoteUser.isStaff ?? false,

@@ -50,9 +50,13 @@ CONSULTATION_PAGES = (
 )
 
 
-def _consultation_clinical_access(allowed_pages: set[str]) -> bool:
+def _consultation_clinical_access(
+    allowed_pages: set[str],
+    denied_pages: set[str] | None = None,
+) -> bool:
+    denied = denied_pages or set()
     return user_has_consultation_access(allowed_pages) or user_has_any_page(
-        allowed_pages, CONSULTATION_PAGES
+        allowed_pages, CONSULTATION_PAGES, denied
     )
 
 MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -146,9 +150,18 @@ def _is_exempt(api_path: str) -> bool:
     return False
 
 
-def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -> bool:
+def check_api_page_access(
+    api_path: str,
+    method: str,
+    allowed_pages: set[str],
+    denied_pages: set[str] | None = None,
+) -> bool:
     api_path = normalize_api_path(api_path)
     method = (method or "GET").upper()
+    denied = denied_pages or set()
+
+    def has_any(required_pages: tuple[str, ...] | list[str]) -> bool:
+        return user_has_any_page(allowed_pages, required_pages, denied)
 
     if allowed_pages & (SUPERUSER_PAGES | ADMIN_ROLE_PAGES):
         return True
@@ -158,50 +171,45 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
 
     # Staff directory / public lookup — any authenticated clinical or admin user.
     if api_path.startswith("accounts/users/directory") or api_path.startswith("accounts/users/public"):
-        return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-            allowed_pages, ("/admin/users", "/admin")
+        return user_has_clinical_module_access(allowed_pages) or has_any( ("/admin/users", "/admin")
         )
 
     if api_path.startswith("accounts/users"):
-        return user_has_any_page(allowed_pages, ("/admin/users", "/admin"))
+        return has_any( ("/admin/users", "/admin"))
 
     if api_path.startswith("accounts/system-roles"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/admin/users", "/admin")
+            return user_has_clinical_module_access(allowed_pages) or has_any( ("/admin/users", "/admin")
             )
-        return user_has_any_page(allowed_pages, ("/admin/users", "/admin"))
+        return has_any( ("/admin/users", "/admin"))
 
     if api_path.startswith("permissions/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return user_has_any_page(
-                allowed_pages, ("/admin/roles", "/admin/users", "/admin")
+            return has_any( ("/admin/roles", "/admin/users", "/admin")
             )
-        return user_has_any_page(allowed_pages, ("/admin/roles",))
+        return has_any( ("/admin/roles",))
 
     if api_path.startswith("organization/security-settings"):
         if method in ("GET", "HEAD", "OPTIONS"):
             return True
-        return user_has_any_page(allowed_pages, ("/admin/settings", "/admin"))
+        return has_any( ("/admin/settings", "/admin"))
 
     if api_path.startswith(ADMIN_API_PREFIXES):
-        return user_has_any_page(allowed_pages, ("/admin/settings", "/admin/clinics", "/admin"))
+        return has_any( ("/admin/settings", "/admin/clinics", "/admin"))
 
     if api_path.startswith(ORGANIZATION_ROOM_PREFIXES):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return user_has_any_page(allowed_pages, ("/admin/rooms", "/admin", "/consultation"))
-        return user_has_any_page(allowed_pages, ("/admin/rooms", "/admin"))
+            return has_any( ("/admin/rooms", "/admin", "/consultation"))
+        return has_any( ("/admin/rooms", "/admin"))
 
     if api_path.startswith(ORGANIZATION_READ_PREFIXES):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/admin/clinics", "/admin/users", "/admin")
+            return user_has_clinical_module_access(allowed_pages) or has_any( ("/admin/clinics", "/admin/users", "/admin")
             )
-        return user_has_any_page(allowed_pages, ("/admin/clinics", "/admin/settings", "/admin"))
+        return has_any( ("/admin/clinics", "/admin/settings", "/admin"))
 
     if api_path.startswith("reports/"):
-        return user_has_any_page(
-            allowed_pages,
+        return has_any(
             (
                 "/medical-records/reports",
                 "/analytics",
@@ -214,125 +222,109 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
     # Consultation ordering UIs need to load lab templates for test selection.
     if api_path.startswith("laboratory/templates/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/laboratory/orders", "/laboratory"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/laboratory/orders", "/laboratory"),
             )
-        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
+        return has_any( ("/laboratory/orders", "/laboratory"))
 
     # Consultation can create/read lab orders as part of encounter workflow.
     if api_path.startswith("laboratory/orders/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages,
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
                 ("/laboratory/orders", "/laboratory", "/physiotherapy/orders", "/physiotherapy"),
             )
         if method == "POST":
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/laboratory/orders", "/laboratory"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/laboratory/orders", "/laboratory"),
             )
-        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
+        return has_any( ("/laboratory/orders", "/laboratory"))
 
     # Consultation can create/read radiology orders and browse radiology templates.
     if api_path.startswith("radiology/orders/"):
         if method in ("GET", "HEAD", "OPTIONS", "POST"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/radiology/orders", "/radiology"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/radiology/orders", "/radiology"),
             )
-        return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
+        return has_any( ("/radiology/orders", "/radiology"))
 
     # Consultation patient history — read completed lab results (values + PDF).
     if api_path.startswith("laboratory/tests/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages,
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
                 ("/laboratory/completed", "/laboratory/verification", "/laboratory"),
             )
-        return user_has_any_page(allowed_pages, ("/laboratory/orders", "/laboratory"))
+        return has_any( ("/laboratory/orders", "/laboratory"))
 
     if api_path.startswith("laboratory/verification/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages,
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
                 ("/laboratory/completed", "/laboratory/verification", "/laboratory"),
             )
-        return user_has_any_page(allowed_pages, ("/laboratory/verification", "/laboratory"))
+        return has_any( ("/laboratory/verification", "/laboratory"))
 
     # Consultation patient history — read verified radiology reports / studies.
     if api_path.startswith("radiology/verification/") or api_path.startswith("radiology/studies/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages,
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
                 ("/radiology/completed", "/radiology/verification", "/radiology"),
             )
         if api_path.startswith("radiology/verification/"):
-            return user_has_any_page(allowed_pages, ("/radiology/verification", "/radiology"))
-        return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
+            return has_any( ("/radiology/verification", "/radiology"))
+        return has_any( ("/radiology/orders", "/radiology"))
 
     if api_path.startswith("radiology/templates/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/radiology/orders", "/radiology"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/radiology/orders", "/radiology"),
             )
-        return user_has_any_page(allowed_pages, ("/radiology/orders", "/radiology"))
+        return has_any( ("/radiology/orders", "/radiology"))
 
     # Consultation can create prescriptions and search generics for prescribing.
     if api_path.startswith("pharmacy/hod-stock-issues/"):
         hod_pages = ("/pharmacy/hod-store", "/pharmacy/hod-store/history")
         if method in ("GET", "HEAD", "OPTIONS"):
-            return user_has_any_page(allowed_pages, hod_pages)
-        return user_has_any_page(allowed_pages, ("/pharmacy/hod-store",))
+            return has_any( hod_pages)
+        return has_any( ("/pharmacy/hod-store",))
 
     if api_path.startswith("pharmacy/prescriptions/") or api_path.startswith("pharmacy/generics/for_prescription/"):
         if method in ("GET", "HEAD", "OPTIONS", "POST"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/pharmacy/prescriptions", "/pharmacy"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/pharmacy/prescriptions", "/pharmacy"),
             )
-        return user_has_any_page(allowed_pages, ("/pharmacy/prescriptions", "/pharmacy"))
+        return has_any( ("/pharmacy/prescriptions", "/pharmacy"))
 
     # Consultation can create nursing procedure orders (injection, dressing, observation admission).
     if api_path.startswith("nursing/orders/"):
         if method in ("GET", "HEAD", "OPTIONS", "POST"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/nursing/procedures", "/nursing"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/nursing/procedures", "/nursing"),
             )
-        return user_has_any_page(allowed_pages, ("/nursing/procedures", "/nursing"))
+        return has_any( ("/nursing/procedures", "/nursing"))
 
     # Consultation observation admission needs ward list + existing-admission checks.
     if api_path.startswith("wards/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/nursing/wards", "/consultation/wards"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/nursing/wards", "/consultation/wards"),
             )
-        return user_has_any_page(allowed_pages, ("/nursing/wards", "/consultation/wards"))
+        return has_any( ("/nursing/wards", "/consultation/wards"))
 
     if api_path.startswith("admissions/"):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/nursing/wards", "/consultation/wards"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/nursing/wards", "/consultation/wards"),
             )
         if "discharge" in api_path:
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/nursing/wards", "/consultation/wards"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/nursing/wards", "/consultation/wards"),
             )
-        return user_has_any_page(allowed_pages, ("/nursing/wards", "/consultation/wards"))
+        return has_any( ("/nursing/wards", "/consultation/wards"))
 
     # Consultation can order physiotherapy (APIs mounted at root /orders/).
     if api_path.startswith("orders/"):
         if api_path.startswith("orders/checkin-from-visit") or api_path.startswith(
             "orders/checkins-for-visits"
         ):
-            return user_has_any_page(
-                allowed_pages,
+            return has_any(
                 ("/nursing/pool-queue", "/physiotherapy/orders", "/physiotherapy"),
             )
-        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-            allowed_pages,
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
             ("/physiotherapy/orders", "/physiotherapy"),
         )
 
     if api_path.startswith(("sessions/", "templates/", "stats/", "patient-tracker/")):
-        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-            allowed_pages,
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
             ("/physiotherapy/orders", "/physiotherapy"),
         )
 
@@ -341,31 +333,27 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         if api_path.startswith("eyecare/orders/checkin-from-visit") or api_path.startswith(
             "eyecare/orders/checkins-for-visits"
         ):
-            return user_has_any_page(
-                allowed_pages,
+            return has_any(
                 ("/nursing/pool-queue", "/eyecare/orders", "/eyecare"),
             )
         if method in ("GET", "HEAD", "OPTIONS", "POST"):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/eyecare/orders", "/eyecare"),
+            return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/eyecare/orders", "/eyecare"),
             )
-        return user_has_any_page(allowed_pages, ("/eyecare/orders", "/eyecare"))
+        return has_any( ("/eyecare/orders", "/eyecare"))
 
     if api_path.startswith("common/"):
         if api_path.startswith("common/dashboard/admin") or api_path.startswith("common/metrics"):
-            return user_has_any_page(allowed_pages, ("/admin",))
+            return has_any( ("/admin",))
         if api_path.startswith("common/dashboard") or api_path.startswith("common/online-users"):
-            return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/admin",)
+            return user_has_clinical_module_access(allowed_pages) or has_any( ("/admin",)
             )
         if api_path.startswith(("common/export", "common/send-email")):
-            return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-                allowed_pages, ("/admin",)
+            return user_has_clinical_module_access(allowed_pages) or has_any( ("/admin",)
             )
         return True
 
     if "routing-matrix" in api_path:
-        return user_has_any_page(allowed_pages, ("/admin/settings", "/admin"))
+        return has_any( ("/admin/settings", "/admin"))
 
     if api_path.startswith("patients/"):
         if not _is_write(method):
@@ -379,22 +367,18 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
             # Clinical modules (Lab/Radiology/Consultation/etc.) need patient search/list
             # for order-entry flows (e.g. New External Lab Request).
             if _PATIENT_LIST.match(api_path.rstrip("/")):
-                return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-                    allowed_pages, MEDICAL_RECORDS_PAGES
+                return user_has_clinical_module_access(allowed_pages) or has_any( MEDICAL_RECORDS_PAGES
                 )
-            return user_has_any_page(allowed_pages, MEDICAL_RECORDS_PAGES)
+            return has_any( MEDICAL_RECORDS_PAGES)
         if _PATIENT_LIST.match(api_path.rstrip("/")):
-            return user_has_any_page(
-                allowed_pages,
+            return has_any(
                 ("/medical-records/patients/new", "/medical-records/patients"),
             )
         if "update_history" in api_path:
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages,
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
                 ("/medical-records/patients", "/medical-records/patient-records"),
             )
-        return user_has_any_page(
-            allowed_pages,
+        return has_any(
             ("/medical-records/patients", "/medical-records/patients/new"),
         )
 
@@ -402,8 +386,7 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         if not _is_write(method):
             if _VISIT_LIST.match(api_path.rstrip("/")):
                 # Nursing pool queue and other clinical modules consume visit lists.
-                return user_has_clinical_module_access(allowed_pages) or user_has_any_page(
-                    allowed_pages, MEDICAL_RECORDS_PAGES
+                return user_has_clinical_module_access(allowed_pages) or has_any( MEDICAL_RECORDS_PAGES
                 )
             if (
                 _VISIT_DETAIL.match(api_path)
@@ -413,14 +396,12 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
                 or "nursing-" in api_path
             ):
                 return user_has_clinical_module_access(allowed_pages)
-            return user_has_any_page(allowed_pages, MEDICAL_RECORDS_PAGES)
+            return has_any( MEDICAL_RECORDS_PAGES)
         if _VISIT_LIST.match(api_path.rstrip("/")):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages,
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
                 ("/medical-records/visits/new", "/medical-records/visits"),
             )
-        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-            allowed_pages,
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
             (
                 "/medical-records/visits",
                 "/medical-records/visits/new",
@@ -431,8 +412,7 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
 
     if api_path.startswith("vitals/"):
         if _is_write(method):
-            return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                allowed_pages,
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
                 (
                     "/nursing/pool-queue",
                     "/nursing/vitals-history",
@@ -440,8 +420,7 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
                     "/nursing",
                 ),
             )
-        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-            allowed_pages,
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
             (
                 "/nursing",
                 "/nursing/pool-queue",
@@ -452,32 +431,27 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         )
 
     if api_path.startswith("medical-certificates/"):
-        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-            allowed_pages,
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
             ("/medical-records/patient-records", "/medical-records"),
         )
 
     if api_path.startswith("annual-checkups/"):
-        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-            allowed_pages,
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
             ("/hr/annual-checkups", "/admin/annual-checkup-programme", "/medical-records"),
         )
 
     if api_path.startswith("appointments/"):
-        return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-            allowed_pages,
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
             ("/medical-records/appointments",),
         )
 
     if api_path.startswith("support/tickets/queue"):
-        return user_has_any_page(
-            allowed_pages,
+        return has_any(
             ("/admin/support-tickets", "/admin/audit", "/admin"),
         )
 
     if re.match(r"support/tickets/\d+/?$", api_path):
-        return user_has_any_page(
-            allowed_pages,
+        return has_any(
             ("/admin/support-tickets", "/admin/audit", "/admin"),
         )
 
@@ -491,18 +465,16 @@ def check_api_page_access(api_path: str, method: str, allowed_pages: set[str]) -
         return user_has_exact_page(allowed_pages, "/hr/exemptions")
 
     if api_path.startswith("hr/"):
-        return user_has_any_page(
-            allowed_pages,
+        return has_any(
             ("/hr", "/hr/annual-checkups", "/hr/exemptions"),
         )
 
     for prefix, pages in MODULE_API_RULES:
         if api_path.startswith(prefix):
             if prefix == "consultation/":
-                return _consultation_clinical_access(allowed_pages) or user_has_any_page(
-                    allowed_pages, pages
+                return _consultation_clinical_access(allowed_pages, denied) or has_any( pages
                 )
-            return user_has_any_page(allowed_pages, pages)
+            return has_any( pages)
 
     # ICD-10 / complaint catalogs — consultation + records.
     if (

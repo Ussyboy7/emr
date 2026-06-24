@@ -6,7 +6,7 @@ from __future__ import annotations
 from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from permissions.api_access import check_api_page_access, normalize_api_path
-from permissions.user_pages import get_user_allowed_pages
+from permissions.user_pages import get_user_allowed_pages, get_user_denied_pages
 
 
 class ApiPageAccessPermission(BasePermission):
@@ -32,13 +32,14 @@ class ApiPageAccessPermission(BasePermission):
 
         required_pages = getattr(view, "required_pages", None)
         allowed = get_user_allowed_pages(user)
+        denied = get_user_denied_pages(user)
         if required_pages:
             from permissions.page_paths import user_has_any_page
 
-            return user_has_any_page(allowed, required_pages)
+            return user_has_any_page(allowed, required_pages, denied)
 
         api_path = normalize_api_path(request.path)
-        return check_api_page_access(api_path, request.method, allowed)
+        return check_api_page_access(api_path, request.method, allowed, denied)
 
 
 AuthenticatedWithPageAccess = [IsAuthenticated, ApiPageAccessPermission]

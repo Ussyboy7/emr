@@ -31,7 +31,7 @@ class Command(BaseCommand):
                 'description': 'Radiology studies and reporting'
             },
             {
-                'name': 'Optamologist',
+                'name': 'Ophthalmologist',
                 'description': 'Ophthalmology and eye care services'
             },
             {

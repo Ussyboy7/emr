@@ -264,7 +264,7 @@ class Command(BaseCommand):
                     '/medical-records/patient-records', '/medical-records/reports',
                     # Consultation - All pages (referrals & forms live under /consultation/referrals)
                     '/consultation', '/consultation/start', '/consultation/room', '/consultation/history',
-                    '/consultation/wards', '/consultation/referrals',
+                    '/consultation/wards', '/consultation/referrals', '/consultation/analytics',
                     # Nursing - Limited access
                     '/nursing', '/nursing/analytics', '/nursing/vitals-history', '/nursing/pool-queue', '/nursing/room-queue',
                     # Laboratory - View access
@@ -274,7 +274,7 @@ class Command(BaseCommand):
                     # Radiology - View access
                     '/radiology', '/radiology/orders', '/radiology/verification', '/radiology/completed',
                     # Physiotherapy - View access
-                    '/physiotherapy', '/physiotherapy/orders', '/physiotherapy/completed',
+                    '/physiotherapy', '/physiotherapy/orders', '/physiotherapy/completed', '/physiotherapy/analytics',
                     # Eye clinic - View access
                     '/eyecare', '/eyecare/orders', '/eyecare/completed', '/eyecare/analytics',
                     # Analytics - View access
@@ -458,6 +458,8 @@ class Command(BaseCommand):
                     '/medical-records', '/medical-records/patients/new', '/medical-records/patients',
                     '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
                     '/medical-records/coding', '/medical-records/diagnosis-review', '/medical-records/patient-records', '/medical-records/referrals', '/medical-records/reports',
+                    '/medical-records/reports/new-registrations', '/medical-records/reports/lab-statistics',
+                    '/medical-records/reports/patient-demographics',
                     # No other modules
                 ],
                 'is_active': True,

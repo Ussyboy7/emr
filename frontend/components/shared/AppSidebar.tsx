@@ -276,9 +276,10 @@ export function AppSidebar() {
   const { currentUser, hydrated } = useCurrentUser();
   const { clinics: userClinics } = useClinic();
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
+  const deniedPages = currentUser?.deniedPages ?? [];
   const canViewOverviewDashboard =
     Boolean(currentUser?.isSuperuser) ||
-    isPathAllowedByPages("/dashboard", currentUser?.permissions ?? []);
+    isPathAllowedByPages("/dashboard", currentUser?.permissions ?? [], deniedPages);
 
 
   // Track which sections are open
@@ -335,6 +336,7 @@ export function AppSidebar() {
 
     // Check if user has access to pages from each module
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    const userDeniedPages = currentUser.deniedPages ?? [];
 
     const canManageUsers =
       currentUser.isSuperuser ||
@@ -344,11 +346,11 @@ export function AppSidebar() {
     const itemAllowed = (href: string) => {
       if (href === "/admin/users") {
         const hasPage =
-          isPathAllowedByPages("/admin/users", allowedPages) ||
-          isPathAllowedByPages("/admin", allowedPages);
+          isPathAllowedByPages("/admin/users", allowedPages, userDeniedPages) ||
+          isPathAllowedByPages("/admin", allowedPages, userDeniedPages);
         return hasPage && canManageUsers;
       }
-      return isPathAllowedByPages(href, allowedPages);
+      return isPathAllowedByPages(href, allowedPages, userDeniedPages);
     };
 
     return menuSections.filter((section) => {
@@ -387,6 +389,7 @@ export function AppSidebar() {
 
     // Check if user has access to specific pages (prefix-aware, matches middleware)
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+    const userDeniedPages = currentUser.deniedPages ?? [];
 
     const canManageUsers =
       currentUser.isSuperuser ||
@@ -396,14 +399,11 @@ export function AppSidebar() {
     return baseItems.filter((item) => {
       if (item.href === "/admin/users") {
         const hasPage =
-          isPathAllowedByPages("/admin/users", allowedPages) ||
-          isPathAllowedByPages("/admin", allowedPages);
+          isPathAllowedByPages("/admin/users", allowedPages, userDeniedPages) ||
+          isPathAllowedByPages("/admin", allowedPages, userDeniedPages);
         return hasPage && canManageUsers;
       }
-      if (item.href === "/admin/health" && isPathAllowedByPages("/admin", allowedPages)) {
-        return true;
-      }
-      return isPathAllowedByPages(item.href, allowedPages);
+      return isPathAllowedByPages(item.href, allowedPages, userDeniedPages);
     });
   };
 
@@ -550,21 +550,30 @@ export function AppSidebar() {
             );
           })}
 
-          {/* Help - Always visible */}
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/help")} tooltip="Help & Support" className="text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:bg-sidebar-primary/10 data-[active=true]:text-sidebar-primary">
-                    <Link href="/help?ticket=1">
-                      <HelpCircle className="h-4 w-4" />
-                      {!isCollapsed && <span>Help & Support</span>}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {/* Help - permission-gated like all other pages */}
+          {hydrated &&
+            currentUser &&
+            isPathAllowedByPages("/help", currentUser?.permissions ?? [], deniedPages) && (
+              <SidebarGroup>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive("/help")}
+                        tooltip="Help & Support"
+                        className="text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:bg-sidebar-primary/10 data-[active=true]:text-sidebar-primary"
+                      >
+                        <Link href="/help?ticket=1">
+                          <HelpCircle className="h-4 w-4" />
+                          {!isCollapsed && <span>Help & Support</span>}
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
 
         </SidebarContent>
       </Sidebar>

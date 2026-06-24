@@ -70,9 +70,29 @@ def get_user_allowed_pages(user) -> set[str]:
     return allowed
 
 
+def get_user_denied_pages(user) -> set[str]:
+    """Per-user restricted pages (``custom_pages`` when mode is ``restrict``)."""
+    if not user or not getattr(user, "is_authenticated", False):
+        return set()
+    if getattr(user, "is_superuser", False):
+        return set()
+
+    mode = (getattr(user, "custom_pages_mode", "") or "").strip()
+    custom = getattr(user, "custom_pages", None)
+    if mode != "restrict" or not isinstance(custom, list):
+        return set()
+
+    return {normalize_role_page_path(p) for p in custom if isinstance(p, str)}
+
+
 def get_user_allowed_pages_for_response(user) -> list[str]:
     """Page list for ``/auth/me`` and login payloads (no internal sentinels)."""
     pages = get_user_allowed_pages(user)
     if pages & SUPERUSER_PAGES or pages & ADMIN_ROLE_PAGES:
         return sorted(ALL_PAGE_IDS)
     return sorted(pages)
+
+
+def get_user_denied_pages_for_response(user) -> list[str]:
+    """Denied page list for ``/auth/me`` (per-user restrict overrides)."""
+    return sorted(get_user_denied_pages(user))

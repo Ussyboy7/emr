@@ -9,6 +9,7 @@ export const REFRESH_TOKEN_EXP_COOKIE = "emr_refresh_exp";
 
 // Auth context cookies (used by middleware for authorization redirects).
 export const AUTH_ALLOWED_PAGES_COOKIE = "emr_allowed_pages";
+export const AUTH_DENIED_PAGES_COOKIE = "emr_denied_pages";
 export const AUTH_IS_SUPERUSER_COOKIE = "emr_is_superuser"; // "1" | "0"
 export const AUTH_HOME_ROUTE_COOKIE = "emr_home"; // e.g. "/nursing"
 
@@ -23,6 +24,7 @@ export const AUTH_NEXT_REDIRECT_COOKIE = "emr_next";
 
 // Legacy names (for cleanup / smooth migration).
 export const LEGACY_AUTH_ALLOWED_PAGES_COOKIE = "npa_emr_allowed_pages";
+export const LEGACY_AUTH_DENIED_PAGES_COOKIE = "npa_emr_denied_pages";
 export const LEGACY_AUTH_IS_SUPERUSER_COOKIE = "npa_emr_is_superuser";
 export const LEGACY_AUTH_HOME_ROUTE_COOKIE = "npa_emr_home";
 export const LEGACY_AUTH_SESSION_COOKIE = "npa_emr_auth";

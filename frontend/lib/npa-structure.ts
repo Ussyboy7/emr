@@ -95,6 +95,7 @@ export type User = {
   accessRoleName?: string;
   capabilities?: string[];
   permissions?: string[]; // Page URLs for sidebar filtering
+  deniedPages?: string[]; // Per-user restricted pages (override parent grants)
   permissionActions?: Record<string, string[]>; // Action counts for UI display
   avatar?: string;
   active: boolean;

@@ -9,7 +9,7 @@ from django.contrib.auth.password_validation import validate_password
 from .models import User, SystemRole
 from permissions.permission_actions import build_permission_action_counts
 from permissions.access_role import get_primary_user_role
-from permissions.user_pages import get_user_allowed_pages_for_response
+from permissions.user_pages import get_user_allowed_pages_for_response, get_user_denied_pages_for_response
 from permissions.user_capabilities import get_user_capabilities_for_response
 
 
@@ -150,6 +150,7 @@ class UserSerializer(serializers.ModelSerializer):
     "type": "object",
     "properties": {
         "pages": {"type": "array", "items": {"type": "string"}},
+        "denied_pages": {"type": "array", "items": {"type": "string"}},
         "actions": {"type": "object", "additionalProperties": {"type": "integer"}},
         "capabilities": {"type": "array", "items": {"type": "string"}},
     },
@@ -158,6 +159,7 @@ class UserSerializer(serializers.ModelSerializer):
         """Get user permissions from their roles, with optional per-user page overrides."""
         return {
             "pages": get_user_allowed_pages_for_response(obj),
+            "denied_pages": get_user_denied_pages_for_response(obj),
             "actions": build_permission_action_counts(obj),
             "capabilities": get_user_capabilities_for_response(obj),
         }

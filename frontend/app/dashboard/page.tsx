@@ -37,7 +37,7 @@ export default function DashboardPage() {
       return;
     }
     if (currentUser.isSuperuser) return;
-    if (isPathAllowedByPages("/dashboard", currentUser.permissions ?? [])) return;
+    if (isPathAllowedByPages("/dashboard", currentUser.permissions ?? [], currentUser.deniedPages ?? [])) return;
     router.replace(homeRoute || "/no-access");
   }, [currentUser, hydrated, homeRoute, router]);
 
