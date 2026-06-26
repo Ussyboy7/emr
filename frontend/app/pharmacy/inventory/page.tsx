@@ -19,7 +19,7 @@ import { pharmacyService } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { 
   Database, Search, Pill, Package, AlertTriangle, Eye,
-  Layers, XCircle, TrendingUp, Hash, Clock, Loader2
+  Layers, XCircle, TrendingUp, Hash, Clock, Loader2, Send
 } from 'lucide-react';
 
 import { toApiDateFromInstant } from '@/lib/dates';
@@ -336,16 +336,23 @@ export default function InventoryPage() {
                     </p>
                   </div>
                 </div>
-                {stats.nearExpiry > 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300"
-                    onClick={() => setStockFilter("near_expiry")}
-                  >
-                    View Near Expiry
-                  </Button>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {(stats.outOfStock > 0 || stats.lowStock > 0) && (
+                    <Button asChild variant="outline" size="sm" className="border-amber-400 text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/30">
+                      <Link href="/pharmacy/requests?new=1">Request Stock</Link>
+                    </Button>
+                  )}
+                  {stats.nearExpiry > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300"
+                      onClick={() => setStockFilter("near_expiry")}
+                    >
+                      View Near Expiry
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -453,6 +460,13 @@ export default function InventoryPage() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
+                            {(stockStatus === 'Out of Stock' || stockStatus === 'Low Stock') && med.medicationId && (
+                              <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-violet-600" title="Request from Central Store">
+                                <Link href={`/pharmacy/requests?new=1&medicationId=${med.medicationId}`}>
+                                  <Send className="h-3.5 w-3.5" />
+                                </Link>
+                              </Button>
+                            )}
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewDetails(med)} title="View Details">
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertPermissionsFromBackend, groupPagePermissionsByModule, normalizeRolePagePath, normalizeRolePagePaths, sortPageModules } from './page-permissions';
+import { convertPermissionsFromBackend, expandRolePagesForRestrictUI, groupPagePermissionsByModule, normalizeRolePagePath, normalizeRolePagePaths, sortPageModules } from './page-permissions';
 
 describe('convertPermissionsFromBackend', () => {
   it('reads string arrays and legacy pages objects', () => {
@@ -16,6 +16,16 @@ describe('sortPageModules', () => {
       'Administration',
       'Other',
     ]);
+  });
+});
+
+describe('expandRolePagesForRestrictUI', () => {
+  it('expands parent module grants into catalog subpages', () => {
+    const expanded = expandRolePagesForRestrictUI(['/pharmacy']);
+    expect(expanded).toContain('/pharmacy');
+    expect(expanded).toContain('/pharmacy/inventory');
+    expect(expanded).toContain('/pharmacy/hod-store');
+    expect(expanded).toContain('/pharmacy/requests');
   });
 });
 

@@ -9,6 +9,7 @@ from pharmacy.dispense_units import (
     DISPENSE_MODE_PACK_OR_UNITS,
     display_to_inventory_units,
     infer_dispense_mode,
+    prescription_dispense_mode,
     validate_inventory_units,
 )
 from pharmacy.models import GenericMedication, Medication
@@ -65,3 +66,16 @@ class DispenseUnitsTest(TestCase):
     def test_pack_only_accepts_whole_pack_multiples(self):
         med = _make_capsule_med(dispense_mode=DISPENSE_MODE_PACK_ONLY)
         validate_inventory_units(med, Decimal("10"), "pack")
+
+    def test_prescription_capsule_promotes_pack_only_to_pack_or_units(self):
+        med = _make_capsule_med(dispense_mode=DISPENSE_MODE_PACK_ONLY)
+        self.assertEqual(
+            prescription_dispense_mode(med, "capsule"),
+            DISPENSE_MODE_PACK_OR_UNITS,
+        )
+
+    def test_prescription_units_entry_for_pack_only_capsule(self):
+        med = _make_capsule_med(dispense_mode=DISPENSE_MODE_PACK_ONLY)
+        units = display_to_inventory_units(med, Decimal("3"), "units", prescribed_unit="capsule")
+        self.assertEqual(units, Decimal("3"))
+        validate_inventory_units(med, Decimal("3"), "units", prescribed_unit="capsule")

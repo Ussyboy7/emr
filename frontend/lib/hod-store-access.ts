@@ -1,5 +1,5 @@
 import type { User } from "@/lib/npa-structure";
-import { isPathAllowedByPages } from "@/lib/home-route";
+import { isPathAllowedByPages, isPathDeniedByPages, userHasExactPageGrant } from "@/lib/home-route";
 
 const HOD_STORE_PAGES = [
   "/pharmacy/hod-store",
@@ -12,13 +12,23 @@ export function userHasHodStorePage(user?: User | null): boolean {
   if (user.isSuperuser) return true;
   const pages = Array.isArray(user.permissions) ? user.permissions : [];
   const deniedPages = user.deniedPages ?? [];
-  return HOD_STORE_PAGES.some((page) => isPathAllowedByPages(page, pages, deniedPages));
+  return HOD_STORE_PAGES.some((page) => userHasExactPageGrant(page, pages, deniedPages));
 }
 
-/** Show HOD Store nav for Pharmacy primary head, superuser, or explicit page grant. */
+/** Show HOD Store nav only for explicit HOD page grants or pharmacy head (not parent /pharmacy alone). */
 export function canShowHodStoreNav(user?: User | null): boolean {
   if (!user) return false;
   if (user.isSuperuser) return true;
-  if (user.isPharmacyHod) return true;
-  return userHasHodStorePage(user);
+
+  const pages = Array.isArray(user.permissions) ? user.permissions : [];
+  const deniedPages = user.deniedPages ?? [];
+
+  const hodPageVisible = (page: string) => {
+    if (isPathDeniedByPages(page, deniedPages)) return false;
+    if (userHasExactPageGrant(page, pages, deniedPages)) return true;
+    if (user.isPharmacyHod && isPathAllowedByPages(page, pages, deniedPages)) return true;
+    return false;
+  };
+
+  return HOD_STORE_PAGES.some(hodPageVisible);
 }

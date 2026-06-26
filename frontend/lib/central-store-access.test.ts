@@ -35,6 +35,30 @@ describe("central-store-access", () => {
     ).toBe(false);
   });
 
+  it("keeps nav visible while clinics are loading for assigned users", () => {
+    expect(
+      canShowCentralStoreNav(baseUser(), [], { clinicsLoading: true }),
+    ).toBe(true);
+  });
+
+  it("hides nav after clinics load when user is not assigned to Bode Thomas", () => {
+    expect(
+      canShowCentralStoreNav(
+        baseUser({ clinics_ids: [2] }),
+        [{ id: 2, code: "TIN-CAN" }],
+        { clinicsLoading: false },
+      ),
+    ).toBe(false);
+  });
+
+  it("shows nav for pharmacy HOD with module grant", () => {
+    expect(
+      userHasCentralStorePage(
+        baseUser({ isPharmacyHod: true, permissions: ["/pharmacy"] }),
+      ),
+    ).toBe(true);
+  });
+
   it("allows superuser regardless of clinic assignment", () => {
     expect(
       canShowCentralStoreNav(

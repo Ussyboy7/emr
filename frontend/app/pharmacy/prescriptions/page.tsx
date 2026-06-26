@@ -763,14 +763,22 @@ export default function PrescriptionsPage() {
   const getDispenseEntryMode = (med: any, medId: string): QuantityEntryMode => {
     return (
       dispenseEntryModes[medId] ??
-      defaultEntryModeForPrescriptionDispense(med?.medication_details || {})
+      defaultEntryModeForPrescriptionDispense(med?.medication_details || {}, med?.unit)
     );
+  };
+
+  const getPrescriptionInventoryUnits = (
+    displayQty: number,
+    med: any,
+    entryMode: QuantityEntryMode
+  ): number => {
+    return toInventoryUnits(displayQty, med.medication_details, entryMode, { prescribedUnit: med?.unit });
   };
 
   const getInventoryQuantityForDispense = (med: any, medId: string): number => {
     const displayQty = dispenseQuantities[medId] ?? getDefaultDispenseQuantity(med);
     if (!usesTabletPackEntry(med)) return displayQty;
-    return toInventoryUnits(displayQty, med.medication_details, getDispenseEntryMode(med, medId));
+    return getPrescriptionInventoryUnits(displayQty, med, getDispenseEntryMode(med, medId));
   };
 
   /**
@@ -1053,6 +1061,7 @@ export default function PrescriptionsPage() {
 
     const initialQuantities: Record<string, number> = {};
     const initialCoverageQuantities: Record<string, number> = {};
+    const initialEntryModes: Record<string, QuantityEntryMode> = {};
     const initialSelection: string[] = [];
     const initialBatches: Record<string, string> = {};
     const loadedBatches: Record<string, MedicationBatch[]> = {};
@@ -1092,8 +1101,12 @@ export default function PrescriptionsPage() {
     }
     for (const med of transformedMedications.filter((m: any) => isActiveDispenseLine(m))) {
       if (med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Pending') {
+        const entryMode = defaultEntryModeForPrescriptionDispense(med.medication_details || {}, med.unit);
+        initialEntryModes[med.id] = entryMode;
         initialQuantities[med.id] = getDefaultDispenseQuantity(med);
-        initialCoverageQuantities[med.id] = getDefaultCoverageQuantity(med);
+        initialCoverageQuantities[med.id] = usesTabletPackEntry(med)
+          ? getPrescriptionInventoryUnits(getDefaultDispenseQuantity(med), med, entryMode)
+          : getDefaultCoverageQuantity(med);
         if (med.status !== 'Pending') initialSelection.push(med.id);
       }
     }
@@ -1101,6 +1114,7 @@ export default function PrescriptionsPage() {
     // Open immediately, then hydrate batch/stock details in background.
     setDispenseQuantities(initialQuantities);
     setDispenseCoverageQuantities(initialCoverageQuantities);
+    setDispenseEntryModes(initialEntryModes);
     setSelectedMedications(initialSelection);
     setSelectedBatches(initialBatches);
     setDispenseNotes('');
@@ -1181,14 +1195,14 @@ export default function PrescriptionsPage() {
       const defaultCoverageQty = med ? getDefaultCoverageQuantity(med) : quantity;
       setSelectedMedications(prev => [...prev, medId]);
       const entryMode = med?.medication_details
-        ? defaultEntryModeForPrescriptionDispense(med.medication_details)
+        ? defaultEntryModeForPrescriptionDispense(med.medication_details, med.unit)
         : "units";
       setDispenseEntryModes(prev => ({ ...prev, [medId]: entryMode }));
       setDispenseQuantities(prev => ({ ...prev, [medId]: defaultDispenseQty }));
       setDispenseCoverageQuantities(prev => ({
         ...prev,
         [medId]: med && usesTabletPackEntry(med)
-          ? toInventoryUnits(defaultDispenseQty, med.medication_details, entryMode)
+          ? getPrescriptionInventoryUnits(defaultDispenseQty, med, entryMode)
           : defaultCoverageQty,
       }));
       
@@ -1276,8 +1290,9 @@ export default function PrescriptionsPage() {
     const invalidQuantities = selectedMedications.filter(medId => {
       const med = selectedPrescriptionMedications.find(m => m.id === medId);
       const quantity = med ? getInventoryQuantityForDispense(med, medId) : 0;
+      const displayQty = med ? (dispenseQuantities[medId] ?? getDefaultDispenseQuantity(med)) : 0;
       const coverageQty = usesTabletPackEntry(med)
-        ? quantity
+        ? getPrescriptionInventoryUnits(displayQty, med, getDispenseEntryMode(med, medId))
         : (dispenseCoverageQuantities[medId] ?? (med ? getDefaultCoverageQuantity(med) : 0));
       return !med || quantity <= 0 || coverageQty <= 0;
     });
@@ -1404,7 +1419,7 @@ export default function PrescriptionsPage() {
         const entryMode = getDispenseEntryMode(med, medId);
         const quantity = getInventoryQuantityForDispense(med, medId);
         const coverageQuantity = usesTabletPackEntry(med)
-          ? quantity
+          ? getPrescriptionInventoryUnits(displayQty, med, entryMode)
           : (dispenseCoverageQuantities[medId] ?? getDefaultCoverageQuantity(med));
 
         // Use manually selected batch OR fetch auto-selected batch (FEFO) from cache
@@ -1454,6 +1469,7 @@ export default function PrescriptionsPage() {
       setSelectedMedications([]);
       setDispenseQuantities({});
       setDispenseCoverageQuantities({});
+      setDispenseEntryModes({});
       setDispenseNotes('');
       setSelectedBatches({});
 
@@ -2692,6 +2708,7 @@ export default function PrescriptionsPage() {
                                       ) : usesTabletPackEntry(med) && med.medication_details ? (
                                         <PharmacyPackQuantityFields
                                           medication={med.medication_details}
+                                          prescribedUnit={med.unit ?? null}
                                           displayQuantity={String(dispenseQuantities[med.id] ?? getDefaultDispenseQuantity(med))}
                                           onDisplayQuantityChange={(value) => {
                                             const inputValue = Math.max(1, parseInt(value, 10) || 1);
@@ -2699,7 +2716,7 @@ export default function PrescriptionsPage() {
                                             setDispenseQuantities((prev) => ({ ...prev, [med.id]: inputValue }));
                                             setDispenseCoverageQuantities((prev) => ({
                                               ...prev,
-                                              [med.id]: toInventoryUnits(inputValue, med.medication_details, mode),
+                                              [med.id]: getPrescriptionInventoryUnits(inputValue, med, mode),
                                             }));
                                           }}
                                           entryMode={getDispenseEntryMode(med, med.id)}
@@ -2708,7 +2725,7 @@ export default function PrescriptionsPage() {
                                             const inputValue = dispenseQuantities[med.id] ?? getDefaultDispenseQuantity(med);
                                             setDispenseCoverageQuantities((prev) => ({
                                               ...prev,
-                                              [med.id]: toInventoryUnits(inputValue, med.medication_details, mode),
+                                              [med.id]: getPrescriptionInventoryUnits(inputValue, med, mode),
                                             }));
                                           }}
                                           className="[&_input]:h-8"
@@ -2854,6 +2871,7 @@ export default function PrescriptionsPage() {
                   setSelectedMedications([]);
                   setDispenseQuantities({});
                   setDispenseCoverageQuantities({});
+                  setDispenseEntryModes({});
                   setSelectedBatches({});
                 }}
               >

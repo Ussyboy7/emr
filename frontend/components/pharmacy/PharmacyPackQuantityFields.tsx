@@ -7,6 +7,7 @@ import {
   getDefaultQuantityEntryMode,
   getDefaultQuantityEntryModeForPrescription,
   getEffectiveDispenseMode,
+  getPrescriptionDispenseMode,
   getQuantityConversionHint,
   getQuantityFieldLabel,
   type PackQuantityMedication,
@@ -23,6 +24,8 @@ type PharmacyPackQuantityFieldsProps = {
   maxDisplayQuantity?: number;
   placeholder?: string;
   className?: string;
+  /** When set, uses prescription pack/units rules (tablet/capsule → pack_or_units, default units). */
+  prescribedUnit?: string | null;
 };
 
 export function PharmacyPackQuantityFields({
@@ -34,20 +37,25 @@ export function PharmacyPackQuantityFields({
   maxDisplayQuantity,
   placeholder,
   className,
+  prescribedUnit,
 }: PharmacyPackQuantityFieldsProps) {
-  const dispenseMode = getEffectiveDispenseMode(medication);
-  const showPackEntry = usesPackQuantityEntry(medication);
+  const isPrescriptionContext = prescribedUnit !== undefined;
+  const dispenseMode = isPrescriptionContext
+    ? getPrescriptionDispenseMode(medication, prescribedUnit)
+    : getEffectiveDispenseMode(medication);
+  const showPackEntry = usesPackQuantityEntry({ ...medication, dispense_mode: dispenseMode });
   const showToggle = canChooseQuantityEntryMode(dispenseMode);
   const conversionHint = getQuantityConversionHint(
     Math.max(0, Number.parseInt(displayQuantity || "0", 10) || 0),
     medication,
-    entryMode
+    entryMode,
+    dispenseMode
   );
 
   if (!showPackEntry) {
     return (
       <div className={className}>
-        <Label className="text-xs">{getQuantityFieldLabel(medication, "units")}</Label>
+        <Label className="text-xs">{getQuantityFieldLabel(medication, "units", dispenseMode)}</Label>
         <Input
           className="mt-1"
           type="number"
@@ -92,7 +100,7 @@ export function PharmacyPackQuantityFields({
           </div>
         </div>
       )}
-      <Label className="text-xs">{getQuantityFieldLabel(medication, entryMode)}</Label>
+      <Label className="text-xs">{getQuantityFieldLabel(medication, entryMode, dispenseMode)}</Label>
       <Input
         className="mt-1"
         type="number"
@@ -112,7 +120,11 @@ export function defaultEntryModeForMedication(medication: PackQuantityMedication
 }
 
 export function defaultEntryModeForPrescriptionDispense(
-  medication: PackQuantityMedication
+  medication: PackQuantityMedication,
+  prescribedUnit?: string | null
 ): QuantityEntryMode {
-  return getDefaultQuantityEntryModeForPrescription(getEffectiveDispenseMode(medication));
+  return getDefaultQuantityEntryModeForPrescription(getEffectiveDispenseMode(medication), {
+    medication,
+    prescribedUnit,
+  });
 }

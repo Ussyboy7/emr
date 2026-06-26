@@ -7,6 +7,8 @@ from permissions.page_catalog import ALL_PAGE_IDS
 from permissions.page_paths import GLOBAL_USER_PAGES, normalize_role_page_path
 from permissions.role_permissions import normalize_role_permissions_list
 
+USER_MANAGEMENT_PAGES = ("/admin/users", "/admin")
+
 SUPERUSER_PAGES = frozenset({"__superuser__"})
 ADMIN_ROLE_PAGES = frozenset({"__admin__"})
 
@@ -66,7 +68,20 @@ def get_user_allowed_pages(user) -> set[str]:
             allowed.add(normalize_role_page_path(page))
 
     allowed = _apply_page_overrides(user, allowed)
+    allowed = _apply_implicit_pages(user, allowed)
     setattr(user, cache_attr, allowed)
+    return allowed
+
+
+def _apply_implicit_pages(user, allowed: set[str]) -> set[str]:
+    """Capability-based page grants (respect per-user restrict denials)."""
+    denied = get_user_denied_pages(user)
+    from pharmacy.hod_store import user_is_pharmacy_hod
+
+    if user_is_pharmacy_hod(user):
+        for page in USER_MANAGEMENT_PAGES:
+            if page not in denied:
+                allowed.add(page)
     return allowed
 
 

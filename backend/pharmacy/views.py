@@ -1490,7 +1490,12 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             from pharmacy.dispense_units import validate_inventory_units
 
             try:
-                validate_inventory_units(dispensed_medication, quantity, quantity_entry_mode)
+                validate_inventory_units(
+                    dispensed_medication,
+                    quantity,
+                    quantity_entry_mode,
+                    prescribed_unit=item.unit,
+                )
             except Exception as exc:
                 from django.core.exceptions import ValidationError as DjangoValidationError
                 if isinstance(exc, DjangoValidationError):
@@ -1954,11 +1959,20 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
-    def _validate_stock_request_access(self, from_location=None, to_location=None):
+    def _stock_request_operation(self) -> str:
+        action = getattr(self, "action", None) or "read"
+        if action == "create":
+            return "create"
+        if action in ("fulfill", "approve", "reject", "partial_update", "update", "destroy"):
+            return "mutate"
+        if action == "confirm_receipt":
+            return "confirm"
+        return "read"
+
+    def _validate_stock_request_access(self, from_location=None, to_location=None, operation=None):
         """Gate stock requests involving Central Store and/or HOD Store."""
         if self.request.user.is_superuser:
             return
-        from pharmacy.hod_store import user_can_access_stock_request
 
         from_loc = from_location
         to_loc = to_location
@@ -1982,13 +1996,14 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         ):
             return
 
-        if not user_can_access_stock_request(self.request.user, from_loc, to_loc):
+        op = operation or self._stock_request_operation()
+        if not user_can_access_stock_request(self.request.user, from_loc, to_loc, operation=op):
             from rest_framework.exceptions import PermissionDenied
 
             raise PermissionDenied(
                 "You do not have permission for this stock request. "
                 "Central store operations require Bode Thomas as your active clinic; "
-                "HOD store operations require Head of Pharmacy access."
+                "dispensary and ward staff may create and confirm Store→site requests only."
             )
 
     def _validate_store_access(self):
@@ -2029,7 +2044,11 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     
     def get_object(self):
         obj = super().get_object()
-        self._validate_stock_request_access(obj.from_location, obj.to_location)
+        self._validate_stock_request_access(
+            obj.from_location,
+            obj.to_location,
+            operation=self._stock_request_operation(),
+        )
         return obj
 
     @extend_schema(tags=["Pharmacy"], summary="List stats", description="Tab counts for stock requests (replaces 5+ parallel COUNT requests).")
@@ -2055,6 +2074,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         self._validate_stock_request_access(
             serializer.validated_data.get('from_location'),
             serializer.validated_data.get('to_location'),
+            operation="create",
         )
         self.auto_set_clinic(serializer)
         serializer.save(requested_by=self.request.user)

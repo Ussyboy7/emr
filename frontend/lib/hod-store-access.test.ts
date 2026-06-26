@@ -19,14 +19,31 @@ describe('canShowHodStoreNav', () => {
     expect(canShowHodStoreNav({ ...baseUser, isSuperuser: true })).toBe(true);
   });
 
-  it('shows for pharmacy HOD flag', () => {
-    expect(canShowHodStoreNav({ ...baseUser, isPharmacyHod: true })).toBe(true);
+  it('shows for pharmacy HOD with module grant', () => {
+    expect(
+      canShowHodStoreNav({ ...baseUser, isPharmacyHod: true, permissions: ['/pharmacy'] }),
+    ).toBe(true);
   });
 
-  it('shows when hod-store page is granted', () => {
+  it('shows when hod-store page is explicitly granted', () => {
     expect(
       canShowHodStoreNav({ ...baseUser, permissions: ['/pharmacy/hod-store'] }),
     ).toBe(true);
+  });
+
+  it('hides for pharmacist with only parent /pharmacy grant', () => {
+    expect(canShowHodStoreNav({ ...baseUser, permissions: ['/pharmacy'] })).toBe(false);
+  });
+
+  it('hides when hod-store is denied even for pharmacy HOD', () => {
+    expect(
+      canShowHodStoreNav({
+        ...baseUser,
+        isPharmacyHod: true,
+        permissions: ['/pharmacy'],
+        deniedPages: ['/pharmacy/hod-store'],
+      }),
+    ).toBe(false);
   });
 
   it('hides for regular pharmacist without pages', () => {

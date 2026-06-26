@@ -142,3 +142,83 @@ class HodStockIssueAPITest(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["to_location"], HOD_STORE_LOCATION)
+
+
+class DispensaryStockRequestAccessTest(APITestCase):
+    """Dispensary staff may create Store→Dispensary requests without central-store operator role."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.medication, cls.generic = _make_medication()
+        cls.clinic = Clinic.objects.create(name="Satellite Clinic", code="SAT-01")
+        cls.dispensary_user = create_test_user(
+            "disp_pharm",
+            pages=["/pharmacy/inventory", "/pharmacy/requests"],
+        )
+        cls.dispensary_user.clinic = cls.clinic
+        cls.dispensary_user.save(update_fields=["clinic"])
+
+    def test_dispensary_pharmacist_can_create_store_to_dispensary_request(self):
+        self.client.force_authenticate(user=self.dispensary_user)
+        resp = self.client.post(
+            "/api/v1/pharmacy/stock-requests/",
+            {
+                "from_location": "Store",
+                "to_location": "Dispensary",
+                "notes": "Restock dispensary",
+                "items": [{"medication": self.medication.pk, "quantity": 10}],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+
+    def test_dispensary_pharmacist_cannot_approve_store_request(self):
+        self.client.force_authenticate(user=self.dispensary_user)
+        create_resp = self.client.post(
+            "/api/v1/pharmacy/stock-requests/",
+            {
+                "from_location": "Store",
+                "to_location": "Dispensary",
+                "items": [{"medication": self.medication.pk, "quantity": 10}],
+            },
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+        approve_resp = self.client.post(
+            f"/api/v1/pharmacy/stock-requests/{create_resp.data['id']}/approve/"
+        )
+        self.assertEqual(approve_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class PharmacyHodUserManagementTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.clinic = Clinic.objects.create(
+            name="Bode Thomas Clinic",
+            code="BODE-THOMAS",
+        )
+        cls.dept = Department.objects.create(
+            clinic=cls.clinic,
+            name="Pharmacy",
+            code="PHARM",
+        )
+        cls.hod = User.objects.create_user(
+            username="pharm_hod_um",
+            password="testpass123",
+            department=cls.dept,
+        )
+        cls.dept.head = cls.hod
+        cls.dept.save(update_fields=["head"])
+        cls.dept_member = User.objects.create_user(
+            username="pharm_staff",
+            password="testpass123",
+            department=cls.dept,
+        )
+
+    def test_pharmacy_hod_can_manage_users_without_admin_page_on_role(self):
+        from permissions.user_management import can_manage_users, managed_department_ids
+        from permissions.user_pages import get_user_allowed_pages
+
+        self.assertTrue(can_manage_users(self.hod))
+        self.assertIn("/admin/users", get_user_allowed_pages(self.hod))
+        self.assertEqual(managed_department_ids(self.hod), {self.dept.id})

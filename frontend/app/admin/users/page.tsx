@@ -20,7 +20,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type User as ApiUser, type Role as ApiRole } from "@/lib/services";
-import { convertPermissionsFromBackend, groupPagePermissionsByModule, normalizeRolePagePaths, sortPageModules } from "@/lib/page-permissions";
+import { convertPermissionsFromBackend, expandRolePagesForRestrictUI, groupPagePermissionsByModule, normalizeRolePagePaths, sortPageModules } from "@/lib/page-permissions";
+import { isScopedDepartmentUserManager } from "@/lib/user-management-access";
 import { getAccessRoleBadgeClass, getAccessRoleIcon } from "@/lib/access-role-display";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import {
@@ -74,10 +75,7 @@ export default function UserManagementPage() {
   const { currentUser, hydrated, refresh: refreshCurrentUser } = useCurrentUser();
 
   const isScopedDeptHead = Boolean(
-    hydrated &&
-      currentUser?.isDepartmentHead &&
-      !currentUser?.isStaff &&
-      !currentUser?.isSuperuser,
+    hydrated && isScopedDepartmentUserManager(currentUser),
   );
 
   const headedDepartments = currentUser?.headedDepartments ?? [];
@@ -1079,8 +1077,8 @@ export default function UserManagementPage() {
                   <div className="rounded-md border p-3 max-h-[360px] overflow-y-auto space-y-4">
                     {(() => {
                       const selectedRole = accessRoles.find((r) => r.id === formData.accessRoleId);
-                      const pages = normalizeRolePagePaths(
-                        convertPermissionsFromBackend(selectedRole?.permissions),
+                      const pages = expandRolePagesForRestrictUI(
+                        normalizeRolePagePaths(convertPermissionsFromBackend(selectedRole?.permissions)),
                       );
                       if (!selectedRole) {
                         return <p className="text-sm text-muted-foreground">Select an access role to see its pages.</p>;

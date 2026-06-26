@@ -25,7 +25,14 @@ def managed_departments_qs(user):
 
 def headed_departments_for_user(user) -> list[dict[str, int | str]]:
     """Departments the user manages (head or deputy) — for UI scoping."""
-    return list(managed_departments_qs(user).values("id", "name"))
+    depts = list(managed_departments_qs(user).values("id", "name"))
+    from pharmacy.hod_store import get_pharmacy_department, user_is_pharmacy_hod
+
+    if user_is_pharmacy_hod(user):
+        pharm = get_pharmacy_department()
+        if pharm and not any(d["id"] == pharm.id for d in depts):
+            depts.append({"id": pharm.id, "name": pharm.name})
+    return depts
 
 
 def is_department_head(user) -> bool:
@@ -61,10 +68,14 @@ def user_has_user_management_page(user) -> bool:
 
 
 def can_manage_users(user) -> bool:
-    """ICT staff, superuser, or department head/deputy with User Management page access."""
+    """ICT staff, superuser, department head/deputy, or Pharmacy HOD with page access."""
     if not user or not getattr(user, "is_authenticated", False):
         return False
     if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
+        return True
+    from pharmacy.hod_store import user_is_pharmacy_hod
+
+    if user_is_pharmacy_hod(user):
         return True
     return is_department_head(user) and user_has_user_management_page(user)
 
@@ -85,7 +96,14 @@ def managed_department_ids(user) -> set[int] | None:
         if user.department_id:
             return {user.department_id}
         return set()
-    return set(managed_departments_qs(user).values_list("id", flat=True))
+    dept_ids = set(managed_departments_qs(user).values_list("id", flat=True))
+    from pharmacy.hod_store import get_pharmacy_department, user_is_pharmacy_hod
+
+    if user_is_pharmacy_hod(user):
+        pharm = get_pharmacy_department()
+        if pharm:
+            dept_ids.add(pharm.id)
+    return dept_ids
 
 
 def filter_users_by_managed_departments(

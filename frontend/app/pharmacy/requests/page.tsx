@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import { formatPackDisplay, packSizeForRequestItem, requestInputToUnits } from "@/lib/pharmacy/stock-request-quantity";
@@ -17,7 +18,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type Medication } from "@/lib/services";
-import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
 import { formatDisplayDate, localMonthBounds, localWeekToTodayBounds, todayApiDateString, formatDisplayDateTime } from "@/lib/dates";
 import { useClinic } from "@/hooks/use-clinic";
@@ -27,12 +27,23 @@ const MEDICATION_SEARCH_LIMIT = 20;
 const MAX_QUANTITY = 100000;
 
 export default function DispensaryRequestsPage() {
+  return (
+    <Suspense fallback={null}>
+      <DispensaryRequestsPageContent />
+    </Suspense>
+  );
+}
+
+function DispensaryRequestsPageContent() {
+  const searchParams = useSearchParams();
   const { ready, handleAuthError } = usePharmacyPageAuth();
   const { activeClinicName } = useClinic();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalRequests, setTotalRequests] = useState(0);
-  const [medications, setMedications] = useState<Medication[]>([]);
+  const [medicationCache, setMedicationCache] = useState<Record<number, Medication>>({});
+  const [medicationSearchResults, setMedicationSearchResults] = useState<Medication[]>([]);
+  const [medicationSearchLoading, setMedicationSearchLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("today");
@@ -78,8 +89,67 @@ export default function DispensaryRequestsPage() {
 
   useEffect(() => {
     if (!ready) return;
-    void loadMedications();
-  }, [ready]);
+    const term = debouncedMedSearch.trim();
+    if (!term) {
+      setMedicationSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    const loadSearch = async () => {
+      setMedicationSearchLoading(true);
+      try {
+        const response = await pharmacyService.getMedications({
+          search: term,
+          page: 1,
+          page_size: MEDICATION_SEARCH_LIMIT,
+        });
+        if (cancelled) return;
+        const results = response.results || [];
+        setMedicationSearchResults(results);
+        setMedicationCache((prev) => {
+          const next = { ...prev };
+          for (const med of results) next[med.id] = med;
+          return next;
+        });
+      } catch (err) {
+        if (!handleAuthError(err)) {
+          console.error("Error searching medications:", err);
+        }
+      } finally {
+        if (!cancelled) setMedicationSearchLoading(false);
+      }
+    };
+    void loadSearch();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedMedSearch, ready, handleAuthError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const medIdRaw = searchParams.get("medicationId");
+    const openNew = searchParams.get("new") === "1";
+    if (!openNew && !medIdRaw) return;
+
+    const bootstrap = async () => {
+      if (medIdRaw) {
+        const medId = Number.parseInt(medIdRaw, 10);
+        if (Number.isFinite(medId) && medId > 0) {
+          try {
+            const med = await pharmacyService.getMedication(medId);
+            setSelectedMedication(med);
+            setMedicationCache((prev) => ({ ...prev, [med.id]: med }));
+          } catch (err) {
+            if (!handleAuthError(err)) {
+              console.error("Error loading medication for request:", err);
+            }
+          }
+        }
+      }
+      setShowNewRequestModal(true);
+    };
+    void bootstrap();
+  }, [ready, searchParams, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;
@@ -134,16 +204,6 @@ export default function DispensaryRequestsPage() {
     }
   };
 
-  const loadMedications = async () => {
-    try {
-      const response = await pharmacyService.getMedications({ page: 1, page_size: MAX_LIST_PAGE_SIZE });
-      setMedications(response.results || []);
-    } catch (err) {
-      if (handleAuthError(err)) return;
-      console.error("Error loading medications:", err);
-    }
-  };
-
   const handleAddItem = () => {
     if (!selectedMedication) {
       toast.error("Please select a medication");
@@ -164,6 +224,7 @@ export default function DispensaryRequestsPage() {
       toast.error("This medication is already added");
       return;
     }
+    setMedicationCache((prev) => ({ ...prev, [selectedMedication.id]: selectedMedication }));
     setRequestItems([...requestItems, { medication: selectedMedication.id, quantity: qty }]);
     setSelectedMedication(null);
     setMedicationSearch("");
@@ -208,16 +269,7 @@ export default function DispensaryRequestsPage() {
     }
   };
 
-  const filteredMedications = useMemo(() => {
-    if (!debouncedMedSearch.trim()) return [];
-    const term = debouncedMedSearch.toLowerCase();
-    return medications
-      .filter(
-        (med) =>
-          med.name.toLowerCase().includes(term) || (med.code || "").toLowerCase().includes(term)
-      )
-      .slice(0, MEDICATION_SEARCH_LIMIT);
-  }, [medications, debouncedMedSearch]);
+  const filteredMedications = medicationSearchResults;
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string; tip?: string }> = {
@@ -460,6 +512,11 @@ export default function DispensaryRequestsPage() {
                       onChange={(e) => setMedicationSearch(e.target.value)}
                       className="mt-1"
                     />
+                    {medicationSearchLoading && medicationSearch && (
+                      <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Searching...
+                      </p>
+                    )}
                     {filteredMedications.length > 0 && medicationSearch && (
                       <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg bg-background shadow-lg z-10 max-h-48 overflow-y-auto">
                         {filteredMedications.map((med) => (
@@ -517,7 +574,7 @@ export default function DispensaryRequestsPage() {
                     <div className="mt-4 space-y-2">
                       <p className="text-sm font-medium">Items Added ({requestItems.length})</p>
                       {requestItems.map((item, idx) => {
-                        const med = medications.find((m) => m.id === item.medication);
+                        const med = medicationCache[item.medication];
                         const packSize = med?.pack_size ?? null;
                         return (
                           <div key={idx} className="flex items-center justify-between p-2 bg-green-50 dark:bg-green-950/30 rounded border border-green-200 dark:border-green-900">
@@ -585,9 +642,9 @@ export default function DispensaryRequestsPage() {
                       <div key={idx} className="border rounded-lg p-3 text-sm flex justify-between items-start">
                         <div>
                           <p className="font-medium">{item.medication_name || "Unknown"}</p>
-                          <p className="text-xs text-muted-foreground">Requested: {formatPackDisplay(Number(item.quantity), packSizeForRequestItem(item, medications))}</p>
+                          <p className="text-xs text-muted-foreground">Requested: {formatPackDisplay(Number(item.quantity), packSizeForRequestItem(item, Object.values(medicationCache)))}</p>
                         </div>
-                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(Number(item.fulfilled_quantity), packSizeForRequestItem(item, medications))}</span>}
+                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(Number(item.fulfilled_quantity), packSizeForRequestItem(item, Object.values(medicationCache)))}</span>}
                       </div>
                     ))}
                   </div>
@@ -621,7 +678,7 @@ export default function DispensaryRequestsPage() {
                     {(selectedRequest.items || []).map((item: any, idx: number) => (
                       <div key={idx} className="flex justify-between">
                         <span>{item.medication_name}</span>
-                        <span className="font-medium">{formatPackDisplay(Number(item.fulfilled_quantity || item.quantity), packSizeForRequestItem(item, medications))}</span>
+                        <span className="font-medium">{formatPackDisplay(Number(item.fulfilled_quantity || item.quantity), packSizeForRequestItem(item, Object.values(medicationCache)))}</span>
                       </div>
                     ))}
                   </div>

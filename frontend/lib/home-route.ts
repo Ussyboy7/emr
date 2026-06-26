@@ -44,6 +44,17 @@ export const MODULE_ROUTE_PRIORITY: ModuleRoute[] = (() => {
   return ordered;
 })();
 
+export function userHasExactPageGrant(
+  pathname: string,
+  allowedPages: string[],
+  deniedPages: string[] = [],
+): boolean {
+  if (!pathname || isPathDeniedByPages(pathname, deniedPages)) return false;
+  const normalizedPath = normalizeRolePagePath(pathname);
+  const normalizedAllowed = (Array.isArray(allowedPages) ? allowedPages : []).map(normalizeRolePagePath);
+  return normalizedAllowed.includes(normalizedPath);
+}
+
 export function isPathDeniedByPages(pathname: string, deniedPages: string[]): boolean {
   if (!pathname || !deniedPages?.length) return false;
   const normalizedPath = normalizeRolePagePath(pathname);

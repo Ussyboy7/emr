@@ -13,6 +13,7 @@ import { Loader2, Search, UserPlus, UserMinus, Star, UserCog, X } from 'lucide-r
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { isPathAllowedByPages } from '@/lib/home-route';
+import { canManageUsersNav, userHasUserManagementPage } from '@/lib/user-management-access';
 
 interface DepartmentStaffDialogProps {
   department: {
@@ -51,9 +52,8 @@ export function DepartmentStaffDialog({ department, open, onOpenChange, onStaffC
 
   const canManageStaff =
     canManageStructure ||
-    Boolean(currentUser?.isStaff) ||
-    (Boolean(currentUser?.isDepartmentHead) &&
-      isPathAllowedByPages('/admin/users', allowedPages, deniedPages) &&
+    (canManageUsersNav(currentUser) &&
+      userHasUserManagementPage(currentUser, allowedPages, deniedPages) &&
       Boolean(department?.id) &&
       (currentUser?.headedDepartments ?? []).some((d) => d.id === department?.id));
 

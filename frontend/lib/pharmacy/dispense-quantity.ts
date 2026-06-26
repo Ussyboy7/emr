@@ -58,6 +58,10 @@ export function asPackQuantityMedication(
   };
 }
 
+export function isTabletCapsuleUnit(unit?: string | null): boolean {
+  return PACK_OR_UNITS_UNITS.has(String(unit || "").trim().toLowerCase());
+}
+
 export function canChooseQuantityEntryMode(mode: DispenseMode): boolean {
   return mode === "pack_or_units";
 }
@@ -66,9 +70,39 @@ export function getDefaultQuantityEntryMode(mode: DispenseMode): QuantityEntryMo
   return mode === "units_only" ? "units" : "pack";
 }
 
+/**
+ * Prescription dispensing: tablet/capsule lines always allow pack or units
+ * (clinical Rx is written in individual units, e.g. 3 capsules).
+ */
+export function getPrescriptionDispenseMode(
+  medication?: PackQuantityMedication | null,
+  prescribedUnit?: string | null
+): DispenseMode {
+  const base = getEffectiveDispenseMode(medication);
+  if (base === "units_only") return "units_only";
+  if (isTabletCapsuleUnit(prescribedUnit) || isTabletCapsuleUnit(medication?.unit)) {
+    return "pack_or_units";
+  }
+  return base;
+}
+
+export function canChoosePrescriptionQuantityEntryMode(
+  medication?: PackQuantityMedication | null,
+  prescribedUnit?: string | null
+): boolean {
+  return canChooseQuantityEntryMode(getPrescriptionDispenseMode(medication, prescribedUnit));
+}
+
 /** Prescriptions are written in clinical units (e.g. 6 capsules) — default to units when both are allowed. */
-export function getDefaultQuantityEntryModeForPrescription(mode: DispenseMode): QuantityEntryMode {
-  if (mode === "pack_only") return "pack";
+export function getDefaultQuantityEntryModeForPrescription(
+  mode: DispenseMode,
+  options?: { medication?: PackQuantityMedication | null; prescribedUnit?: string | null }
+): QuantityEntryMode {
+  const effectiveMode =
+    options?.medication != null || options?.prescribedUnit != null
+      ? getPrescriptionDispenseMode(options?.medication, options?.prescribedUnit)
+      : mode;
+  if (effectiveMode === "pack_only") return "pack";
   return "units";
 }
 
@@ -80,10 +114,14 @@ export function usesPackQuantityEntry(med?: PackQuantityMedication | null): bool
 export function toInventoryUnits(
   displayQty: number,
   med?: PackQuantityMedication | null,
-  entryMode: QuantityEntryMode = "units"
+  entryMode: QuantityEntryMode = "units",
+  options?: { prescribedUnit?: string | null }
 ): number {
   const packSize = getPackSize(med);
-  const mode = getEffectiveDispenseMode(med);
+  const mode =
+    options?.prescribedUnit != null
+      ? getPrescriptionDispenseMode(med, options.prescribedUnit)
+      : getEffectiveDispenseMode(med);
   if (entryMode === "pack") {
     if (mode === "units_only") {
       throw new Error("This medication must be issued in individual units, not packs.");
@@ -127,9 +165,10 @@ export function formatIssuedQuantityDisplay(
 
 export function getQuantityFieldLabel(
   med?: PackQuantityMedication | null,
-  entryMode: QuantityEntryMode = "units"
+  entryMode: QuantityEntryMode = "units",
+  modeOverride?: DispenseMode
 ): string {
-  const mode = getEffectiveDispenseMode(med);
+  const mode = modeOverride ?? getEffectiveDispenseMode(med);
   const packSize = getPackSize(med);
   const unitLabel = String(med?.unit || "units").trim() || "units";
   if (mode === "pack_only" || entryMode === "pack") {
@@ -141,7 +180,8 @@ export function getQuantityFieldLabel(
 export function getQuantityConversionHint(
   displayQty: number,
   med?: PackQuantityMedication | null,
-  entryMode: QuantityEntryMode = "units"
+  entryMode: QuantityEntryMode = "units",
+  modeOverride?: DispenseMode
 ): string | null {
   const packSize = getPackSize(med);
   const unitLabel = String(med?.unit || "units").trim() || "units";

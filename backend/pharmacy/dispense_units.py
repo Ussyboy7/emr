@@ -76,15 +76,33 @@ def normalize_entry_mode(entry_mode: str | None) -> str:
     return mode if mode in dict(QUANTITY_ENTRY_CHOICES) else QUANTITY_ENTRY_UNITS
 
 
+def prescription_dispense_mode(medication, prescribed_unit: str = "") -> str:
+    """Tablet/capsule Rx lines may break packs even when stock is configured pack_only."""
+    base = effective_dispense_mode(medication)
+    if base == DISPENSE_MODE_UNITS_ONLY:
+        return base
+    rx_u = (prescribed_unit or "").strip().lower()
+    stock_u = (getattr(medication, "unit", "") or "").strip().lower()
+    if rx_u in _PACK_OR_UNITS_UNITS or stock_u in _PACK_OR_UNITS_UNITS:
+        return DISPENSE_MODE_PACK_OR_UNITS
+    return base
+
+
 def display_to_inventory_units(
     medication,
     display_qty: Decimal,
     entry_mode: str | None,
+    *,
+    prescribed_unit: str | None = None,
 ) -> Decimal:
     if display_qty <= 0:
         raise ValidationError("Quantity must be greater than zero.")
     pack_size = medication_pack_size(medication)
-    mode = effective_dispense_mode(medication)
+    mode = (
+        prescription_dispense_mode(medication, prescribed_unit or "")
+        if prescribed_unit is not None
+        else effective_dispense_mode(medication)
+    )
     entry = normalize_entry_mode(entry_mode)
 
     if entry == QUANTITY_ENTRY_PACK:
@@ -105,11 +123,17 @@ def validate_inventory_units(
     medication,
     quantity: Decimal,
     entry_mode: str | None = None,
+    *,
+    prescribed_unit: str | None = None,
 ) -> None:
     if quantity <= 0:
         raise ValidationError("Quantity must be greater than zero.")
     pack_size = medication_pack_size(medication)
-    mode = effective_dispense_mode(medication)
+    mode = (
+        prescription_dispense_mode(medication, prescribed_unit or "")
+        if prescribed_unit is not None
+        else effective_dispense_mode(medication)
+    )
     entry = normalize_entry_mode(entry_mode)
 
     if mode == DISPENSE_MODE_PACK_ONLY and pack_size > 1:

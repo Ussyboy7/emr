@@ -217,6 +217,30 @@ export function sortPageModules(modules: string[]): string[] {
   });
 }
 
+/** True when a stored role grant covers a catalog page (exact or parent prefix). */
+function roleGrantAllowsCatalogPage(grant: string, pageId: string): boolean {
+  const grantNorm = normalizeRolePagePath(grant);
+  const pageNorm = normalizeRolePagePath(pageId);
+  if (!grantNorm || !pageNorm) return false;
+  if (grantNorm === pageNorm) return true;
+  if (pageNorm.startsWith(`${grantNorm}/`)) return true;
+  if (grantNorm.startsWith(`${pageNorm}/`)) return true;
+  return false;
+}
+
+/** Expand role page grants so parent paths (e.g. `/pharmacy`) list every restrictable subpage. */
+export function expandRolePagesForRestrictUI(rolePages: string[]): string[] {
+  const normalized = normalizeRolePagePaths(rolePages);
+  const expanded = new Set<string>(normalized);
+  for (const catalogPage of ALL_PAGE_PERMISSIONS) {
+    if (catalogPage.module === "User") continue;
+    if (normalized.some((grant) => roleGrantAllowsCatalogPage(grant, catalogPage.id))) {
+      expanded.add(catalogPage.id);
+    }
+  }
+  return normalizeRolePagePaths(Array.from(expanded));
+}
+
 export function groupPagePermissionsByModule(
   pageIds: string[]
 ): Record<string, PagePermission[]> {

@@ -70,6 +70,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
 import { canShowCentralStoreNav } from "@/lib/central-store-access";
+import { canManageUsersNav, userHasUserManagementPage } from "@/lib/user-management-access";
 import { canShowHodStoreNav } from "@/lib/hod-store-access";
 import { useClinic } from "@/hooks/use-clinic";
 
@@ -274,7 +275,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const isCollapsed = state === "collapsed";
   const { currentUser, hydrated } = useCurrentUser();
-  const { clinics: userClinics } = useClinic();
+  const { clinics: userClinics, loading: clinicsLoading } = useClinic();
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
   const deniedPages = currentUser?.deniedPages ?? [];
   const canViewOverviewDashboard =
@@ -338,17 +339,11 @@ export function AppSidebar() {
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
     const userDeniedPages = currentUser.deniedPages ?? [];
 
-    const canManageUsers =
-      currentUser.isSuperuser ||
-      currentUser.isStaff ||
-      currentUser.isDepartmentHead;
+    const canManageUsers = canManageUsersNav(currentUser);
 
     const itemAllowed = (href: string) => {
       if (href === "/admin/users") {
-        const hasPage =
-          isPathAllowedByPages("/admin/users", allowedPages, userDeniedPages) ||
-          isPathAllowedByPages("/admin", allowedPages, userDeniedPages);
-        return hasPage && canManageUsers;
+        return userHasUserManagementPage(currentUser, allowedPages, userDeniedPages) && canManageUsers;
       }
       return isPathAllowedByPages(href, allowedPages, userDeniedPages);
     };
@@ -370,7 +365,7 @@ export function AppSidebar() {
       "/pharmacy/hod-store/requests",
       "/pharmacy/hod-store/history",
     ];
-    const showCentralStore = canShowCentralStoreNav(currentUser, userClinics);
+    const showCentralStore = canShowCentralStoreNav(currentUser, userClinics, { clinicsLoading });
     const showHodStore = canShowHodStoreNav(currentUser);
     const baseItems = section.items.filter((item) => {
       if (storeHrefs.includes(item.href) && !showCentralStore) {
@@ -391,17 +386,11 @@ export function AppSidebar() {
     const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
     const userDeniedPages = currentUser.deniedPages ?? [];
 
-    const canManageUsers =
-      currentUser.isSuperuser ||
-      currentUser.isStaff ||
-      currentUser.isDepartmentHead;
+    const canManageUsers = canManageUsersNav(currentUser);
 
     return baseItems.filter((item) => {
       if (item.href === "/admin/users") {
-        const hasPage =
-          isPathAllowedByPages("/admin/users", allowedPages, userDeniedPages) ||
-          isPathAllowedByPages("/admin", allowedPages, userDeniedPages);
-        return hasPage && canManageUsers;
+        return userHasUserManagementPage(currentUser, allowedPages, userDeniedPages) && canManageUsers;
       }
       return isPathAllowedByPages(item.href, allowedPages, userDeniedPages);
     });
