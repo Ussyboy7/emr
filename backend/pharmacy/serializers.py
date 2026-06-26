@@ -836,9 +836,15 @@ class StockRequestSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_clinic_name(self, obj):
-        if hasattr(obj, "clinic") and obj.clinic:
+        if obj.clinic_id and obj.clinic:
             return obj.clinic.name
         return None
+
+    def to_representation(self, instance):
+        from pharmacy.stock_request_clinic import repair_stock_request_clinic
+
+        instance = repair_stock_request_clinic(instance)
+        return super().to_representation(instance)
 
     class Meta:
         model = StockRequest

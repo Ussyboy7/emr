@@ -86,6 +86,17 @@ class StockRequestWorkflowTest(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["requested_by"], self.user.pk)
 
+    def test_create_sets_requesting_clinic(self):
+        from organization.models import Clinic
+
+        clinic = Clinic.objects.create(name="Bode Thomas Clinic", code="BODE-THOMAS")
+        self.user.clinic = clinic
+        self.user.save(update_fields=["clinic"])
+        resp = self._create_stock_request()
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["clinic"], clinic.pk)
+        self.assertEqual(resp.data["clinic_name"], clinic.name)
+
     # -- approve --
 
     def test_approve_pending_request(self):

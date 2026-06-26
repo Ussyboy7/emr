@@ -2053,7 +2053,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 qs = qs.filter(created_at__date__lte=dt)
             except ValueError:
                 pass
-        return qs
+        return qs.select_related("clinic", "requested_by", "requested_by__clinic", "confirmed_by")
     
     def get_object(self):
         obj = super().get_object()
