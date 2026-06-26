@@ -190,6 +190,54 @@ class DispensaryStockRequestAccessTest(APITestCase):
         self.assertEqual(approve_resp.status_code, status.HTTP_403_FORBIDDEN)
 
 
+class CentralStoreApproveStockRequestTest(APITestCase):
+    """Assigned Bode Thomas store staff can approve without active clinic at Bode Thomas."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from organization.models import SystemConfig
+
+        SystemConfig.objects.update_or_create(
+            key="multi_clinic_enabled",
+            defaults={"value": "true", "description": "test"},
+        )
+        cls.central = Clinic.objects.create(name="Bode Thomas Clinic", code="BODE-THOMAS")
+        cls.other = Clinic.objects.create(name="Apapa Port Clinic", code="APAPA")
+        cls.medication, cls.generic = _make_medication()
+        cls.dispensary_user = create_test_user(
+            "disp_requester",
+            pages=["/pharmacy/requests"],
+        )
+        cls.dispensary_user.clinic = cls.other
+        cls.dispensary_user.save(update_fields=["clinic"])
+        cls.store_staff = create_test_user(
+            "store_approver",
+            pages=["/pharmacy/store", "/pharmacy/store/requests"],
+        )
+        cls.store_staff.clinic = cls.central
+        cls.store_staff.active_clinic = cls.other
+        cls.store_staff.save(update_fields=["clinic", "active_clinic"])
+        cls.store_staff.clinics.add(cls.central, cls.other)
+
+    def test_approve_store_to_dispensary_request(self):
+        self.client.force_authenticate(user=self.dispensary_user)
+        create_resp = self.client.post(
+            "/api/v1/pharmacy/stock-requests/",
+            {
+                "from_location": "Store",
+                "to_location": "Dispensary",
+                "items": [{"medication": self.medication.pk, "quantity": 10}],
+            },
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED, create_resp.data)
+        self.client.force_authenticate(user=self.store_staff)
+        approve_resp = self.client.post(
+            f"/api/v1/pharmacy/stock-requests/{create_resp.data['id']}/approve/"
+        )
+        self.assertEqual(approve_resp.status_code, status.HTTP_200_OK, approve_resp.data)
+        self.assertEqual(approve_resp.data["status"], "approved")
+
 class PharmacyHodUserManagementTest(TestCase):
     @classmethod
     def setUpTestData(cls):

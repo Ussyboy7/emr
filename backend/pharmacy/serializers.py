@@ -836,7 +836,7 @@ class StockRequestSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_clinic_name(self, obj):
-        if hasattr(obj, 'clinic') and obj.clinic:
+        if hasattr(obj, "clinic") and obj.clinic:
             return obj.clinic.name
         return None
 

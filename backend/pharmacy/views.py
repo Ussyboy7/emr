@@ -1959,6 +1959,18 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
+    def auto_set_clinic(self, serializer):
+        """Always stamp the requester's clinic; multi-clinic mode still validates explicit picks."""
+        clinic_val = serializer.validated_data.get(self.clinic_filter_field)
+        if clinic_val is None:
+            from accounts.utils import resolve_clinic
+
+            clinic = resolve_clinic(self.request.user)
+            if clinic is not None:
+                serializer.validated_data[self.clinic_filter_field] = clinic
+        else:
+            super().auto_set_clinic(serializer)
+
     def _stock_request_operation(self) -> str:
         action = getattr(self, "action", None) or "read"
         if action == "create":
@@ -2002,8 +2014,9 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
             raise PermissionDenied(
                 "You do not have permission for this stock request. "
-                "Central store operations require Bode Thomas as your active clinic; "
-                "dispensary and ward staff may create and confirm Store→site requests only."
+                "Central store approve/issue requires Bode Thomas assignment and store access "
+                "(or set Bode Thomas as your active clinic). "
+                "Dispensary and ward staff may create and confirm Store→site requests only."
             )
 
     def _validate_store_access(self):

@@ -101,13 +101,13 @@ def user_can_operate_stock_request(user, from_location: str | None, to_location:
     if involves_hod and user_can_operate_hod_store(user):
         return True
     if involves_central:
-        from pharmacy.central_store import user_can_operate_central_store
+        from pharmacy.central_store import user_can_manage_central_store_stock_requests
 
-        return user_can_operate_central_store(user)
+        return user_can_manage_central_store_stock_requests(user)
     if involves_hod:
-        from pharmacy.central_store import user_can_operate_central_store
+        from pharmacy.central_store import user_can_manage_central_store_stock_requests
 
-        return user_can_operate_central_store(user)
+        return user_can_manage_central_store_stock_requests(user)
     return False
 
 

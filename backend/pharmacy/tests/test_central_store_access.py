@@ -49,3 +49,12 @@ class CentralStoreAccessTests(TestCase):
         self.user.save(update_fields=["active_clinic"])
         self.assertTrue(user_assigned_to_central_store(self.user))
         self.assertFalse(user_can_operate_central_store(self.user))
+
+    def test_assigned_user_can_manage_stock_requests_when_active_elsewhere(self):
+        from common.tests.support import grant_pages
+        from pharmacy.central_store import user_can_manage_central_store_stock_requests
+
+        self.user.active_clinic = self.other
+        self.user.save(update_fields=["active_clinic"])
+        grant_pages(self.user, ["/pharmacy/store/requests"])
+        self.assertTrue(user_can_manage_central_store_stock_requests(self.user))
