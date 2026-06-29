@@ -32,6 +32,8 @@ import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { toApiDateString, formatDisplayDate, formatDisplayTime, localWeekToTodayBounds } from '@/lib/dates';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { resolvePatientPhoto } from '@/lib/patient-photo';
 import {
   PrescriptionOrderModal,
   type PrescriptionOrderItemInput,
@@ -61,6 +63,7 @@ import { extractSessionEditState } from '@/lib/consultation/workspace-bundle-enr
 // Extended type for local use (includes patientGender for filtering)
 interface ConsultationRecordWithGender extends ConsultationRecord {
   patientGender?: string;
+  patientPhoto?: string | null;
   visitDisplayId?: string;
 }
 
@@ -361,6 +364,7 @@ export default function ConsultationHistoryPage() {
             return {
               id: String(session.id),
               patient: session.patient_name ?? '',
+              patientPhoto: resolvePatientPhoto(session),
               patientId: session.patient_id || '',
               patientIdNumeric: session.patient,
               visitId: session.visit,
@@ -1331,16 +1335,6 @@ export default function ConsultationHistoryPage() {
                 : isCompleted
                   ? "border-l-emerald-500"
                   : "border-l-amber-500";
-              const avatarBg = isCompleted ? "bg-emerald-100 dark:bg-emerald-900/30" : "bg-amber-100 dark:bg-amber-900/30";
-              const avatarText = isCompleted ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-300";
-
-              const initials = (c.patient || "P")
-                .split(" ")
-                .filter(Boolean)
-                .slice(0, 2)
-                .map((n) => n[0]!)
-                .join("")
-                .toUpperCase();
 
               return (
                 <Card
@@ -1351,10 +1345,7 @@ export default function ConsultationHistoryPage() {
                 >
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
-                      {/* Avatar (Manage Visits pattern) */}
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${avatarBg}`}>
-                        <span className={`font-semibold text-xs ${avatarText}`}>{initials}</span>
-                      </div>
+                      <PatientAvatar name={c.patient} photoUrl={c.patientPhoto} size="sm" />
 
                       {/* Details (Manage Visits pattern) */}
                       <div className="flex-1 min-w-0 overflow-hidden">

@@ -154,6 +154,14 @@ export function normalizeRolePagePath(path: string): string {
   return LEGACY_PAGE_PATH_ALIASES[noTrailing] ?? LEGACY_PAGE_PATH_ALIASES[raw] ?? noTrailing;
 }
 
+export const ADMIN_SCOPED_CHILD_PAGES = new Set(["/admin/users"]);
+
+export function childGrantAllowsParentPath(parentPath: string, childGrant: string): boolean {
+  if (!childGrant.startsWith(`${parentPath}/`)) return false;
+  if (parentPath === "/admin" && ADMIN_SCOPED_CHILD_PAGES.has(childGrant)) return false;
+  return true;
+}
+
 /**
  * De-duplicate and normalize role page paths for forms and access lists.
  * Unknown paths (typos, future routes) are kept so saving does not drop data.
@@ -239,6 +247,73 @@ export function expandRolePagesForRestrictUI(rolePages: string[]): string[] {
     }
   }
   return normalizeRolePagePaths(Array.from(expanded));
+}
+
+const HOD_STORE_PAGE_IDS = new Set([
+  "/pharmacy/hod-store",
+  "/pharmacy/hod-store/requests",
+  "/pharmacy/hod-store/history",
+]);
+
+const CENTRAL_STORE_PAGE_IDS = new Set([
+  "/pharmacy/store",
+  "/pharmacy/store/requests",
+]);
+
+export type RestrictUIPageEntry = {
+  id: string;
+  name: string;
+  module: string;
+  /** Listed directly on the access role vs implied by a parent path (e.g. `/pharmacy`). */
+  source: "explicit" | "implied";
+  /** Extra sidebar visibility rules beyond role/deny lists. */
+  navNote?: string;
+};
+
+/** Sidebar visibility hint for pages with special nav gates (HOD store, central store). */
+export function getPageNavConstraintNote(pageId: string): string | undefined {
+  if (HOD_STORE_PAGE_IDS.has(pageId)) {
+    return "Nav: Pharmacy Head only (or explicit HOD page on role)";
+  }
+  if (CENTRAL_STORE_PAGE_IDS.has(pageId)) {
+    return "Nav: Bode Thomas clinic + store page on role";
+  }
+  return undefined;
+}
+
+/** Pages shown in the per-user deny editor, with explicit vs implied source. */
+export function getRestrictUIPageEntries(rolePages: string[]): RestrictUIPageEntry[] {
+  const explicit = new Set(normalizeRolePagePaths(rolePages));
+  const expanded = expandRolePagesForRestrictUI(rolePages);
+  const byId = new Map(ALL_PAGE_PERMISSIONS.map((p) => [p.id, p]));
+
+  return expanded.map((id) => {
+    const perm = byId.get(id);
+    return {
+      id,
+      name: perm?.name ?? id,
+      module: perm?.module ?? "Other",
+      source: explicit.has(id) ? "explicit" : "implied",
+      navNote: getPageNavConstraintNote(id),
+    };
+  });
+}
+
+export function groupRestrictUIPageEntries(
+  entries: RestrictUIPageEntry[],
+): Record<string, RestrictUIPageEntry[]> {
+  const grouped: Record<string, RestrictUIPageEntry[]> = {};
+  for (const entry of entries) {
+    if (!grouped[entry.module]) grouped[entry.module] = [];
+    grouped[entry.module].push(entry);
+  }
+  for (const moduleName of Object.keys(grouped)) {
+    grouped[moduleName] = grouped[moduleName].slice().sort((a, b) => {
+      if (a.source !== b.source) return a.source === "explicit" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+  return grouped;
 }
 
 export function groupPagePermissionsByModule(

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -31,20 +31,29 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   const clinics_ids = currentUser?.clinics_ids;
   const active_clinic_id = currentUser?.active_clinic_id ?? null;
   const multi_clinic_enabled = currentUser?.multi_clinic_enabled ?? false;
+  const currentUserId = currentUser?.id;
+  const autoSetClinicAttemptedRef = useRef(false);
 
-  // Auto-set active clinic to the first assigned clinic if none is set yet
+  // Auto-set active clinic to the first assigned clinic if none is set yet (once per session).
   useEffect(() => {
-    if (!hydrated || !currentUser || !multi_clinic_enabled) return;
+    if (!hydrated || !currentUserId || !multi_clinic_enabled) return;
     if (active_clinic_id !== null && active_clinic_id !== undefined) return;
     if (!clinics_ids || clinics_ids.length === 0) return;
+    if (autoSetClinicAttemptedRef.current) return;
+
+    autoSetClinicAttemptedRef.current = true;
     apiFetch("/accounts/auth/me/", {
       method: "PATCH",
       body: JSON.stringify({ active_clinic: clinics_ids[0] }),
-    }).then(() => refresh()).catch(() => {});
-  }, [hydrated, currentUser, clinics_ids, active_clinic_id, multi_clinic_enabled, refresh]);
+    })
+      .then(() => refresh())
+      .catch(() => {
+        autoSetClinicAttemptedRef.current = false;
+      });
+  }, [hydrated, currentUserId, clinics_ids, active_clinic_id, multi_clinic_enabled, refresh]);
 
   useEffect(() => {
-    if (!hydrated || !currentUser || !clinics_ids || clinics_ids.length === 0) {
+    if (!hydrated || !currentUserId || !clinics_ids || clinics_ids.length === 0) {
       setClinicsLoaded(false);
       return;
     }
@@ -63,7 +72,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
         setClinicsLoaded(true);
       });
     return () => { cancelled = true; };
-  }, [hydrated, currentUser, clinics_ids]);
+  }, [hydrated, currentUserId, clinics_ids]);
 
   const userClinics = useMemo(() => {
     if (!clinics_ids || clinics_ids.length === 0) return [];

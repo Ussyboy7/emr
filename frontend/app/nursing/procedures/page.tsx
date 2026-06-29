@@ -36,6 +36,7 @@ import {
   type AddNursingProcedureResult,
 } from '@/components/nursing/AddNursingProcedureDialog';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { resolvePatientPhoto } from '@/lib/patient-photo';
 import { completeNursingProcedureVisit } from '@/lib/nursing/nursing-repeat-procedure';
 
 const DRESSING_INTERVENTION_MAP: Record<string, string> = {
@@ -56,6 +57,7 @@ interface Procedure {
   type: 'injection' | 'dressing' | 'medication' | 'ward_admission';
   status: 'pending' | 'completed';
   patientName: string;
+  patientPhoto?: string | null;
   patientId: string;
   personalNumber: string;
   age: number;
@@ -309,6 +311,7 @@ function nursingOrderToProcedure(order: any): Procedure {
     type: procedureType,
     status: order.status === 'completed' ? 'completed' : 'pending',
     patientName: order.patient_name ?? '',
+    patientPhoto: resolvePatientPhoto(order),
     patientId: order.patient_patient_id ?? '',
     personalNumber: order.patient_personal_number ?? '',
     age: order.patient_age ?? 0,
@@ -1088,7 +1091,7 @@ export default function ProceduresQueuePage() {
                 >
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
-                      <PatientAvatar name={procedure.patientName} photoUrl={undefined} size="sm" />
+                      <PatientAvatar name={procedure.patientName} photoUrl={procedure.patientPhoto} size="sm" />
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">

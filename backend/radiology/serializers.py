@@ -5,6 +5,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 import re
+from patients.photo import patient_photo_url
 from .models import (
     RadiologyTemplate,
     RadiologyOrder,
@@ -178,6 +179,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
     """Serializer for RadiologyOrder model."""
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_photo = serializers.SerializerMethodField()
     patient_details = serializers.SerializerMethodField()
     doctor_name = serializers.SerializerMethodField()
     doctor_details = serializers.SerializerMethodField()
@@ -204,8 +206,13 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
                 'name': obj.patient.get_full_name(),
                 'age': getattr(obj.patient, 'age', None),
                 'gender': getattr(obj.patient, 'gender', None),
+                'photo': patient_photo_url(obj.patient),
             }
         return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
     
     @extend_schema_field(OpenApiTypes.STR)
     def get_doctor_name(self, obj):
@@ -395,6 +402,7 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
 
     study_details = RadiologyStudySerializer(source='study', read_only=True)
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_photo = serializers.SerializerMethodField()
     patient_details = serializers.SerializerMethodField()
     order_id = serializers.CharField(source='order.order_id', read_only=True)
     order_details = serializers.SerializerMethodField()
@@ -409,8 +417,13 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
                 'name': obj.patient.get_full_name(),
                 'age': getattr(obj.patient, 'age', None),
                 'gender': getattr(obj.patient, 'gender', None),
+                'photo': patient_photo_url(obj.patient),
             }
         return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
     
     @extend_schema_field(OpenApiTypes.STR)
     def get_order_details(self, obj):

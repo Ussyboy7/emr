@@ -28,6 +28,7 @@ interface VitalsPatientSummary {
   patient: number;
   patient_id: string;
   patient_name: string;
+  patient_photo?: string | null;
   patient_gender: string;
   patient_date_of_birth: string | null;
   reading_count: number;
@@ -409,7 +410,7 @@ export default function VitalsHistoryPage() {
                 <Card key={patient.patient} className="border-l-4 border-l-rose-500 hover:shadow-md transition-shadow">
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
-                      <PatientAvatar name={patient.patient_name} photoUrl={undefined} size="sm" />
+                      <PatientAvatar name={patient.patient_name} photoUrl={patient.patient_photo} size="sm" />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap min-w-0">

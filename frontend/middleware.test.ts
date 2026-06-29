@@ -90,6 +90,24 @@ describe('middleware', () => {
     expect(response.headers.get('location')).toContain('/nursing');
   });
 
+  it('blocks admin child routes when only user management is granted', () => {
+    const response = makeRequest(
+      '/admin/clinics',
+      authCookies(['/admin/users'], { [AUTH_HOME_ROUTE_COOKIE]: encodeURIComponent('/admin/users') }),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('/admin/users');
+  });
+
+  it('blocks admin dashboard when only user management is granted', () => {
+    const response = makeRequest(
+      '/admin',
+      authCookies(['/admin/users'], { [AUTH_HOME_ROUTE_COOKIE]: encodeURIComponent('/admin/users') }),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('/admin/users');
+  });
+
   it('blocks nested routes when parent is allowed but page is per-user denied', () => {
     const response = makeRequest(
       '/nursing/pool-queue',

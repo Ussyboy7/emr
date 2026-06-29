@@ -47,6 +47,7 @@ import {
   type TemplateField,
 } from '@/lib/laboratory/template-utils';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
@@ -119,7 +120,7 @@ interface LabOrder {
     gender: string;
     personal_number?: string;
     division?: string;
-    photoUrl?: string;
+    photo?: string;
     category?: string;
     employee_type?: string;
     nonnpa_type?: string;
@@ -199,7 +200,7 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
       gender: formatPatientGenderLabel(apiOrder.patient?.gender) || apiOrder.patient?.gender || 'Unknown',
       personal_number: (apiOrder.patient as any).personal_number || undefined,
       division: (apiOrder.patient as any).division || undefined,
-      photoUrl: (apiOrder.patient as any).photo || undefined,
+      photo: (apiOrder.patient as any).photo || undefined,
       category: (apiOrder.patient as any).category || undefined,
       employee_type: (apiOrder.patient as any).employee_type || undefined,
       nonnpa_type: (apiOrder.patient as any).nonnpa_type || undefined,
@@ -1782,7 +1783,7 @@ export default function LabOrdersPage() {
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3">
             {/* Avatar */}
-            <PatientAvatar name={order.patient.name} photoUrl={order.patient.photoUrl} size="sm" />
+            <PatientAvatar name={order.patient.name} photoUrl={order.patient.photo} size="sm" />
             
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -2142,6 +2143,7 @@ export default function LabOrdersPage() {
                     <div className="flex items-center gap-3">
                       <PatientAvatar
                         name={selectedExternalPatient.full_name || `${selectedExternalPatient.first_name} ${selectedExternalPatient.surname}`}
+                        photoUrl={selectedExternalPatient.photo}
                         size="sm"
                       />
                       <div>
@@ -2191,6 +2193,7 @@ export default function LabOrdersPage() {
                           >
                             <PatientAvatar
                               name={patient.full_name || `${patient.first_name} ${patient.surname}`}
+                              photoUrl={patient.photo}
                               size="sm"
                             />
                             <span>

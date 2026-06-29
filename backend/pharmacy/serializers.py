@@ -8,6 +8,7 @@ from drf_spectacular.types import OpenApiTypes
 from rest_framework.exceptions import ValidationError
 from django.db import models
 from .combo_utils import combo_component_names_from_display_name
+from .units import infer_dose_unit, resolve_prescription_unit
 from .models import (
     GenericMedication,
     Medication,
@@ -84,6 +85,16 @@ class GenericMedicationSerializer(serializers.ModelSerializer):
         if isinstance(form_value, str) and form_value.strip():
             if not isinstance(route_value, str) or not route_value.strip():
                 attrs["route"] = infer_route(form_value)
+        unit_value = attrs.get("unit")
+        if isinstance(form_value, str) and form_value.strip():
+            if unit_value is None or (isinstance(unit_value, str) and not unit_value.strip()):
+                attrs["unit"] = infer_dose_unit(form_value)
+            elif (
+                isinstance(unit_value, str)
+                and unit_value.strip().lower() == "tablet"
+                and infer_dose_unit(form_value) == "capsule"
+            ):
+                attrs["unit"] = "capsule"
         return attrs
 
     class Meta:
@@ -254,7 +265,11 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
         clinic = getattr(obj, 'location_clinic', None)
-        return clinic.name if clinic else None
+        if clinic:
+            return clinic.name
+        req = getattr(obj, 'request', None)
+        req_clinic = getattr(req, 'clinic', None) if req else None
+        return req_clinic.name if req_clinic else None
 
     @staticmethod
     def _resolve_source_location(obj):
@@ -383,10 +398,22 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
             return value is None or (isinstance(value, str) and not value.strip())
 
         if _is_blank(attrs.get("unit")):
-            attrs["unit"] = (
-                getattr(medication, "unit", None)
+            attrs["unit"] = resolve_prescription_unit(
+                unit=None,
+                dosage_form=attrs.get("dosage_form")
                 or getattr(generic, "dosage_form", None)
-                or "unit"
+                or getattr(medication, "form", None),
+                generic_unit=getattr(generic, "unit", None),
+                medication_unit=getattr(medication, "unit", None),
+            )
+        else:
+            attrs["unit"] = resolve_prescription_unit(
+                unit=attrs.get("unit"),
+                dosage_form=attrs.get("dosage_form")
+                or getattr(generic, "dosage_form", None)
+                or getattr(medication, "form", None),
+                generic_unit=getattr(generic, "unit", None),
+                medication_unit=getattr(medication, "unit", None),
             )
         if _is_blank(attrs.get("dosage_form")):
             attrs["dosage_form"] = (
@@ -624,10 +651,15 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             "name": patient.get_full_name(),
             "patient_id": patient.patient_id,
             "age": patient.age,
+            "age_display": patient.age_display,
             "date_of_birth": patient.date_of_birth,
             "gender": patient.gender,
             "phone": patient.phone,
             "phone_number": patient.phone,  # Alias for compatibility
+            "division": patient.division,
+            "employee_type": patient.employee_type,
+            "location": patient.location,
+            "photo": patient.photo.url if patient.photo else None,
             "allergies": allergies_list,
         }
 
@@ -641,6 +673,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         return {
             "id": visit.id,
             "visit_id": visit.visit_id,
+            "visit_type": visit.visit_type,
             "clinic": visit.clinic,
             "location": visit.location,
             "visit_date": visit.created_at.date() if visit.created_at else None,
@@ -836,15 +869,9 @@ class StockRequestSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_clinic_name(self, obj):
-        if obj.clinic_id and obj.clinic:
+        if obj.clinic_id:
             return obj.clinic.name
         return None
-
-    def to_representation(self, instance):
-        from pharmacy.stock_request_clinic import repair_stock_request_clinic
-
-        instance = repair_stock_request_clinic(instance)
-        return super().to_representation(instance)
 
     class Meta:
         model = StockRequest

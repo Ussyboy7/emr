@@ -4,6 +4,7 @@ Physiotherapy serializers for the EMR system.
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from patients.photo import patient_photo_url
 from .models import PhysioTemplate, PhysioOrder, PhysioSession
 
 
@@ -19,12 +20,13 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
     """Serializer for physiotherapy orders."""
     patient_name = serializers.SerializerMethodField()
     patient_id = serializers.SerializerMethodField()
+    patient_photo = serializers.SerializerMethodField()
     ordered_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PhysioOrder
         fields = [
-            'id', 'patient', 'patient_name', 'patient_id',
+            'id', 'patient', 'patient_name', 'patient_id', 'patient_photo',
             'ordered_by', 'ordered_by_name', 'consultation_session',
             'visit',
             'history_clinical_findings', 'diagnosis', 'drug_history', 'special_instructions',
@@ -32,7 +34,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             'sessions_completed',
             'location_clinic_name',
         ]
-        read_only_fields = ['id', 'ordered_at', 'patient_name', 'patient_id', 'ordered_by_name']
+        read_only_fields = ['id', 'ordered_at', 'patient_name', 'patient_id', 'patient_photo', 'ordered_by_name']
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_patient_name(self, obj):
@@ -69,6 +71,9 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
 
 
 class PhysioOrderCreateSerializer(serializers.ModelSerializer):
@@ -87,6 +92,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
     """Serializer for physiotherapy sessions."""
     patient_name = serializers.SerializerMethodField()
     patient_id = serializers.SerializerMethodField()
+    patient_photo = serializers.SerializerMethodField()
     physiotherapist_name = serializers.SerializerMethodField()
     order_details = PhysioOrderSerializer(source='order', read_only=True)
 
@@ -99,7 +105,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
             'duration_minutes', 'created_at',
 
             # Patient info
-            'patient_name', 'patient_id',
+            'patient_name', 'patient_id', 'patient_photo',
 
             # A. Patient Assessment
             'presenting_complaint', 'pain_level_before', 'pain_level_after',
@@ -151,6 +157,11 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
             return None
         except (AttributeError, TypeError):
             return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        patient = getattr(getattr(obj, 'order', None), 'patient', None)
+        return patient_photo_url(patient)
 
     def to_representation(self, instance):
         try:

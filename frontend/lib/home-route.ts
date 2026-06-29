@@ -1,5 +1,5 @@
 import type { User } from "@/lib/npa-structure";
-import { ALL_PAGE_PERMISSIONS, normalizeRolePagePath } from "@/lib/page-permissions";
+import { ALL_PAGE_PERMISSIONS, normalizeRolePagePath, childGrantAllowsParentPath } from "@/lib/page-permissions";
 
 type ModuleRoute = {
   basePath: string;
@@ -87,7 +87,7 @@ export function isPathAllowedByPages(
   if (normalizedAllowed.some((p) => {
     if (!p || p === "/") return false;
     if (normalizedPath === p || normalizedPath.startsWith(p + "/")) return true;
-    if (p.startsWith(normalizedPath + "/")) return true;
+    if (childGrantAllowsParentPath(normalizedPath, p)) return true;
     return false;
   })) {
     return true;

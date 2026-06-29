@@ -154,7 +154,7 @@ export const MEDICATION_CATEGORIES = [
   { value: 'Other', label: 'Other' },
 ];
 
-export const DOSAGE_FORMS = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Ointment', 'Drops', 'Inhaler', 'Suspension', 'Powder', 'Lozenge', 'Suppository', 'Patch', 'Gel', 'Spray', 'Solution', 'Other'];
+export const DOSAGE_FORMS = ['Tablet', 'Capsule', 'Softgel Capsule', 'Syrup', 'Injection', 'Cream', 'Ointment', 'Drops', 'Inhaler', 'Suspension', 'Powder', 'Lozenge', 'Suppository', 'Patch', 'Gel', 'Spray', 'Solution', 'Other'];
 
 export const MEDICATION_STRENGTHS = [
   // Solids (mg)

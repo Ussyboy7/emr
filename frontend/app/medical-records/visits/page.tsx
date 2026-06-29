@@ -49,6 +49,8 @@ import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { resolvePatientPhoto } from '@/lib/patient-photo';
 
 export default function VisitsPage() {
   const router = useRouter();
@@ -111,6 +113,7 @@ export default function VisitsPage() {
     visitId: visit.visit_id || String(visit.id), // Display ID (visit_id string)
     patientId: visit.patient_id || '',
     patient: visit.patient_name ?? '',
+    patientPhoto: resolvePatientPhoto(visit),
     type: visit.visit_type || 'consultation', // Use backend value (lowercase)
     clinic: visit.clinic || '',
     clinics: visit.clinics || [], // All clinics for this visit
@@ -729,21 +732,7 @@ export default function VisitsPage() {
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-3">
                   {/* Patient Avatar */}
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    visit.type === 'emergency' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                    visit.type === 'follow_up' ? 'bg-blue-100 dark:bg-blue-900/30' :
-                    visit.type === 'routine' ? 'bg-violet-100 dark:bg-violet-900/30' :
-                    'bg-teal-100 dark:bg-teal-900/30'
-                  }`}>
-                    <span className={`font-semibold text-xs ${
-                      visit.type === 'emergency' ? 'text-rose-600 dark:text-rose-400' :
-                      visit.type === 'follow_up' ? 'text-blue-600 dark:text-blue-400' :
-                      visit.type === 'routine' ? 'text-violet-600 dark:text-violet-400' :
-                      'text-teal-600 dark:text-teal-400'
-                    }`}>
-                      {visit.patient.split(' ').map((n: string) => n[0]).join('')}
-                    </span>
-                  </div>
+                  <PatientAvatar name={visit.patient} photoUrl={visit.patientPhoto} size="sm" />
                   
                   {/* Visit Details */}
                   <div className="flex-1 min-w-0 overflow-hidden">

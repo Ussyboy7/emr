@@ -15,8 +15,9 @@ import type { RoomQueueDialogEntry } from '@/hooks/use-consultation-room-queue';
 import {
   formatRoomDate as formatDate,
   formatRoomTime as formatTime,
-  initialsFromQueueDisplayName,
 } from '@/lib/consultation/room-helpers';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { resolvePatientPhoto } from '@/lib/patient-photo';
 import type { ConsultationRoomPatient } from '@/lib/consultation/room-types';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { getVisitTypeBadgeClass, getVisitTypeLabel } from '@/lib/utils/priority';
@@ -151,13 +152,7 @@ export function ConsultationRoomQueueDialog({
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          <div
-                            className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-white text-xs font-semibold ${
-                              isInConsultation ? 'bg-emerald-600' : 'bg-blue-600'
-                            }`}
-                          >
-                            {initialsFromQueueDisplayName(patient.name)}
-                          </div>
+                          <PatientAvatar name={patient.name} photoUrl={patient.photo} size="sm" />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1">
                               <span className="text-sm font-medium truncate max-w-[220px] sm:max-w-none">
@@ -325,9 +320,7 @@ export function ConsultationRoomQueueDialog({
                       className="rounded-md border border-amber-500/40 bg-amber-50/50 dark:bg-amber-900/10 px-2.5 py-2"
                     >
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-amber-600 text-white text-xs font-semibold">
-                          {initialsFromQueueDisplayName(displayName)}
-                        </div>
+                        <PatientAvatar name={displayName} photoUrl={resolvePatientPhoto(ps)} size="sm" />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1">
                             <span className="text-sm font-medium truncate max-w-[220px] sm:max-w-none">

@@ -26,6 +26,8 @@ import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/compon
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { StandardPagination } from '@/components/shared/StandardPagination';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { resolvePatientPhoto } from '@/lib/patient-photo';
 import { toast } from 'sonner';
 import { formatDisplayDateMedium, formatDisplayDateTime, localWeekToTodayBounds } from '@/lib/dates';
 import { wardService, type Ward, type PatientAdmission, type WardAssignment } from '@/lib/services/ward-service';
@@ -882,9 +884,7 @@ export default function WardOverviewPage() {
                       <CardContent className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           {/* Avatar */}
-                          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${avatar.bg}`}>
-                            <span className={`font-semibold text-xs ${avatar.text}`}>{initials(admission.patient_name)}</span>
-                          </div>
+                          <PatientAvatar name={admission.patient_name} photoUrl={resolvePatientPhoto(admission)} size="sm" />
 
                           {/* Info */}
                           <div className="flex-1 min-w-0">

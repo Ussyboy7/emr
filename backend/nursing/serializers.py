@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from patients.photo import patient_photo_url
 from .models import NursingOrder, Procedure
 
 
@@ -19,6 +20,7 @@ class NursingOrderSerializer(serializers.ModelSerializer):
     patient_personal_number = serializers.CharField(source='patient.personal_number', read_only=True)
     patient_age = serializers.SerializerMethodField()
     patient_allergies = serializers.SerializerMethodField()
+    patient_photo = serializers.SerializerMethodField()
     ordered_by_name = serializers.CharField(source='ordered_by.get_full_name', read_only=True, allow_null=True)
     admission_id_display = serializers.CharField(source='admission.admission_id', read_only=True, allow_null=True)
 
@@ -42,6 +44,10 @@ class NursingOrderSerializer(serializers.ModelSerializer):
         if isinstance(mh.allergies, str):
             return [a.strip() for a in mh.allergies.replace("\n", ",").split(",") if a.strip()]
         return []
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
 
     class Meta:
         model = NursingOrder
@@ -84,6 +90,7 @@ class ProcedureSerializer(serializers.ModelSerializer):
     )
     ordered_by_name = serializers.SerializerMethodField()
     performed_by_name = serializers.CharField(source='performed_by.get_full_name', read_only=True, allow_null=True)
+    patient_photo = serializers.SerializerMethodField()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_patient_age(self, obj):
@@ -99,6 +106,10 @@ class ProcedureSerializer(serializers.ModelSerializer):
         if order and order.ordered_by_id:
             return order.ordered_by.get_full_name() or ''
         return ''
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
 
     def validate(self, attrs):
         nursing_order = attrs.get('nursing_order')

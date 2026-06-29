@@ -51,7 +51,7 @@ import { useWorkLocationOptions } from '@/hooks/use-work-location-options';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedFiltersButton } from '@/components/shared/AdvancedFiltersButton';
 import { MergePatientDialog } from './merge-patient-dialog';
-import { getMediaUrl } from '@/lib/media-url';
+import { validatePatientPhotoFile } from '@/lib/patient-photo';
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -91,7 +91,7 @@ type Patient = {
   lastVisit: string;
   totalVisits: number;
   location: string;
-  photoUrl: string;
+  photo: string | null;
   registeredAt: string;
   primaryPatient?: string;
   relationship?: string;
@@ -99,9 +99,6 @@ type Patient = {
   /** Active dependents for employee/retiree principals (from API count). */
   dependentsCount?: number;
 };
-
-const photoUrlFromPath = (photoPath: string | null | undefined): string =>
-  getMediaUrl(photoPath) ?? '';
 
 // Safe property access helper
 const getLocation = (patient: any): string => {
@@ -164,7 +161,7 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
     lastVisit: apiPatient.last_visit_at ? formatDate(apiPatient.last_visit_at) : '',
     totalVisits: Number(apiPatient.total_visits || 0),
     location: getLocation(apiPatient),
-    photoUrl: photoUrlFromPath(apiPatient.photo),
+    photo: apiPatient.photo ?? null,
     registeredAt: toApiDateFromInstant(apiPatient.created_at),
     primaryPatient: apiPatient.principal_staff_full_name || '',
     relationship: apiPatient.nok_relationship || '',
@@ -259,6 +256,7 @@ function PatientsListPageContent() {
   const [patientToMerge, setPatientToMerge] = useState<Patient | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoRemoved, setPhotoRemoved] = useState(false);
 
   const isAdminUser = useMemo(() => isSystemAdminUser(currentUser), [currentUser]);
   const canManagePatientLifecycleActions = useMemo(
@@ -750,11 +748,12 @@ function PatientsListPageContent() {
       
       // Set photo preview if patient has photo
       if (apiPatient.photo) {
-        setPhotoPreview(photoUrlFromPath(apiPatient.photo));
+        setPhotoPreview(apiPatient.photo);
       } else {
         setPhotoPreview(null);
       }
       setPhotoFile(null);
+      setPhotoRemoved(false);
       
       // Medical history (occupation is edited once under Personal Information; synced on save)
       if (historyPayload) {
@@ -777,13 +776,16 @@ function PatientsListPageContent() {
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Photo must be less than 5MB');
+
+    const validationError = validatePatientPhotoFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      e.target.value = '';
       return;
     }
     
     setPhotoFile(file);
+    setPhotoRemoved(false);
     const reader = new FileReader();
     reader.onloadend = () => {
       setPhotoPreview(reader.result as string);
@@ -794,6 +796,7 @@ function PatientsListPageContent() {
   const handleRemovePhoto = () => {
     setPhotoFile(null);
     setPhotoPreview(null);
+    setPhotoRemoved(true);
   };
 
   const handleSaveEdit = async () => {
@@ -874,75 +877,11 @@ function PatientsListPageContent() {
         updateData.personal_number = editForm.personalNumber.trim();
       }
 
-      // Handle photo upload if a new photo was selected
       if (photoFile) {
-        // Get valid access token using the same method as apiFetch
-        const { getStoredAccessToken, getStoredRefreshToken, storeTokens } = await import('@/lib/api-client');
-        let token = getStoredAccessToken();
-        
-        // If token is expired or missing, try to refresh it
-        if (!token) {
-          // Try to get refresh token and refresh
-          const refreshToken = getStoredRefreshToken();
-          if (refreshToken) {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-            if (!apiUrl) return;
-            const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-            const refreshResponse = await fetch(`${baseUrl}/accounts/auth/token/refresh/`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refresh: refreshToken }),
-            });
-            
-            if (refreshResponse.ok) {
-              const data = await refreshResponse.json();
-              token = data.access;
-              storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in);
-            }
-          }
-        }
-
-        if (!token) {
-          throw new Error('Authentication required. Please log in again.');
-        }
-
-        const formData = new FormData();
-        // Add all update data to FormData for multipart/form-data request
-        Object.keys(updateData).forEach(key => {
-          const value = updateData[key as keyof typeof updateData];
-          if (value !== undefined && value !== null) {
-            formData.append(key, String(value));
-          }
-        });
-        formData.append('photo', photoFile);
-        
-        // Update patient with photo via FormData
-        try {
-          const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-          if (!apiUrl) return;
-          const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-          const photoUrl = `${baseUrl}/patients/${numericId}/`;
-          
-          const response = await fetch(photoUrl, {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              // Don't set Content-Type - browser will set it with boundary for FormData
-            },
-            body: formData,
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.photo?.[0] || errorData.detail || 'Failed to update patient with photo');
-          }
-        } catch (photoError: any) {
-          console.warn('Photo upload failed, trying without photo:', photoError);
-          // Fallback to regular update without photo
-          await patientService.updatePatient(numericId, updateData);
-        }
+        await patientService.updatePatient(numericId, updateData, { photo: photoFile });
+      } else if (photoRemoved) {
+        await patientService.updatePatient(numericId, updateData, { clearPhoto: true });
       } else {
-        // Update without photo
         await patientService.updatePatient(numericId, updateData);
       }
 
@@ -971,6 +910,7 @@ function PatientsListPageContent() {
       setIsEditModalOpen(false);
       setPhotoFile(null);
       setPhotoPreview(null);
+      setPhotoRemoved(false);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update patient');
       console.error('Error updating patient:', err);
@@ -1134,7 +1074,7 @@ function PatientsListPageContent() {
                     <CardContent className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         {/* Avatar */}
-                        <PatientAvatar name={patient.name} photoUrl={patient.photoUrl} size="md" />
+                        <PatientAvatar name={patient.name} photoUrl={patient.photo} size="md" />
                         
                         {/* Info */}
                         <div className="flex-1 min-w-0">
@@ -1427,7 +1367,16 @@ function PatientsListPageContent() {
                       <div className="flex items-center gap-4">
                         <div className="w-20 h-20 rounded-lg border-2 border-dashed border-border bg-muted/30 flex items-center justify-center overflow-hidden">
                           {photoPreview ? (
-                            <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                            photoPreview.startsWith('data:') ? (
+                              <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                            ) : (
+                              <PatientAvatar
+                                name={selectedPatient?.name ?? ''}
+                                photoUrl={photoPreview}
+                                size="lg"
+                                className="w-full h-full rounded-lg"
+                              />
+                            )
                           ) : (
                             <Camera className="h-6 w-6 text-muted-foreground" />
                           )}
@@ -1437,7 +1386,7 @@ function PatientsListPageContent() {
                             <input 
                               type="file" 
                               id="edit-photo-upload" 
-                              accept="image/*" 
+                              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" 
                               onChange={handlePhotoSelect} 
                               className="hidden" 
                             />

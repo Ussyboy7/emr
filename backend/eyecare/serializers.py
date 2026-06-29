@@ -4,6 +4,7 @@ Serializers for the Eye Care app.
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from patients.photo import patient_photo_url
 from .models import EyeOrder, EyeSession, EyeSessionDiagnosticFile
 
 
@@ -11,6 +12,7 @@ class EyeOrderSerializer(serializers.ModelSerializer):
     """Serializer for EyeOrder model."""
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    patient_photo = serializers.SerializerMethodField()
     ordered_by_name = serializers.CharField(source='ordered_by.get_full_name', read_only=True, allow_null=True)
     completed_sessions_count = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
@@ -21,10 +23,14 @@ class EyeOrderSerializer(serializers.ModelSerializer):
 
         return order_location_clinic_name(obj)
 
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
+
     class Meta:
         model = EyeOrder
         fields = [
-            'id', 'patient', 'patient_name', 'patient_id', 'ordered_by', 'ordered_by_name',
+            'id', 'patient', 'patient_name', 'patient_id', 'patient_photo', 'ordered_by', 'ordered_by_name',
             'visit', 'consultation_session',
             'chief_complaint', 'visual_acuity_od', 'visual_acuity_os', 'visual_acuity_ou',
             'refraction_od', 'refraction_os', 'iop_od', 'iop_os',
@@ -101,6 +107,7 @@ class EyeSessionSerializer(serializers.ModelSerializer):
     """Serializer for EyeSession model."""
     patient_name = serializers.CharField(source='order.patient.get_full_name', read_only=True)
     patient_id = serializers.CharField(source='order.patient.patient_id', read_only=True)
+    patient_photo = serializers.SerializerMethodField()
     order_details = EyeOrderSerializer(source='order', read_only=True)
     diagnostic_attachments = serializers.SerializerMethodField()
 
@@ -112,9 +119,14 @@ class EyeSessionSerializer(serializers.ModelSerializer):
             'duration_minutes', 'notes', 'procedures_performed', 'findings', 'soap_note', 'created_at',
             'pachymetry_file', 'oct_file', 'visual_field_file',
             'diagnostic_attachments',
-            'patient_name', 'patient_id',
+            'patient_name', 'patient_id', 'patient_photo',
         ]
         read_only_fields = ['id', 'created_at']
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        patient = getattr(getattr(obj, 'order', None), 'patient', None)
+        return patient_photo_url(patient)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_diagnostic_attachments(self, obj):

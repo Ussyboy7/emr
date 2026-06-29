@@ -28,6 +28,7 @@ import {
   type RadiologyVerificationTab,
 } from '@/lib/radiology/radiology-workflow-search';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import {
   transformApiRowToVerificationRadiologyReport,
@@ -562,12 +563,7 @@ export default function RadiologyVerificationPage() {
                         checked={selectedIds.includes(report.id)}
                         onCheckedChange={() => toggleSelection(report.id)}
                       />
-                      {/* Avatar */}
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        report.study.critical ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-amber-100 dark:bg-amber-900/30'
-                      }`}>
-                        <PatientAvatar name={report.patient.name} photoUrl={(report.patient as any).photoUrl || (report.patient as any).photo} size="sm" />
-                      </div>
+                      <PatientAvatar name={report.patient.name} photoUrl={resolvePatientPhoto(report.patient)} size="sm" />
                       
                       {/* Info */}
                       <div className="flex-1 min-w-0">
@@ -683,7 +679,7 @@ export default function RadiologyVerificationPage() {
                                 {/* Row 1: Patient Name + Badges + Actions */}
                                 <div className="flex items-center justify-between gap-2 flex-1">
                                   <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                    <PatientAvatar name={report.patient.name} size="sm" />
+                                    <PatientAvatar name={report.patient.name} photoUrl={resolvePatientPhoto(report.patient)} size="sm" />
                                     <span className="font-semibold text-foreground truncate">{report.patient.name}</span>
                                     {report.study.critical && (
                                       <Badge className="text-[10px] px-1.5 py-0 bg-rose-500 text-white">

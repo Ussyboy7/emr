@@ -4,12 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
-import { formatPackDisplay, packSizeForStockItem, requestInputToUnits } from "@/lib/pharmacy/stock-request-quantity";
+import { formatPackDisplay, packSizeForStockItem } from "@/lib/pharmacy/stock-request-quantity";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,18 +27,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type Medication } from "@/lib/services";
-import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
 import {
-  formatDisplayDate,
-  formatDisplayDateTime,
   localMonthBounds,
   localWeekToTodayBounds,
   todayApiDateString,
 } from "@/lib/dates";
+import { StockRequestListCard } from "@/components/pharmacy/StockRequestListCard";
+import { StockRequestDetailDialog } from "@/components/pharmacy/StockRequestDetailDialog";
+import { StockRequestItemsBuilder } from "@/components/pharmacy/StockRequestItemsBuilder";
 import {
   Send,
   Search,
@@ -47,23 +45,12 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
-  Eye,
-  HelpCircle,
   Package,
   ArrowDownLeft,
   ArrowUpRight,
 } from "lucide-react";
 
-const MEDICATION_SEARCH_LIMIT = 20;
-const MAX_QUANTITY = 100000;
-
 type RequestTab = "incoming" | "outgoing";
-type RequestLine = {
-  medication: number;
-  quantity: number;
-  medication_name: string;
-  medication_pack_size?: number | null;
-};
 
 export default function HodStoreRequestsPage() {
   const { ready, handleAuthError } = usePharmacyPageAuth();
@@ -93,14 +80,13 @@ export default function HodStoreRequestsPage() {
   const [confirmNotes, setConfirmNotes] = useState("");
   const [isConfirming, setIsConfirming] = useState(false);
 
-  const [requestItems, setRequestItems] = useState<RequestLine[]>([]);
+  const [requestItems, setRequestItems] = useState<Array<{ medication: number; quantity: number }>>([]);
   const [requestNotes, setRequestNotes] = useState("");
   const [creatingRequest, setCreatingRequest] = useState(false);
-  const [medicationSearch, setMedicationSearch] = useState("");
-  const debouncedMedSearch = useDebouncedValue(medicationSearch, 300);
-  const [selectedMedication, setSelectedMedication] = useState<Medication | null>(null);
-  const [requestQuantity, setRequestQuantity] = useState("1");
-  const [filteredMedications, setFilteredMedications] = useState<Medication[]>([]);
+  const [medicationCache, setMedicationCache] = useState<Record<number, Medication>>({});
+  const learnMedication = useCallback((med: Medication) => {
+    setMedicationCache((prev) => ({ ...prev, [med.id]: med }));
+  }, []);
 
   const buildDateParams = useCallback(() => {
     const p: Record<string, string> = {};
@@ -193,65 +179,6 @@ export default function HodStoreRequestsPage() {
     void loadRequests();
   }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, requestTab, ready]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      const term = debouncedMedSearch.trim();
-      if (!term) {
-        setFilteredMedications([]);
-        return;
-      }
-      try {
-        const res = await pharmacyService.getMedications({
-          search: term,
-          page: 1,
-          page_size: MAX_LIST_PAGE_SIZE,
-        });
-        if (!cancelled) setFilteredMedications((res.results || []).slice(0, MEDICATION_SEARCH_LIMIT));
-      } catch {
-        if (!cancelled) setFilteredMedications([]);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedMedSearch]);
-
-  const handleAddItem = () => {
-    if (!selectedMedication) {
-      toast.error("Select a medication");
-      return;
-    }
-    const packSize = selectedMedication.pack_size ?? 1;
-    const inputVal = parseInt(requestQuantity, 10);
-    if (!Number.isFinite(inputVal) || inputVal < 1) {
-      toast.error("Enter a valid quantity (min 1)");
-      return;
-    }
-    const qty = requestInputToUnits(inputVal, packSize);
-    if (qty > MAX_QUANTITY) {
-      toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
-      return;
-    }
-    if (requestItems.find((i) => i.medication === selectedMedication.id)) {
-      toast.error("Medication already added");
-      return;
-    }
-    setRequestItems([
-      ...requestItems,
-      {
-        medication: selectedMedication.id,
-        quantity: qty,
-        medication_name: selectedMedication.name,
-        medication_pack_size: selectedMedication.pack_size ?? null,
-      },
-    ]);
-    setSelectedMedication(null);
-    setMedicationSearch("");
-    setRequestQuantity("1");
-  };
-
   const handleCreateRequest = async () => {
     if (requestItems.length === 0) {
       toast.error("Add at least one medication");
@@ -295,61 +222,11 @@ export default function HodStoreRequestsPage() {
   const resetNewRequestModal = () => {
     setRequestItems([]);
     setRequestNotes("");
-    setMedicationSearch("");
-    setSelectedMedication(null);
-    setRequestQuantity("1");
-    setFilteredMedications([]);
   };
 
   const openDetails = (req: StockRequest) => {
     setSelectedRequest(req);
     setShowDetailsModal(true);
-  };
-
-  const getStatusBadge = (status: string) => {
-    const map: Record<string, { label: string; cls: string; tip?: string }> = {
-      pending: {
-        label: "Pending",
-        cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200",
-        tip: "Awaiting Central Store approval",
-      },
-      approved: {
-        label: "Approved",
-        cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200",
-        tip: "Ready for Central Store to issue",
-      },
-      fulfilled: {
-        label: "Issued (Awaiting Confirm)",
-        cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200",
-        tip: "Stock issued; confirm receipt when received",
-      },
-      received: {
-        label: "Confirmed ✓",
-        cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200",
-      },
-      rejected: {
-        label: "Rejected",
-        cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200",
-      },
-      partially_fulfilled: {
-        label: "Partially Fulfilled",
-        cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200",
-      },
-    };
-    const cfg = map[status] || { label: status, cls: "" };
-    const badge = <Badge className={cfg.cls}>{cfg.label}</Badge>;
-    return cfg.tip ? (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent>
-            <p>{cfg.tip}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    ) : (
-      badge
-    );
   };
 
   const statsCards = useMemo(
@@ -388,13 +265,6 @@ export default function HodStoreRequestsPage() {
     ],
     [stats]
   );
-
-  const requestTitle = (req: StockRequest) => {
-    if (requestTab === "incoming") {
-      return `${req.from_location || "Store"} → HOD Store`;
-    }
-    return `HOD Store → ${req.to_location || "Store"}`;
-  };
 
   return (
     <DashboardLayout>
@@ -560,74 +430,20 @@ export default function HodStoreRequestsPage() {
             </Card>
           ) : (
             requests.map((req) => (
-              <Card
+              <StockRequestListCard
                 key={req.id}
-                className="hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => openDetails(req)}
-              >
-                <CardContent className="py-3 px-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-shrink-0">
-                      <Send className="h-8 w-8 text-violet-500" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          <span className="font-semibold text-foreground truncate">
-                            {requestTitle(req)}
-                          </span>
-                          {getStatusBadge(req.status)}
-                        </div>
-                        <div
-                          className="flex items-center gap-1 flex-shrink-0"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {requestTab === "incoming" &&
-                            (req.status === "fulfilled" || req.status === "partially_fulfilled") &&
-                            !req.confirmed_at && (
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedRequest(req);
-                                  setShowConfirmModal(true);
-                                }}
-                                className="bg-green-600 hover:bg-green-700 h-8"
-                              >
-                                Confirm
-                              </Button>
-                            )}
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => openDetails(req)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                        <span>{req.request_id}</span>
-                        <span>•</span>
-                        <span>{req.items?.length || 0} item(s)</span>
-                        <span>•</span>
-                        <span>{formatDisplayDate(req.created_at)}</span>
-                        {req.requested_by_name && (
-                          <>
-                            <span>•</span>
-                            <span>Requested by: {req.requested_by_name}</span>
-                          </>
-                        )}
-                      </div>
-                      {req.notes && (
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-md">
-                          {req.notes}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                request={req}
+                role="requester"
+                onOpen={openDetails}
+                onConfirm={
+                  requestTab === "incoming"
+                    ? (r) => {
+                        setSelectedRequest(r);
+                        setShowConfirmModal(true);
+                      }
+                    : undefined
+                }
+              />
             ))
           )}
         </div>
@@ -652,130 +468,26 @@ export default function HodStoreRequestsPage() {
         <Dialog
           open={showNewRequestModal}
           onOpenChange={(open) => {
-            setShowNewRequestModal(open);
             if (!open) resetNewRequestModal();
+            setShowNewRequestModal(open);
           }}
         >
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Order from Central Store</DialogTitle>
-              <DialogDescription>Request medications from Central Store to HOD store</DialogDescription>
+              <DialogDescription>
+                Add one or more drugs to the list below, then submit a single request to Central Store.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="border rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <h4 className="font-medium">Add Items to Request</h4>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>
-                          Search by name or code. For packed drugs (e.g. Amatem), enter number of packs —
-                          the system converts to tablets/units automatically.
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <Label>Search medication</Label>
-                    <Input
-                      className="mt-1"
-                      value={medicationSearch}
-                      onChange={(e) => {
-                        setMedicationSearch(e.target.value);
-                        setSelectedMedication(null);
-                      }}
-                      placeholder="Drug name or code"
-                    />
-                    {filteredMedications.length > 0 && !selectedMedication && (
-                      <div className="mt-1 border rounded-md max-h-36 overflow-y-auto">
-                        {filteredMedications.map((m) => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-muted"
-                            onClick={() => {
-                              setSelectedMedication(m);
-                              setMedicationSearch(m.name);
-                              setFilteredMedications([]);
-                            }}
-                          >
-                            {m.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {selectedMedication && (
-                    <div>
-                      <Label className="text-xs">
-                        {(selectedMedication.pack_size ?? 1) > 1
-                          ? `Packs (×${selectedMedication.pack_size} units each, max ${Math.floor(MAX_QUANTITY / (selectedMedication.pack_size ?? 1)).toLocaleString()} packs)`
-                          : `Quantity (1–${MAX_QUANTITY.toLocaleString()} units)`}
-                      </Label>
-                      <Input
-                        className="mt-1"
-                        type="number"
-                        min={1}
-                        max={
-                          (selectedMedication.pack_size ?? 1) > 1
-                            ? Math.floor(MAX_QUANTITY / (selectedMedication.pack_size ?? 1))
-                            : MAX_QUANTITY
-                        }
-                        value={requestQuantity}
-                        onChange={(e) => setRequestQuantity(e.target.value)}
-                        placeholder={(selectedMedication.pack_size ?? 1) > 1 ? "10" : "100"}
-                      />
-                      {(selectedMedication.pack_size ?? 1) > 1 && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {`${Math.max(0, Number.parseInt(requestQuantity || "0", 10) || 0).toLocaleString()} packs = ${(Math.max(0, Number.parseInt(requestQuantity || "0", 10) || 0) * (selectedMedication.pack_size ?? 1)).toLocaleString()} units`}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {selectedMedication && (
-                    <Button
-                      type="button"
-                      onClick={handleAddItem}
-                      className="w-full bg-blue-600 hover:bg-blue-700"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add to Request
-                    </Button>
-                  )}
-                  {requestItems.length > 0 && (
-                    <div className="mt-4 space-y-2">
-                      <p className="text-sm font-medium">Items Added ({requestItems.length})</p>
-                      {requestItems.map((item, idx) => (
-                        <div
-                          key={`${item.medication}-${idx}`}
-                          className="flex items-center justify-between p-2 bg-green-50 dark:bg-green-950/30 rounded border border-green-200 dark:border-green-900"
-                        >
-                          <div>
-                            <p className="text-sm font-medium">{item.medication_name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatPackDisplay(item.quantity, item.medication_pack_size)}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setRequestItems(requestItems.filter((_, i) => i !== idx))}
-                            className="h-6 w-6 p-0"
-                          >
-                            ×
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <StockRequestItemsBuilder
+                key={showNewRequestModal ? "open" : "closed"}
+                items={requestItems}
+                onItemsChange={setRequestItems}
+                medicationCache={medicationCache}
+                onMedicationLearned={learnMedication}
+                addButtonClassName="bg-violet-600 hover:bg-violet-700"
+              />
               <div>
                 <Label>Notes (optional)</Label>
                 <Textarea
@@ -796,110 +508,25 @@ export default function HodStoreRequestsPage() {
                 disabled={creatingRequest || requestItems.length === 0}
                 className="bg-violet-600 hover:bg-violet-700"
               >
-                {creatingRequest ? "Submitting..." : "Create Request"}
+                {creatingRequest
+                  ? "Submitting..."
+                  : requestItems.length > 0
+                    ? `Submit request (${requestItems.length} drug${requestItems.length === 1 ? "" : "s"})`
+                    : "Submit request"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{selectedRequest?.request_id}</DialogTitle>
-              <DialogDescription>
-                {selectedRequest
-                  ? `${selectedRequest.from_location} → ${selectedRequest.to_location}`
-                  : ""}
-              </DialogDescription>
-            </DialogHeader>
-            {selectedRequest && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Status</p>
-                    <div className="font-medium">{getStatusBadge(selectedRequest.status)}</div>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Created</p>
-                    <p className="font-medium">{formatDisplayDate(selectedRequest.created_at)}</p>
-                  </div>
-                  {selectedRequest.requested_by_name && (
-                    <div>
-                      <p className="text-muted-foreground">Requested By</p>
-                      <p className="font-medium">{selectedRequest.requested_by_name}</p>
-                    </div>
-                  )}
-                </div>
-                {selectedRequest.confirmed_at && (
-                  <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg p-3">
-                    <p className="text-sm font-medium mb-1 text-green-800 dark:text-green-200">
-                      ✓ Receipt Confirmed
-                    </p>
-                    <p className="text-xs text-green-700 dark:text-green-300">
-                      Confirmed by: {selectedRequest.confirmed_by_name}
-                    </p>
-                    <p className="text-xs text-green-700 dark:text-green-300">
-                      On: {formatDisplayDateTime(selectedRequest.confirmed_at)}
-                    </p>
-                  </div>
-                )}
-                {selectedRequest.notes && (
-                  <div>
-                    <p className="text-sm font-medium mb-1">Notes</p>
-                    <p className="text-sm text-muted-foreground">{selectedRequest.notes}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-sm font-medium mb-2">
-                    Items ({selectedRequest.items?.length || 0})
-                  </p>
-                  <div className="space-y-2">
-                    {(selectedRequest.items || []).map((item, idx) => (
-                      <div
-                        key={item.id ?? idx}
-                        className="border rounded-lg p-3 text-sm flex justify-between items-start"
-                      >
-                        <div>
-                          <p className="font-medium">{item.medication_name || "Unknown"}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Requested:{" "}
-                            {formatPackDisplay(Number(item.quantity), packSizeForStockItem(item))}
-                          </p>
-                        </div>
-                        {Number(item.fulfilled_quantity) > 0 && (
-                          <span className="text-xs font-medium text-green-600">
-                            ✓{" "}
-                            {formatPackDisplay(
-                              Number(item.fulfilled_quantity),
-                              packSizeForStockItem(item)
-                            )}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setShowDetailsModal(false)}>
-                    Close
-                  </Button>
-                  {requestTab === "incoming" &&
-                    (selectedRequest.status === "fulfilled" ||
-                      selectedRequest.status === "partially_fulfilled") &&
-                    !selectedRequest.confirmed_at && (
-                      <Button
-                        onClick={() => setShowConfirmModal(true)}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <CheckCircle2 className="h-4 w-4 mr-2" />
-                        Confirm Receipt
-                      </Button>
-                    )}
-                </DialogFooter>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+        <StockRequestDetailDialog
+          open={showDetailsModal}
+          onOpenChange={setShowDetailsModal}
+          request={selectedRequest}
+          role="requester"
+          onConfirm={
+            requestTab === "incoming" ? () => setShowConfirmModal(true) : undefined
+          }
+        />
 
         <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">

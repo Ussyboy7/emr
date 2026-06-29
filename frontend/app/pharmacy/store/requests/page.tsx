@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import {
   formatEditableQuantity,
   formatPackDisplay,
   packSizeForStockItem,
-  requestInputToUnits,
   toDisplayQuantity,
   toUnitsQuantity,
 } from "@/lib/pharmacy/stock-request-quantity";
@@ -15,7 +14,6 @@ import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -26,10 +24,15 @@ import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type StockRequestItem, type Medication } from "@/lib/services";
 import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
-import { formatDisplayDate, localMonthBounds, localWeekToTodayBounds, todayApiDateString } from "@/lib/dates";
-import { Send, CheckCircle2, Clock, Loader2, Eye, Zap, Search, Plus, Minus, HelpCircle, Building2 } from "lucide-react";
-
-const MAX_QUANTITY = 100000;
+import { localMonthBounds, localWeekToTodayBounds, todayApiDateString } from "@/lib/dates";
+import { StockRequestListCard } from "@/components/pharmacy/StockRequestListCard";
+import { StockRequestDetailDialog } from "@/components/pharmacy/StockRequestDetailDialog";
+import { StockRequestItemsBuilder } from "@/components/pharmacy/StockRequestItemsBuilder";
+import {
+  formatStockRequestItemLine,
+  isStockRequestEditable,
+} from "@/lib/pharmacy/stock-request-card";
+import { Send, CheckCircle2, Clock, Loader2, Zap, Search, Plus, Minus, HelpCircle, Building2 } from "lucide-react";
 
 export default function StoreRequestsPage() {
   const { ready, handleAuthError } = usePharmacyPageAuth();
@@ -54,21 +57,13 @@ export default function StoreRequestsPage() {
   const [statsData, setStatsData] = useState({ total: 0, pending: 0, approved: 0, awaiting: 0 });
 
   const [showHodRequestModal, setShowHodRequestModal] = useState(false);
-  const [hodRequestItems, setHodRequestItems] = useState<
-    Array<{
-      medication: number;
-      quantity: number;
-      medication_name: string;
-      medication_pack_size?: number | null;
-    }>
-  >([]);
+  const [hodRequestItems, setHodRequestItems] = useState<Array<{ medication: number; quantity: number }>>([]);
   const [hodRequestNotes, setHodRequestNotes] = useState("");
   const [creatingHodRequest, setCreatingHodRequest] = useState(false);
-  const [hodMedSearch, setHodMedSearch] = useState("");
-  const debouncedHodMedSearch = useDebouncedValue(hodMedSearch, 300);
-  const [hodSelectedMed, setHodSelectedMed] = useState<Medication | null>(null);
-  const [hodRequestQty, setHodRequestQty] = useState("1");
-  const [hodMedResults, setHodMedResults] = useState<Medication[]>([]);
+  const [hodMedicationCache, setHodMedicationCache] = useState<Record<number, Medication>>({});
+  const learnHodMedication = useCallback((med: Medication) => {
+    setHodMedicationCache((prev) => ({ ...prev, [med.id]: med }));
+  }, []);
 
   const buildDateParams = () => {
     const p: Record<string, string> = {};
@@ -159,73 +154,9 @@ export default function StoreRequestsPage() {
     loadStats();
   }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, hodDirection, ready]);
 
-  useEffect(() => {
-    if (!ready) return;
-    let cancelled = false;
-    const run = async () => {
-      const term = debouncedHodMedSearch.trim();
-      if (!term) {
-        setHodMedResults([]);
-        return;
-      }
-      try {
-        const res = await pharmacyService.getMedications({
-          search: term,
-          page: 1,
-          page_size: MAX_LIST_PAGE_SIZE,
-        });
-        if (!cancelled) setHodMedResults((res.results || []).slice(0, 20));
-      } catch {
-        if (!cancelled) setHodMedResults([]);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedHodMedSearch, ready]);
-
-  const handleAddHodRequestItem = () => {
-    if (!hodSelectedMed) {
-      toast.error("Select a medication");
-      return;
-    }
-    const packSize = hodSelectedMed.pack_size ?? 1;
-    const inputVal = parseInt(hodRequestQty, 10);
-    if (!Number.isFinite(inputVal) || inputVal < 1) {
-      toast.error("Enter a valid quantity (min 1)");
-      return;
-    }
-    const qty = requestInputToUnits(inputVal, packSize);
-    if (qty > MAX_QUANTITY) {
-      toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
-      return;
-    }
-    if (hodRequestItems.find((i) => i.medication === hodSelectedMed.id)) {
-      toast.error("Medication already added");
-      return;
-    }
-    setHodRequestItems([
-      ...hodRequestItems,
-      {
-        medication: hodSelectedMed.id,
-        quantity: qty,
-        medication_name: hodSelectedMed.name,
-        medication_pack_size: hodSelectedMed.pack_size ?? null,
-      },
-    ]);
-    setHodSelectedMed(null);
-    setHodMedSearch("");
-    setHodRequestQty("1");
-  };
-
   const resetHodRequestModal = () => {
     setHodRequestItems([]);
     setHodRequestNotes("");
-    setHodMedSearch("");
-    setHodSelectedMed(null);
-    setHodRequestQty("1");
-    setHodMedResults([]);
   };
 
   const handleCreateHodToStoreRequest = async () => {
@@ -360,26 +291,6 @@ export default function StoreRequestsPage() {
   };
 
   const paginatedRequests = requests;
-
-  const getStatusBadge = (status: string) => {
-    const map: Record<string, { label: string; cls: string; tip?: string }> = {
-      pending: { label: "Pending Review", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200", tip: "Awaiting store approval" },
-      approved: { label: "Approved", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200", tip: "Ready to issue" },
-      partially_fulfilled: { label: "Partially Issued", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200", tip: "Some items issued" },
-      fulfilled: { label: "Issued (Awaiting Confirm)", cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200", tip: requestTab === "dispensary" ? "Stock issued; dispensary must confirm receipt" : requestTab === "ward" ? "Stock issued; ward nurse must confirm receipt" : hodDirection === "to_hod" ? "Stock issued; HOD must confirm receipt" : "Stock issued from HOD store" },
-      received: { label: "Confirmed", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" },
-    };
-    const cfg = map[status] || { label: status, cls: "" };
-    const badge = <Badge className={cfg.cls}>{cfg.label}</Badge>;
-    return cfg.tip ? (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent><p>{cfg.tip}</p></TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    ) : badge;
-  };
 
   const stats = useMemo(() => [
     { label: "Total", value: statsData.total, icon: Send, color: "text-violet-500", bg: "bg-violet-500/10" },
@@ -551,54 +462,15 @@ export default function StoreRequestsPage() {
                 </Card>
               ) : (
                 paginatedRequests.map((req) => (
-                  <Card key={req.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => handleOpenDetails(req)}>
-                    <CardContent className="py-3 px-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex-shrink-0">
-                          <Building2 className="h-8 w-8 text-violet-500" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 flex-wrap min-w-0">
-                              <span className="font-semibold text-foreground truncate">
-                                {req.clinic_name || 'Unknown clinic'}
-                              </span>
-                              {getStatusBadge(req.status)}
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                              {req.status === "pending" && (
-                                <Button size="sm" onClick={() => handleApproveRequest(req.id)} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-700 h-8">
-                                  Approve
-                                </Button>
-                              )}
-                              {req.status === "approved" && (
-                                <Button size="sm" onClick={() => handleFulfillRequest(req.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700 h-8">
-                                  {isProcessing ? "Issuing..." : "Issue"}
-                                </Button>
-                              )}
-                              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleOpenDetails(req)}>
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                            <span>{req.items?.length || 0} item(s)</span>
-                            <span>•</span>
-                            <span>{formatDisplayDate(req.created_at)}</span>
-                            <span>•</span>
-                            <span>Store → {req.to_location || 'Dispensary'}</span>
-                            {req.requested_by_name && (
-                              <>
-                                <span>•</span>
-                                <span>Requested by: {req.requested_by_name}</span>
-                              </>
-                            )}
-                          </div>
-                          {req.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-md">{req.notes}</p>}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <StockRequestListCard
+                    key={req.id}
+                    request={req}
+                    role="operator"
+                    onOpen={handleOpenDetails}
+                    onApprove={handleApproveRequest}
+                    onIssue={handleFulfillRequest}
+                    isProcessing={isProcessing}
+                  />
                 ))
               )}
             </div>
@@ -617,131 +489,156 @@ export default function StoreRequestsPage() {
               </Card>
             )}
 
-        <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{selectedRequest?.request_id}</DialogTitle>
-              <DialogDescription>Review items and adjust quantities before approving or issuing</DialogDescription>
-            </DialogHeader>
-            {selectedRequest && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Status</p>
-                    <div className="font-medium">{getStatusBadge(selectedRequest.status)}</div>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Created</p>
-                    <p className="font-medium">{formatDisplayDate(selectedRequest.created_at)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Requesting Clinic</p>
-                    <p className="font-medium">{selectedRequest.clinic_name || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Requested By</p>
-                    <p className="font-medium">{selectedRequest.requested_by_name || 'N/A'}</p>
-                  </div>
-                </div>
-                {selectedRequest.notes && (
-                  <div>
-                    <p className="text-sm font-medium mb-1">Notes</p>
-                    <p className="text-sm text-muted-foreground">{selectedRequest.notes}</p>
-                  </div>
-                )}
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <p className="text-sm font-medium">Items (adjust quantities if needed)</p>
+        <StockRequestDetailDialog
+          open={showDetailsModal}
+          onOpenChange={setShowDetailsModal}
+          request={selectedRequest}
+          role="operator"
+          description={
+            selectedRequest && isStockRequestEditable(selectedRequest.status)
+              ? "Review items and adjust quantities before approving or issuing"
+              : undefined
+          }
+          itemsSlot={
+            selectedRequest ? (
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="text-sm font-medium">
+                    {isStockRequestEditable(selectedRequest.status)
+                      ? "Items (adjust quantities if needed)"
+                      : `Items (${selectedRequest.items?.length || 0})`}
+                  </p>
+                  {isStockRequestEditable(selectedRequest.status) ? (
                     <TooltipProvider>
                       <Tooltip>
-                        <TooltipTrigger><HelpCircle className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-                        <TooltipContent><p>Use +/− to change quantities. Save before issuing.</p></TooltipContent>
+                        <TooltipTrigger>
+                          <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Use +/− to change quantities. Save before issuing.</p>
+                        </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                  </div>
-                  <div className="space-y-2">
-                    {(selectedRequest.items || []).map((item: StockRequestItem) => {
-                      const canEdit = selectedRequest.status === "pending" || selectedRequest.status === "approved";
-                      const fulfilled = Number(item.fulfilled_quantity || 0);
-                      const packSize = packSizeForStockItem(item);
-                      const qty = editedQuantities[item.id!] ?? toDisplayQuantity(Number(item.quantity), packSize);
+                  ) : null}
+                </div>
+                <div className="space-y-2">
+                  {(selectedRequest.items || []).map((item: StockRequestItem) => {
+                    const canEdit = isStockRequestEditable(selectedRequest.status);
+                    const fulfilled = Number(item.fulfilled_quantity || 0);
+                    const packSize = packSizeForStockItem(item);
+                    const qty =
+                      editedQuantities[item.id!] ??
+                      toDisplayQuantity(Number(item.quantity), packSize);
+
+                    if (!canEdit) {
+                      const { medicationName, quantityLine } = formatStockRequestItemLine(item);
                       return (
-                        <div key={item.id} className="border rounded-lg p-3 bg-muted/30 flex justify-between items-center gap-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-sm">{item.medication_name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              Requested: {formatPackDisplay(Number(item.quantity), packSize)}
-                              {fulfilled > 0 && <> • Issued: {formatPackDisplay(fulfilled, packSize)}</>}
-                            </p>
+                        <div
+                          key={item.id}
+                          className="border rounded-lg p-3 text-sm flex justify-between items-start gap-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium">{medicationName}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{quantityLine}</p>
                           </div>
-                          {canEdit && fulfilled === 0 ? (
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => handleQuantityChange(item.id!, -1, toDisplayQuantity(Number(item.quantity), packSize))}
-                              >
-                                <Minus className="h-3 w-3" />
-                              </Button>
-                              <Input
-                                type="number"
-                                min={0}
-                                value={qty}
-                                onChange={(e) => handleQuantityInput(item.id!, e.target.value)}
-                                className="w-16 h-8 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => handleQuantityChange(item.id!, 1, toDisplayQuantity(Number(item.quantity), packSize))}
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ) : fulfilled > 0 ? (
-                            <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(fulfilled, packSize)} issued</span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">{formatEditableQuantity(qty, packSize)}</span>
-                          )}
                         </div>
                       );
-                    })}
-                  </div>
+                    }
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="border rounded-lg p-3 bg-muted/30 flex justify-between items-center gap-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm">{item.medication_name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Requested: {formatPackDisplay(Number(item.quantity), packSize)}
+                          </p>
+                        </div>
+                        {fulfilled === 0 ? (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() =>
+                                handleQuantityChange(
+                                  item.id!,
+                                  -1,
+                                  toDisplayQuantity(Number(item.quantity), packSize),
+                                )
+                              }
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={qty}
+                              onChange={(e) => handleQuantityInput(item.id!, e.target.value)}
+                              className="w-16 h-8 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() =>
+                                handleQuantityChange(
+                                  item.id!,
+                                  1,
+                                  toDisplayQuantity(Number(item.quantity), packSize),
+                                )
+                              }
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {formatEditableQuantity(qty, packSize)}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                <DialogFooter className="gap-2">
-                  <Button variant="outline" onClick={() => setShowDetailsModal(false)}>Close</Button>
-                  {(selectedRequest.status === "pending" || selectedRequest.status === "approved") && (
-                    <>
-                      <Button onClick={handleSaveQuantities} disabled={isSavingQuantities} variant="secondary">
-                        {isSavingQuantities ? "Saving..." : "Save Quantities"}
-                      </Button>
-                      {selectedRequest.status === "pending" && (
-                        <Button onClick={() => handleApproveRequest(selectedRequest.id)} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-700">
-                          {isProcessing ? "Approving..." : "Approve"}
-                        </Button>
-                      )}
-                      {selectedRequest.status === "approved" && (
-                        <Button onClick={() => handleFulfillRequest(selectedRequest.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700">
-                          {isProcessing
-                            ? "Issuing..."
-                            : requestTab === "dispensary"
-                              ? "Issue to Dispensary"
-                              : requestTab === "ward"
-                                ? "Issue to Ward Care"
-                                : hodDirection === "to_hod"
-                                  ? "Issue to HOD Store"
-                                  : "Issue from HOD Store"}
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </DialogFooter>
               </div>
-            )}
-          </DialogContent>
-        </Dialog>
+            ) : null
+          }
+          footerSlot={
+            selectedRequest ? (
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setShowDetailsModal(false)}>Close</Button>
+                {(selectedRequest.status === "pending" || selectedRequest.status === "approved") && (
+                  <>
+                    <Button onClick={handleSaveQuantities} disabled={isSavingQuantities} variant="secondary">
+                      {isSavingQuantities ? "Saving..." : "Save Quantities"}
+                    </Button>
+                    {selectedRequest.status === "pending" && (
+                      <Button onClick={() => handleApproveRequest(selectedRequest.id)} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-700">
+                        {isProcessing ? "Approving..." : "Approve"}
+                      </Button>
+                    )}
+                    {selectedRequest.status === "approved" && (
+                      <Button onClick={() => handleFulfillRequest(selectedRequest.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700">
+                        {isProcessing
+                          ? "Issuing..."
+                          : requestTab === "dispensary"
+                            ? "Issue to Dispensary"
+                            : requestTab === "ward"
+                              ? "Issue to Ward Care"
+                              : hodDirection === "to_hod"
+                                ? "Issue to HOD Store"
+                                : "Issue from HOD Store"}
+                      </Button>
+                    )}
+                  </>
+                )}
+              </DialogFooter>
+            ) : null
+          }
+        />
 
         <Dialog
           open={showHodRequestModal}
@@ -750,110 +647,29 @@ export default function StoreRequestsPage() {
             if (!open) resetHodRequestModal();
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Request from HOD Store</DialogTitle>
               <DialogDescription>
-                Request medications from the Pharmacy HOD store back to Central Store
+                Add one or more drugs to the list below, then submit a single request from HOD Store to Central Store.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
+              <StockRequestItemsBuilder
+                key={showHodRequestModal ? "open" : "closed"}
+                items={hodRequestItems}
+                onItemsChange={setHodRequestItems}
+                medicationCache={hodMedicationCache}
+                onMedicationLearned={learnHodMedication}
+              />
               <div>
-                <Label>Search medication</Label>
-                <Input
-                  className="mt-1"
-                  value={hodMedSearch}
-                  onChange={(e) => {
-                    setHodMedSearch(e.target.value);
-                    setHodSelectedMed(null);
-                  }}
-                  placeholder="Drug name or code"
-                />
-                {hodMedResults.length > 0 && !hodSelectedMed && (
-                  <div className="mt-1 border rounded-md max-h-36 overflow-y-auto">
-                    {hodMedResults.map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted"
-                        onClick={() => {
-                          setHodSelectedMed(m);
-                          setHodMedSearch(m.name);
-                          setHodMedResults([]);
-                        }}
-                      >
-                        {m.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {hodSelectedMed && (
-                <div>
-                  <Label className="text-xs">
-                    {(hodSelectedMed.pack_size ?? 1) > 1
-                      ? `Packs (×${hodSelectedMed.pack_size} units each, max ${Math.floor(MAX_QUANTITY / (hodSelectedMed.pack_size ?? 1)).toLocaleString()} packs)`
-                      : `Quantity (1–${MAX_QUANTITY.toLocaleString()} units)`}
-                  </Label>
-                  <Input
-                    className="mt-1"
-                    type="number"
-                    min={1}
-                    max={
-                      (hodSelectedMed.pack_size ?? 1) > 1
-                        ? Math.floor(MAX_QUANTITY / (hodSelectedMed.pack_size ?? 1))
-                        : MAX_QUANTITY
-                    }
-                    value={hodRequestQty}
-                    onChange={(e) => setHodRequestQty(e.target.value)}
-                    placeholder={(hodSelectedMed.pack_size ?? 1) > 1 ? "10" : "100"}
-                  />
-                  {(hodSelectedMed.pack_size ?? 1) > 1 && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {`${Math.max(0, Number.parseInt(hodRequestQty || "0", 10) || 0).toLocaleString()} packs = ${(Math.max(0, Number.parseInt(hodRequestQty || "0", 10) || 0) * (hodSelectedMed.pack_size ?? 1)).toLocaleString()} units`}
-                    </p>
-                  )}
-                </div>
-              )}
-              {hodSelectedMed && (
-                <Button type="button" variant="secondary" onClick={handleAddHodRequestItem}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add to Request
-                </Button>
-              )}
-              {hodRequestItems.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Items added ({hodRequestItems.length})</p>
-                  {hodRequestItems.map((item, idx) => (
-                    <div
-                      key={`${item.medication}-${idx}`}
-                      className="flex items-center justify-between p-2 bg-muted/50 rounded border"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{item.medication_name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatPackDisplay(item.quantity, item.medication_pack_size)}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => setHodRequestItems(hodRequestItems.filter((_, i) => i !== idx))}
-                      >
-                        ×
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div>
-                <Label>Notes</Label>
+                <Label>Notes (optional)</Label>
                 <Textarea
-                  className="mt-1"
+                  className="mt-1 resize-none"
+                  rows={3}
                   value={hodRequestNotes}
                   onChange={(e) => setHodRequestNotes(e.target.value)}
+                  placeholder="e.g., Return excess stock, urgent restock..."
                 />
               </div>
             </div>
@@ -865,7 +681,11 @@ export default function StoreRequestsPage() {
                 onClick={handleCreateHodToStoreRequest}
                 disabled={creatingHodRequest || hodRequestItems.length === 0}
               >
-                {creatingHodRequest ? "Submitting..." : "Submit request"}
+                {creatingHodRequest
+                  ? "Submitting..."
+                  : hodRequestItems.length > 0
+                    ? `Submit request (${hodRequestItems.length} drug${hodRequestItems.length === 1 ? "" : "s"})`
+                    : "Submit request"}
               </Button>
             </DialogFooter>
           </DialogContent>

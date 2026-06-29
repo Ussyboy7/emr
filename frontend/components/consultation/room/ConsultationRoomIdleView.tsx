@@ -12,6 +12,7 @@ import {
   isEmergencyVisitType,
 } from '@/lib/utils/priority';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import {
   Activity,
   AlertTriangle,
@@ -214,8 +215,11 @@ export function ConsultationRoomIdleView({
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-start gap-3 flex-1">
-                          <div className="w-10 h-10 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 rounded-full flex items-center justify-center text-gray-700 dark:text-gray-200 font-bold">
-                            {index + 1}
+                          <div className="relative shrink-0">
+                            <PatientAvatar name={patient.name} photoUrl={patient.photo} size="sm" className="w-10 h-10" />
+                            <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground ring-2 ring-background">
+                              {index + 1}
+                            </span>
                           </div>
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">

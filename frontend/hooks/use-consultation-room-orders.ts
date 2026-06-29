@@ -807,8 +807,40 @@ export function useConsultationRoomOrders({
     }
     if (nextPrescriptions.length === 0) return;
 
-    setPrescriptions((prev) => [...prev, ...nextPrescriptions]);
-    toast.success(`${nextPrescriptions.length} medication(s) added to consultation`, {
+    setPrescriptions((prev) => {
+      const seen = new Set(
+        prev
+          .map((row) => row.genericId)
+          .filter((id): id is number => typeof id === 'number' && id > 0),
+      );
+      const toAdd: typeof nextPrescriptions = [];
+      for (const row of nextPrescriptions) {
+        const genericId = row.genericId;
+        if (genericId && seen.has(genericId)) continue;
+        if (genericId) seen.add(genericId);
+        toAdd.push(row);
+      }
+      if (toAdd.length < nextPrescriptions.length) {
+        toast.warning('Skipped duplicate generic(s) already on this consultation order.');
+      }
+      if (toAdd.length === 0) return prev;
+      return [...prev, ...toAdd];
+    });
+    const addedCount = (() => {
+      const seen = new Set(
+        prescriptions
+          .map((row) => row.genericId)
+          .filter((id): id is number => typeof id === 'number' && id > 0),
+      );
+      return nextPrescriptions.filter((row) => {
+        const genericId = row.genericId;
+        if (!genericId || seen.has(genericId)) return false;
+        seen.add(genericId);
+        return true;
+      }).length;
+    })();
+    if (addedCount === 0) return;
+    toast.success(`${addedCount} medication(s) added to consultation`, {
       description: 'Prescriptions will be sent to pharmacy when consultation is completed'
     });
   };

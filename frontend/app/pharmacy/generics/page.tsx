@@ -15,6 +15,11 @@ import { pharmacyService, type GenericMedication } from "@/lib/services";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import { DOSAGE_FORMS as DOSAGE_FORM_OPTIONS, MEDICATION_STRENGTHS, MEDICATION_CATEGORIES } from "@/lib/constants/pharmacy";
+import {
+  inferDoseUnitFromForm,
+  normalizePrescriptionDoseUnit,
+  PRESCRIPTION_DOSE_UNITS,
+} from "@/lib/pharmacy/infer-dose-unit";
 import { Plus, Search, Edit, Eye, Trash2, Loader2 } from "lucide-react";
 
 const ANY = "__any__";
@@ -46,6 +51,34 @@ const DOSAGE_FORMS = [
 const GENERIC_ROUTES = ROUTES.filter((r) => r.value !== ANY);
 const GENERIC_CATEGORIES = MEDICATION_CATEGORIES.filter((c) => c.value !== "All Categories");
 
+const GENERIC_UNIT_LABELS: Record<string, string> = {
+  tablet: "Tablet",
+  capsule: "Capsule",
+  ml: "Milliliter (ml)",
+  mg: "Milligram (mg)",
+  g: "Gram (g)",
+  drop: "Drop",
+  vial: "Vial",
+  ampoule: "Ampoule",
+  sachet: "Sachet",
+  suppository: "Suppository",
+  puff: "Puff",
+  patch: "Patch",
+  tube: "Tube",
+  bottle: "Bottle",
+};
+
+function unitLabel(unit: string): string {
+  return GENERIC_UNIT_LABELS[unit] || unit;
+}
+
+function defaultUnitForForm(dosageForm: string, currentUnit?: string): string {
+  if (!dosageForm.trim()) {
+    return normalizePrescriptionDoseUnit(currentUnit, dosageForm);
+  }
+  return inferDoseUnitFromForm(dosageForm);
+}
+
 export default function GenericsPage() {
   const { ready, handleAuthError } = usePharmacyPageAuth();
   const [loading, setLoading] = useState(true);
@@ -70,6 +103,7 @@ export default function GenericsPage() {
     category: "",
     strength: "",
     dosage_form: "",
+    unit: "tablet",
     route: "",
     is_active: true,
   });
@@ -121,6 +155,7 @@ export default function GenericsPage() {
       category: "Other",
       strength: "",
       dosage_form: "",
+      unit: "tablet",
       route: "",
       is_active: true,
     });
@@ -135,6 +170,7 @@ export default function GenericsPage() {
       category: g.category || "",
       strength: g.strength || "",
       dosage_form: g.dosage_form || "",
+      unit: normalizePrescriptionDoseUnit(g.unit, g.dosage_form),
       route: g.route || "",
       is_active: g.is_active ?? true,
     });
@@ -163,6 +199,7 @@ export default function GenericsPage() {
         category: formData.category.trim(),
         strength: formData.strength.trim() || undefined,
         dosage_form: formData.dosage_form.trim() || undefined,
+        unit: formData.unit.trim() || undefined,
         route: formData.route.trim() || undefined,
       });
       toast.success("Generic created");
@@ -193,6 +230,7 @@ export default function GenericsPage() {
         category: formData.category.trim(),
         strength: formData.strength.trim(),
         dosage_form: formData.dosage_form.trim(),
+        unit: formData.unit.trim(),
         route: formData.route.trim(),
         is_active: !!formData.is_active,
       });
@@ -302,9 +340,9 @@ export default function GenericsPage() {
                         {g.category && <Badge variant="outline" className="text-xs">{g.category}</Badge>}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                        {(g.strength || g.dosage_form || g.route) && (
+                        {(g.strength || g.dosage_form || g.unit || g.route) && (
                           <span>
-                            {[g.strength, g.dosage_form, g.route].filter(Boolean).join(" • ")}
+                            {[g.strength, g.dosage_form, g.unit ? unitLabel(g.unit) : null, g.route].filter(Boolean).join(" • ")}
                           </span>
                         )}
                         {g.active_ingredient && (
@@ -402,7 +440,16 @@ export default function GenericsPage() {
               </div>
               <div>
                 <Label>Dosage Form</Label>
-                <Select value={formData.dosage_form} onValueChange={(v) => setFormData({ ...formData, dosage_form: v })}>
+                <Select
+                  value={formData.dosage_form}
+                  onValueChange={(v) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      dosage_form: v,
+                      unit: defaultUnitForForm(v, prev.unit),
+                    }))
+                  }
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select dosage form" />
                   </SelectTrigger>
@@ -414,6 +461,24 @@ export default function GenericsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label>Dose unit</Label>
+                <Select value={formData.unit} onValueChange={(v) => setFormData({ ...formData, unit: v })}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRESCRIPTION_DOSE_UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {unitLabel(u)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Used when doctors prescribe this generic (e.g. capsule for softgels).
+                </p>
               </div>
               <div>
                 <Label>Route</Label>
@@ -500,7 +565,16 @@ export default function GenericsPage() {
               </div>
               <div>
                 <Label>Dosage Form</Label>
-                <Select value={formData.dosage_form} onValueChange={(v) => setFormData({ ...formData, dosage_form: v })}>
+                <Select
+                  value={formData.dosage_form}
+                  onValueChange={(v) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      dosage_form: v,
+                      unit: defaultUnitForForm(v, prev.unit),
+                    }))
+                  }
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select dosage form" />
                   </SelectTrigger>
@@ -512,6 +586,24 @@ export default function GenericsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label>Dose unit</Label>
+                <Select value={formData.unit} onValueChange={(v) => setFormData({ ...formData, unit: v })}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRESCRIPTION_DOSE_UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {unitLabel(u)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Used when doctors prescribe this generic (e.g. capsule for softgels).
+                </p>
               </div>
               <div>
                 <Label>Route</Label>
@@ -581,6 +673,12 @@ export default function GenericsPage() {
                   <div>
                     <p className="text-muted-foreground">Dosage Form</p>
                     <p className="font-medium">{selectedGeneric.dosage_form}</p>
+                  </div>
+                )}
+                {selectedGeneric.unit && (
+                  <div>
+                    <p className="text-muted-foreground">Dose unit</p>
+                    <p className="font-medium">{unitLabel(selectedGeneric.unit)}</p>
                   </div>
                 )}
                 {selectedGeneric.route && (

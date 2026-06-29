@@ -91,6 +91,7 @@ class Command(BaseCommand):
                         request=req,
                         issue=issue,
                         stock_issue_line=issue_line,
+                        location_clinic=getattr(req, "clinic", None),
                         batch_number=inv_item.batch_number or "",
                         expiry_date=inv_item.expiry_date,
                     )

@@ -43,6 +43,7 @@ import { useServerToday } from '@/hooks/use-server-today';
 import { localWeekToTodayBounds } from '@/lib/dates';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -470,6 +471,7 @@ export default function NursingPoolQueuePage() {
           return {
             id: String(visit.id),
             name: visit.patient_name ?? '',
+            patientPhoto: resolvePatientPhoto(visit),
             patientId: (visit as any).patient_id || '', // direct from backend
             visitId: visit.visit_id || String(visit.id), // Visit ID string (VIS-...)
             personalNumber: '', // Not used for search, keep empty
@@ -597,6 +599,7 @@ export default function NursingPoolQueuePage() {
   interface NursingPatient {
     id: string;
     name: string;
+    patientPhoto?: string | null;
     patientId: string;
     visitId: string;
     personalNumber: string;
@@ -1247,7 +1250,7 @@ export default function NursingPoolQueuePage() {
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <PatientAvatar name={patient.name} photoUrl={undefined} size="sm" />
+                    <PatientAvatar name={patient.name} photoUrl={patient.patientPhoto} size="sm" />
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0">

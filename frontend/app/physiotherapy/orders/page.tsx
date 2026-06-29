@@ -47,6 +47,7 @@ import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { getOrganizationHeader } from '@/lib/constants/organization';
 import { formatDisplayDate, formatDisplayDateTime, toApiDateString } from '@/lib/dates';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
 
 import {
   Users, Search, Stethoscope, Calendar, Clock, CheckCircle, CheckCircle2,
@@ -662,7 +663,7 @@ export default function PhysiotherapyOrdersPage() {
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3">
             {/* Avatar */}
-            <PatientAvatar name={order.patient_name ?? ''} size="sm" />
+            <PatientAvatar name={order.patient_name ?? ''} photoUrl={resolvePatientPhoto(order)} size="sm" />
 
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -1243,7 +1244,7 @@ export default function PhysiotherapyOrdersPage() {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
                       <div className="flex items-center gap-2">
-                        <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
+                        <PatientAvatar name={selectedOrder.patient_name ?? ''} photoUrl={resolvePatientPhoto(selectedOrder)} size="sm" />
                         <div>
                           <p className="font-medium">{selectedOrder.patient_name}</p>
                           <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
@@ -1511,7 +1512,7 @@ export default function PhysiotherapyOrdersPage() {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
                       <div className="flex items-center gap-2">
-                        <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
+                        <PatientAvatar name={selectedOrder.patient_name ?? ''} photoUrl={resolvePatientPhoto(selectedOrder)} size="sm" />
                         <div>
                           <p className="font-medium">{selectedOrder.patient_name}</p>
                           <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
@@ -1832,7 +1833,7 @@ export default function PhysiotherapyOrdersPage() {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
                       <div className="flex items-center gap-2">
-                        <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
+                        <PatientAvatar name={selectedOrder.patient_name ?? ''} photoUrl={resolvePatientPhoto(selectedOrder)} size="sm" />
                         <div>
                           <p className="font-medium">{selectedOrder.patient_name}</p>
                           <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>

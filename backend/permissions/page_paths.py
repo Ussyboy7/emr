@@ -27,6 +27,9 @@ CLINICAL_MODULE_PREFIXES = (
     "/eyecare",
 )
 
+# Department-scoped admin pages must not unlock the ICT admin dashboard (/admin).
+ADMIN_SCOPED_CHILD_PAGES = frozenset({"/admin/users"})
+
 
 def normalize_role_page_path(path: str) -> str:
     raw = (path or "").strip()
@@ -76,6 +79,8 @@ def is_path_allowed_by_pages(
         if normalized_path == allowed or normalized_path.startswith(allowed + "/"):
             return True
         if allowed.startswith(normalized_path + "/"):
+            if normalized_path == "/admin" and allowed in ADMIN_SCOPED_CHILD_PAGES:
+                continue
             return True
 
     if normalized_path.startswith("/medical-records/patients/") and "/medical-records/patient-records" in normalized_allowed:

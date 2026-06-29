@@ -4,27 +4,25 @@ import { useEffect, useMemo, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
-import { formatPackDisplay, packSizeForRequestItem, requestInputToUnits } from "@/lib/pharmacy/stock-request-quantity";
+import { formatPackDisplay, packSizeForRequestItem } from "@/lib/pharmacy/stock-request-quantity";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type Medication } from "@/lib/services";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
-import { formatDisplayDate, localMonthBounds, localWeekToTodayBounds, todayApiDateString, formatDisplayDateTime } from "@/lib/dates";
+import { localMonthBounds, localWeekToTodayBounds, todayApiDateString } from "@/lib/dates";
 import { useClinic } from "@/hooks/use-clinic";
-import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye, HelpCircle, Building2 } from "lucide-react";
-
-const MEDICATION_SEARCH_LIMIT = 20;
-const MAX_QUANTITY = 100000;
+import { StockRequestListCard } from "@/components/pharmacy/StockRequestListCard";
+import { StockRequestDetailDialog } from "@/components/pharmacy/StockRequestDetailDialog";
+import { StockRequestItemsBuilder } from "@/components/pharmacy/StockRequestItemsBuilder";
+import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Building2 } from "lucide-react";
 
 export default function DispensaryRequestsPage() {
   return (
@@ -42,8 +40,9 @@ function DispensaryRequestsPageContent() {
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalRequests, setTotalRequests] = useState(0);
   const [medicationCache, setMedicationCache] = useState<Record<number, Medication>>({});
-  const [medicationSearchResults, setMedicationSearchResults] = useState<Medication[]>([]);
-  const [medicationSearchLoading, setMedicationSearchLoading] = useState(false);
+  const learnMedication = useCallback((med: Medication) => {
+    setMedicationCache((prev) => ({ ...prev, [med.id]: med }));
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("today");
@@ -57,11 +56,8 @@ function DispensaryRequestsPageContent() {
   const [requestItems, setRequestItems] = useState<Array<{ medication: number; quantity: number }>>([]);
   const [requestNotes, setRequestNotes] = useState("");
   const [creatingRequest, setCreatingRequest] = useState(false);
-  const [medicationSearch, setMedicationSearch] = useState("");
-  const debouncedMedSearch = useDebouncedValue(medicationSearch, 300);
+  const [seedMedication, setSeedMedication] = useState<Medication | null>(null);
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
-  const [selectedMedication, setSelectedMedication] = useState<Medication | null>(null);
-  const [requestQuantity, setRequestQuantity] = useState("1");
   const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, confirmed: 0, awaitingConfirmation: 0 });
 
   const [requestTab, setRequestTab] = useState<"dispensary" | "ward">("dispensary");
@@ -89,44 +85,6 @@ function DispensaryRequestsPageContent() {
 
   useEffect(() => {
     if (!ready) return;
-    const term = debouncedMedSearch.trim();
-    if (!term) {
-      setMedicationSearchResults([]);
-      return;
-    }
-    let cancelled = false;
-    const loadSearch = async () => {
-      setMedicationSearchLoading(true);
-      try {
-        const response = await pharmacyService.getMedications({
-          search: term,
-          page: 1,
-          page_size: MEDICATION_SEARCH_LIMIT,
-        });
-        if (cancelled) return;
-        const results = response.results || [];
-        setMedicationSearchResults(results);
-        setMedicationCache((prev) => {
-          const next = { ...prev };
-          for (const med of results) next[med.id] = med;
-          return next;
-        });
-      } catch (err) {
-        if (!handleAuthError(err)) {
-          console.error("Error searching medications:", err);
-        }
-      } finally {
-        if (!cancelled) setMedicationSearchLoading(false);
-      }
-    };
-    void loadSearch();
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedMedSearch, ready, handleAuthError]);
-
-  useEffect(() => {
-    if (!ready) return;
     const medIdRaw = searchParams.get("medicationId");
     const openNew = searchParams.get("new") === "1";
     if (!openNew && !medIdRaw) return;
@@ -137,8 +95,8 @@ function DispensaryRequestsPageContent() {
         if (Number.isFinite(medId) && medId > 0) {
           try {
             const med = await pharmacyService.getMedication(medId);
-            setSelectedMedication(med);
-            setMedicationCache((prev) => ({ ...prev, [med.id]: med }));
+            learnMedication(med);
+            setSeedMedication(med);
           } catch (err) {
             if (!handleAuthError(err)) {
               console.error("Error loading medication for request:", err);
@@ -149,7 +107,7 @@ function DispensaryRequestsPageContent() {
       setShowNewRequestModal(true);
     };
     void bootstrap();
-  }, [ready, searchParams, handleAuthError]);
+  }, [ready, searchParams, handleAuthError, learnMedication]);
 
   useEffect(() => {
     if (!ready) return;
@@ -204,31 +162,11 @@ function DispensaryRequestsPageContent() {
     }
   };
 
-  const handleAddItem = () => {
-    if (!selectedMedication) {
-      toast.error("Please select a medication");
-      return;
-    }
-    const packSize = selectedMedication.pack_size ?? 1;
-    const inputVal = parseInt(requestQuantity, 10);
-    if (isNaN(inputVal) || inputVal < 1) {
-      toast.error("Please enter a valid quantity (min 1)");
-      return;
-    }
-    const qty = requestInputToUnits(inputVal, packSize);
-    if (qty > MAX_QUANTITY) {
-      toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
-      return;
-    }
-    if (requestItems.find((i) => i.medication === selectedMedication.id)) {
-      toast.error("This medication is already added");
-      return;
-    }
-    setMedicationCache((prev) => ({ ...prev, [selectedMedication.id]: selectedMedication }));
-    setRequestItems([...requestItems, { medication: selectedMedication.id, quantity: qty }]);
-    setSelectedMedication(null);
-    setMedicationSearch("");
-    setRequestQuantity("1");
+  const closeNewRequestModal = () => {
+    setShowNewRequestModal(false);
+    setRequestItems([]);
+    setRequestNotes("");
+    setSeedMedication(null);
   };
 
   const handleCreateRequest = async () => {
@@ -240,9 +178,7 @@ function DispensaryRequestsPageContent() {
       setCreatingRequest(true);
       await pharmacyService.createStockRequest({ items: requestItems, notes: requestNotes });
       toast.success("Stock request created successfully");
-      setShowNewRequestModal(false);
-      setRequestItems([]);
-      setRequestNotes("");
+      closeNewRequestModal();
       await loadRequests();
       await loadStats();
     } catch (err: any) {
@@ -269,29 +205,6 @@ function DispensaryRequestsPageContent() {
     }
   };
 
-  const filteredMedications = medicationSearchResults;
-
-  const getStatusBadge = (status: string) => {
-    const map: Record<string, { label: string; cls: string; tip?: string }> = {
-      pending: { label: "Pending", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200", tip: "Awaiting store approval" },
-      approved: { label: "Approved", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200", tip: "Ready for store to issue" },
-      fulfilled: { label: "Issued (Awaiting Confirm)", cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200", tip: "Stock issued; confirm receipt when received" },
-      received: { label: "Confirmed ✓", cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200" },
-      rejected: { label: "Rejected", cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200" },
-      partially_fulfilled: { label: "Partially Fulfilled", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" },
-    };
-    const cfg = map[status] || { label: status, cls: "" };
-    const badge = <Badge className={cfg.cls}>{cfg.label}</Badge>;
-    return cfg.tip ? (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent><p>{cfg.tip}</p></TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    ) : badge;
-  };
-
   const statsCards = useMemo(
     () => [
       { label: "Total", value: stats.total, icon: Send, color: "text-violet-500", bg: "bg-violet-500/10" },
@@ -309,9 +222,11 @@ function DispensaryRequestsPageContent() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Stock Requests</h1>
             <p className="text-muted-foreground mt-1">
-              {requestTab === "dispensary"
-                ? `Requests — ${activeClinicName || 'Loading...'} — Dispensary requests from Central Store`
-                : `Requests — ${activeClinicName || 'Loading...'} — Ward Care requests from Central Store (nursing)`}
+              {activeClinicName
+                ? `${activeClinicName} · ${requestTab === "dispensary" ? "Dispensary" : "Ward Care"} · From Central Store`
+                : requestTab === "dispensary"
+                  ? "Dispensary requests from Central Store"
+                  : "Ward Care requests from Central Store"}
             </p>
           </div>
           {requestTab === "dispensary" && (
@@ -429,44 +344,20 @@ function DispensaryRequestsPageContent() {
                 </Card>
               ) : (
                 requests.map((req) => (
-                  <Card key={req.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setSelectedRequest(req); setShowDetailsModal(true); }}>
-                    <CardContent className="py-3 px-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex-shrink-0">
-                          <Send className="h-8 w-8 text-violet-500" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 flex-wrap min-w-0">
-                              <span className="font-semibold text-foreground truncate">
-                                {req.to_location || 'Dispensary'} Request
-                              </span>
-                              {getStatusBadge(req.status)}
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => { setSelectedRequest(req); setShowDetailsModal(true); }}>
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                            <span>{req.items?.length || 0} item(s)</span>
-                            <span>•</span>
-                            <span>{formatDisplayDate(req.created_at)}</span>
-                            <span>•</span>
-                            <span>From: {req.from_location || 'Store'}</span>
-                            {req.requested_by_name && (
-                              <>
-                                <span>•</span>
-                                <span>Requested by: {req.requested_by_name}</span>
-                              </>
-                            )}
-                          </div>
-                          {req.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-md">{req.notes}</p>}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <StockRequestListCard
+                    key={req.id}
+                    request={req}
+                    role="requester"
+                    medications={Object.values(medicationCache)}
+                    onOpen={(r) => {
+                      setSelectedRequest(r);
+                      setShowDetailsModal(true);
+                    }}
+                    onConfirm={(r) => {
+                      setSelectedRequest(r);
+                      setShowConfirmModal(true);
+                    }}
+                  />
                 ))
               )}
             </div>
@@ -485,111 +376,30 @@ function DispensaryRequestsPageContent() {
               </Card>
             )}
 
-        {/* New Request Modal */}
-        <Dialog open={showNewRequestModal} onOpenChange={setShowNewRequestModal}>
+        <Dialog
+          open={showNewRequestModal}
+          onOpenChange={(open) => {
+            if (!open) closeNewRequestModal();
+            else setShowNewRequestModal(true);
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create Dispensary Request</DialogTitle>
-              <DialogDescription>Request medications from Central store to Dispensary</DialogDescription>
+              <DialogDescription>
+                Add one or more drugs to the list below, then submit a single request to Central Store.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="border rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <h4 className="font-medium">Add Items to Request</h4>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger><HelpCircle className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-                      <TooltipContent><p>Search by name or code. Quantity must be 1–{MAX_QUANTITY.toLocaleString()}.</p></TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <div className="space-y-3">
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">Search Medication</Label>
-                    <Input
-                      placeholder="Search by name or code..."
-                      value={medicationSearch}
-                      onChange={(e) => setMedicationSearch(e.target.value)}
-                      className="mt-1"
-                    />
-                    {medicationSearchLoading && medicationSearch && (
-                      <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Searching...
-                      </p>
-                    )}
-                    {filteredMedications.length > 0 && medicationSearch && (
-                      <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg bg-background shadow-lg z-10 max-h-48 overflow-y-auto">
-                        {filteredMedications.map((med) => (
-                          <button
-                            key={med.id}
-                            onClick={() => { setSelectedMedication(med); setMedicationSearch(""); }}
-                            className="w-full text-left px-3 py-2 hover:bg-muted text-sm border-b last:border-b-0"
-                          >
-                            <div className="font-medium">{med.name}</div>
-                            <div className="text-xs text-muted-foreground">{med.code} • {med.strength}</div>
-                          </button>
-                        ))}
-                        {filteredMedications.length >= MEDICATION_SEARCH_LIMIT && (
-                          <p className="px-3 py-2 text-xs text-muted-foreground">Showing first {MEDICATION_SEARCH_LIMIT} results. Refine search for more.</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  {selectedMedication && (
-                    <div className="bg-muted/50 p-2 rounded border">
-                      <p className="text-sm font-medium">{selectedMedication.name}</p>
-                      <p className="text-xs text-muted-foreground">{selectedMedication.code}</p>
-                    </div>
-                  )}
-                  {selectedMedication && (
-                    <div>
-                      <Label className="text-xs">
-                        {(selectedMedication.pack_size ?? 1) > 1
-                          ? `Packs (×${selectedMedication.pack_size} units each, max ${Math.floor(MAX_QUANTITY / (selectedMedication.pack_size ?? 1)).toLocaleString()} packs)`
-                          : `Quantity (1–${MAX_QUANTITY.toLocaleString()} units)`}
-                      </Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={(selectedMedication.pack_size ?? 1) > 1 ? Math.floor(MAX_QUANTITY / (selectedMedication.pack_size ?? 1)) : MAX_QUANTITY}
-                        value={requestQuantity}
-                        onChange={(e) => setRequestQuantity(e.target.value)}
-                        placeholder={(selectedMedication.pack_size ?? 1) > 1 ? "10" : "100"}
-                        className="mt-1"
-                      />
-                      {(selectedMedication.pack_size ?? 1) > 1 && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {`${Math.max(0, Number.parseInt(requestQuantity || "0", 10) || 0).toLocaleString()} packs = ${(Math.max(0, Number.parseInt(requestQuantity || "0", 10) || 0) * (selectedMedication.pack_size ?? 1)).toLocaleString()} units`}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {selectedMedication && (
-                    <Button onClick={handleAddItem} className="w-full bg-blue-600 hover:bg-blue-700">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add to Request
-                    </Button>
-                  )}
-                  {requestItems.length > 0 && (
-                    <div className="mt-4 space-y-2">
-                      <p className="text-sm font-medium">Items Added ({requestItems.length})</p>
-                      {requestItems.map((item, idx) => {
-                        const med = medicationCache[item.medication];
-                        const packSize = med?.pack_size ?? null;
-                        return (
-                          <div key={idx} className="flex items-center justify-between p-2 bg-green-50 dark:bg-green-950/30 rounded border border-green-200 dark:border-green-900">
-                            <div>
-                              <p className="text-sm font-medium">{med?.name}</p>
-                              <p className="text-xs text-muted-foreground">{formatPackDisplay(item.quantity, packSize)}</p>
-                            </div>
-                            <Button variant="ghost" size="sm" onClick={() => setRequestItems(requestItems.filter((_, i) => i !== idx))} className="h-6 w-6 p-0">×</Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <StockRequestItemsBuilder
+                key={showNewRequestModal ? "open" : "closed"}
+                items={requestItems}
+                onItemsChange={setRequestItems}
+                medicationCache={medicationCache}
+                onMedicationLearned={learnMedication}
+                seedMedication={seedMedication}
+                addButtonClassName="bg-violet-600 hover:bg-violet-700"
+              />
               <div>
                 <Label>Notes (optional)</Label>
                 <Textarea
@@ -602,66 +412,32 @@ function DispensaryRequestsPageContent() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowNewRequestModal(false)}>Cancel</Button>
-              <Button onClick={handleCreateRequest} disabled={creatingRequest || requestItems.length === 0} className="bg-violet-600 hover:bg-violet-700">
-                {creatingRequest ? "Creating..." : "Create Request"}
+              <Button variant="outline" onClick={closeNewRequestModal}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateRequest}
+                disabled={creatingRequest || requestItems.length === 0}
+                className="bg-violet-600 hover:bg-violet-700"
+              >
+                {creatingRequest
+                  ? "Submitting..."
+                  : requestItems.length > 0
+                    ? `Submit request (${requestItems.length} drug${requestItems.length === 1 ? "" : "s"})`
+                    : "Submit request"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Details Modal */}
-        <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{selectedRequest?.request_id}</DialogTitle>
-            </DialogHeader>
-            {selectedRequest && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Status</p>
-                    <div className="font-medium">{getStatusBadge(selectedRequest.status)}</div>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Created</p>
-                    <p className="font-medium">{formatDisplayDate(selectedRequest.created_at)}</p>
-                  </div>
-                </div>
-                {selectedRequest.confirmed_at && (
-                  <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg p-3">
-                    <p className="text-sm font-medium mb-1 text-green-800 dark:text-green-200">✓ Receipt Confirmed</p>
-                    <p className="text-xs text-green-700 dark:text-green-300">Confirmed by: {selectedRequest.confirmed_by_name}</p>
-                    <p className="text-xs text-green-700 dark:text-green-300">On: {formatDisplayDateTime(selectedRequest.confirmed_at)}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-sm font-medium mb-2">Items ({selectedRequest.items?.length || 0})</p>
-                  <div className="space-y-2">
-                    {(selectedRequest.items || []).map((item: any, idx: number) => (
-                      <div key={idx} className="border rounded-lg p-3 text-sm flex justify-between items-start">
-                        <div>
-                          <p className="font-medium">{item.medication_name || "Unknown"}</p>
-                          <p className="text-xs text-muted-foreground">Requested: {formatPackDisplay(Number(item.quantity), packSizeForRequestItem(item, Object.values(medicationCache)))}</p>
-                        </div>
-                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(Number(item.fulfilled_quantity), packSizeForRequestItem(item, Object.values(medicationCache)))}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setShowDetailsModal(false)}>Close</Button>
-                  {(selectedRequest.status === "fulfilled" || selectedRequest.status === "partially_fulfilled") && !selectedRequest.confirmed_at && (
-                    <Button onClick={() => setShowConfirmModal(true)} className="bg-green-600 hover:bg-green-700">
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      Confirm Receipt
-                    </Button>
-                  )}
-                </DialogFooter>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+        <StockRequestDetailDialog
+          open={showDetailsModal}
+          onOpenChange={setShowDetailsModal}
+          request={selectedRequest}
+          role="requester"
+          medications={Object.values(medicationCache)}
+          onConfirm={() => setShowConfirmModal(true)}
+        />
 
         {/* Confirm Receipt Modal */}
         <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>

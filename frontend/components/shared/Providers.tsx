@@ -2,7 +2,7 @@
 
 import { ThemeProvider } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { ClientErrorBoundary } from '@/components/shared/ClientErrorBoundary';
 import { Toaster as ToastToaster } from "@/components/ui/toaster";
@@ -22,50 +22,40 @@ function AuthzGate({ children }: { children: React.ReactNode }) {
 
   const isPublicRoute = pathname === "/" || pathname === "/login";
 
-  // Prevent child routes from mounting (and firing API calls) until we've checked auth+permissions.
-  const [canRender, setCanRender] = useState(false);
+  const canRender = useMemo(() => {
+    if (isPublicRoute || pathname === "/_not-found") return true;
+    if (!hydrated || !currentUser) return false;
+    if (currentUser.isSuperuser) return true;
+    if (pathname === "/no-access" || pathname.startsWith("/no-access/")) return true;
+    return isPathAllowedByPages(
+      pathname,
+      currentUser.permissions || [],
+      currentUser.deniedPages || [],
+    );
+  }, [currentUser, hydrated, isPublicRoute, pathname]);
 
   useEffect(() => {
-    if (isPublicRoute || pathname === "/_not-found") {
-      setCanRender(true);
-      return;
-    }
-
-    if (!hydrated) {
-      setCanRender(false);
-      return;
-    }
+    if (isPublicRoute || pathname === "/_not-found" || !hydrated) return;
 
     if (!currentUser) {
       if (typeof window !== "undefined") {
         sessionStorage.setItem("redirect_after_login", window.location.pathname);
       }
-      setCanRender(false);
       router.replace("/login");
       return;
     }
 
-    if (currentUser.isSuperuser) {
-      setCanRender(true);
-      return;
-    }
+    if (currentUser.isSuperuser) return;
+    if (pathname === "/no-access" || pathname.startsWith("/no-access/")) return;
 
-    // Always allow the no-access page for authenticated users (to avoid redirect loops).
-    if (pathname === "/no-access" || pathname.startsWith("/no-access/")) {
-      setCanRender(true);
-      return;
-    }
-
-    const allowedPages = currentUser.permissions || [];
-    const deniedPages = currentUser.deniedPages || [];
-    const allowed = isPathAllowedByPages(pathname, allowedPages, deniedPages);
+    const allowed = isPathAllowedByPages(
+      pathname,
+      currentUser.permissions || [],
+      currentUser.deniedPages || [],
+    );
     if (!allowed) {
-      setCanRender(false);
       router.replace(homeRoute || "/no-access");
-      return;
     }
-
-    setCanRender(true);
   }, [currentUser, hydrated, homeRoute, isPublicRoute, pathname, router]);
 
   if (!canRender) return null;

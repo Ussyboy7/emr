@@ -122,6 +122,7 @@ export interface ConsultationSession {
   patient_age?: number;
   patient_age_display?: string;
   patient_gender?: string;
+  patient_photo?: string | null;
   doctor?: number;
   doctor_name?: string;
   visit?: number;

@@ -292,6 +292,7 @@ class PharmacyService {
   }): Promise<{
     pending: number;
     processing: number;
+    partially_dispensed: number;
     dispensed: number;
     total: number;
   }> {
@@ -1160,6 +1161,7 @@ class PharmacyService {
     category?: string;
     strength?: string;
     dosage_form?: string;
+    unit?: string;
     route?: string;
     atc_code?: string;
   }): Promise<GenericMedication> {

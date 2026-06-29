@@ -23,8 +23,6 @@ export class ClientErrorBoundary extends Component<ClientErrorBoundaryProps, Cli
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    this.setState({ error, errorInfo });
-
     // Log the error with component stack for debugging
     console.error('Client Error Boundary caught an error:', error);
     console.error('Error Info:', errorInfo);
@@ -51,14 +49,13 @@ export class ClientErrorBoundary extends Component<ClientErrorBoundaryProps, Cli
               <p className="text-sm text-muted-foreground mb-4">
                 {this.state.error?.message || 'An unexpected error occurred'}
               </p>
-              {process.env.NODE_ENV === 'development' && this.state.errorInfo && (
+              {process.env.NODE_ENV === 'development' && this.state.error && (
                 <details className="text-left mb-4">
                   <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
                     Error Details (Development)
                   </summary>
                   <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-auto max-h-40">
                     {this.state.error?.stack}
-                    {this.state.errorInfo.componentStack}
                   </pre>
                 </details>
               )}

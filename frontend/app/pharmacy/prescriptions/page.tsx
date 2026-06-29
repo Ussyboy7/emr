@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
@@ -20,6 +20,13 @@ import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, form
 import { pharmacyService, type Prescription as ApiPrescription, type PrescriptionItem } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
+import { DispenseMedicationLineCard, DispenseMedicationListHeader } from "@/components/pharmacy/DispenseMedicationLineCard";
+import { PrescriptionPatientContext } from "@/components/pharmacy/PrescriptionPatientContext";
+import {
+  PrescriptionMedicationViewLine,
+  PrescriptionMedicationViewListHeader,
+} from "@/components/pharmacy/PrescriptionMedicationViewLine";
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
@@ -34,9 +41,9 @@ import {
 } from '@/lib/pharmacy/dispense-quantity';
 import { 
   ClipboardList, Search, Eye, Clock, CheckCircle2, CheckCircle, Pill, Calendar,
-  AlertTriangle, Package, User, Activity, Stethoscope,
+  AlertTriangle, Package, Activity, Stethoscope,
   ArrowRight, XCircle, Printer, ShieldAlert, ArrowRightLeft, Info,
-  FileText, Beaker, Hash, Loader2, Tag, GitBranch
+  Beaker, Hash, Loader2, Tag, GitBranch
 } from 'lucide-react';
 import type { Prescription, PrescriptionStatus, Priority, DrugInteraction, MedicationBatch, SubstituteOption, MedicationItem } from './TYPES';
 
@@ -134,6 +141,36 @@ const mapApiPrescriptionStatusToUi = (s: string | undefined, fallback: string): 
 };
 
 const isActiveDispenseLine = (m: any) => !m?.prescribing_record_only;
+
+const lineRemainingQty = (med: any) =>
+  Math.max(0, Number(med.quantity || 0) - Number(med.dispensed_quantity || med.dispensed || 0));
+
+const summarizeActiveMedications = (meds: any[]) => {
+  const active = meds.filter(isActiveDispenseLine);
+  const remainingCount = active.filter((m) => lineRemainingQty(m) > 0).length;
+  return { activeCount: active.length, remainingCount };
+};
+
+const getMedicationStatusLabel = (status: string): string => {
+  switch (status) {
+    case 'Available':
+      return 'Ready to dispense';
+    case 'Low Stock':
+      return 'Low stock';
+    case 'Out of Stock':
+      return 'Out of stock';
+    case 'Pending':
+      return 'Needs brand';
+    case 'Partially Dispensed':
+      return 'Partially dispensed';
+    case 'Dispensed':
+      return 'Dispensed';
+    case 'Over-dispensed':
+      return 'Over-dispensed';
+    default:
+      return status;
+  }
+};
 
 /** Prescribed ingredient PK — API links dispensary rows (brand medications) to this generic. */
 const resolveGenericIdForBrandSelect = (med: any): number | null => {
@@ -298,6 +335,7 @@ export default function PrescriptionsPage() {
   const [queueStats, setQueueStats] = useState<{
     pending: number;
     processing: number;
+    partially_dispensed: number;
     dispensed: number;
     total: number;
   } | null>(null);
@@ -591,7 +629,8 @@ export default function PrescriptionsPage() {
           age: patientAge,
           gender: patientGender,
           allergies: patientAllergies,
-          phone: patientPhone
+          phone: patientPhone,
+          photo: patientDetails.photo || null,
         };
 
         // Ensure patient object is never undefined
@@ -892,6 +931,64 @@ export default function PrescriptionsPage() {
     }
   };
 
+  const openBrandSelectionForMed = useCallback(async (med: any) => {
+    setSubstitutionMed(med);
+    setSubstituteSearchResults([]);
+    setSubstitutionForm({
+      reason: 'brand_selection',
+      selectedSubstitute: '',
+      selectedSubstituteBrand: '',
+      notes: '',
+    });
+    setSubstituteSearchQuery('');
+    setBrandSelectionTargetName('');
+    setBrandSelectionMode('select');
+    setShowSubstitutionModal(true);
+    setIsLoadingBrands(true);
+    try {
+      let genericId = resolveGenericIdForBrandSelect(med);
+      let targetName = med.name || med.medication_details?.name || '';
+      if (!genericId && med.medication) {
+        const medDetail = await getCachedMedication(Number(med.medication));
+        genericId =
+          parseNumericId(medDetail?.generic?.id) ??
+          resolveGenericIdForBrandSelect(medDetail) ??
+          null;
+        const g = medDetail?.generic as { name?: string } | undefined;
+        targetName = (g && typeof g === 'object' && g.name) || targetName;
+      }
+      setBrandSelectionTargetName(targetName);
+      brandSelectionGenericIdRef.current = genericId;
+      if (genericId) {
+        await performSubstituteSearch('', 'brand_selection');
+      } else {
+        setSubstituteSearchResults([]);
+        toast.error('Prescribed ingredient not found for this line');
+      }
+    } catch (err) {
+      console.error('Failed to load brand data:', err);
+      setSubstituteSearchResults([]);
+      toast.error('Failed to load brands');
+    } finally {
+      setIsLoadingBrands(false);
+    }
+  }, [getCachedMedication, performSubstituteSearch]);
+
+  const openSubstitutionForMed = useCallback((med: any) => {
+    setSubstitutionMed(med);
+    setSubstituteSearchResults([]);
+    setSubstituteBrandOptions([]);
+    setSubstitutionForm({
+      reason: 'out_of_stock',
+      selectedSubstitute: '',
+      selectedSubstituteBrand: '',
+      notes: '',
+    });
+    setSubstituteSearchQuery('');
+    brandSelectionGenericIdRef.current = null;
+    setShowSubstitutionModal(true);
+  }, []);
+
   // Load brands when pharmacist selects a generic in Substitute modal
   useEffect(() => {
     if (substitutionForm.reason === 'brand_selection' || !substitutionForm.selectedSubstitute || !substitutionMed) return;
@@ -956,8 +1053,9 @@ export default function PrescriptionsPage() {
     () => ({
       pending: queueStats?.pending ?? 0,
       processing: queueStats?.processing ?? 0,
-      total: queueStats?.total ?? 0,
+      partiallyDispensed: queueStats?.partially_dispensed ?? 0,
       dispensed: queueStats?.dispensed ?? 0,
+      total: queueStats?.total ?? 0,
     }),
     [queueStats],
   );
@@ -1768,7 +1866,7 @@ export default function PrescriptionsPage() {
         </div>
 
         {/* Stats Cards — workflow + volume */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -1799,12 +1897,12 @@ export default function PrescriptionsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total prescriptions</p>
+                  <p className="text-sm text-muted-foreground">Partial</p>
                   <p className="text-2xl font-bold text-violet-600 tabular-nums">
-                    {queueStatsLoading ? '—' : stats.total.toLocaleString()}
+                    {queueStatsLoading ? '—' : stats.partiallyDispensed.toLocaleString()}
                   </p>
                 </div>
-                <Hash className="h-5 w-5 text-violet-500" />
+                <GitBranch className="h-5 w-5 text-violet-500" />
               </div>
             </CardContent>
           </Card>
@@ -1812,12 +1910,25 @@ export default function PrescriptionsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Dispensed</p>
+                  <p className="text-sm text-muted-foreground">Fully dispensed</p>
                   <p className="text-2xl font-bold text-emerald-600 tabular-nums">
                     {queueStatsLoading ? '—' : stats.dispensed.toLocaleString()}
                   </p>
                 </div>
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total</p>
+                  <p className="text-2xl font-bold text-slate-700 dark:text-slate-200 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.total.toLocaleString()}
+                  </p>
+                </div>
+                <Hash className="h-5 w-5 text-slate-500" />
               </div>
             </CardContent>
           </Card>
@@ -1910,7 +2021,7 @@ export default function PrescriptionsPage() {
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <PatientAvatar name={rx.patient.name} photoUrl={(rx.patient as any).photoUrl || (rx.patient as any).photo} size="sm" />
+                    <PatientAvatar name={rx.patient.name} photoUrl={resolvePatientPhoto(rx.patient)} size="sm" />
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0">
@@ -2031,14 +2142,9 @@ export default function PrescriptionsPage() {
         <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
           <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-3">
-                <div className="p-2 bg-violet-100 dark:bg-violet-900/30 rounded-full">
-                  <User className="h-5 w-5 text-violet-600" />
-                </div>
-                <div>
-                  <div className="text-xl font-bold">{selectedPrescription?.patient.name}</div>
-                  <div className="text-sm text-muted-foreground">RX: {selectedPrescription?.id}</div>
-                </div>
+              <DialogTitle className="flex items-center gap-2">
+                <Pill className="h-5 w-5 text-violet-500" />
+                Prescription · RX {selectedPrescription?.id}
               </DialogTitle>
               <DialogDescription>
                 View prescription details and patient information
@@ -2047,70 +2153,17 @@ export default function PrescriptionsPage() {
             
             {selectedPrescription && (
               <div className="overflow-y-auto max-h-[65vh] space-y-4">
-                {/* Status Badges and Update */}
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex gap-2">
-                    <Badge variant="outline" className={getPriorityColor(selectedPrescription.priority)}>
-                      {selectedPrescription.priority}
-                    </Badge>
-                    <Badge variant="outline" className={getStatusColor(selectedPrescription.status)}>
-                      {selectedPrescription.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                    </Badge>
-                  </div>
-
-                </div>
-
-                {/* Patient Info */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-muted/50 rounded-lg p-4 text-sm">
-                  {((selectedPrescription as any).patient_details?.patient_id || selectedPrescription.patient) && (
-                    <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.patient_id || selectedPrescription.patient}</span></div>
-                  )}
-                  {joinDisplayParts([
-                    (selectedPrescription as any).patient_details?.age,
-                    (selectedPrescription as any).patient_details?.gender,
-                  ]) && (
-                    <div><span className="text-muted-foreground">Age/Gender:</span> <span className="font-medium">{joinDisplayParts([(selectedPrescription as any).patient_details?.age, (selectedPrescription as any).patient_details?.gender])}</span></div>
-                  )}
-                  {(selectedPrescription as any).patient_details?.phone && (
-                    <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.phone}</span></div>
-                  )}
-                  {((selectedPrescription as any).doctor_name || selectedPrescription.doctor) && (
-                    <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{(selectedPrescription as any).doctor_name || selectedPrescription.doctor}</span></div>
-                  )}
-                  {((selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic) && (
-                    <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{(selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic}</span></div>
-                  )}
-                  {(selectedPrescription.location_clinic_name) && (
-                    <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{selectedPrescription.location_clinic_name}</span></div>
-                  )}
-                  {(selectedPrescription.prescribed_at || selectedPrescription.date || selectedPrescription.time) && (
-                    <div>
-                      <span className="text-muted-foreground">Date:</span>{' '}
-                      <span className="font-medium">
-                        {selectedPrescription.prescribed_at
-                          ? formatDisplayDateTime(selectedPrescription.prescribed_at)
-                          : `${selectedPrescription.date || ''} ${selectedPrescription.time || ''}`.trim()}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Allergies */}
-                {selectedPrescription.patient_details?.allergies && selectedPrescription.patient_details.allergies.length > 0 && (
-                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-red-700 dark:text-red-400 font-medium mb-1">
-                      <AlertTriangle className="h-4 w-4" />
-                      Allergies
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(selectedPrescription as any).patient_details?.allergies?.map((allergy: string, i: number) => (
-                        <Badge key={i} className="bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-400">
-                          {allergy}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <PrescriptionPatientContext
+                  prescription={selectedPrescription}
+                  priorityBadge={{
+                    label: selectedPrescription.priority,
+                    className: getPriorityColor(selectedPrescription.priority),
+                  }}
+                  statusBadge={{
+                    label: selectedPrescription.status.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
+                    className: getStatusColor(selectedPrescription.status),
+                  }}
+                />
 
                 <Icd10DiagnosesBlock diagnoses={(selectedPrescription as any).icd10_diagnoses} compact />
 
@@ -2140,65 +2193,24 @@ export default function PrescriptionsPage() {
 
                 {/* Medications */}
                 <div>
-                  <h4 className="font-semibold mb-3 flex items-center gap-2">
-                    <Pill className="h-4 w-4 text-violet-500" />
-                    Medications ({selectedPrescriptionMedications.length})
-                  </h4>
-                  <div className="space-y-3">
-                    {selectedPrescriptionMedications.map((med) => (
-                        <div key={med.id} className="border rounded-lg p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <div>
-                              <h5 className="font-medium flex items-center gap-2">
-                                {med.name || med.medication_name || ''}
-                                {(med as any).prescribing_record_only && (
-                                  <Badge variant="outline" className="text-xs font-normal border-slate-400 text-slate-700">
-                                    Original order (superseded — not dispensed)
-                                  </Badge>
-                                )}
-                                {med.substitution && <span className="text-amber-600 text-sm">🔄 Substituted</span>}
-                              </h5>
-                              {joinDisplayParts([med.route, med.frequency, med.duration]) ? (
-                                <p className="text-sm text-muted-foreground">{joinDisplayParts([med.route, med.frequency, med.duration])}</p>
-                              ) : null}
-                              {med.substitution && (
-                                <p className="text-xs text-amber-700 mt-1">Originally: {med.originalMedication}</p>
-                              )}
-                            </div>
-                          <Badge variant="outline" className={getMedicationStatusColor(med.status || '')}>
-                            {med.status || ''}
-                          </Badge>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                          {med.dosage != null && String(med.dosage).trim() !== '' && (
-                            <div><span className="text-muted-foreground">Dose:</span> <span className="font-medium">{med.dosage}</span></div>
-                          )}
-                          {(med.quantity != null && String(med.quantity).trim() !== '') || (med.unit != null && String(med.unit).trim() !== '') ? (
-                            <div><span className="text-muted-foreground">Prescribed:</span> <span className="font-medium">{joinDisplayParts([med.quantity, med.unit])}</span></div>
-                          ) : null}
-                          <div>
-                            <span className="text-muted-foreground">Dispensed:</span>{' '}
-                            <span className="font-medium text-blue-600">
-                              {med.dispensed_quantity || med.dispensed || 0}
-                              {med.unit ? ` ${med.unit}` : ''}
-                              {Number(med.stock_dispensed_quantity || 0) > 0 && med.stock_dispensed_unit
-                                ? ` (${med.stock_dispensed_quantity} ${med.stock_dispensed_unit})`
-                                : ''}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Remaining:</span>{' '}
-                            <span className={`font-medium ${(med.quantity - (med.dispensed_quantity || med.dispensed || 0)) <= 0 ? 'text-green-600' : 'text-orange-600'}`}>
-                              {Math.max(0, (med.quantity - (med.dispensed_quantity || med.dispensed || 0)))} {med.unit || ''}
-                            </span>
-                          </div>
-                        </div>
-                        {(med.instructions || med.medication_details?.instructions) && (
-                          <div className="mt-2 text-sm">
-                            <span className="text-muted-foreground">Instructions:</span> <span className="font-medium">{med.instructions || med.medication_details?.instructions}</span>
-                          </div>
-                        )}
-                      </div>
+                  {(() => {
+                    const { activeCount, remainingCount } = summarizeActiveMedications(selectedPrescriptionMedications);
+                    return (
+                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <Pill className="h-4 w-4 text-violet-500" />
+                        Medications ({activeCount})
+                        {remainingCount > 0 ? (
+                          <span className="text-sm font-normal text-muted-foreground">
+                            · {remainingCount} line{remainingCount === 1 ? '' : 's'} remaining
+                          </span>
+                        ) : null}
+                      </h4>
+                    );
+                  })()}
+                  <div className="border rounded-lg overflow-hidden divide-y">
+                    <PrescriptionMedicationViewListHeader />
+                    {selectedPrescriptionMedications.filter(isActiveDispenseLine).map((med) => (
+                      <PrescriptionMedicationViewLine key={med.id} med={med} />
                     ))}
                   </div>
                 </div>
@@ -2227,6 +2239,18 @@ export default function PrescriptionsPage() {
                   Dispense
                 </Button>
               )}
+              {selectedPrescription && selectedPrescription.status === 'Partially Dispensed' && (
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700"
+                  onClick={() => {
+                    setShowViewModal(false);
+                    handleStartDispense(selectedPrescription);
+                  }}
+                >
+                  <Package className="h-4 w-4 mr-2" />
+                  Resume dispense
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -2246,104 +2270,34 @@ export default function PrescriptionsPage() {
             
             {selectedPrescription && (
               <div className="overflow-y-auto max-h-[65vh] space-y-4">
-                {/* Patient Summary */}
-                <div className="bg-muted/50 rounded-lg p-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="font-medium">{selectedPrescription.patient_details?.name ?? ''}</span>
-                      {(() => {
-                        const sub = joinDisplayParts([
-                          selectedPrescription.patient_details?.patient_id
-                            ? `ID: ${selectedPrescription.patient_details.patient_id}`
-                            : '',
-                          selectedPrescription.patient_details?.age != null &&
-                          selectedPrescription.patient_details.age !== ''
-                            ? `${selectedPrescription.patient_details.age}y`
-                            : '',
-                          selectedPrescription.patient_details?.gender,
-                        ]);
-                        return sub ? (
-                          <span className="text-muted-foreground"> • {sub}</span>
-                        ) : null;
-                      })()}
-                    </div>
-                    <Badge variant="outline" className={getPriorityColor(selectedPrescription.priority)}>
-                      {selectedPrescription.priority}
-                    </Badge>
-                  </div>
-                  {(() => {
-                    const allergies = selectedPrescription.patient_details?.allergies ||
-                                    selectedPrescription.patient?.allergies || [];
-                    return allergies.length > 0 ? (
-                      <div className="flex items-center gap-1 text-red-600 dark:text-red-400 mt-2 text-xs p-2 bg-red-50 dark:bg-red-900/20 rounded">
-                        <AlertTriangle className="h-4 w-4" />
-                        <span className="font-medium">ALLERGIES:</span> {allergies.join(', ')}
-                      </div>
-                    ) : null;
-                  })()}
-                </div>
+                <PrescriptionPatientContext
+                  prescription={selectedPrescription}
+                  statusBadge={{
+                    label: selectedPrescription.status,
+                    className: getStatusColor(selectedPrescription.status),
+                  }}
+                  priorityBadge={{
+                    label: selectedPrescription.priority,
+                    className: getPriorityColor(selectedPrescription.priority),
+                  }}
+                />
 
                 <Icd10DiagnosesBlock diagnoses={(selectedPrescription as any).icd10_diagnoses} compact />
 
-                {/* Prescription Details */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-muted/30 rounded-lg p-4 text-sm">
-                  {selectedPrescription.patient_details?.patient_id && (
-                    <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{selectedPrescription.patient_details.patient_id}</span></div>
-                  )}
-                  {selectedPrescription.doctor_name && (
-                    <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{selectedPrescription.doctor_name}</span></div>
-                  )}
-                  {selectedPrescription.visit_details?.clinic && (
-                    <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{selectedPrescription.visit_details.clinic}</span></div>
-                  )}
-                  {selectedPrescription.location_clinic_name && (
-                    <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{selectedPrescription.location_clinic_name}</span></div>
-                  )}
-                  {(selectedPrescription.prescribed_at || selectedPrescription.date) && (
-                    <div>
-                      <span className="text-muted-foreground">Date:</span>{' '}
-                      <span className="font-medium">
-                        {selectedPrescription.prescribed_at
-                          ? formatDisplayDate(selectedPrescription.prescribed_at)
-                          : selectedPrescription.date}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
                 {/* Dispensing History */}
                 {selectedPrescriptionMedications.some(med => isActiveDispenseLine(med) && (med.dispensed_quantity || med.dispensed || 0) > 0) && (
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400 font-medium mb-3">
+                  <div>
+                    <h4 className="font-medium mb-2 flex items-center gap-2 text-blue-700 dark:text-blue-400">
                       <Package className="h-4 w-4" />
-                      Dispensing History
-                    </div>
-                    <div className="space-y-2">
+                      Dispensing history
+                    </h4>
+                    <div className="border rounded-lg overflow-hidden divide-y">
+                      <PrescriptionMedicationViewListHeader />
                       {selectedPrescriptionMedications
                         .filter(med => isActiveDispenseLine(med) && (med.dispensed_quantity || med.dispensed || 0) > 0)
-                        .map(med => {
-                          const dispensed = med.dispensed_quantity || med.dispensed || 0;
-                          const quantity = med.quantity || 0;
-                          const remaining = Math.max(0, quantity - dispensed);
-                          return (
-                            <div key={med.id} className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border">
-                              <div>
-                                <span className="font-medium text-sm">{med.name || med.medication_name}</span>
-                                {med.substitution && (
-                                  <div className="text-xs text-amber-600 dark:text-amber-400">
-                                    🔄 Substituted from {med.originalMedication}
-                                  </div>
-                                )}
-                                <div className="text-xs text-muted-foreground">
-                                  Dispensed: {dispensed} • Remaining: {remaining}
-                                </div>
-                              </div>
-                              <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400">
-                                {remaining > 0 ? 'Partial' : 'Complete'}
-                              </Badge>
-                            </div>
-                          );
-                        })}
+                        .map((med) => (
+                          <PrescriptionMedicationViewLine key={med.id} med={med} />
+                        ))}
                     </div>
                   </div>
                 )}
@@ -2391,49 +2345,33 @@ export default function PrescriptionsPage() {
                   </div>
                 )}
 
-                {selectedPrescriptionMedications.some((m: any) => m.prescribing_record_only) && (
-                  <div className="rounded-lg border border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-900/40 p-4 mb-4">
-                    <h4 className="font-medium mb-1 flex items-center gap-2 text-slate-800 dark:text-slate-200">
-                      <FileText className="h-4 w-4" />
-                      Originally prescribed (record only)
-                    </h4>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      The prescriber ordered this combination product. It was split into separate ingredient lines below—dispense those lines only.
-                    </p>
-                    <div className="space-y-2">
-                      {selectedPrescriptionMedications
-                        .filter((m: any) => m.prescribing_record_only)
-                        .map((med: any) => (
-                          <div
-                            key={med.id}
-                            className="rounded-md border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-950/30 px-3 py-2 text-sm"
-                          >
-                            <div className="font-medium">{med.name}</div>
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              {med.route} • {med.frequency} • {med.duration}
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              Qty {med.quantity} {med.unit || ''}
-                              {med.strength ? ` • ${med.strength}` : ''}
-                            </div>
-                            {med.instructions ? (
-                              <div className="text-xs mt-1 text-slate-700 dark:text-slate-300">
-                                <span className="font-medium">Instructions:</span> {med.instructions}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* Medications to Dispense */}
                 <div>
-                  <h4 className="font-medium mb-3 flex items-center gap-2">
-                    <Pill className="h-4 w-4 text-violet-500" />
-                    Medications ({selectedPrescriptionMedications.filter((med: any) => isActiveDispenseLine(med) && (med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Out of Stock' || med.status === 'Partially Dispensed' || med.status === 'Pending')).length})
-                  </h4>
-                  <div className="space-y-3">
+                  {(() => {
+                    const actionable = selectedPrescriptionMedications.filter(
+                      (med: any) =>
+                        isActiveDispenseLine(med) &&
+                        (med.status === 'Available' ||
+                          med.status === 'Low Stock' ||
+                          med.status === 'Out of Stock' ||
+                          med.status === 'Partially Dispensed' ||
+                          med.status === 'Pending'),
+                    );
+                    const { remainingCount } = summarizeActiveMedications(actionable);
+                    return (
+                      <h4 className="font-medium mb-3 flex items-center gap-2 flex-wrap">
+                        <Pill className="h-4 w-4 text-violet-500" />
+                        Medications ({actionable.length})
+                        {remainingCount > 0 ? (
+                          <span className="text-sm font-normal text-muted-foreground">
+                            · {remainingCount} line{remainingCount === 1 ? '' : 's'} to dispense
+                          </span>
+                        ) : null}
+                      </h4>
+                    );
+                  })()}
+                  <div className="border rounded-lg overflow-hidden divide-y">
+                    <DispenseMedicationListHeader />
                     {selectedPrescriptionMedications
                       .filter(
                         (med: any) =>
@@ -2444,407 +2382,53 @@ export default function PrescriptionsPage() {
                             med.status === 'Partially Dispensed' ||
                             med.status === 'Pending')
                       )
-                      .map((med) => {
-                      const isSelected = selectedMedications.includes(med.id);
-                      const isAvailable = (med as any).status === 'Available' || (med as any).status === 'Low Stock' || (med as any).status === 'Partially Dispensed';
-                      const isPendingGeneric = (med as any).status === 'Pending'; // Generics need selection
-                      const needsBrandBeforeSelect = isPendingGeneric && !(med as any).medication;
-                      const usesPackDispensing = isPackDispenseMedication(med);
-                      const packSizeMl = getPackSizeMl(med);
-                                      const batches = medicationBatches[med.id] || [];
-                                      // Substitution details are displayed in UI; no runtime logging needed.
-                      const hasSubstitute = false;
-                      
-                      return (
-                        <div 
-                          key={med.id} 
-                          className={`border rounded-lg p-4 ${!isAvailable && !isPendingGeneric ? 'opacity-60 bg-muted/50' : isSelected ? 'border-violet-300 bg-violet-50/50 dark:bg-violet-900/10' : ''}`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <Checkbox
-                              checked={isSelected}
-                              disabled={needsBrandBeforeSelect || (!isAvailable && !isPendingGeneric)}
-                              onCheckedChange={(checked) => handleMedicationSelection(
-                                med.id,
-                                checked as boolean,
-                                Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0))
-                              )}
-                              className="mt-1 h-5 w-5 flex-shrink-0"
-                              id={`med-${med.id}`}
-                            />
-                            <div
-                              className={`flex-1 ${needsBrandBeforeSelect ? 'cursor-default' : 'cursor-pointer'}`}
-                              onClick={() => {
-                                if (needsBrandBeforeSelect) return;
-                                if (isAvailable || isPendingGeneric) {
-                                  handleMedicationSelection(
-                                    med.id,
-                                    !isSelected,
-                                    Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0))
-                                  );
-                                }
-                              }}
-                            >
-                              <div className="flex items-center justify-between mb-2">
-                                <div>
-                                  <h5 className="font-medium">
-                                    {med.name}
-                                    {(med as any).strength &&
-                                    !String(med.name || '').toLowerCase().includes(String((med as any).strength || '').toLowerCase()) && (
-                                      <span className="font-normal text-muted-foreground ml-1">{(med as any).strength}</span>
-                                    )}
-                                  </h5>
-                                  {(() => {
-                                    const sub = (med as any).substitution;
-                                    const original = (med as any).originalMedication;
-                                    const previousBrand = sub?.previous_brand;
-                                    const isFirstBrandSelection = sub?.reason === 'brand_selection' && sub?.is_first_brand_selection !== false;
-
-                                    if (!sub && !original) return null;
-
-                                    return (
-                                      <div className="space-y-0.5">
-                                        {sub?.reason === 'brand_selection' && previousBrand && (
-                                          <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                                            {isFirstBrandSelection
-                                              ? `✓ Brand selected: ${med.name}`
-                                              : `🔁 Brand switched from ${previousBrand}`}
-                                          </p>
-                                        )}
-                                        {original && (
-                                          <p className="text-xs text-amber-600 dark:text-amber-400">
-                                            🔄 Substituted from {original}
-                                          </p>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                  <p className="text-xs text-muted-foreground">
-                                    {med.route}
-                                    {med.frequency ? ` • ${med.frequency}` : ''}
-                                    {med.duration ? ` • ${med.duration}` : ''}
-                                  </p>
-                                  {(med as any).can_split_combo && Array.isArray((med as any).combo_components) && (med as any).combo_components.length > 1 && (
-                                    <p className="text-xs text-fuchsia-600 dark:text-fuchsia-400 mt-1">
-                                      Combo components: {(med as any).combo_components.join(' + ')}
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Badge 
-                                    variant="outline" 
-                                    className={getMedicationStatusColor(med.status)}
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    {med.status}
-                                  </Badge>
-                                  {/* Select Brand Button - Always available for brand selection */}
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-50 mr-2"
-                                    disabled={isLoadingBrands}
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-
-                                      // OPTIMISTIC UI: Open modal immediately
-                                      setSubstitutionMed(med);
-                                      setSubstituteSearchResults([]);
-                                      setSubstitutionForm({
-                                        reason: 'brand_selection',
-                                        selectedSubstitute: '',
-                                        selectedSubstituteBrand: '',
-                                        notes: '',
-                                      });
-                                      setSubstituteSearchQuery('');
-                                      setBrandSelectionTargetName('');
-                                      setBrandSelectionMode('select');
-                                      setShowSubstitutionModal(true);
-                                       setIsLoadingBrands(true);
-
-                                       try {
-                                        let genericId = resolveGenericIdForBrandSelect(med);
-                                        let targetName =
-                                          (med as any).name || (med as any).medication_details?.name || '';
-
-                                        if (!genericId && (med as any).medication) {
-                                          const medDetail = await getCachedMedication(Number((med as any).medication));
-                                          genericId =
-                                            parseNumericId(medDetail?.generic?.id) ??
-                                            resolveGenericIdForBrandSelect(medDetail) ??
-                                            null;
-                                          const g = medDetail?.generic as { name?: string } | undefined;
-                                          targetName =
-                                            (g && typeof g === 'object' && g.name) || targetName;
-                                        }
-
-                                        setBrandSelectionTargetName(targetName);
-                                        brandSelectionGenericIdRef.current = genericId;
-
-                                         if (genericId) {
-                                           performSubstituteSearch('', 'brand_selection');
-                                         } else {
-                                          setSubstituteSearchResults([]);
-                                          toast.error('Prescribed ingredient not found for this line');
-                                        }
-                                      } catch (err) {
-                                        console.error('Failed to load brand data:', err);
-                                        setSubstituteSearchResults([]);
-                                        toast.error('Failed to load brands');
-                                      } finally {
-                                        setIsLoadingBrands(false);
-                                      }
-                                    }}
-                                    >
-                                      <>
-                                        <Tag className="h-3 w-3 mr-1" />
-                                        Select Brand
-                                      </>
-                                    </Button>
-
-                                    {(med as any).can_split_combo && (
-                                    <AlertDialog open={splitComboAlertOpen} onOpenChange={(open) => {
-                                      setSplitComboAlertOpen(open);
-                                      if (!open) setMedToSplit(null);
-                                    }}>
-                                      <AlertDialogTrigger asChild>
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-7 text-xs border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50 mr-2"
-                                          disabled={Boolean(splittingComboItemId)}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setMedToSplit(med);
-                                          }}
-                                        >
-                                          {splittingComboItemId === String(med.id) ? (
-                                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                          ) : (
-                                            <GitBranch className="h-3 w-3 mr-1" />
-                                          )}
-                                          Split Combo
-                                        </Button>
-                                      </AlertDialogTrigger>
-                                      <AlertDialogContent>
-                                        <AlertDialogHeader>
-                                          <AlertDialogTitle>Split Combo Medication</AlertDialogTitle>
-                                          <AlertDialogDescription>
-                                            Split this combo into separate ingredient lines? Missing component generics will be auto-created as placeholders so you can substitute during dispensing.
-                                          </AlertDialogDescription>
-                                        </AlertDialogHeader>
-                                        <AlertDialogFooter>
-                                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                          <AlertDialogAction
-                                            onClick={async () => {
-                                              setSplitComboAlertOpen(false);
-                                              await handleSplitComboMedication(medToSplit);
-                                              setMedToSplit(null);
-                                            }}
-                                          >
-                                            Split Combo
-                                          </AlertDialogAction>
-                                        </AlertDialogFooter>
-                                      </AlertDialogContent>
-                                    </AlertDialog>
-                                    )}
-
-                                    {/* Substitute Button - Always available for medication substitution */}
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
-                                      disabled={isLoadingSubstitutes}
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-
-                                      // OPTIMISTIC UI: Open modal immediately
-                                      setSubstitutionMed(med);
-                                      setSubstituteSearchResults([]);
-                                      setSubstituteBrandOptions([]);
-                                      setSubstitutionForm({
-                                        reason: 'out_of_stock',
-                                        selectedSubstitute: '',
-                                        selectedSubstituteBrand: '',
-                                        notes: '',
-                                      });
-                                      setSubstituteSearchQuery('');
-                                      brandSelectionGenericIdRef.current = null;
-                                       setShowSubstitutionModal(true);
-
-                                      // BACKGROUND LOADING: Load initial substitute options
-                                      try {
-                                        setIsLoadingSubstitutes(true);
-                                        // performSubstituteSearch will be triggered by the modal's useEffect
-                                        // when the modal opens and detect the reason change
-                                      } catch (err) {
-                                        console.error('Failed to initialize substitution:', err);
-                                        toast.error('Failed to load substitution options');
-                                      } finally {
-                                        setIsLoadingSubstitutes(false);
-                                      }
-                                    }}
-                                    >
-                                      <ArrowRightLeft className="h-3 w-3 mr-1" />
-                                      Substitute
-                                    </Button>
-                                </div>
-                              </div>
-                              
-                              {isSelected && isAvailable && (
-                                <div className="space-y-3 mt-3 pt-3 border-t" onClick={(e) => e.stopPropagation()}>
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    {/* Quantity */}
-                                    <div>
-                                      {(med as any).remaining_quantity <= 0 ? (
-                                        <>
-                                          <Label className="text-xs">
-                                            Quantity to Dispense {usesPackDispensing ? '(bottles)' : ''}
-                                          </Label>
-                                          <div className="h-8 mt-1 flex items-center px-3 bg-muted text-muted-foreground text-sm rounded">
-                                            Fully dispensed
-                                          </div>
-                                        </>
-                                      ) : usesTabletPackEntry(med) && med.medication_details ? (
-                                        <PharmacyPackQuantityFields
-                                          medication={med.medication_details}
-                                          prescribedUnit={med.unit ?? null}
-                                          displayQuantity={String(dispenseQuantities[med.id] ?? getDefaultDispenseQuantity(med))}
-                                          onDisplayQuantityChange={(value) => {
-                                            const inputValue = Math.max(1, parseInt(value, 10) || 1);
-                                            const mode = getDispenseEntryMode(med, med.id);
-                                            setDispenseQuantities((prev) => ({ ...prev, [med.id]: inputValue }));
-                                            setDispenseCoverageQuantities((prev) => ({
-                                              ...prev,
-                                              [med.id]: getPrescriptionInventoryUnits(inputValue, med, mode),
-                                            }));
-                                          }}
-                                          entryMode={getDispenseEntryMode(med, med.id)}
-                                          onEntryModeChange={(mode) => {
-                                            setDispenseEntryModes((prev) => ({ ...prev, [med.id]: mode }));
-                                            const inputValue = dispenseQuantities[med.id] ?? getDefaultDispenseQuantity(med);
-                                            setDispenseCoverageQuantities((prev) => ({
-                                              ...prev,
-                                              [med.id]: getPrescriptionInventoryUnits(inputValue, med, mode),
-                                            }));
-                                          }}
-                                          className="[&_input]:h-8"
-                                        />
-                                      ) : (
-                                        <>
-                                          <Label className="text-xs">
-                                            Quantity to Dispense {usesPackDispensing ? '(bottles)' : ''}
-                                          </Label>
-                                          <Input
-                                            type="number"
-                                            min="1"
-                                            step="1"
-                                            value={dispenseQuantities[med.id] ?? getDefaultDispenseQuantity(med)}
-                                            onChange={(e) => {
-                                              const inputValue = Math.max(1, parseInt(e.target.value) || 1);
-                                              setDispenseQuantities(prev => ({
-                                                ...prev,
-                                                [med.id]: inputValue
-                                              }));
-                                              if (!usesPackDispensing) {
-                                                setDispenseCoverageQuantities(prev => ({
-                                                  ...prev,
-                                                  [med.id]: inputValue
-                                                }));
-                                              }
-                                            }}
-                                            className="h-8 mt-1"
-                                          />
-                                        </>
-                                      )}
-                                      <div className="text-[10px] text-muted-foreground mt-1 space-y-1">
-                                        <div>
-                                          {joinDisplayParts([
-                                            med.quantity != null && med.quantity !== '' ? `Prescribed: ${med.quantity}` : '',
-                                            Array.isArray(batches)
-                                              ? `Available: ${batches.reduce((total, b) => total + Number(b.quantity || 0), 0)}`
-                                              : '',
-                                          ])}
-                                        </div>
-                                        {usesPackDispensing && (
-                                          <div>
-                                            Clinical unit: {med.unit || 'ml'}
-                                            {packSizeMl ? ` • Pack size: ${packSizeMl} ml per bottle` : ' • Pack size not set'}
-                                          </div>
-                                        )}
-                                        {(med as any).dispensed_quantity > 0 && (
-                                        <div className={(med as any).remaining_quantity < 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
-                                          Already dispensed: {(med as any).dispensed_quantity} • Remaining: {Math.max(0, (med as any).remaining_quantity)}
-                                          {(med as any).remaining_quantity < 0 && " (Over-dispensed)"}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    {usesPackDispensing && (
-                                      <div>
-                                        <Label className="text-xs">Clinical Quantity Covered ({med.unit || 'ml'})</Label>
-                                        {(med as any).remaining_quantity <= 0 ? (
-                                          <div className="h-8 mt-1 flex items-center px-3 bg-muted text-muted-foreground text-sm rounded">
-                                            Fully covered
-                                          </div>
-                                        ) : (
-                                          <Input
-                                            type="number"
-                                            min="1"
-                                            value={dispenseCoverageQuantities[med.id] ?? getDefaultCoverageQuantity(med)}
-                                            onChange={(e) => {
-                                              const inputValue = Math.max(1, parseInt(e.target.value) || 1);
-                                              setDispenseCoverageQuantities(prev => ({
-                                                ...prev,
-                                                [med.id]: inputValue
-                                              }));
-                                            }}
-                                            className="h-8 mt-1"
-                                          />
-                                        )}
-                                        <div className="text-[10px] text-muted-foreground mt-1">
-                                          Use this to mark how much prescribed volume this bottle quantity covers.
-                                        </div>
-                                      </div>
-                                    )}
-                                    
-                                    {/* Stock Info */}
-                                    <div>
-                                      <Label className="text-xs">Stock Available</Label>
-                                      {(() => {
-                                        const stock = Array.isArray(batches)
-                                          ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0)
-                                          : null;
-                                        if (stock === null) {
-                                          return <div className="mt-1 min-h-[2.25rem] rounded bg-muted/50" aria-hidden />;
-                                        }
-                                        return (
-                                          <div className={`mt-1 p-2 rounded text-center font-medium ${stock < 50 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'}`}>
-                                            {stock} units
-                                          </div>
-                                        );
-                                      })()}
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Instructions */}
-                                  <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-xs">
-                                    <span className="font-medium text-blue-700 dark:text-blue-400">Instructions:</span> {med.instructions}
-                                  </div>
-                                </div>
-                              )}
-                              
-                              {!isAvailable && med.status === 'Out of Stock' && (
-                                <p className="text-xs text-red-600 dark:text-red-400 mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded">
-                                  ⚠️ This medication is out of stock. {hasSubstitute ? 'Consider using a substitute.' : 'Contact procurement.'}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                      .map((med) => (
+                        <DispenseMedicationLineCard
+                          key={med.id}
+                          med={med}
+                          isSelected={selectedMedications.includes(med.id)}
+                          batches={medicationBatches[med.id] || []}
+                          dispenseQuantities={dispenseQuantities}
+                          dispenseCoverageQuantities={dispenseCoverageQuantities}
+                          dispenseEntryModes={dispenseEntryModes}
+                          isLoadingBrands={isLoadingBrands}
+                          isLoadingSubstitutes={isLoadingSubstitutes}
+                          splittingComboItemId={splittingComboItemId}
+                          splitComboAlertOpen={splitComboAlertOpen}
+                          onSplitComboAlertOpenChange={setSplitComboAlertOpen}
+                          medToSplit={medToSplit}
+                          onMedToSplit={setMedToSplit}
+                          onToggleSelect={(checked) =>
+                            handleMedicationSelection(
+                              med.id,
+                              checked,
+                              Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0)),
+                            )
+                          }
+                          onRowActivate={() => {
+                            const isSelected = selectedMedications.includes(med.id);
+                            handleMedicationSelection(
+                              med.id,
+                              !isSelected,
+                              Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0)),
+                            );
+                          }}
+                          onDispenseQuantitiesChange={(medId, value) =>
+                            setDispenseQuantities((prev) => ({ ...prev, [medId]: value }))
+                          }
+                          onDispenseCoverageChange={(medId, value) =>
+                            setDispenseCoverageQuantities((prev) => ({ ...prev, [medId]: value }))
+                          }
+                          onDispenseEntryModeChange={(medId, mode) =>
+                            setDispenseEntryModes((prev) => ({ ...prev, [medId]: mode }))
+                          }
+                          onOpenBrandSelection={openBrandSelectionForMed}
+                          onOpenSubstitution={openSubstitutionForMed}
+                          onConfirmSplitCombo={handleSplitComboMedication}
+                          getDefaultDispenseQuantity={getDefaultDispenseQuantity}
+                          getDefaultCoverageQuantity={getDefaultCoverageQuantity}
+                        />
+                      ))}
                   </div>
                 </div>
 

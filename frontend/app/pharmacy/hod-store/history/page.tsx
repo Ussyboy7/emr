@@ -27,13 +27,13 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { pharmacyService, type HodStockIssue } from "@/lib/services";
+import { formatDisplayDateTime } from "@/lib/dates";
 import {
-  formatDisplayDate,
-  formatDisplayDateMedium,
-  formatDisplayDateTime,
-  formatDisplayTime,
-} from "@/lib/dates";
-import { formatIssuedQuantityDisplay } from "@/lib/pharmacy/dispense-quantity";
+  buildHodIssueCardMeta,
+  buildHodIssueRecipientLine,
+  formatHodIssueQuantity,
+  getHodIssueReasonBadgeLabel,
+} from "@/lib/pharmacy/hod-stock-issue-card";
 import {
   History,
   Search,
@@ -42,9 +42,7 @@ import {
   Eye,
   Calendar,
   Package,
-  User,
   AlertTriangle,
-  CheckCircle2,
 } from "lucide-react";
 
 export default function HodDispenseHistoryPage() {
@@ -191,8 +189,6 @@ export default function HodDispenseHistoryPage() {
     setShowDetailModal(true);
   };
 
-  const formatDate = (dateString: string) => formatDisplayDateMedium(dateString);
-
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -306,91 +302,61 @@ export default function HodDispenseHistoryPage() {
               </CardContent>
             </Card>
           ) : history.length > 0 ? (
-            history.map((row) => (
+            history.map((row) => {
+              const reasonBadge = getHodIssueReasonBadgeLabel(row);
+              const cardMeta = buildHodIssueCardMeta(row);
+              const recipientLine = buildHodIssueRecipientLine(row);
+              return (
               <Card
                 key={row.id}
-                className="border-l-4 border-l-violet-500 hover:shadow-md transition-shadow cursor-pointer"
+                className="border-l-4 border-l-emerald-500 hover:shadow-md transition-shadow cursor-pointer"
                 onClick={() => openDetails(row)}
               >
                 <CardContent className="py-3 px-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-shrink-0 w-9 h-9 rounded-full bg-violet-500/10 flex items-center justify-center">
-                      <Pill className="h-4 w-4 text-violet-500" />
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 rounded-full bg-violet-500/10 p-2 mt-0.5">
+                      <Pill className="h-4 w-4 text-violet-600 dark:text-violet-400" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          <span className="font-semibold text-foreground truncate">
-                            {row.medication_name || "Medication"}
-                          </span>
-                          {getStatusBadge()}
-                          {row.patient_name && (
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                              <User className="h-3 w-3 mr-1 inline" />
-                              Patient
-                            </Badge>
-                          )}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-medium text-foreground text-sm truncate">
+                              {row.medication_name || "Medication"}
+                            </h3>
+                            {getStatusBadge()}
+                            {reasonBadge ? (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 shrink-0">
+                                {reasonBadge}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          {cardMeta ? (
+                            <p className="text-xs text-muted-foreground mt-0.5 truncate">{cardMeta}</p>
+                          ) : null}
+                          {recipientLine ? (
+                            <p className="text-xs text-foreground/80 mt-0.5 truncate">{recipientLine}</p>
+                          ) : null}
                         </div>
                         <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 flex-shrink-0"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 flex-shrink-0"
                           onClick={(e) => {
                             e.stopPropagation();
                             openDetails(row);
                           }}
+                          title="View details"
                         >
-                          <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                          <Eye className="h-4 w-4" />
                         </Button>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                        <span>{row.issue_id}</span>
-                        <span>•</span>
-                        <span>
-                          {formatIssuedQuantityDisplay(
-                            Number(row.quantity),
-                            {
-                              unit: row.unit,
-                              pack_size: row.medication_pack_size ?? row.medication_details?.pack_size,
-                              dispense_mode: row.medication_details?.dispense_mode,
-                            },
-                            row.quantity_entry_mode
-                          )}
-                        </span>
-                        {row.batch_number && (
-                          <>
-                            <span>•</span>
-                            <span>Batch {row.batch_number}</span>
-                          </>
-                        )}
-                        {row.issued_by_name && (
-                          <>
-                            <span>•</span>
-                            <span>{row.issued_by_name}</span>
-                          </>
-                        )}
-                        <span>•</span>
-                        <span>
-                          {formatDate(row.issued_at)} {formatDisplayTime(row.issued_at)}
-                        </span>
-                      </div>
-                      {(row.patient_name || row.reason) && (
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-xl">
-                          {row.patient_name && (
-                            <span>
-                              {row.patient_name}
-                              {row.patient_mrn ? ` (${row.patient_mrn})` : ""}
-                            </span>
-                          )}
-                          {row.patient_name && row.reason && " · "}
-                          {row.reason}
-                        </p>
-                      )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            ))
+            );
+            })
           ) : (
             <Card>
               <CardContent className="py-12 text-center">
@@ -424,116 +390,62 @@ export default function HodDispenseHistoryPage() {
         <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-3">
-                <Pill className="h-5 w-5 text-violet-500" />
-                <div>
-                  <div className="text-xl font-bold">
-                    {selected?.medication_name || "HOD Issue"}
-                  </div>
-                  <div className="text-sm text-muted-foreground font-normal">
-                    ID: {selected?.issue_id}
-                  </div>
-                </div>
-              </DialogTitle>
-              <DialogDescription>HOD store discretionary issue details</DialogDescription>
+              <DialogTitle>{selected?.medication_name || "HOD Issue"}</DialogTitle>
+              <DialogDescription>
+                {selected?.issue_id}
+                {selected?.reason ? ` · ${selected.reason}` : ""}
+              </DialogDescription>
             </DialogHeader>
 
             {selected && (
               <div className="space-y-4">
-                <div className="bg-muted/50 rounded-lg p-4 grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Status</span>
-                    <div className="mt-1">{getStatusBadge()}</div>
+                <div className="rounded-lg bg-muted/50 p-4 text-sm space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {getStatusBadge()}
+                    {getHodIssueReasonBadgeLabel(selected) ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">
+                        {getHodIssueReasonBadgeLabel(selected)}
+                      </Badge>
+                    ) : null}
                   </div>
-                  <div>
-                    <span className="text-muted-foreground">Issued</span>
-                    <p className="font-semibold">{formatDisplayDateTime(selected.issued_at)}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Quantity</span>
-                    <p className="font-semibold">
-                      {formatIssuedQuantityDisplay(
-                        Number(selected.quantity),
-                        {
-                          unit: selected.unit,
-                          pack_size: selected.medication_pack_size ?? selected.medication_details?.pack_size,
-                          dispense_mode: selected.medication_details?.dispense_mode,
-                        },
-                        selected.quantity_entry_mode
-                      )}
-                    </p>
-                  </div>
-                  {selected.batch_number && (
-                    <div>
-                      <span className="text-muted-foreground">Batch</span>
-                      <p className="font-semibold">{selected.batch_number}</p>
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-muted-foreground">Issued By</span>
-                    <p className="font-semibold">{selected.issued_by_name || "—"}</p>
-                  </div>
-                  {selected.patient_name && (
-                    <div>
-                      <span className="text-muted-foreground">Patient</span>
-                      <p className="font-semibold">{selected.patient_name}</p>
-                    </div>
-                  )}
-                  {selected.patient_mrn && (
-                    <div>
-                      <span className="text-muted-foreground">MRN</span>
-                      <p className="font-semibold">{selected.patient_mrn}</p>
-                    </div>
-                  )}
-                  {selected.reason && (
-                    <div className="col-span-2">
-                      <span className="text-muted-foreground">Reason</span>
-                      <p className="font-semibold">{selected.reason}</p>
-                    </div>
-                  )}
-                </div>
 
-                {selected.notes && (
-                  <div className="border rounded-lg p-4">
-                    <p className="text-sm font-medium mb-1 flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-violet-500" />
-                      Notes
-                    </p>
-                    <p className="text-sm text-muted-foreground">{selected.notes}</p>
-                  </div>
-                )}
-
-                <div>
-                  <h4 className="font-semibold mb-3 flex items-center gap-2">
-                    <Pill className="h-4 w-4 text-violet-500" />
-                    Medication Issued
-                  </h4>
-                  <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 dark:bg-gray-800/50 dark:border-gray-700">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 bg-violet-100 dark:bg-violet-900/50 rounded-full flex items-center justify-center flex-shrink-0">
-                          <Pill className="h-3 w-3 text-violet-600" />
-                        </div>
-                        <div>
-                          <p className="font-semibold">{selected.medication_name}</p>
-                          <p className="text-xs text-muted-foreground">From HOD store inventory</p>
-                        </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Issued</p>
+                      <p className="font-medium mt-0.5">{formatDisplayDateTime(selected.issued_at)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Quantity</p>
+                      <p className="font-medium mt-0.5">{formatHodIssueQuantity(selected)}</p>
+                    </div>
+                    {selected.batch_number ? (
+                      <div>
+                        <p className="text-muted-foreground text-xs">Batch</p>
+                        <p className="font-medium mt-0.5">{selected.batch_number}</p>
                       </div>
-                      <span className="font-bold text-lg whitespace-nowrap">
-                        ×
-                        {formatIssuedQuantityDisplay(
-                          Number(selected.quantity),
-                          {
-                            unit: selected.unit,
-                            pack_size: selected.medication_pack_size ?? selected.medication_details?.pack_size,
-                            dispense_mode: selected.medication_details?.dispense_mode,
-                          },
-                          selected.quantity_entry_mode
-                        )}
-                      </span>
+                    ) : null}
+                    <div>
+                      <p className="text-muted-foreground text-xs">Issued by</p>
+                      <p className="font-medium mt-0.5">{selected.issued_by_name || "—"}</p>
                     </div>
+                    {selected.patient_name ? (
+                      <div>
+                        <p className="text-muted-foreground text-xs">Patient</p>
+                        <p className="font-medium mt-0.5">
+                          {selected.patient_name}
+                          {selected.patient_mrn ? ` (${selected.patient_mrn})` : ""}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
+
+                {selected.notes ? (
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                    <p className="text-xs text-muted-foreground mb-1">Notes</p>
+                    <p>{selected.notes}</p>
+                  </div>
+                ) : null}
               </div>
             )}
 

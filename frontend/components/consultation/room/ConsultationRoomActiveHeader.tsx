@@ -119,7 +119,7 @@ export function ConsultationRoomActiveHeader({
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
             <PatientAvatar
               name={patient.name}
-              photoUrl={patient.photo || null}
+              photoUrl={patient.photo}
               size="lg"
               className="shrink-0"
             />

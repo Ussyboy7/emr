@@ -4,7 +4,12 @@ Serializers for the Patients app.
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from .photo import patient_photo_url
 from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate, AnnualCheckup
+
+
+def _patient_photo_url(obj) -> str | None:
+    return patient_photo_url(obj)
 
 
 class PatientSerializer(serializers.ModelSerializer):
@@ -13,7 +18,8 @@ class PatientSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     age = serializers.IntegerField(read_only=True)
     age_display = serializers.CharField(read_only=True)
-    photo = serializers.SerializerMethodField()
+    photo = serializers.ImageField(required=False, allow_null=True)
+    clear_photo = serializers.BooleanField(required=False, write_only=True, default=False)
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
 
@@ -49,20 +55,29 @@ class PatientSerializer(serializers.ModelSerializer):
             'blood_group', 'genotype', 'allergies',
             'nok_surname', 'nok_first_name', 'nok_middle_name', 'nok_relationship', 'nok_address', 'nok_phone',
             'created_at', 'updated_at', 'created_by_name', 'updated_by_name', 'is_active',
+            'clear_photo',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'updated_at', 'age']
     
     @extend_schema_field(OpenApiTypes.STR)
     def get_full_name(self, obj):
         return obj.get_full_name()
-    
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_photo(self, obj):
-        """Return the photo URL if photo exists."""
-        if obj.photo:
-            # Return relative URL - frontend will construct full URL
-            return obj.photo.url
-        return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['photo'] = _patient_photo_url(instance)
+        return data
+
+    def validate_photo(self, value):
+        if value is None:
+            return value
+        from common.upload_validation import UploadValidationError, validate_upload_file
+
+        try:
+            validate_upload_file(value)
+        except UploadValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return value
 
     def _resolve_location_clinic(self, location_str):
         """Resolve location_clinic from facility name or numeric facility id."""
@@ -76,6 +91,7 @@ class PatientSerializer(serializers.ModelSerializer):
             return None
 
     def create(self, validated_data):
+        validated_data.pop('clear_photo', None)
         location_str = validated_data.get('location')
         if location_str and validated_data.get('location_clinic') is None:
             clinic = self._resolve_location_clinic(location_str)
@@ -84,6 +100,14 @@ class PatientSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        clear_photo = validated_data.pop('clear_photo', False)
+        new_photo = validated_data.get('photo')
+        if new_photo:
+            clear_photo = False
+        elif clear_photo and instance.photo:
+            instance.photo.delete(save=False)
+            validated_data['photo'] = None
+
         location_str = validated_data.get('location', instance.location)
         if location_str and 'location_clinic' not in validated_data:
             clinic = self._resolve_location_clinic(location_str)
@@ -195,11 +219,7 @@ class PatientListSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_photo(self, obj):
-        """Return the photo URL if photo exists."""
-        if obj.photo:
-            # Return relative URL - frontend will construct full URL
-            return obj.photo.url
-        return None
+        return _patient_photo_url(obj)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_total_visits(self, obj):
@@ -252,6 +272,7 @@ class VisitSerializer(serializers.ModelSerializer):
     is_first_visit = serializers.SerializerMethodField()
     is_returning_visit = serializers.SerializerMethodField()
     patient_visit_status = serializers.SerializerMethodField()
+    patient_photo = serializers.SerializerMethodField()
     vitals = serializers.SerializerMethodField()
 
     @extend_schema_field(OpenApiTypes.STR)
@@ -310,6 +331,10 @@ class VisitSerializer(serializers.ModelSerializer):
         if self.get_is_new_registration(obj):
             return 'Newly Registered'
         return 'Returning'
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return _patient_photo_url(getattr(obj, 'patient', None))
     
     def validate_clinic(self, value):
         """Normalize clinic name before validation."""
@@ -429,7 +454,7 @@ class VisitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Visit
         fields = [
-            'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'age', 'gender', 'visit_type', 'status',
+            'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'patient_photo', 'age', 'gender', 'visit_type', 'status',
             'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'location_clinic', 'location_clinic_name', 'doctor', 'doctor_name',
             'clinical_notes', 'vitals',
             'is_new_registration', 'is_first_visit', 'is_returning_visit', 'patient_visit_status',
@@ -447,6 +472,7 @@ class VitalReadingSerializer(serializers.ModelSerializer):
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    patient_photo = serializers.SerializerMethodField()
     recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True, allow_null=True)
     location_clinic_name = serializers.SerializerMethodField()
 
@@ -457,10 +483,14 @@ class VitalReadingSerializer(serializers.ModelSerializer):
         visit = getattr(obj, "visit", None)
         return location_clinic_name(visit)
 
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return _patient_photo_url(getattr(obj, 'patient', None))
+
     class Meta:
         model = VitalReading
         fields = [
-            'id', 'visit', 'patient', 'patient_id', 'patient_name',
+            'id', 'visit', 'patient', 'patient_id', 'patient_name', 'patient_photo',
             'temperature', 'blood_pressure_systolic', 'blood_pressure_diastolic',
             'heart_rate', 'respiratory_rate', 'oxygen_saturation',
             'weight', 'height', 'bmi', 'pain_scale', 'blood_sugar', 'random_blood_sugar',

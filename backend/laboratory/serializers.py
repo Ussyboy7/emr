@@ -5,6 +5,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 import re
+from patients.photo import patient_photo_url
 from .models import (
     LabTemplate,
     LabPartner,
@@ -228,6 +229,7 @@ class LabTestSerializer(serializers.ModelSerializer):
                     'nonnpa_type': getattr(order.patient, 'nonnpa_type', None),
                     'dependent_type': getattr(order.patient, 'dependent_type', None),
                     'phone': getattr(order.patient, 'phone', None),
+                    'photo': patient_photo_url(order.patient),
                 }
             except (AttributeError, TypeError):
                 patient_name = str(order.patient) if order.patient else None
@@ -315,6 +317,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
     patient_name = serializers.SerializerMethodField()
     doctor_name = serializers.SerializerMethodField()
     patient_details = serializers.SerializerMethodField()
+    patient_photo = serializers.SerializerMethodField()
     doctor_details = serializers.SerializerMethodField()
     external_clinic_details = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
@@ -407,6 +410,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'dependent_type': getattr(obj.patient, 'dependent_type', None),
                 'phone': getattr(obj.patient, 'phone', None),
                 'division': obj.patient.division,
+                'photo': patient_photo_url(obj.patient),
             }
         except (AttributeError, TypeError):
             return {
@@ -417,6 +421,10 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'personal_number': None,
                 'division': None,
             }
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
     
     def to_representation(self, instance):
         """Customize output to include patient and doctor as objects."""
@@ -625,6 +633,7 @@ class LabResultSerializer(serializers.ModelSerializer):
                 'name': obj.patient.get_full_name() if hasattr(obj.patient, 'get_full_name') else str(obj.patient),
                 'age': getattr(obj.patient, 'age', None),
                 'gender': getattr(obj.patient, 'gender', None),
+                'photo': patient_photo_url(obj.patient),
             }
         except (AttributeError, TypeError):
             return {

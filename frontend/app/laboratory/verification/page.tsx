@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { labService } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { transformToBackendPriority } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
@@ -603,14 +604,7 @@ export default function ResultsVerificationPage() {
                         checked={selectedIds.includes(result.id)}
                         onCheckedChange={() => toggleSelection(result.id)}
                       />
-                      {/* Avatar */}
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        result.overallStatus === 'Critical' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                        result.overallStatus === 'Abnormal' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                        'bg-emerald-100 dark:bg-emerald-900/30'
-                      }`}>
-                        <PatientAvatar name={result.patient.name} photoUrl={(result.patient as any).photoUrl || (result.patient as any).photo} size="sm" />
-                      </div>
+                      <PatientAvatar name={result.patient.name} photoUrl={resolvePatientPhoto(result.patient)} size="sm" />
                       
                       {/* Info */}
                       <div className="flex-1 min-w-0">
@@ -707,14 +701,7 @@ export default function ResultsVerificationPage() {
                     <Card key={result.id} className={`border-l-4 hover:shadow-md transition-shadow ${result.overallStatus === 'Critical' ? 'border-l-rose-500' : result.overallStatus === 'Abnormal' ? 'border-l-amber-500' : 'border-l-emerald-500'}`}>
                       <CardContent className="py-3 px-4">
                         <div className="flex items-center gap-3">
-                          {/* Avatar */}
-                          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            result.overallStatus === 'Critical' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                            result.overallStatus === 'Abnormal' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                            'bg-emerald-100 dark:bg-emerald-900/30'
-                          }`}>
-                            <PatientAvatar name={result.patient.name} photoUrl={(result.patient as any).photoUrl || (result.patient as any).photo} size="sm" />
-                          </div>
+                          <PatientAvatar name={result.patient.name} photoUrl={resolvePatientPhoto(result.patient)} size="sm" />
 
                           {/* Info */}
                           <div className="flex-1 min-w-0">

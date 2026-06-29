@@ -2,6 +2,9 @@
 Serializers for the Appointments app.
 """
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
+from patients.photo import patient_photo_url
 from .models import Appointment, AppointmentSlot
 
 
@@ -9,10 +12,15 @@ class AppointmentSerializer(serializers.ModelSerializer):
     """Serializer for Appointment model."""
     
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_photo = serializers.SerializerMethodField()
     patient_code = serializers.CharField(source='patient.patient_id', read_only=True)
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     clinic_name = serializers.CharField(source='clinic.name', read_only=True, allow_null=True)
     room_name = serializers.CharField(source='room.name', read_only=True, allow_null=True)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
     
     class Meta:
         model = Appointment

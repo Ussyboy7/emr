@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { CustomDateRangeButton } from "@/components/shared/CustomDateRangeButton";
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { AdvancedDateRangeDialog } from "@/components/shared/AdvancedDateRangeDialog";
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import {
@@ -732,33 +733,7 @@ export default function AppointmentsPage() {
             <div className="space-y-2">
               {appointments.map((appointment) => {
                 const name = appointment.patient_name ?? "Patient";
-                const initials = name
-                  .split(/\s+/)
-                  .filter(Boolean)
-                  .slice(0, 2)
-                  .map((n) => n[0]?.toUpperCase())
-                  .join("");
                 const t = appointment.appointment_type;
-                const avatarBg =
-                  t === "emergency"
-                    ? "bg-rose-100 dark:bg-rose-900/30"
-                    : t === "follow_up"
-                      ? "bg-blue-100 dark:bg-blue-900/30"
-                      : t === "routine"
-                        ? "bg-violet-100 dark:bg-violet-900/30"
-                        : t === "procedure"
-                          ? "bg-orange-100 dark:bg-orange-900/30"
-                          : "bg-teal-100 dark:bg-teal-900/30";
-                const avatarFg =
-                  t === "emergency"
-                    ? "text-rose-600 dark:text-rose-400"
-                    : t === "follow_up"
-                      ? "text-blue-600 dark:text-blue-400"
-                      : t === "routine"
-                        ? "text-violet-600 dark:text-violet-400"
-                        : t === "procedure"
-                          ? "text-orange-600 dark:text-orange-400"
-                          : "text-teal-600 dark:text-teal-400";
                 return (
                   <Card
                     key={appointment.id}
@@ -766,11 +741,7 @@ export default function AppointmentsPage() {
                   >
                     <CardContent className="px-4 py-3">
                       <div className="flex items-start gap-3">
-                        <div
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${avatarBg}`}
-                        >
-                          <span className={`text-xs font-semibold ${avatarFg}`}>{initials}</span>
-                          </div>
+                        <PatientAvatar name={name} photoUrl={resolvePatientPhoto(appointment)} size="sm" />
                         <div className="min-w-0 flex-1 overflow-hidden">
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="truncate text-sm font-medium text-foreground">{name}</h3>

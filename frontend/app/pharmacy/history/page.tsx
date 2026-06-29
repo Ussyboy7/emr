@@ -14,7 +14,9 @@ import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
 import { pharmacyService } from '@/lib/services';
 import { formatIssuedQuantityDisplay } from '@/lib/pharmacy/dispense-quantity';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
-import { formatDisplayDate, formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
+import { resolvePatientPhoto } from "@/lib/patient-photo";
+import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
+import { formatWaitMinutes, waitMinutesBetween } from '@/lib/pharmacy/wait-duration';
 import { getServerToday, peekServerTimezone } from '@/lib/utils/serverTime';
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
@@ -38,6 +40,7 @@ interface DispenseHistoryRecord {
   }>;
   doctor: string;
   pharmacist: string;
+  dispensedAt: string;
   date: string;
   time: string;
   status: string;
@@ -153,15 +156,10 @@ export default function DispenseHistoryPage() {
         // Count substitutions
         const substitutions = medications.filter((m: any) => m.context === 'substituted').length;
         
-        // Calculate wait time from when pharmacist started attending this prescription.
-        let waitTime = '0 min';
-        if (prescription.dispensing_started_at && dispense.dispensed_at) {
-          const prescribedAt = new Date(prescription.dispensing_started_at);
-          const dispensedAt = new Date(dispense.dispensed_at);
-          const waitTimeMs = dispensedAt.getTime() - prescribedAt.getTime();
-          const waitTimeMins = Math.max(0, Math.floor(waitTimeMs / 60000));
-          waitTime = `${waitTimeMins} min`;
-        }
+        const dispensingStartedAt = prescription.dispensing_started_at as string | undefined;
+        const dispensedAt = dispense.dispensed_at as string;
+        const waitMins = waitMinutesBetween(dispensingStartedAt, dispensedAt);
+        const waitTime = formatWaitMinutes(waitMins);
         
         return {
           id: dispense.dispense_id || dispense.id.toString(),
@@ -171,13 +169,15 @@ export default function DispenseHistoryPage() {
             id: patientId,
             mrn: patientMRN,
             age: patientAge,
-            gender: patientGender
+            gender: patientGender,
+            photo: patientDetails.photo || null,
           },
           medications,
           doctor: doctorName,
           pharmacist: dispense.dispensed_by_name || '',
-          date: formatDisplayDate(dispense.dispensed_at),
-          time: formatDisplayTime(dispense.dispensed_at),
+          dispensedAt,
+          date: formatDisplayDateMedium(dispensedAt),
+          time: formatDisplayTime(dispensedAt),
           status: 'Dispensed',
           waitTime,
           substitutions,
@@ -206,6 +206,7 @@ export default function DispenseHistoryPage() {
       today: summaryStats.today,
       withSubstitutions: summaryStats.substitutions,
       avgWaitTime: summaryStats.avg_wait_minutes,
+      avgWaitLabel: formatWaitMinutes(summaryStats.avg_wait_minutes),
     };
   }, [summaryStats]);
 
@@ -217,8 +218,6 @@ export default function DispenseHistoryPage() {
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
     }
   };
-
-  const formatDate = (dateString: string) => formatDisplayDateMedium(dateString);
 
   const handleViewDetails = (record: DispenseHistoryRecord) => {
     setSelectedRecord(record);
@@ -294,7 +293,7 @@ export default function DispenseHistoryPage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Avg Wait Time</p>
                   <p className="text-2xl sm:text-3xl font-bold text-blue-600 tabular-nums">
-                    {summaryLoading ? '—' : stats ? `${stats.avgWaitTime}m` : '—'}
+                    {summaryLoading ? '—' : stats ? stats.avgWaitLabel : '—'}
                   </p>
                 </div>
                 <Clock className="h-6 w-6 text-blue-500" />
@@ -363,7 +362,7 @@ export default function DispenseHistoryPage() {
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <PatientAvatar name={record.patient.name} photoUrl={(record.patient as any).photoUrl || (record.patient as any).photo} size="sm" />
+                    <PatientAvatar name={record.patient.name} photoUrl={resolvePatientPhoto(record.patient)} size="sm" />
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0">
@@ -386,13 +385,23 @@ export default function DispenseHistoryPage() {
                       
                       {/* Row 2: Details */}
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                        <span>{record.id}</span>
+                        <span className="font-mono">{record.id}</span>
                         <span>•</span>
-                        <span>{record.prescriptionId}</span>
+                        <span>RX {record.prescriptionId}</span>
+                        {record.doctor ? (
+                          <>
+                            <span>•</span>
+                            <span>Dr {record.doctor}</span>
+                          </>
+                        ) : null}
+                        {record.pharmacist ? (
+                          <>
+                            <span>•</span>
+                            <span>Pharm {record.pharmacist}</span>
+                          </>
+                        ) : null}
                         <span>•</span>
-                        <span>{record.pharmacist}</span>
-                        <span>•</span>
-                        <span>{formatDate(record.date)} {record.time}</span>
+                        <span>{record.date} {record.time}</span>
                         <span>•</span>
                         <span>{record.waitTime} wait</span>
                       </div>
@@ -452,7 +461,7 @@ export default function DispenseHistoryPage() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Date & Time:</span>
-                    <p className="font-semibold">{formatDate(selectedRecord.date)} {selectedRecord.time}</p>
+                    <p className="font-semibold">{selectedRecord.date} {selectedRecord.time}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Wait Time:</span>

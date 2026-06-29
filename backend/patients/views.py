@@ -23,6 +23,7 @@ from organization.models import SystemConfig
 from django.http import HttpResponse
 from django.core.files.base import ContentFile
 
+from .photo import patient_photo_url
 from .models import (
     Patient,
     Visit,
@@ -1349,6 +1350,11 @@ class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         rows = list(grouped[start:start + page_size])
 
         patient_ids = [row['patient'] for row in rows]
+        photo_by_patient: dict[int, str | None] = {}
+        if patient_ids:
+            for patient in Patient.objects.filter(id__in=patient_ids).only('id', 'photo'):
+                photo_by_patient[patient.id] = patient_photo_url(patient)
+
         latest_by_patient: dict[int, VitalReading] = {}
         if patient_ids:
             for vital in qs.filter(patient_id__in=patient_ids).order_by('patient_id', '-recorded_at'):
@@ -1367,6 +1373,7 @@ class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 'patient': pid,
                 'patient_id': row.get('patient__patient_id') or '',
                 'patient_name': ' '.join(part for part in name_parts if part).strip(),
+                'patient_photo': photo_by_patient.get(pid),
                 'patient_gender': row.get('patient__gender') or '',
                 'patient_date_of_birth': row.get('patient__date_of_birth'),
                 'reading_count': row['reading_count'],

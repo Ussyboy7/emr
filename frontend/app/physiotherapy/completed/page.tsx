@@ -19,6 +19,7 @@ import { physioService, type PhysioSession } from '@/lib/services';
 import { usePhysioPageAuth } from '@/hooks/use-physio-page-auth';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { PhysioSessionReportDialog } from '@/components/physiotherapy/PhysioSessionReportDialog';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -210,12 +211,7 @@ export default function PhysioCompletedPage() {
                 }`}>
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
-                      {/* Avatar */}
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        hasRecommendations ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'
-                      }`}>
-                        <PatientAvatar name={session.patient_name ?? ''} size="sm" />
-                      </div>
+                      <PatientAvatar name={session.patient_name ?? ''} photoUrl={resolvePatientPhoto(session)} size="sm" />
                       
                       {/* Info */}
                       <div className="flex-1 min-w-0">

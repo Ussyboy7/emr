@@ -655,9 +655,10 @@ export default function InventoryPage() {
                                 <span className="font-medium">{requestId}</span>
                               </div>
                             ) : null}
-                            {batch.locationClinicName ? (
+                            {batch.locationClinicName &&
+                            batch.locationClinicName.trim() !== (activeClinicName || '').trim() ? (
                               <div>
-                                <span className="text-muted-foreground">Location:</span>{' '}
+                                <span className="text-muted-foreground">Clinic:</span>{' '}
                                 <span className="font-medium">{batch.locationClinicName}</span>
                               </div>
                             ) : null}

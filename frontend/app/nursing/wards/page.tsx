@@ -15,6 +15,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StandardPagination } from '@/components/shared/StandardPagination';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { resolvePatientPhoto } from '@/lib/patient-photo';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Building2, Users, Search, Eye, CheckCircle, AlertTriangle,
@@ -1237,9 +1239,7 @@ export default function WardCarePage() {
                       >
                         <CardContent className="py-3 px-4">
                           <div className="flex items-center gap-3">
-                            <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${avatar.bg}`}>
-                              <span className={`font-semibold text-xs ${avatar.text}`}>{initials(admission.patient_name)}</span>
-                            </div>
+                            <PatientAvatar name={admission.patient_name} photoUrl={resolvePatientPhoto(admission)} size="sm" />
 
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">

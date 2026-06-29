@@ -8,6 +8,10 @@ from permissions.page_paths import GLOBAL_USER_PAGES, normalize_role_page_path
 from permissions.role_permissions import normalize_role_permissions_list
 
 USER_MANAGEMENT_PAGES = ("/admin/users", "/admin")
+"""Pages that satisfy user-management checks (full ``/admin`` or users-only)."""
+
+PHARMACY_HOD_IMPLICIT_PAGES = ("/admin/users",)
+"""UI paths auto-granted to Pharmacy HOD for department-scoped user management only."""
 
 SUPERUSER_PAGES = frozenset({"__superuser__"})
 ADMIN_ROLE_PAGES = frozenset({"__admin__"})
@@ -79,7 +83,7 @@ def _apply_implicit_pages(user, allowed: set[str]) -> set[str]:
     from pharmacy.hod_store import user_is_pharmacy_hod
 
     if user_is_pharmacy_hod(user):
-        for page in USER_MANAGEMENT_PAGES:
+        for page in PHARMACY_HOD_IMPLICIT_PAGES:
             if page not in denied:
                 allowed.add(page)
     return allowed

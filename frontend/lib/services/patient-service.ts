@@ -4,6 +4,14 @@
 import { apiFetch, buildQueryString } from '../api-client';
 import { getVisitTypeLabel } from '../utils/priority';
 
+function appendPatientFormFields(formData: FormData, data: Record<string, unknown>): void {
+  Object.entries(data).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      formData.append(key, String(value));
+    }
+  });
+}
+
 /**
  * Normalize API gender to a display label.
  * Patient list serializer uses Django choice labels ("Male" / "Female");
@@ -128,6 +136,7 @@ export interface Visit {
   patient: number;
   patient_id?: string;
   patient_name?: string;
+  patient_photo?: string | null;
   /** Completed years from patient DOB (from Visit API). */
   age?: number;
   gender?: string;
@@ -156,6 +165,7 @@ export interface VitalReading {
   visit?: number;
   patient: number;
   patient_name?: string;
+  patient_photo?: string | null;
   temperature?: number;
   blood_pressure_systolic?: number;
   blood_pressure_diastolic?: number;
@@ -303,22 +313,52 @@ class PatientService {
   }
 
   /**
-   * Create a new patient
+   * Create a new patient (optional photo via multipart).
    */
-  async createPatient(data: Partial<Patient>): Promise<Patient> {
+  async createPatient(data: Partial<Patient>, photo?: File): Promise<Patient> {
+    if (!photo) {
+      return apiFetch<Patient>('/patients/', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    }
+
+    const formData = new FormData();
+    appendPatientFormFields(formData, { ...data, is_active: data.is_active ?? true });
+    formData.append('photo', photo);
     return apiFetch<Patient>('/patients/', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: formData,
     });
   }
 
   /**
-   * Update a patient
+   * Update a patient (optional photo upload or removal via multipart).
    */
-  async updatePatient(patientId: number, data: Partial<Patient>): Promise<Patient> {
+  async updatePatient(
+    patientId: number,
+    data: Partial<Patient>,
+    options?: { photo?: File; clearPhoto?: boolean },
+  ): Promise<Patient> {
+    const { photo, clearPhoto } = options ?? {};
+    if (!photo && !clearPhoto) {
+      return apiFetch<Patient>(`/patients/${patientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      });
+    }
+
+    const formData = new FormData();
+    appendPatientFormFields(formData, data as Record<string, unknown>);
+    if (photo) {
+      formData.append('photo', photo);
+    }
+    if (clearPhoto) {
+      formData.append('clear_photo', 'true');
+    }
     return apiFetch<Patient>(`/patients/${patientId}/`, {
       method: 'PATCH',
-      body: JSON.stringify(data),
+      body: formData,
     });
   }
 
@@ -432,14 +472,6 @@ class PatientService {
     return apiFetch<any>(`/patients/${patientId}/update_history/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
-    });
-  }
-
-  async uploadPatientPhoto(patientId: number, formData: FormData): Promise<Patient> {
-    return apiFetch<Patient>(`/patients/patients/${patientId}/upload_photo/`, {
-      method: 'POST',
-      body: formData,
-      headers: {}, // Let browser set Content-Type for FormData
     });
   }
 

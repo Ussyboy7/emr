@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { patientService } from '@/lib/services/patient-service';
+import { validatePatientPhotoFile } from '@/lib/patient-photo';
 import { DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { 
   UserPlus, User, Phone, Heart, Users, Send, ArrowLeft, ArrowRight, 
@@ -217,9 +218,10 @@ export default function NewPatientPage() {
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('Photo must be less than 5MB');
+      const validationError = validatePatientPhotoFile(file);
+      if (validationError) {
+        toast.error(validationError);
+        e.target.value = '';
         return;
       }
       setPhotoFile(file);
@@ -615,75 +617,14 @@ export default function NewPatientPage() {
       // Handle photo upload if provided
       let createdPatient: any;
       if (photoFile) {
-        // Use FormData for file upload
-        const formData = new FormData();
-        Object.keys(payload).forEach(key => {
-          const value = payload[key];
-          // Skip undefined, null, and empty strings (for optional fields)
-          if (value !== undefined && value !== null && value !== '') {
-            formData.append(key, String(value));
-          }
-        });
-        // Ensure is_active is explicitly set to true
-        formData.append('is_active', 'true');
-        formData.append('photo', photoFile);
-        
-        // Get access token
-        const { getStoredAccessToken, getStoredRefreshToken, storeTokens } = await import('@/lib/api-client');
-        let token = getStoredAccessToken();
-        
-        if (!token) {
-          const refreshToken = getStoredRefreshToken();
-          if (refreshToken) {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-            if (!apiUrl) return;
-            const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-            const refreshResponse = await fetch(`${baseUrl}/accounts/auth/token/refresh/`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refresh: refreshToken }),
-            });
-            
-            if (refreshResponse.ok) {
-              const data = await refreshResponse.json();
-              token = data.access;
-              storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in);
-            }
-          }
-        }
-        
-        if (!token) {
-          throw new Error('Authentication required. Please log in again.');
-        }
-        
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-        if (!apiUrl) throw new Error('API URL not configured');
-        const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-        
-        const response = await fetch(`${baseUrl}/patients/`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            // Don't set Content-Type header - browser will set it with boundary for FormData
-          },
-          body: formData,
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          console.error('[Patient Registration] Photo upload error:', errorData);
-          const errorMessage = errorData.photo?.[0] || errorData.detail || errorData.message || `Failed to create patient with photo (${response.status})`;
-          throw new Error(errorMessage);
-        }
-        
-        createdPatient = await response.json();
-        console.log('[Patient Registration] Patient created successfully with photo:', createdPatient);
-        
+        createdPatient = await patientService.createPatient(
+          { ...payload, is_active: true },
+          photoFile,
+        );
         if (!createdPatient || !createdPatient.patient_id) {
           throw new Error('Patient created but patient_id not found in response');
         }
       } else {
-        // No photo, use regular JSON API
         createdPatient = await patientService.createPatient(payload);
       }
       
@@ -968,7 +909,7 @@ export default function NewPatientPage() {
                           )}
                         </div>
                         <div>
-                          <input type="file" id="photo-upload" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                          <input type="file" id="photo-upload" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={handlePhotoUpload} className="hidden" />
                           <Button variant="outline" size="sm" onClick={() => document.getElementById('photo-upload')?.click()}>
                             <Upload className="h-4 w-4 mr-2" />
                             Choose File

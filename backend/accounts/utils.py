@@ -17,15 +17,8 @@ def resolve_clinic(user):
     if not user or not user.is_authenticated:
         return None
     if SystemConfig.is_enabled('multi_clinic_enabled'):
-        clinic = user.active_clinic or user.clinic
-    else:
-        clinic = user.clinic
-    if clinic is not None:
-        return clinic
-    clinics = getattr(user, "clinics", None)
-    if clinics is not None:
-        return clinics.order_by("id").first()
-    return None
+        return user.active_clinic or user.clinic
+    return user.clinic
 
 
 def resolve_clinic_id(user):

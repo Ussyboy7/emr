@@ -42,6 +42,7 @@ import {
 } from '@/lib/services';
 import { RAD_OTHER_TEMPLATE_CODE } from '@/lib/constants/order-template-codes';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { resolvePatientPhoto } from '@/lib/patient-photo';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -193,7 +194,7 @@ export default function RadiologyOrdersPage() {
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3">
             {/* Avatar */}
-            <PatientAvatar name={order.patient_name ?? ''} size="sm" />
+            <PatientAvatar name={order.patient_name ?? ''} photoUrl={resolvePatientPhoto(order)} size="sm" />
 
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -1625,7 +1626,7 @@ export default function RadiologyOrdersPage() {
                 {selectedExternalPatient ? (
                   <div className="flex items-center justify-between rounded-md border p-3">
                     <div className="flex items-center gap-3">
-                      <PatientAvatar name={selectedExternalPatient.full_name || `${selectedExternalPatient.first_name} ${selectedExternalPatient.surname}`} size="sm" />
+                      <PatientAvatar name={selectedExternalPatient.full_name || `${selectedExternalPatient.first_name} ${selectedExternalPatient.surname}`} photoUrl={selectedExternalPatient.photo} size="sm" />
                       <div>
                         <p className="text-sm font-medium">
                           {selectedExternalPatient.full_name || `${selectedExternalPatient.first_name} ${selectedExternalPatient.surname}`}
@@ -1666,7 +1667,7 @@ export default function RadiologyOrdersPage() {
                             className="w-full p-3 text-left hover:bg-muted flex items-center gap-3"
                             onClick={() => setSelectedExternalPatient(patient)}
                           >
-                            <PatientAvatar name={patient.full_name || `${patient.first_name} ${patient.surname}`} size="sm" />
+                            <PatientAvatar name={patient.full_name || `${patient.first_name} ${patient.surname}`} photoUrl={patient.photo} size="sm" />
                             <span>
                               <span className="block text-sm font-medium">{patient.full_name || `${patient.first_name} ${patient.surname}`}</span>
                               <span className="block text-xs text-muted-foreground">
@@ -2321,7 +2322,7 @@ export default function RadiologyOrdersPage() {
                   <div>
                     <p className="text-xs text-muted-foreground">Patient</p>
                     <div className="flex items-start gap-2 mt-1">
-                      <PatientAvatar name={selectedOrder.patient_name} size="sm" />
+                      <PatientAvatar name={selectedOrder.patient_name} photoUrl={resolvePatientPhoto(selectedOrder)} size="sm" />
                       <div>
                         <p className="font-medium">{selectedOrder.patient_name}</p>
                         <div className="mt-1 text-xs text-muted-foreground space-y-0.5">

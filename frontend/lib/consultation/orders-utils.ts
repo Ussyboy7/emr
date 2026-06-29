@@ -1,4 +1,5 @@
 import type { PrescriptionOrderSubmitInput } from '@/components/consultation/orders/PrescriptionOrderModal';
+import { normalizePrescriptionDoseUnit } from '@/lib/pharmacy/infer-dose-unit';
 import { formatOrderDiagnoses, type OrderDiagnosisEntry } from '@/lib/consultation/order-diagnoses';
 
 export type PrescriptionDraft = {
@@ -39,7 +40,7 @@ export function buildPrescriptionDrafts(
       rejectedLabels.push(item.medication_name || `item #${index + 1}`);
       return;
     }
-    const unit = (item.unit || 'tablet').trim();
+    const unit = normalizePrescriptionDoseUnit(item.unit, item.dosage_form);
     const doseValue = (item.dosage || '').trim();
     const normalizedDose = doseValue ? `${doseValue} ${unit}`.trim() : `1 ${unit}`.trim();
 

@@ -224,6 +224,7 @@ export function transformApiRowToCompletedTest(
       name: patientName,
       age: age ?? null,
       gender,
+      photo: (patientDetails as any)?.photo || null,
     },
     doctor: {
       id: doctorIdRaw != null ? String(doctorIdRaw) : '',
@@ -304,6 +305,7 @@ export function transformApiRowToVerificationLabResult(
       name: completed.patient.name,
       age: completed.patient.age ?? 0,
       gender: completed.patient.gender || 'Unknown',
+      photo: completed.patient.photo ?? null,
     },
     doctor: completed.doctor,
     testName: completed.testName,

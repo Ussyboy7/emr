@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertPermissionsFromBackend, expandRolePagesForRestrictUI, groupPagePermissionsByModule, normalizeRolePagePath, normalizeRolePagePaths, sortPageModules } from './page-permissions';
+import { convertPermissionsFromBackend, expandRolePagesForRestrictUI, getPageNavConstraintNote, getRestrictUIPageEntries, groupRestrictUIPageEntries, groupPagePermissionsByModule, normalizeRolePagePath, normalizeRolePagePaths, sortPageModules } from './page-permissions';
 
 describe('convertPermissionsFromBackend', () => {
   it('reads string arrays and legacy pages objects', () => {
@@ -26,6 +26,25 @@ describe('expandRolePagesForRestrictUI', () => {
     expect(expanded).toContain('/pharmacy/inventory');
     expect(expanded).toContain('/pharmacy/hod-store');
     expect(expanded).toContain('/pharmacy/requests');
+  });
+});
+
+describe('getRestrictUIPageEntries', () => {
+  it('marks explicit vs implied pages for parent grants', () => {
+    const entries = getRestrictUIPageEntries(['/pharmacy', '/pharmacy/store']);
+    const hod = entries.find((e) => e.id === '/pharmacy/hod-store');
+    const store = entries.find((e) => e.id === '/pharmacy/store');
+    const rx = entries.find((e) => e.id === '/pharmacy/prescriptions');
+    expect(hod?.source).toBe('implied');
+    expect(hod?.navNote).toContain('Pharmacy Head');
+    expect(store?.source).toBe('explicit');
+    expect(store?.navNote).toContain('Bode Thomas');
+    expect(rx?.source).toBe('implied');
+  });
+
+  it('returns nav constraint notes for HOD and central store', () => {
+    expect(getPageNavConstraintNote('/pharmacy/hod-store')).toBeDefined();
+    expect(getPageNavConstraintNote('/pharmacy/prescriptions')).toBeUndefined();
   });
 });
 

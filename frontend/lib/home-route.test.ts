@@ -65,6 +65,13 @@ describe('isPathAllowedByPages', () => {
     expect(isPathAllowedByPages('/admin', ['/admin/clinics'])).toBe(true);
   });
 
+  it('does not treat user management as full admin module access', () => {
+    expect(isPathAllowedByPages('/admin', ['/admin/users'])).toBe(false);
+    expect(isPathAllowedByPages('/admin/clinics', ['/admin/users'])).toBe(false);
+    expect(isPathAllowedByPages('/admin/roles', ['/admin/users'])).toBe(false);
+    expect(isPathAllowedByPages('/admin/users', ['/admin/users'])).toBe(true);
+  });
+
   it('rejects unrelated paths', () => {
     expect(isPathAllowedByPages('/radiology', ['/nursing', '/pharmacy'])).toBe(false);
   });

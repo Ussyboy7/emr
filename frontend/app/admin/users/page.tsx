@@ -20,7 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type User as ApiUser, type Role as ApiRole } from "@/lib/services";
-import { convertPermissionsFromBackend, expandRolePagesForRestrictUI, groupPagePermissionsByModule, normalizeRolePagePaths, sortPageModules } from "@/lib/page-permissions";
+import { convertPermissionsFromBackend, getRestrictUIPageEntries, groupRestrictUIPageEntries, normalizeRolePagePaths, sortPageModules } from "@/lib/page-permissions";
 import { isScopedDepartmentUserManager } from "@/lib/user-management-access";
 import { getAccessRoleBadgeClass, getAccessRoleIcon } from "@/lib/access-role-display";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -1070,56 +1070,89 @@ export default function UserManagementPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Restrict pages (per-user)</Label>
+                  <Label>Deny pages (per-user)</Label>
                   <p className="text-xs text-muted-foreground">
-                    Optional. These pages will be removed from the role’s allowed pages for this user only.
+                    Uncheck a page to remove it from this user&apos;s access (on top of their access role).
+                    Checked = allowed; unchecked = denied for this user only.
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+                    Sidebar may hide some pages even when not denied here — e.g. HOD Store only appears for the
+                    Pharmacy Head, and Central Store only for users assigned to Bode Thomas with store access.
                   </p>
                   <div className="rounded-md border p-3 max-h-[360px] overflow-y-auto space-y-4">
                     {(() => {
                       const selectedRole = accessRoles.find((r) => r.id === formData.accessRoleId);
-                      const pages = expandRolePagesForRestrictUI(
-                        normalizeRolePagePaths(convertPermissionsFromBackend(selectedRole?.permissions)),
+                      const rolePageIds = normalizeRolePagePaths(
+                        convertPermissionsFromBackend(selectedRole?.permissions),
                       );
+                      const entries = getRestrictUIPageEntries(rolePageIds);
                       if (!selectedRole) {
                         return <p className="text-sm text-muted-foreground">Select an access role to see its pages.</p>;
                       }
-                      if (pages.length === 0) {
+                      if (entries.length === 0) {
                         return <p className="text-sm text-muted-foreground">This role has no page permissions configured.</p>;
                       }
 
                       const restricted = new Set(formData.restrictedPages || []);
-                      const grouped = groupPagePermissionsByModule(pages);
+                      const grouped = groupRestrictUIPageEntries(entries);
 
                       return (
                         <div className="space-y-4">
                           {sortPageModules(Object.keys(grouped)).map((module) => {
                               const perms = grouped[module];
-                              const selectedCount = perms.filter((p) => !restricted.has(p.id)).length;
+                              const allowedCount = perms.filter((p) => !restricted.has(p.id)).length;
+                              const explicitCount = perms.filter((p) => p.source === "explicit").length;
+                              const impliedCount = perms.length - explicitCount;
                               return (
                                 <div key={module} className="space-y-2">
-                                  <div className="flex items-center justify-between">
+                                  <div className="flex items-center justify-between gap-2">
                                     <p className="font-medium text-sm">{module}</p>
-                                    <p className="text-xs text-muted-foreground tabular-nums">
-                                      {selectedCount}/{perms.length}
+                                    <p className="text-xs text-muted-foreground tabular-nums text-right">
+                                      {allowedCount}/{perms.length} allowed
+                                      {impliedCount > 0 && explicitCount > 0
+                                        ? ` · ${explicitCount} on role, ${impliedCount} via parent`
+                                        : impliedCount > 0
+                                          ? " · via parent grant"
+                                          : ""}
                                     </p>
                                   </div>
                                   <div className="space-y-1">
                                     {perms.map((p) => (
-                                      <label key={p.id} className="flex items-center gap-2 text-sm">
+                                      <label
+                                        key={p.id}
+                                        className="flex items-start gap-2 text-sm py-0.5 cursor-pointer"
+                                      >
                                         <input
                                           type="checkbox"
+                                          className="mt-0.5"
                                           checked={!restricted.has(p.id)}
                                           onChange={(e) => {
                                             setFormData((prev) => {
                                               const cur = new Set(prev.restrictedPages || []);
-                                              // Checked means "allowed"; unchecked means "restricted"
                                               if (e.target.checked) cur.delete(p.id);
                                               else cur.add(p.id);
                                               return { ...prev, restrictedPages: Array.from(cur) };
                                             });
                                           }}
                                         />
-                                        <span className="text-sm">{p.name}</span>
+                                        <span className="flex-1 min-w-0">
+                                          <span className="flex flex-wrap items-center gap-1.5">
+                                            <span>{p.name}</span>
+                                            {p.source === "implied" && (
+                                              <Badge variant="outline" className="text-[10px] px-1 py-0 font-normal">
+                                                via parent role
+                                              </Badge>
+                                            )}
+                                            {p.navNote && (
+                                              <Badge
+                                                variant="secondary"
+                                                className="text-[10px] px-1 py-0 font-normal text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/40"
+                                              >
+                                                {p.navNote}
+                                              </Badge>
+                                            )}
+                                          </span>
+                                        </span>
                                       </label>
                                     ))}
                                   </div>

@@ -18,6 +18,7 @@ from .models import (
     PresentingComplaint,
 )
 from patients.serializers import PatientListSerializer, VitalReadingSerializer
+from patients.photo import patient_photo_url
 
 
 class ConsultationRoomSerializer(serializers.ModelSerializer):
@@ -84,6 +85,7 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
     patient_age = serializers.IntegerField(source='patient.age', read_only=True)
     patient_age_display = serializers.CharField(source='patient.age_display', read_only=True)
     patient_gender = serializers.SerializerMethodField()
+    patient_photo = serializers.SerializerMethodField()
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     clinic_name = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
@@ -109,6 +111,10 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
         if not p or not p.gender:
             return ''
         return p.get_gender_display()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        return patient_photo_url(getattr(obj, 'patient', None))
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_active_duration_seconds(self, obj):

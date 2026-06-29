@@ -495,12 +495,11 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if self._is_dispensary_request():
             qs = DispensaryReceiptLine.objects.all().select_related(
                 'medication', 'medication__generic', 'request', 'issue', 'issue__request',
-                'stock_issue_line', 'stock_issue_line__source_inventory_item'
+                'stock_issue_line', 'stock_issue_line__source_inventory_item', 'location_clinic',
             )
-            if SystemConfig.is_enabled('multi_clinic_enabled'):
-                clinic_id = resolve_clinic_id(self.request.user)
-                if clinic_id is not None:
-                    qs = qs.filter(location_clinic=clinic_id)
+            clinic_id = resolve_clinic_id(self.request.user)
+            if clinic_id is not None:
+                qs = qs.filter(location_clinic=clinic_id)
             return qs.order_by('received_at')
         queryset = self.scope_queryset(MedicationInventory.objects.all().select_related('medication'))
         stock_status = self.request.query_params.get('stock_status')
@@ -957,12 +956,14 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         qs = self.filter_queryset(qs)
         pending = qs.filter(status='pending').count()
         processing = qs.filter(status='dispensing').count()
-        dispensed = qs.filter(Q(status='dispensed') | Q(status='partially_dispensed')).count()
+        partially_dispensed = qs.filter(status='partially_dispensed').count()
+        dispensed = qs.filter(status='dispensed').count()
         total = qs.count()
         return Response(
             {
                 'pending': pending,
                 'processing': processing,
+                'partially_dispensed': partially_dispensed,
                 'dispensed': dispensed,
                 'total': total,
             }
@@ -1023,10 +1024,9 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             .select_related("medication")
             .order_by("received_at")
         )
-        if SystemConfig.is_enabled('multi_clinic_enabled'):
-            clinic_id = resolve_clinic_id(request.user)
-            if clinic_id is not None:
-                receipt_qs = receipt_qs.filter(location_clinic=clinic_id)
+        clinic_id = resolve_clinic_id(request.user)
+        if clinic_id is not None:
+            receipt_qs = receipt_qs.filter(location_clinic=clinic_id)
 
         batches_by_medication = {}
         totals_by_medication = {}
@@ -1465,13 +1465,12 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
             if receipt_line_id:
                 receipt_line = DispensaryReceiptLine.objects.select_related('medication').get(id=receipt_line_id)
-                if SystemConfig.is_enabled('multi_clinic_enabled'):
-                    clinic_id = resolve_clinic_id(request.user)
-                    if clinic_id is not None and receipt_line.location_clinic_id != clinic_id:
-                        return Response(
-                            {'error': 'This receipt line belongs to a different clinic'},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
+                clinic_id = resolve_clinic_id(request.user)
+                if clinic_id is not None and receipt_line.location_clinic_id != clinic_id:
+                    return Response(
+                        {'error': 'This receipt line belongs to a different clinic'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 if receipt_line.quantity_remaining < quantity:
                     return Response(
                         {'error': 'Insufficient stock'},
@@ -2053,7 +2052,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 qs = qs.filter(created_at__date__lte=dt)
             except ValueError:
                 pass
-        return qs.select_related("clinic", "requested_by", "requested_by__clinic", "confirmed_by")
+        return qs.select_related("clinic", "requested_by", "confirmed_by")
     
     def get_object(self):
         obj = super().get_object()
@@ -2325,6 +2324,11 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                         destination_inventory_item=None,
                         quantity=transfer_qty
                     )
+                    receipt_clinic = stock_request.clinic
+                    if receipt_clinic is None and stock_request.requested_by_id:
+                        from accounts.utils import resolve_clinic
+
+                        receipt_clinic = resolve_clinic(stock_request.requested_by)
                     DispensaryReceiptLine.objects.create(
                         medication=item.medication,
                         quantity=transfer_qty,
@@ -2333,7 +2337,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                         request=stock_request,
                         issue=issue,
                         stock_issue_line=issue_line,
-                        location_clinic=stock_request.clinic,
+                        location_clinic=receipt_clinic,
                         batch_number=inv_item.batch_number or '',
                         expiry_date=inv_item.expiry_date
                     )

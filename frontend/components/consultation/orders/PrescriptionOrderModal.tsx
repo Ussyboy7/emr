@@ -12,6 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertTriangle, Loader2, Pill, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { pharmacyService } from "@/lib/services";
+import {
+  normalizePrescriptionDoseUnit,
+  PRESCRIPTION_DOSE_UNITS,
+} from "@/lib/pharmacy/infer-dose-unit";
 import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 
 /** Match consultation room: "Name (strength, form)" */
@@ -98,42 +102,6 @@ type MedicationConfig = {
   generic_name?: string;
 };
 
-const PRESCRIPTION_UNIT_OPTIONS = [
-  "tablet",
-  "capsule",
-  "ml",
-  "mg",
-  "g",
-  "drop",
-  "vial",
-  "ampoule",
-  "sachet",
-  "suppository",
-  "puff",
-  "patch",
-  "tube",
-  "bottle",
-];
-
-/** Normalize API unit (e.g. "Tablet") to a value that exists in PRESCRIPTION_UNIT_OPTIONS so the Select displays correctly. */
-function normalizeDoseUnit(unit: string | undefined): string {
-  if (!unit || typeof unit !== "string") return "tablet";
-  const u = unit.trim().toLowerCase();
-  if (PRESCRIPTION_UNIT_OPTIONS.includes(u)) return u;
-  if (u === "tablets") return "tablet";
-  if (u === "capsules") return "capsule";
-  if (u === "vials") return "vial";
-  if (u === "puffs") return "puff";
-  if (u === "drops") return "drop";
-  if (u === "tubes") return "tube";
-  if (u === "bottles") return "bottle";
-  if (u === "sachets") return "sachet";
-  if (u === "suppositories") return "suppository";
-  if (u === "patches") return "patch";
-  if (u === "ampoules") return "ampoule";
-  return "tablet";
-}
-
 function parseDurationDaysFromString(duration?: string): number | "" {
   if (!duration) return "";
   const m = String(duration).match(/(\d+)\s*day/i);
@@ -211,7 +179,7 @@ export function PrescriptionOrderModal({
         frequency: item.frequency || "Once daily (OD)",
         durationDays,
         route: item.route || "Oral",
-        unit: normalizeDoseUnit(item.unit),
+        unit: normalizePrescriptionDoseUnit(item.unit, item.dosage_form),
         strength: (item.strength || "").trim(),
         form: (item.dosage_form || "").trim(),
         quantity: item.quantity,
@@ -324,7 +292,7 @@ export function PrescriptionOrderModal({
               frequency: "Once daily (OD)",
               durationDays: "",
               route: med.route || defaultRouteFromForm,
-              unit: normalizeDoseUnit(med.unit || form || undefined),
+              unit: normalizePrescriptionDoseUnit(med.unit, form),
               strength: (med.strength || "").trim(),
               form,
               instructions: "",
@@ -396,7 +364,7 @@ export function PrescriptionOrderModal({
         frequency: "Once daily (OD)" as const,
         durationDays: "" as const,
         route: med?.route || "Oral",
-        unit: normalizeDoseUnit(med?.unit || medForm || undefined),
+        unit: normalizePrescriptionDoseUnit(med?.unit, medForm || cfg.form),
         strength: (med?.strength || "").trim() || cfg.strength,
         form: medForm || cfg.form,
         quantity: 0,
@@ -405,7 +373,10 @@ export function PrescriptionOrderModal({
       const mergedCfg = { ...defaultCfg, ...cfg };
 
       if (!mergedCfg.frequency?.trim()) missing.push(`${displayName} - frequency required`);
-      const unitToSend = normalizeDoseUnit(mergedCfg.unit || "tablet");
+      const unitToSend = normalizePrescriptionDoseUnit(
+        mergedCfg.unit,
+        mergedCfg.form || medForm || med?.dosage_form || med?.form,
+      );
       if (!unitToSend?.trim()) missing.push(`${displayName} - dose unit required`);
 
       // Quantity is inferred from dosage + frequency + durationDays (like room page)
@@ -425,7 +396,7 @@ export function PrescriptionOrderModal({
         generic: medId,
         medication: null,
         medication_name: med?.name || mergedCfg.name || "",
-        unit: unitToSend || "tablet",
+        unit: unitToSend,
         dosage_form: mergedCfg.form || med?.dosage_form || med?.form || "",
         strength: mergedCfg.strength || med?.strength || "",
         route: mergedCfg.route || med?.route || "Oral",
@@ -620,7 +591,7 @@ export function PrescriptionOrderModal({
                     frequency: "Once daily (OD)" as const,
                     durationDays: "" as const,
                     route: med?.route || "Oral",
-                    unit: normalizeDoseUnit(med?.unit || renderMedForm || undefined),
+                    unit: normalizePrescriptionDoseUnit(med?.unit, renderMedForm || cfg.form),
                     strength: (med?.strength || "").trim() || cfg.strength,
                     form: renderMedForm || cfg.form,
                     quantity: 0,
@@ -664,12 +635,15 @@ export function PrescriptionOrderModal({
                           </div>
                           <div className="space-y-1 md:col-span-3">
                             <Label className="text-xs">Dose unit <span className="text-red-500">*</span></Label>
-                            <Select value={normalizeDoseUnit(mergedCfg.unit) || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
+                            <Select
+                              value={normalizePrescriptionDoseUnit(mergedCfg.unit, mergedCfg.form || renderMedForm)}
+                              onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}
+                            >
                               <SelectTrigger className="h-8 text-xs">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {PRESCRIPTION_UNIT_OPTIONS.map((u) => (
+                                {PRESCRIPTION_DOSE_UNITS.map((u) => (
                                   <SelectItem key={u} value={u}>{u}</SelectItem>
                                 ))}
                               </SelectContent>

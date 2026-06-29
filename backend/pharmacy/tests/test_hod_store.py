@@ -264,9 +264,20 @@ class PharmacyHodUserManagementTest(TestCase):
         )
 
     def test_pharmacy_hod_can_manage_users_without_admin_page_on_role(self):
+        from permissions.page_paths import is_path_allowed_by_pages
         from permissions.user_management import can_manage_users, managed_department_ids
         from permissions.user_pages import get_user_allowed_pages
 
         self.assertTrue(can_manage_users(self.hod))
-        self.assertIn("/admin/users", get_user_allowed_pages(self.hod))
+        allowed = get_user_allowed_pages(self.hod)
+        self.assertIn("/admin/users", allowed)
+        self.assertNotIn("/admin", allowed)
+        self.assertFalse(
+            is_path_allowed_by_pages("/admin/clinics", allowed),
+            "Pharmacy HOD implicit grant must not unlock full admin module",
+        )
+        self.assertFalse(
+            is_path_allowed_by_pages("/admin", allowed),
+            "User management grant must not unlock ICT admin dashboard",
+        )
         self.assertEqual(managed_department_ids(self.hod), {self.dept.id})

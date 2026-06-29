@@ -1,6 +1,5 @@
 "use client";
 import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, formatDisplayTime, todayApiDateString, toApiDateFromInstant } from "@/lib/dates";
-import { getMediaUrl } from '@/lib/media-url';
 import { MAX_LIST_PAGE_SIZE, DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -52,7 +51,7 @@ interface Patient {
   lastVisit: string;
   totalVisits: number;
   location: string;
-  photoUrl: string;
+  photo: string | null;
   registeredAt: string;
   primaryPatient?: string;
   relationship?: string;
@@ -111,7 +110,7 @@ interface PatientDetail {
   city: string;
   state: string;
   status: string;
-  photoUrl: string;
+  photo: string | null;
   category: string;
   personalNumber: string;
   employeeType: string;
@@ -615,7 +614,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         city: '',
         state: apiPatient.state_of_residence || '',
         status: 'active',
-        photoUrl: getMediaUrl(apiPatient.photo) ?? '',
+        photo: apiPatient.photo ?? null,
         category: apiPatient.category || '',
         personalNumber: apiPatient.personal_number || '',
         employeeType: apiPatient.employee_type || '',
@@ -731,7 +730,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               {loading ? (
                 <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
               ) : (
-                <PatientAvatar name={overviewPatientName} photoUrl={patient.photoUrl} size="lg" className="border-2 border-primary/20" />
+                <PatientAvatar name={overviewPatientName} photoUrl={patient.photo} size="lg" className="border-2 border-primary/20" />
               )}
               <div>
                 <DialogTitle className="text-2xl font-bold">{overviewPatientName || 'Patient Details'}</DialogTitle>

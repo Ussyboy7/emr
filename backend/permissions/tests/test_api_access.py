@@ -33,6 +33,16 @@ class PagePathMatchingTests(SimpleTestCase):
         denied = {"/nursing"}
         self.assertFalse(is_path_allowed_by_pages("/nursing/procedures", allowed, denied))
 
+    def test_user_management_does_not_unlock_admin_dashboard(self):
+        allowed = {"/admin/users"}
+        self.assertFalse(is_path_allowed_by_pages("/admin", allowed))
+        self.assertFalse(is_path_allowed_by_pages("/admin/clinics", allowed))
+        self.assertTrue(is_path_allowed_by_pages("/admin/users", allowed))
+
+    def test_admin_child_still_unlocks_admin_dashboard(self):
+        allowed = {"/admin/clinics"}
+        self.assertTrue(is_path_allowed_by_pages("/admin", allowed))
+
     def test_consultation_referrals_grants_consultation_api_pages(self):
         from permissions.page_paths import user_has_consultation_access
 

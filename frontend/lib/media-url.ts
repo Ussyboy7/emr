@@ -53,7 +53,7 @@ export function normalizeMediaRelativePath(relativePath: string): string {
 }
 
 /**
- * Build a same-origin URL for authenticated media (cookie on navigation, Bearer via apiFetch).
+ * Build a same-origin URL for authenticated media (JWT access-token cookie on <img> requests).
  */
 export function getMediaUrl(relativePath: string | null | undefined): string | null {
   if (!relativePath) return null;

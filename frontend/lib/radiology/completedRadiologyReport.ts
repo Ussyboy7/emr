@@ -129,6 +129,7 @@ export function transformApiRadiologyReportToCompleted(apiReport: Record<string,
       name: apiReportAny.patient_name ?? '',
       age: apiReportAny.patient_details?.age ?? null,
       gender: apiReportAny.patient_details?.gender || 'Unknown',
+      photo: apiReportAny.patient_details?.photo || null,
     },
     patientName: apiReportAny.patient_name ?? '',
     patientId:
@@ -266,6 +267,7 @@ export function transformApiRowToVerificationRadiologyReport(
       name: completed.patient.name,
       age: completed.age ?? 0,
       gender: completed.gender,
+      photo: completed.patient.photo ?? null,
     },
     doctor: completed.doctor,
     study: {
