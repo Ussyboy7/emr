@@ -1,6 +1,12 @@
 /**
- * Protected media URLs — files are served from /api/v1/common/media/ with JWT auth.
+ * Protected media URLs — files are served from /api/common/media/ with JWT auth.
+ * Prefer `fetchAuthenticatedMediaBlob` / `useAuthenticatedMediaUrl` for images
+ * so requests use Bearer tokens and token refresh (plain <img src> cannot).
  */
+
+export function isInlineMediaUrl(input: string): boolean {
+  return input.startsWith("data:") || input.startsWith("blob:");
+}
 
 function getApiRoot(): string {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -76,6 +82,59 @@ export function getMediaUrl(relativePath: string | null | undefined): string | n
   return `${getApiRoot()}/common/media/${encodeURI(rel)}`;
 }
 
+const mediaBlobCache = new Map<string, string>();
+const inflightMediaFetches = new Map<string, Promise<string | null>>();
+
+/** Clear cached blob URLs (tests). */
+export function clearAuthenticatedMediaCache(): void {
+  for (const blobUrl of mediaBlobCache.values()) {
+    URL.revokeObjectURL(blobUrl);
+  }
+  mediaBlobCache.clear();
+  inflightMediaFetches.clear();
+}
+
+/**
+ * Fetch protected media via apiFetch and return a blob: URL (cached in-memory).
+ */
+export async function fetchAuthenticatedMediaBlob(
+  relativePath: string | null | undefined,
+): Promise<string | null> {
+  if (!relativePath) return null;
+
+  const trimmed = relativePath.trim();
+  if (!trimmed) return null;
+  if (isInlineMediaUrl(trimmed)) return trimmed;
+
+  const rel = normalizeMediaRelativePath(trimmed);
+  if (!rel) return null;
+
+  const cached = mediaBlobCache.get(rel);
+  if (cached) return cached;
+
+  let pending = inflightMediaFetches.get(rel);
+  if (!pending) {
+    pending = (async () => {
+      try {
+        const { apiFetch } = await import("@/lib/api-client");
+        const blob = await apiFetch<Blob>(`/common/media/${encodeURI(rel)}`, {
+          responseType: "blob",
+        });
+        const blobUrl = URL.createObjectURL(blob);
+        mediaBlobCache.set(rel, blobUrl);
+        return blobUrl;
+      } catch {
+        return null;
+      } finally {
+        inflightMediaFetches.delete(rel);
+      }
+    })();
+    inflightMediaFetches.set(rel, pending);
+  }
+
+  return pending;
+}
+
 /**
  * Open a protected media file in a new tab (uses Bearer token via apiFetch).
  */
@@ -110,17 +169,16 @@ export async function openMediaInNewTab(
     throw new Error("No media path");
   }
 
-  const { apiFetch } = await import("@/lib/api-client");
-  const blob = await apiFetch<Blob>(`/common/media/${encodeURI(rel)}`, {
-    responseType: "blob",
-  });
-  const objectUrl = URL.createObjectURL(blob);
+  const blobUrl = await fetchAuthenticatedMediaBlob(rel);
+  if (!blobUrl) {
+    throw new Error("Failed to load media");
+  }
   try {
-    const win = window.open(objectUrl, "_blank", "noopener,noreferrer");
+    const win = window.open(blobUrl, "_blank", "noopener,noreferrer");
     if (!win) {
       throw new Error("Pop-ups blocked. Allow pop-ups to view the file.");
     }
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch (error) {
+    throw error;
   }
 }

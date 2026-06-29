@@ -123,8 +123,9 @@ else
 
     step "Docker: build staging frontend image (no push)"
     docker build -f frontend/Dockerfile.stag \
-      --build-arg NEXT_PUBLIC_API_URL=http://172.16.0.46:8047/api \
+      --build-arg NEXT_PUBLIC_API_URL=/api \
       --build-arg NEXT_PUBLIC_ENVIRONMENT=staging \
+      --build-arg API_PROXY_TARGET=http://backend:8000 \
       -t emr-frontend:local-ci ./frontend
   else
     echo ""

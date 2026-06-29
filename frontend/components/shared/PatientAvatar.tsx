@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getMediaUrl } from "@/lib/media-url";
+import { useAuthenticatedMediaUrl } from "@/hooks/use-authenticated-media-url";
 
 interface PatientAvatarProps {
   name: string;
@@ -16,13 +16,6 @@ interface PatientAvatarProps {
   className?: string;
   /** When false, photo is not clickable (e.g. nested inside another photo preview). */
   previewable?: boolean;
-}
-
-function resolvePhotoSrc(photoUrl?: string | null): string | null {
-  const trimmed = typeof photoUrl === "string" ? photoUrl.trim() : "";
-  if (!trimmed) return null;
-  if (trimmed.startsWith("data:") || trimmed.startsWith("blob:")) return trimmed;
-  return getMediaUrl(trimmed);
 }
 
 export function PatientAvatar({
@@ -40,7 +33,7 @@ export function PatientAvatar({
 
   const safeName = (name || 'UP').replace(/[<>'"&]/g, '').substring(0, 50);
   const initials = safeName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-  const photoSrc = useMemo(() => resolvePhotoSrc(photoUrl), [photoUrl]);
+  const { url: photoSrc, loading, error: loadError } = useAuthenticatedMediaUrl(photoUrl);
   const [imageError, setImageError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -63,13 +56,34 @@ export function PatientAvatar({
     setPreviewOpen(true);
   };
 
-  if (!photoSrc || imageError) {
+  const showInitials = !loading && (!photoSrc || loadError || imageError);
+
+  if (showInitials) {
     return (
       <div className={`${sizeClasses[size]} rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white font-medium flex-shrink-0 ${className}`}>
         {initials}
       </div>
     );
   }
+
+  if (loading && !photoSrc) {
+    return (
+      <div
+        className={`${sizeClasses[size]} rounded-full bg-muted animate-pulse flex-shrink-0 ${className}`}
+        aria-hidden
+      />
+    );
+  }
+
+  if (!photoSrc) {
+    return (
+      <div className={`${sizeClasses[size]} rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white font-medium flex-shrink-0 ${className}`}>
+        {initials}
+      </div>
+    );
+  }
+
+  const resolvedPhotoSrc = photoSrc;
 
   const avatar = (
     <div
@@ -80,7 +94,7 @@ export function PatientAvatar({
       {!imageLoaded && <div className="absolute inset-0 bg-muted" aria-hidden />}
       <img
         ref={imgRef}
-        src={photoSrc}
+        src={resolvedPhotoSrc}
         alt={safeName}
         className={`w-full h-full object-cover ${imageLoaded ? "opacity-100" : "opacity-0"}`}
         onLoad={() => setImageLoaded(true)}
@@ -114,7 +128,7 @@ export function PatientAvatar({
           </DialogHeader>
           <div className="flex justify-center rounded-lg bg-muted/40 p-2 sm:p-4">
             <img
-              src={photoSrc}
+              src={resolvedPhotoSrc}
               alt={safeName}
               className="max-h-[70vh] w-auto max-w-full rounded-md object-contain"
             />

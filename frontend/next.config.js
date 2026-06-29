@@ -19,15 +19,13 @@ const contentSecurityPolicy = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Django API routes require trailing slashes; without this, Next strips them
+  // (308) and Django adds them back (301), causing an infinite redirect loop on /api/*.
+  skipTrailingSlashRedirect: true,
   // Emit a self-contained server bundle so the production Docker image can
   // drop full node_modules and run via `node server.js`.
   output: "standalone",
   transpilePackages: [],
-  /**
-   * In dev, proxy same-origin `/api/*` to Django.
-   * Docker note: 127.0.0.1 points to the frontend container itself, so default
-   * to the backend container DNS name unless API_PROXY_TARGET is explicitly set.
-   */
   async redirects() {
     return [
       {
@@ -37,12 +35,12 @@ const nextConfig = {
       },
     ];
   },
+  /**
+   * `/api/*` is proxied by `app/api/[[...path]]/route.ts` so trailing slashes
+   * are preserved for Django. Rewrites strip them and cause redirect loops.
+   */
   async rewrites() {
-    if (process.env.NODE_ENV !== "development") {
-      return [];
-    }
-    const target = (process.env.API_PROXY_TARGET || "http://emr-backend-local:8001").replace(/\/$/, "");
-    return [{ source: "/api/:path*", destination: `${target}/api/:path*` }];
+    return [];
   },
   images: {
     remotePatterns: [

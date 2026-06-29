@@ -4,10 +4,12 @@ WORKDIR /app
 # Accept build arguments for Next.js public environment variables
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_ENVIRONMENT
+ARG API_PROXY_TARGET=http://backend:8000
 
 # Set as environment variables for the build
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_ENVIRONMENT=$NEXT_PUBLIC_ENVIRONMENT
+ENV API_PROXY_TARGET=$API_PROXY_TARGET
 
 COPY package.json package-lock.json ./
 RUN npm ci
