@@ -81,6 +81,10 @@ export interface SubstituteOption {
   id: string;
   name: string;
   strength: string;
+  dosageForm?: string;
+  unit?: string;
+  packSize?: number;
+  route?: string;
   type: 'generic' | 'brand' | 'therapeutic';
   stock: number | null; // null means loading
   expiryDate: string;

@@ -2,6 +2,7 @@
 Pharmacy models for the EMR system.
 """
 
+from django.conf import settings
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
@@ -305,6 +306,18 @@ class MedicationInventory(models.Model):
     supplier = models.CharField(max_length=200, blank=True)
     purchase_price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    received_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When stock was physically received into this location",
+    )
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="medication_inventory_receipts",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

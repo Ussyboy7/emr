@@ -3,7 +3,10 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
-import { formatPackDisplay, resolvePackSize } from '@/lib/pharmacy/dispense-quantity';
+import { formatInventoryStockDisplay, resolvePackSize } from '@/lib/pharmacy/dispense-quantity';
+import { formatReceiptReceivedMeta } from '@/lib/pharmacy/batch-display';
+import { formatDisplayDate } from '@/lib/dates';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { useClinic } from '@/hooks/use-clinic';
 import Link from 'next/link';
 import { StandardPagination } from '@/components/shared/StandardPagination';
@@ -15,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Checkbox } from '@/components/ui/checkbox';
 import { pharmacyService } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { 
@@ -32,7 +36,9 @@ interface MedicationBatch {
   quantity: number;
   expiryDate: string;
   receivedDate: string;
+  receivedByName?: string;
   supplier: string;
+  unit?: string;
   locationClinicName?: string;
   sourceFromCentralStore?: { request_id?: string; issue_id?: string; issued_at?: string; from_location?: string } | null;
 }
@@ -47,6 +53,7 @@ interface MedicationInventoryItem {
   strength: string;
   dosageForm: string;
   packSize: number;
+  unit?: string;
   manufacturer: string;
   currentStock: number;
   minimumStock: number;
@@ -86,6 +93,9 @@ export default function InventoryPage() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [showBatchesModal, setShowBatchesModal] = useState(false);
   const [selectedMedication, setSelectedMedication] = useState<MedicationInventoryItem | null>(null);
+  const [batchLines, setBatchLines] = useState<MedicationBatch[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+  const [showDepletedBatches, setShowDepletedBatches] = useState(false);
 
   const loadStats = useCallback(async () => {
     try {
@@ -171,6 +181,7 @@ export default function InventoryPage() {
           strength,
           dosageForm,
         packSize: resolvePackSize(medication),
+        unit: medication.unit || item.unit || '',
         manufacturer: medication.manufacturer || '', // Get from backend
         currentStock: Number(item.quantity),
         minimumStock: Number(item.min_stock_level),
@@ -240,6 +251,50 @@ export default function InventoryPage() {
   const handleViewDetails = (med: MedicationInventoryItem) => {
     setSelectedMedication(med);
     setShowViewModal(true);
+  };
+
+  const mapReceiptLineToBatch = (item: Record<string, unknown>): MedicationBatch => ({
+    id: String(item.id),
+    batchNumber: String(item.batch_number || ''),
+    quantity: Number(item.quantity),
+    expiryDate: String(item.expiry_date || ''),
+    receivedDate:
+      toApiDateFromInstant(item.received_at as string | undefined) ||
+      toApiDateFromInstant(
+        (item.source_from_central_store as { issued_at?: string } | undefined)?.issued_at,
+      ) ||
+      toApiDateFromInstant(item.created_at as string | undefined),
+    receivedByName: String(item.received_by_name || ''),
+    supplier: String(item.supplier || ''),
+    unit: String(item.unit || ''),
+    locationClinicName: String(item.location_clinic_name || ''),
+    sourceFromCentralStore:
+      (item.source_from_central_store as MedicationBatch['sourceFromCentralStore']) || null,
+  });
+
+  const handleViewBatches = async (med: MedicationInventoryItem) => {
+    setSelectedMedication(med);
+    setShowDepletedBatches(false);
+    setBatchLines([]);
+    setShowBatchesModal(true);
+    if (!med.medicationId) {
+      setBatchLines(med.batches);
+      return;
+    }
+    setBatchesLoading(true);
+    try {
+      const resp = await pharmacyService.getInventory({
+        medication: String(med.medicationId),
+        location,
+        page_size: MAX_LIST_PAGE_SIZE,
+      });
+      setBatchLines(resp.results.map((item) => mapReceiptLineToBatch(item as unknown as Record<string, unknown>)));
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setBatchLines(med.batches);
+    } finally {
+      setBatchesLoading(false);
+    }
   };
 
   return (
@@ -456,7 +511,7 @@ export default function InventoryPage() {
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0">{med.strength}</Badge>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStockColor(stockStatus)}`}>{stockStatus}</Badge>
                             <span className="text-[10px] font-medium text-muted-foreground">
-                              {formatPackDisplay(med.currentStock, med.packSize)}
+                              {formatInventoryStockDisplay(med.currentStock, med.packSize, med.unit)}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
@@ -470,7 +525,7 @@ export default function InventoryPage() {
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewDetails(med)} title="View Details">
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedMedication(med); setShowBatchesModal(true); }} title={location === PHARMACY_LOCATIONS.DISPENSARY ? 'View Receipts' : 'View Batches'}>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewBatches(med)} title={location === PHARMACY_LOCATIONS.DISPENSARY ? 'View Receipts' : 'View Batches'}>
                               <Layers className="h-4 w-4 text-muted-foreground hover:text-violet-500" />
                             </Button>
                           </div>
@@ -560,13 +615,13 @@ export default function InventoryPage() {
                   <div className="grid grid-cols-2 gap-4 text-center mb-3">
                     <div>
                       <p className="text-2xl font-bold text-foreground">
-                        {formatPackDisplay(selectedMedication.currentStock, selectedMedication.packSize)}
+                        {formatInventoryStockDisplay(selectedMedication.currentStock, selectedMedication.packSize, selectedMedication.unit)}
                       </p>
                       <p className="text-xs text-muted-foreground">Current</p>
                     </div>
                     <div>
                       <p className="text-2xl font-bold text-amber-600">
-                        {formatPackDisplay(selectedMedication.minimumStock, selectedMedication.packSize)}
+                        {formatInventoryStockDisplay(selectedMedication.minimumStock, selectedMedication.packSize, selectedMedication.unit)}
                       </p>
                       <p className="text-xs text-muted-foreground">Minimum</p>
                     </div>
@@ -590,8 +645,16 @@ export default function InventoryPage() {
         </Dialog>
 
 
-        {/* View Batches Modal */}
-        <Dialog open={showBatchesModal} onOpenChange={setShowBatchesModal}>
+        <Dialog
+          open={showBatchesModal}
+          onOpenChange={(open) => {
+            setShowBatchesModal(open);
+            if (!open) {
+              setBatchLines([]);
+              setShowDepletedBatches(false);
+            }
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -599,49 +662,97 @@ export default function InventoryPage() {
                 {location === PHARMACY_LOCATIONS.DISPENSARY ? 'Dispensary Receipts' : 'Batch Details'} - {selectedMedication?.name}
               </DialogTitle>
               <DialogDescription>
-                {location === PHARMACY_LOCATIONS.DISPENSARY ? 'View transfer receipts and expiry information' : 'View all batches and expiry information'}
+                {location === PHARMACY_LOCATIONS.DISPENSARY
+                  ? 'All receipt lines for this medication at the dispensary'
+                  : 'View all batches and expiry information'}
               </DialogDescription>
             </DialogHeader>
             
             {selectedMedication && (
               <div className="overflow-y-auto max-h-[50vh] space-y-3">
-                {selectedMedication.batches && selectedMedication.batches.length > 0 ? (
-                  selectedMedication.batches.map((batch, idx) => {
+                <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-3 py-2">
+                  <label htmlFor="show-depleted-dispensary-batches" className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      id="show-depleted-dispensary-batches"
+                      checked={showDepletedBatches}
+                      onCheckedChange={(checked) => setShowDepletedBatches(checked === true)}
+                    />
+                    Show depleted receipts (0 stock)
+                  </label>
+                </div>
+
+                {batchesLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading receipt lines...
+                  </div>
+                ) : (() => {
+                  const visibleBatches = batchLines
+                    .filter((batch) => showDepletedBatches || Number(batch.quantity) > 0)
+                    .slice()
+                    .sort((a, b) => String(a.expiryDate).localeCompare(String(b.expiryDate)));
+
+                  if (visibleBatches.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Package className="h-12 w-12 mx-auto mb-2" />
+                        <p>
+                          {batchLines.length === 0
+                            ? 'No receipt lines found for this medication'
+                            : 'No in-stock receipts. Enable “Show depleted receipts” to view empty lines.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return visibleBatches.map((batch) => {
                     const daysUntilExpiry = getDaysUntilExpiry(batch.expiryDate);
                     const isExpired = daysUntilExpiry < 0;
                     const isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= EXPIRY_WARNING_DAYS;
+                    const isDepleted = Number(batch.quantity) <= 0;
                     const sourceLabel =
                       batch.sourceFromCentralStore?.from_location || batch.supplier || '';
                     const requestId = batch.sourceFromCentralStore?.request_id || '';
-                    const issuedDate = toApiDateFromInstant(batch.sourceFromCentralStore?.issued_at);
-                    
+                    const receivedMeta = formatReceiptReceivedMeta(batch);
+
                     return (
-                      <Card key={batch.id} className={`border-l-4 ${
-                        isExpired ? 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10' :
-                        isExpiringSoon ? 'border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10' :
-                        'border-l-emerald-500'
-                      }`}>
+                      <Card
+                        key={batch.id}
+                        className={`border-l-4 ${
+                          isExpired
+                            ? 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10'
+                            : isExpiringSoon
+                              ? 'border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10'
+                              : 'border-l-emerald-500'
+                        } ${isDepleted ? 'opacity-75' : ''}`}
+                      >
                         <CardContent className="py-3 px-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-between mb-2 gap-2">
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
                               <Hash className="h-4 w-4 text-muted-foreground" />
                               <span className="font-medium">{batch.batchNumber}</span>
-                              {idx === 0 && <Badge variant="secondary" className="text-[10px]">Primary</Badge>}
+                              {isDepleted ? (
+                                <Badge variant="secondary" className="text-[10px]">Depleted</Badge>
+                              ) : null}
                             </div>
                             <Badge className={getExpiryBadgeColor(batch.expiryDate)}>
-                              {isExpired ? 'EXPIRED' : isExpiringSoon ? `Expires in ${daysUntilExpiry} days` : `Exp: ${batch.expiryDate}`}
+                              {isExpired
+                                ? 'EXPIRED'
+                                : isExpiringSoon
+                                  ? `Expires in ${daysUntilExpiry} days`
+                                  : `Exp: ${formatDisplayDate(batch.expiryDate)}`}
                             </Badge>
                           </div>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                             <div>
                               <span className="text-muted-foreground">Quantity:</span>{' '}
                               <span className="font-medium">
-                                {formatPackDisplay(Number(batch.quantity || 0), selectedMedication?.packSize)}
+                                {formatInventoryStockDisplay(
+                                  Number(batch.quantity || 0),
+                                  selectedMedication.packSize,
+                                  selectedMedication.unit || batch.unit,
+                                )}
                               </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Received:</span>{' '}
-                              <span className="font-medium">{batch.receivedDate}</span>
                             </div>
                             {sourceLabel ? (
                               <div>
@@ -663,22 +774,14 @@ export default function InventoryPage() {
                               </div>
                             ) : null}
                           </div>
-                          {batch.sourceFromCentralStore && issuedDate ? (
-                            <div className="mt-2 text-xs">
-                              <span className="text-muted-foreground">Issued:</span>{' '}
-                              <span className="font-medium">{issuedDate}</span>
-                            </div>
+                          {receivedMeta ? (
+                            <p className="text-xs text-muted-foreground mt-2">{receivedMeta}</p>
                           ) : null}
                         </CardContent>
                       </Card>
                     );
-                  })
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Package className="h-12 w-12 mx-auto mb-2" />
-                    <p>No batch information available</p>
-                  </div>
-                )}
+                  });
+                })()}
               </div>
             )}
             

@@ -140,6 +140,36 @@ export function formatPackDisplay(units: number, packSize?: number | null): stri
   return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
 }
 
+function pluralizeUnitLabel(unit: string, qty: number): string {
+  const trimmed = unit.trim() || "units";
+  if (qty === 1) return trimmed;
+  const lower = trimmed.toLowerCase();
+  if (lower === "ml" || lower === "g" || lower === "mg" || lower === "l") return trimmed;
+  if (lower.endsWith("s")) return trimmed;
+  return `${trimmed}s`;
+}
+
+/** Stock line for inventory lists: packs + unit label when pack_size is set. */
+export function formatInventoryStockDisplay(
+  units: number,
+  packSize?: number | null,
+  unit?: string | null,
+): string {
+  const qty = Math.max(0, Math.round(Number(units) || 0));
+  const unitLabel = pluralizeUnitLabel(String(unit || "units").trim() || "units", qty);
+  const ps = Number(packSize);
+  if (!Number.isFinite(ps) || ps <= 1) {
+    return `${qty.toLocaleString()} ${unitLabel}`;
+  }
+  const packs = Math.floor(qty / ps);
+  const remainder = qty % ps;
+  const unitsPart = `${qty.toLocaleString()} ${unitLabel}`;
+  if (remainder === 0) {
+    return `${packs.toLocaleString()} pack${packs === 1 ? "" : "s"} (${unitsPart})`;
+  }
+  return `${unitsPart} (${packs.toLocaleString()} pack${packs === 1 ? "" : "s"} + ${remainder.toLocaleString()} loose)`;
+}
+
 export function formatIssuedQuantityDisplay(
   units: number,
   med?: PackQuantityMedication | null,

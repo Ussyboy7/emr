@@ -54,6 +54,7 @@ from .serializers import (
     StockIssueSerializer,
     HodStockIssueSerializer,
 )
+from .inventory_history import build_stock_history
 from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
 from audit.models import ActivityLog
@@ -495,13 +496,16 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if self._is_dispensary_request():
             qs = DispensaryReceiptLine.objects.all().select_related(
                 'medication', 'medication__generic', 'request', 'issue', 'issue__request',
-                'stock_issue_line', 'stock_issue_line__source_inventory_item', 'location_clinic',
+                'issue__issued_by', 'stock_issue_line',
+                'stock_issue_line__source_inventory_item', 'location_clinic',
             )
             clinic_id = resolve_clinic_id(self.request.user)
             if clinic_id is not None:
                 qs = qs.filter(location_clinic=clinic_id)
             return qs.order_by('received_at')
-        queryset = self.scope_queryset(MedicationInventory.objects.all().select_related('medication'))
+        queryset = self.scope_queryset(
+            MedicationInventory.objects.all().select_related('medication', 'received_by')
+        )
         stock_status = self.request.query_params.get('stock_status')
         if stock_status:
             if stock_status == 'out':
@@ -666,9 +670,13 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         serializer = DispensaryReceiptLineSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    def perform_create(self, serializer):
-        """Create inventory item and log audit."""
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        """Receive stock: merge into an existing batch row when batch# matches, else create."""
         from pharmacy.hod_store import is_hod_store_location
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
         location = serializer.validated_data.get('location') or ''
         if is_hod_store_location(location):
@@ -676,18 +684,89 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             raise ValidationError(
                 {'location': ['HOD store inventory is updated via stock transfers only.']}
             )
-        inventory = serializer.save()
+
+        medication = serializer.validated_data['medication']
+        batch_number = (serializer.validated_data.get('batch_number') or '').strip()
+        expiry = serializer.validated_data['expiry_date']
+        add_qty = serializer.validated_data['quantity']
+        supplier = (serializer.validated_data.get('supplier') or '').strip()
+
+        existing = (
+            MedicationInventory.objects.select_for_update()
+            .filter(
+                medication=medication,
+                location=location,
+                batch_number__iexact=batch_number,
+            )
+            .first()
+        )
+
+        if existing:
+            if existing.expiry_date != expiry:
+                raise ValidationError(
+                    {
+                        'batch_number': (
+                            'This batch number already exists with a different expiry date. '
+                            'Use Adjust on the existing batch or verify the label on the package.'
+                        ),
+                    }
+                )
+            old_qty = float(existing.quantity)
+            existing.quantity += add_qty
+            update_fields = ['quantity', 'updated_at']
+            if supplier:
+                existing.supplier = supplier
+                update_fields.append('supplier')
+            existing.save(update_fields=update_fields)
+            AuditService.log_activity(
+                user=request.user,
+                action='update',
+                object_type='medication_inventory',
+                object_id=str(existing.id),
+                module='pharmacy',
+                object_repr=f'Inventory {existing.batch_number} - {existing.medication.name}',
+                description=(
+                    f'Added stock to existing batch {existing.batch_number} '
+                    f'(+{float(add_qty)} {existing.unit})'
+                ),
+                old_values={'quantity': old_qty},
+                new_values={'quantity': float(existing.quantity)},
+                metadata={'stock_event': 'receive', 'quantity_unit': existing.unit or 'units'},
+                request=request,
+            )
+            out = self.get_serializer(existing)
+            return Response(out.data, status=status.HTTP_200_OK)
+
+        inventory = serializer.save(
+            received_at=timezone.now(),
+            received_by=request.user if request.user.is_authenticated else None,
+        )
         AuditService.log_activity(
-            user=self.request.user,
+            user=request.user,
             action='create',
             object_type='medication_inventory',
             object_id=str(inventory.id),
             module='pharmacy',
             object_repr=f'Inventory {inventory.batch_number} - {inventory.medication.name}',
-            description=f'Created inventory item: {inventory.medication.name} (Batch: {inventory.batch_number}, Qty: {inventory.quantity})',
-            new_values={'batch_number': inventory.batch_number, 'quantity': float(inventory.quantity), 'medication_id': str(inventory.medication.id)},
-            request=self.request,
+            description=(
+                f'Received inventory: {inventory.medication.name} '
+                f'(Batch: {inventory.batch_number}, Qty: {inventory.quantity})'
+            ),
+            new_values={
+                'batch_number': inventory.batch_number,
+                'quantity': float(inventory.quantity),
+                'medication_id': str(inventory.medication.id),
+                'received_at': inventory.received_at.isoformat() if inventory.received_at else None,
+            },
+            metadata={'stock_event': 'initial_receive', 'quantity_unit': inventory.unit or 'units'},
+            request=request,
         )
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def perform_create(self, serializer):
+        """Unused — create() handles inventory receipt and audit."""
+        serializer.save()
     
     def perform_update(self, serializer):
         """Update inventory item and log audit."""
@@ -715,73 +794,28 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
-    @extend_schema(tags=["Pharmacy"], summary="Adjustment history", description="Return adjustment history for a specific batch inventory item.")
+    @extend_schema(tags=["Pharmacy"], summary="Stock history", description="Return stock history for a batch (receipts, adjustments, merges).")
     @action(detail=True, methods=['get'], url_path='adjustment_history')
     def adjustment_history(self, request, pk=None):
         """
-        Return adjustment history for a specific batch inventory item.
+        Return stock history for a specific batch inventory item.
 
-        Note: History is derived from ActivityLog records tagged with
-        `metadata.batch_adjustment=true` so we don't need a new DB table.
+        History is derived from ActivityLog records on the inventory row, plus a
+        synthetic opening-balance entry when legacy/seed data has no create log.
         """
         inventory = self.get_object()
 
-        # Only return records created by our adjustment endpoint.
-        # We filter `metadata.batch_adjustment` in Python for DB compatibility.
         logs = (
             ActivityLog.objects.filter(
                 module='pharmacy',
                 object_type='medication_inventory',
                 object_id=str(inventory.id),
             )
-            .order_by('-created_at')[:50]
+            .select_related('user')
+            .order_by('-created_at')[:100]
         )
 
-        # Frontend expects `BatchAdjustmentHistory` shape.
-        data = []
-        for log in logs:
-            qty_before = (log.old_values or {}).get('quantity')
-            qty_after = (log.new_values or {}).get('quantity')
-            meta = log.metadata or {}
-
-            # Only include logs that actually represent a quantity change.
-            # (Avoid noise from other updates like expiry changes.)
-            if qty_before is None or qty_after is None:
-                continue
-
-            # Pull reason from a few potential metadata keys (backwards/forwards compatibility).
-            # If none exist (older adjustment style), the UI will show `—`.
-            reason_val = (
-                meta.get("adjustment_reason")
-                or meta.get("reason_display")
-                or meta.get("adjustment_reason_display")
-                or meta.get("reason")
-                or meta.get("adjustmentReason")
-                or ""
-            )
-
-            data.append(
-                {
-                    "id": log.id,
-                    "batch_inventory": inventory.id,
-                    "medication_name": inventory.medication.name if hasattr(inventory, "medication") else None,
-                    "batch_number": inventory.batch_number,
-                    "quantity_before": float(qty_before or 0),
-                    "quantity_after": float(qty_after or 0),
-                    "quantity_unit": meta.get("quantity_unit") or (inventory.unit or "units"),
-                    "adjustment_reason": reason_val or "",
-                    "adjustment_notes": meta.get("adjustment_notes") or "",
-                    "created_by": getattr(log.user, "id", None) if getattr(log, "user", None) else None,
-                    "created_by_name": (
-                        (log.user.get_full_name() if getattr(log.user, "get_full_name", None) else None)
-                        or getattr(log.user, "username", None)
-                        or (str(log.user) if getattr(log, "user", None) else None)
-                    ),
-                    "created_at": log.created_at.isoformat(),
-                }
-            )
-
-        return Response(data)
+        return Response(build_stock_history(inventory, logs))
 
     @extend_schema(tags=["Pharmacy"], summary="Record adjustment", description="Record a quantity adjustment for a batch inventory item.")
     @action(detail=True, methods=['post'], url_path='record_adjustment')
@@ -827,6 +861,7 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             new_values={'quantity': float(inventory.quantity or 0)},
             metadata={
                 'batch_adjustment': True,
+                'stock_event': 'adjustment',
                 'adjustment_reason': adjustment_reason,
                 'adjustment_notes': adjustment_notes,
                 'quantity_unit': inventory.unit or 'units',

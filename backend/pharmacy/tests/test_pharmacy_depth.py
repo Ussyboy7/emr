@@ -380,6 +380,49 @@ class MedicationInventoryTest(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["batch_number"], "BN-001")
+        self.assertIsNotNone(resp.data.get("received_at"))
+        self.assertEqual(resp.data.get("received_by_name"), self.user.get_full_name() or self.user.username)
+
+    def test_receive_merges_duplicate_batch_number(self):
+        expiry = (date.today() + timedelta(days=365)).isoformat()
+        payload = {
+            "medication_id": self.medication.pk,
+            "batch_number": "BN-MERGE",
+            "expiry_date": expiry,
+            "quantity": "100.00",
+            "unit": "tablet",
+            "min_stock_level": "50.00",
+            "location": "Store",
+        }
+        first = self.client.post("/api/v1/pharmacy/inventory/", payload, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post(
+            "/api/v1/pharmacy/inventory/",
+            {**payload, "quantity": "50.00"},
+            format="json",
+        )
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(MedicationInventory.objects.filter(batch_number__iexact="BN-MERGE").count(), 1)
+        self.assertEqual(float(second.data["quantity"]), 150.0)
+
+    def test_receive_rejects_duplicate_batch_with_different_expiry(self):
+        expiry_a = (date.today() + timedelta(days=365)).isoformat()
+        expiry_b = (date.today() + timedelta(days=400)).isoformat()
+        payload = {
+            "medication_id": self.medication.pk,
+            "batch_number": "BN-CLASH",
+            "expiry_date": expiry_a,
+            "quantity": "100.00",
+            "unit": "tablet",
+            "location": "Store",
+        }
+        self.client.post("/api/v1/pharmacy/inventory/", payload, format="json")
+        clash = self.client.post(
+            "/api/v1/pharmacy/inventory/",
+            {**payload, "expiry_date": expiry_b},
+            format="json",
+        )
+        self.assertEqual(clash.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_is_expired_property(self):
         inv = MedicationInventory.objects.create(
@@ -459,6 +502,90 @@ class MedicationInventoryTest(APITestCase):
         )
         resp = self.client.get("/api/v1/pharmacy/inventory/?location=Store")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_stock_history_includes_initial_receive(self):
+        create = self.client.post(
+            "/api/v1/pharmacy/inventory/",
+            {
+                "medication_id": self.medication.pk,
+                "batch_number": "BN-HIST-01",
+                "expiry_date": (date.today() + timedelta(days=365)).isoformat(),
+                "quantity": "200.00",
+                "unit": "tablet",
+                "min_stock_level": "50.00",
+                "location": "Store",
+            },
+            format="json",
+        )
+        self.assertEqual(create.status_code, status.HTTP_201_CREATED)
+        inv_id = create.data["id"]
+        history = self.client.get(f"/api/v1/pharmacy/inventory/{inv_id}/adjustment_history/")
+        self.assertEqual(history.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(row.get("event_type") == "initial_receive" for row in history.data))
+
+    def test_stock_history_includes_receive_merge(self):
+        expiry = (date.today() + timedelta(days=365)).isoformat()
+        payload = {
+            "medication_id": self.medication.pk,
+            "batch_number": "BN-HIST-MERGE",
+            "expiry_date": expiry,
+            "quantity": "100.00",
+            "unit": "tablet",
+            "min_stock_level": "50.00",
+            "location": "Store",
+        }
+        first = self.client.post("/api/v1/pharmacy/inventory/", payload, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post(
+            "/api/v1/pharmacy/inventory/",
+            {**payload, "quantity": "50.00"},
+            format="json",
+        )
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        history = self.client.get(
+            f"/api/v1/pharmacy/inventory/{first.data['id']}/adjustment_history/"
+        )
+        self.assertEqual(history.status_code, status.HTTP_200_OK)
+        event_types = {row.get("event_type") for row in history.data}
+        self.assertIn("initial_receive", event_types)
+        self.assertIn("receive", event_types)
+
+    def test_stock_history_synthetic_opening_balance_for_legacy_row(self):
+        inv = MedicationInventory.objects.create(
+            medication=self.medication,
+            batch_number="BN-LEGACY",
+            expiry_date=date.today() + timedelta(days=365),
+            quantity=Decimal("1000"),
+            unit="tablet",
+            location="Store",
+        )
+        history = self.client.get(f"/api/v1/pharmacy/inventory/{inv.id}/adjustment_history/")
+        self.assertEqual(history.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(history.data), 1)
+        self.assertEqual(history.data[0]["event_type"], "opening_balance")
+        self.assertTrue(history.data[0]["is_synthetic"])
+
+    def test_stock_history_includes_manual_adjustment(self):
+        inv = MedicationInventory.objects.create(
+            medication=self.medication,
+            batch_number="BN-ADJ-HIST",
+            expiry_date=date.today() + timedelta(days=365),
+            quantity=Decimal("100"),
+            unit="tablet",
+            location="Store",
+        )
+        adjust = self.client.post(
+            f"/api/v1/pharmacy/inventory/{inv.id}/record_adjustment/",
+            {
+                "quantity_after": "80",
+                "adjustment_reason": "Physical count adjustment",
+            },
+            format="json",
+        )
+        self.assertEqual(adjust.status_code, status.HTTP_200_OK)
+        history = self.client.get(f"/api/v1/pharmacy/inventory/{inv.id}/adjustment_history/")
+        self.assertEqual(history.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(row.get("event_type") == "adjustment" for row in history.data))
 
 
 # ---------------------------------------------------------------------------

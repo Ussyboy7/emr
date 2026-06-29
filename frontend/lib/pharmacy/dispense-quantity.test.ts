@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canChoosePrescriptionQuantityEntryMode,
+  formatInventoryStockDisplay,
   getDefaultQuantityEntryModeForPrescription,
   getPrescriptionDispenseMode,
   toInventoryUnits,
@@ -42,5 +43,15 @@ describe("prescription dispense quantity", () => {
         prescribedUnit: "ml",
       })
     ).toBe("pack");
+  });
+
+  it("formats inventory stock with packs and unit label", () => {
+    expect(formatInventoryStockDisplay(9000, 10, "capsule")).toBe(
+      "900 packs (9,000 capsules)"
+    );
+    expect(formatInventoryStockDisplay(9005, 10, "capsule")).toBe(
+      "9,005 capsules (900 packs + 5 loose)"
+    );
+    expect(formatInventoryStockDisplay(50, 1, "tablet")).toBe("50 tablets");
   });
 });

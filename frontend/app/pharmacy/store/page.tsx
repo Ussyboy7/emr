@@ -1,9 +1,10 @@
 "use client";
-import { formatDisplayDateTime } from '@/lib/dates';
+import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dates';
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { formatPackDisplay, resolvePackSize } from "@/lib/pharmacy/dispense-quantity";
+import { formatInventoryStockDisplay, resolvePackSize } from "@/lib/pharmacy/dispense-quantity";
+import { formatBatchReceivedMeta, ensureStockHistory, formatStockHistoryHeadline, shouldShowHistoryBalanceChange } from "@/lib/pharmacy/batch-display";
 import { usePharmacyPageAuth } from "@/hooks/use-pharmacy-page-auth";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { pharmacyService, type MedicationInventory, type Medication, type BatchAdjustmentHistory } from "@/lib/services";
@@ -94,6 +96,8 @@ export default function WarehouseStorePage() {
   const [selectedMedication, setSelectedMedication] = useState<MedicationWithStock | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showBatchesModal, setShowBatchesModal] = useState(false);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+  const batchesCacheRef = useRef<Record<number, MedicationInventory[]>>({});
   const [showAdjustBatchModal, setShowAdjustBatchModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<MedicationInventory | null>(null);
   const [showBatchHistoryModal, setShowBatchHistoryModal] = useState(false);
@@ -110,6 +114,7 @@ export default function WarehouseStorePage() {
   });
 
   const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [showDepletedBatches, setShowDepletedBatches] = useState(false);
   const [receiving, setReceiving] = useState(false);
   const [receiveForm, setReceiveForm] = useState({
     batch_number: "",
@@ -217,8 +222,38 @@ export default function WarehouseStorePage() {
       location: PHARMACY_LOCATIONS.STORE,
       page_size: MAX_LIST_PAGE_SIZE,
     });
-    return res.results || [];
+    const batches = res.results || [];
+    batchesCacheRef.current[med.id] = batches;
+    return batches;
   }, []);
+
+  const refreshBatchesForMedication = useCallback(async (med: MedicationWithStock) => {
+    const batches = await fetchBatchesForMedication(med);
+    setSelectedMedication((prev) => (prev?.id === med.id ? { ...prev, batches } : prev));
+    return batches;
+  }, [fetchBatchesForMedication]);
+
+  const loadBatchesForMedication = useCallback(
+    async (med: MedicationWithStock, options?: { background?: boolean }) => {
+      const cached = batchesCacheRef.current[med.id] || med.batches || [];
+      const background = options?.background === true && cached.length > 0;
+
+      if (!background) {
+        setBatchesLoading(cached.length === 0);
+      }
+
+      try {
+        const batches = await fetchBatchesForMedication(med);
+        setSelectedMedication((prev) => (prev?.id === med.id ? { ...prev, batches } : prev));
+        return batches;
+      } finally {
+        if (!background) {
+          setBatchesLoading(false);
+        }
+      }
+    },
+    [fetchBatchesForMedication],
+  );
 
   const categories = useMemo(() => {
     return MEDICATION_CATEGORIES;
@@ -262,20 +297,37 @@ export default function WarehouseStorePage() {
     }
   };
 
+  const getExpiryBadgeColor = (expiryDate: string) => {
+    const days = getDaysUntilExpiry(expiryDate);
+    if (days < 0) return "bg-red-500 text-white";
+    if (days <= 30) return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
+    if (days <= EXPIRY_WARNING_DAYS) return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400";
+    return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400";
+  };
+
+  const getBatchBorderColor = (expiryDate: string, isDepleted: boolean) => {
+    if (isDepleted) return "border-l-gray-400";
+    const days = getDaysUntilExpiry(expiryDate);
+    if (days < 0) return "border-l-red-500";
+    if (days <= EXPIRY_WARNING_DAYS) return "border-l-amber-500";
+    return "border-l-emerald-500";
+  };
+
   const handleViewDetails = async (med: MedicationWithStock) => {
-    setSelectedMedication(med);
+    const cached = batchesCacheRef.current[med.id] || med.batches || [];
+    setSelectedMedication({ ...med, batches: cached });
     setShowDetailsModal(true);
-    if (!med.batches?.length && (med.batchCount ?? 0) > 0) {
-      const batches = await fetchBatchesForMedication(med);
-      setSelectedMedication((prev) => (prev?.id === med.id ? { ...prev, batches } : prev));
+    if (cached.length === 0 && (med.batchCount ?? 0) > 0) {
+      await loadBatchesForMedication(med);
     }
   };
 
   const handleViewBatches = async (med: MedicationWithStock) => {
-    setSelectedMedication({ ...med, batches: [] });
+    setShowDepletedBatches(false);
+    const cached = batchesCacheRef.current[med.id] || med.batches || [];
+    setSelectedMedication({ ...med, batches: cached });
     setShowBatchesModal(true);
-    const batches = await fetchBatchesForMedication(med);
-    setSelectedMedication((prev) => (prev?.id === med.id ? { ...prev, batches } : prev));
+    await loadBatchesForMedication(med, { background: cached.length > 0 });
   };
 
   const openReceive = () => {
@@ -296,21 +348,28 @@ export default function WarehouseStorePage() {
   const openAdjustForBatch = async (batch: MedicationInventory) => {
     setSelectedBatch(batch);
     setShowAdjustBatchModal(true);
-    setAdjustmentForm({ type: "decrease", quantity: 0, reason: "", notes: "" });
+    const isDepleted = Number(batch.quantity || 0) <= 0;
+    setAdjustmentForm({
+      type: isDepleted ? "increase" : "decrease",
+      quantity: 0,
+      reason: "",
+      notes: "",
+    });
   };
 
   const openBatchHistoryForBatch = async (batch: MedicationInventory) => {
     setSelectedHistoryBatch(batch);
     setShowBatchHistoryModal(true);
-    setAdjustmentHistory([]);
     setAdjustmentHistoryError(null);
+    setAdjustmentHistory(ensureStockHistory([], batch));
     setAdjustmentHistoryLoading(true);
     try {
-      const history = await pharmacyService.getBatchAdjustmentHistory(Number(batch.id));
-      setAdjustmentHistory(history || []);
+      const raw = await pharmacyService.getBatchAdjustmentHistory(Number(batch.id));
+      const history = Array.isArray(raw) ? raw : [];
+      setAdjustmentHistory(ensureStockHistory(history, batch));
     } catch (e: any) {
-      setAdjustmentHistoryError("Adjustment history not available.");
-      setAdjustmentHistory([]);
+      setAdjustmentHistoryError("Could not load full history from server.");
+      setAdjustmentHistory(ensureStockHistory([], batch));
     } finally {
       setAdjustmentHistoryLoading(false);
     }
@@ -353,6 +412,9 @@ export default function WarehouseStorePage() {
       setSelectedBatch(null);
       setAdjustmentForm({ type: "decrease", quantity: 0, reason: "", notes: "" });
       await Promise.all([loadStorePage(), loadStoreStats()]);
+      if (selectedMedication) {
+        await refreshBatchesForMedication(selectedMedication);
+      }
     } catch (e: any) {
       toast.error(e?.message || "Failed to adjust batch");
     } finally {
@@ -374,23 +436,34 @@ export default function WarehouseStorePage() {
 
     const packSize = resolvePackSize(selectedMedication);
     const quantityInUnits = packs * packSize;
+    const unitLabel = selectedMedication.unit?.trim() || "unit";
 
     try {
       setReceiving(true);
+      const existingBatch = selectedMedication.batches.find(
+        (b) => b.batch_number.trim().toLowerCase() === receiveForm.batch_number.trim().toLowerCase(),
+      );
       await pharmacyService.createInventoryItem({
         medication: selectedMedication.id,
         batch_number: receiveForm.batch_number.trim(),
         expiry_date: receiveForm.expiry_date,
         quantity: quantityInUnits,
-        unit: "unit",
+        unit: unitLabel,
         min_stock_level: selectedMedication.minimumStock,
         supplier: receiveForm.supplier.trim() || undefined,
         location: PHARMACY_LOCATIONS.STORE,
       });
-      toast.success(`Received ${packs} packs (${quantityInUnits.toLocaleString()} units)`);
+      toast.success(
+        existingBatch
+          ? `Added ${packs} pack${packs === 1 ? "" : "s"} to batch ${receiveForm.batch_number.trim()} (${quantityInUnits.toLocaleString()} ${unitLabel})`
+          : `Received ${packs} pack${packs === 1 ? "" : "s"} (${quantityInUnits.toLocaleString()} ${unitLabel})`,
+      );
       setShowReceiveModal(false);
-      setShowDetailsModal(false);
+      setReceiveForm({ batch_number: "", quantity: "", expiry_date: "", supplier: "" });
       await Promise.all([loadStorePage(), loadStoreStats()]);
+      if (selectedMedication) {
+        await refreshBatchesForMedication(selectedMedication);
+      }
     } catch (e: any) {
       toast.error(e?.message || "Failed to receive stock");
     } finally {
@@ -741,7 +814,7 @@ export default function WarehouseStorePage() {
                                 {stockStatus}
                               </Badge>
                               <span className="text-[10px] font-medium text-muted-foreground">
-                                {formatPackDisplay(med.storeQuantity, med.packSize)}
+                                {formatInventoryStockDisplay(med.storeQuantity, med.packSize, med.unit)}
                               </span>
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
@@ -814,81 +887,74 @@ export default function WarehouseStorePage() {
         <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
           <DialogContent className="w-[95vw] sm:max-w-[720px]">
             <DialogHeader>
-              <DialogTitle className="flex items-center justify-between gap-2">
-                <span className="truncate">{selectedMedication?.name}</span>
-                {selectedMedication && (
-                  <Badge variant="outline" className={`text-[10px] px-2 py-0.5 ${getStockColor(getStockStatus(selectedMedication))}`}>
+              <DialogTitle className="flex items-start justify-between gap-3 pr-6">
+                <div className="min-w-0 space-y-1">
+                  <span className="block text-lg font-semibold truncate">{selectedMedication?.name}</span>
+                  {selectedMedication ? (
+                    <DialogDescription asChild>
+                      <p className="text-sm text-muted-foreground">
+                        {joinDisplayParts([
+                          selectedMedication.generic_name || selectedMedication.generic?.name,
+                          selectedMedication.category,
+                          selectedMedication.form,
+                        ])}
+                      </p>
+                    </DialogDescription>
+                  ) : null}
+                </div>
+                {selectedMedication ? (
+                  <Badge
+                    variant="outline"
+                    className={`shrink-0 text-[10px] px-2 py-0.5 ${getStockColor(getStockStatus(selectedMedication))}`}
+                  >
                     {getStockStatus(selectedMedication)}
                   </Badge>
-                )}
+                ) : null}
               </DialogTitle>
             </DialogHeader>
             {selectedMedication && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">ID</p>
-                    <p className="font-medium">{selectedMedication.id}</p>
-                  </div>
-                  {(selectedMedication.generic_name || selectedMedication.generic?.name) && (
-                    <div>
-                      <p className="text-muted-foreground">Generic Name</p>
-                      <p className="font-medium">{selectedMedication.generic_name || selectedMedication.generic?.name}</p>
-                    </div>
-                  )}
-                  {selectedMedication.category && (
-                    <div>
-                      <p className="text-muted-foreground">Category</p>
-                      <p className="font-medium">{selectedMedication.category}</p>
-                    </div>
-                  )}
-                  {selectedMedication.strength && (
-                    <div>
-                      <p className="text-muted-foreground">Strength</p>
-                      <p className="font-medium">{selectedMedication.strength}</p>
-                    </div>
-                  )}
-                  {selectedMedication.form && (
-                    <div>
-                      <p className="text-muted-foreground">Form</p>
-                      <p className="font-medium">{selectedMedication.form}</p>
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-muted-foreground">Total Stock</p>
-                    <p className="font-medium text-lg">{selectedMedication.storeQuantity}</p>
-                  </div>
-                </div>
+                <p className="text-sm text-muted-foreground -mt-1">
+                  {joinDisplayParts([
+                    formatInventoryStockDisplay(
+                      selectedMedication.storeQuantity,
+                      selectedMedication.packSize,
+                      selectedMedication.unit,
+                    ),
+                    `${(selectedMedication.batchCount ?? selectedMedication.batches.length) || 0} batch(es)`,
+                    getNearestExpiryForMedication(selectedMedication)
+                      ? `Exp ${formatDisplayDate(getNearestExpiryForMedication(selectedMedication))}`
+                      : null,
+                    selectedMedication.minimumStock > 0
+                      ? `Min ${formatInventoryStockDisplay(
+                          selectedMedication.minimumStock,
+                          selectedMedication.packSize,
+                          selectedMedication.unit,
+                        )}`
+                      : null,
+                  ])}
+                </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="bg-muted/50 rounded-lg p-4">
-                    <h4 className="font-medium mb-3">Stock Levels</h4>
-                    <div className="grid grid-cols-2 gap-4 text-center mb-3">
-                      <div>
-                        <p className="text-2xl font-bold text-foreground">
-                          {formatPackDisplay(selectedMedication.storeQuantity, selectedMedication.packSize)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">Current</p>
-                      </div>
-                      <div>
-                        <p className="text-2xl font-bold text-amber-600">
-                          {formatPackDisplay(selectedMedication.minimumStock, selectedMedication.packSize)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">Minimum</p>
-                      </div>
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm rounded-lg border bg-muted/30 p-4">
+                  <div>
+                    <dt className="text-muted-foreground text-xs">Medication ID</dt>
+                    <dd className="font-medium mt-0.5">{selectedMedication.id}</dd>
+                  </div>
+                  {selectedMedication.packSize ? (
+                    <div>
+                      <dt className="text-muted-foreground text-xs">Pack size</dt>
+                      <dd className="font-medium mt-0.5">
+                        {selectedMedication.packSize.toLocaleString()} {selectedMedication.unit || "units"} per pack
+                      </dd>
                     </div>
-                  </div>
-
-                  <div className="bg-muted/50 rounded-lg p-4">
-                    <h4 className="font-medium mb-2">Expiry Information</h4>
-                    {getNearestExpiryForMedication(selectedMedication) ? (
-                      <p className="text-sm">
-                        <span className="text-muted-foreground">Expiry Date:</span>{" "}
-                        <span className="font-medium">{getNearestExpiryForMedication(selectedMedication)}</span>
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
+                  ) : null}
+                  {selectedMedication.strength ? (
+                    <div className="sm:col-span-2">
+                      <dt className="text-muted-foreground text-xs">Strength</dt>
+                      <dd className="font-medium mt-0.5 leading-snug">{selectedMedication.strength}</dd>
+                    </div>
+                  ) : null}
+                </dl>
               </div>
             )}
             <DialogFooter>
@@ -906,7 +972,13 @@ export default function WarehouseStorePage() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={showBatchesModal} onOpenChange={setShowBatchesModal}>
+        <Dialog
+          open={showBatchesModal}
+          onOpenChange={(open) => {
+            setShowBatchesModal(open);
+            if (!open) setBatchesLoading(false);
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -917,39 +989,138 @@ export default function WarehouseStorePage() {
             </DialogHeader>
             {selectedMedication && (
               <div className="space-y-3">
-                {selectedMedication.batches
-                  .slice()
-                  .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)))
-                  .map((batch) => (
-                    <Card key={batch.id}>
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Hash className="h-4 w-4 text-muted-foreground" />
-                              <span className="font-semibold">{batch.batch_number}</span>
-                              <Badge variant="outline">Exp: {batch.expiry_date}</Badge>
+                <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-3 py-2">
+                  <label htmlFor="show-depleted-batches" className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      id="show-depleted-batches"
+                      checked={showDepletedBatches}
+                      onCheckedChange={(checked) => setShowDepletedBatches(checked === true)}
+                    />
+                    Show depleted batches (0 stock)
+                  </label>
+                </div>
+                {batchesLoading ? (
+                  <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading batches...
+                  </div>
+                ) : (() => {
+                  const visibleBatches = selectedMedication.batches
+                    .filter((batch) => showDepletedBatches || Number(batch.quantity) > 0)
+                    .slice()
+                    .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
+                  if (visibleBatches.length === 0) {
+                    return (
+                      <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
+                        {selectedMedication.batches.length === 0
+                          ? "No batches yet. Receive stock to create the first batch."
+                          : "No in-stock batches. Enable “Show depleted batches” or receive new stock."}
+                      </div>
+                    );
+                  }
+                  return visibleBatches.map((batch) => {
+                    const isDepleted = Number(batch.quantity) <= 0;
+                    const daysUntilExpiry = getDaysUntilExpiry(batch.expiry_date);
+                    const isExpired = daysUntilExpiry < 0;
+                    const isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= EXPIRY_WARNING_DAYS;
+                    const receivedMeta = formatBatchReceivedMeta(batch);
+
+                    return (
+                      <Card
+                        key={batch.id}
+                        className={`border-l-4 hover:shadow-md transition-shadow ${getBatchBorderColor(batch.expiry_date, isDepleted)} ${
+                          isDepleted ? "opacity-75" : ""
+                        }`}
+                      >
+                        <CardContent className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                isExpired
+                                  ? "bg-red-100 dark:bg-red-900/30"
+                                  : isExpiringSoon
+                                    ? "bg-amber-100 dark:bg-amber-900/30"
+                                    : isDepleted
+                                      ? "bg-gray-100 dark:bg-gray-800"
+                                      : "bg-emerald-100 dark:bg-emerald-900/30"
+                              }`}
+                            >
+                              <Hash
+                                className={`h-4 w-4 ${
+                                  isExpired
+                                    ? "text-red-600"
+                                    : isExpiringSoon
+                                      ? "text-amber-600"
+                                      : isDepleted
+                                        ? "text-muted-foreground"
+                                        : "text-emerald-600"
+                                }`}
+                              />
                             </div>
-                            <div className="text-sm text-muted-foreground mt-1">
-                              Qty: <span className="font-medium text-foreground">
-                                {formatPackDisplay(Number(batch.quantity), selectedMedication?.packSize)}
-                              </span>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                  <span className="font-semibold text-foreground truncate">
+                                    {batch.batch_number}
+                                  </span>
+                                  {isDepleted ? (
+                                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                      Depleted
+                                    </Badge>
+                                  ) : null}
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] px-1.5 py-0 ${getExpiryBadgeColor(batch.expiry_date)}`}
+                                  >
+                                    {isExpired
+                                      ? "EXPIRED"
+                                      : isExpiringSoon
+                                        ? `${daysUntilExpiry}d`
+                                        : `Exp: ${formatDisplayDate(batch.expiry_date)}`}
+                                  </Badge>
+                                  <span className="text-[10px] font-medium text-muted-foreground">
+                                    {formatInventoryStockDisplay(
+                                      Number(batch.quantity),
+                                      selectedMedication.packSize,
+                                      selectedMedication.unit || batch.unit,
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-7 p-0"
+                                    onClick={() => openAdjustForBatch(batch)}
+                                    title="Adjust stock"
+                                  >
+                                    <ArrowUpDown className="h-4 w-4 text-muted-foreground hover:text-amber-600" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-7 p-0"
+                                    onClick={() => openBatchHistoryForBatch(batch)}
+                                    title="Stock history"
+                                  >
+                                    <Clock className="h-4 w-4 text-muted-foreground hover:text-violet-500" />
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {receivedMeta ? (
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                  <span>{receivedMeta}</span>
+                                </div>
+                              ) : null}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={() => openAdjustForBatch(batch)}>
-                              <ArrowUpDown className="h-4 w-4 mr-2" />
-                              Adjust
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => openBatchHistoryForBatch(batch)}>
-                              <Clock className="h-4 w-4 mr-2" />
-                              History
-                            </Button>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardContent>
+                      </Card>
+                    );
+                  });
+                })()}
               </div>
             )}
             <DialogFooter>
@@ -971,88 +1142,122 @@ export default function WarehouseStorePage() {
             if (!open) setSelectedHistoryBatch(null);
           }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[620px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Hash className="h-5 w-5 text-muted-foreground" />
-                  <span className="font-semibold truncate">
-                    {selectedHistoryBatch?.batch_number ?? ""}
+              <DialogTitle className="flex items-start justify-between gap-3 pr-6">
+                <div className="min-w-0 space-y-1">
+                  <span className="block font-semibold truncate">
+                    {selectedHistoryBatch?.batch_number ?? "Batch"}
                   </span>
+                  {selectedMedication?.name ? (
+                    <DialogDescription asChild>
+                      <p className="text-sm text-muted-foreground">
+                        {joinDisplayParts([
+                          selectedMedication.name,
+                          selectedHistoryBatch
+                            ? `Exp ${formatDisplayDate(selectedHistoryBatch.expiry_date)}`
+                            : null,
+                        ])}
+                      </p>
+                    </DialogDescription>
+                  ) : null}
                 </div>
-                {selectedHistoryBatch ? (
-                  <Badge variant="outline">Exp: {selectedHistoryBatch.expiry_date}</Badge>
-                ) : null}
               </DialogTitle>
-              <DialogDescription>Batch adjustment history (additions / reductions)</DialogDescription>
             </DialogHeader>
 
             {selectedHistoryBatch && (
               <div className="space-y-4">
-                <div className="bg-muted/50 rounded-lg p-4 text-sm text-center">
-                  <p className="text-muted-foreground">Qty</p>
-                  <p className="text-2xl sm:text-3xl font-bold">
-                    {formatPackDisplay(Number(selectedHistoryBatch.quantity || 0), selectedMedication?.packSize)}
-                  </p>
-                </div>
+                <p className="text-sm text-muted-foreground -mt-1">
+                  {joinDisplayParts([
+                    formatInventoryStockDisplay(
+                      Number(selectedHistoryBatch.quantity || 0),
+                      selectedMedication?.packSize,
+                      selectedMedication?.unit || selectedHistoryBatch.unit,
+                    ),
+                    formatBatchReceivedMeta(selectedHistoryBatch) || null,
+                  ])}
+                </p>
 
-                <div className="bg-muted/50 rounded-lg p-4">
-                  <h4 className="font-medium mb-2">Adjustments</h4>
-                  {adjustmentHistoryLoading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading history...
-                    </div>
-                  ) : adjustmentHistoryError ? (
-                    <p className="text-sm text-muted-foreground">{adjustmentHistoryError}</p>
-                  ) : adjustmentHistory.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No historic adjustments yet for this batch.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {adjustmentHistory.map((h) => {
-                        const packSize = resolvePackSize(selectedMedication);
-                        const deltaUnits = Number(h.quantity_after || 0) - Number(h.quantity_before || 0);
-                        const direction = deltaUnits >= 0 ? "Increase" : "Decrease";
-                        const absUnits = Math.abs(deltaUnits);
-                        const dateLabel = h.created_at ? formatDisplayDateTime(h.created_at) : "";
+                {adjustmentHistoryLoading && adjustmentHistory.length === 0 ? (
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading history...
+                  </div>
+                ) : (
+                  <>
+                    {adjustmentHistoryError ? (
+                      <p className="text-sm text-amber-700 dark:text-amber-400">{adjustmentHistoryError}</p>
+                    ) : null}
+                    {adjustmentHistoryLoading && adjustmentHistory.length > 0 ? (
+                      <p className="text-xs text-muted-foreground">Refreshing...</p>
+                    ) : null}
+                    {!adjustmentHistoryLoading && adjustmentHistory.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-2">
+                        No recorded activity for this batch yet.
+                      </p>
+                    ) : adjustmentHistory.length > 0 ? (
+                      <ul className="space-y-2">
+                        {adjustmentHistory.map((h) => {
+                          const packSize = resolvePackSize(selectedMedication);
+                          const unit = selectedMedication?.unit || selectedHistoryBatch?.unit;
+                          const dateLabel = h.created_at ? formatDisplayDate(h.created_at) : "";
+                          const isManualAdjustment = (h.event_type || "adjustment") === "adjustment";
+                          const showBalanceChange = shouldShowHistoryBalanceChange(h);
 
-                        return (
-                          <div key={h.id} className="pt-1 border-t border-border first:border-t-0">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="font-medium">
-                                  {direction} by {formatPackDisplay(absUnits, packSize)}
-                                </p>
-                                {h.adjustment_reason?.trim() ? (
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    Reason: {h.adjustment_reason}
+                          return (
+                            <li
+                              key={h.id}
+                              className="rounded-lg border bg-muted/30 px-3 py-2.5 text-sm"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-medium leading-snug">
+                                    {formatStockHistoryHeadline(h, packSize, unit)}
+                                  </p>
+                                  {isManualAdjustment && h.adjustment_reason?.trim() ? (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {h.adjustment_reason}
+                                    </p>
+                                  ) : null}
+                                  {h.created_by_name ? (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      By {h.created_by_name}
+                                    </p>
+                                  ) : null}
+                                  {h.adjustment_notes ? (
+                                    <p className="text-xs text-muted-foreground mt-1 break-words">
+                                      {h.adjustment_notes}
+                                    </p>
+                                  ) : null}
+                                  {showBalanceChange ? (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {formatInventoryStockDisplay(
+                                        Number(h.quantity_before || 0),
+                                        packSize,
+                                        unit,
+                                      )}{" "}
+                                      →{" "}
+                                      {formatInventoryStockDisplay(
+                                        Number(h.quantity_after || 0),
+                                        packSize,
+                                        unit,
+                                      )}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                {dateLabel ? (
+                                  <p className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                                    {dateLabel}
                                   </p>
                                 ) : null}
-                                {h.created_by_name ? (
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    By: {h.created_by_name}
-                                  </p>
-                                ) : null}
-                                {h.adjustment_notes ? (
-                                  <p className="text-xs text-muted-foreground mt-1 break-words">
-                                    Notes: {h.adjustment_notes}
-                                  </p>
-                                ) : null}
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  {formatPackDisplay(Number(h.quantity_before || 0), packSize)} -&gt;{" "}
-                                  {formatPackDisplay(Number(h.quantity_after || 0), packSize)}
-                                </p>
                               </div>
-                              {dateLabel ? (
-                                <p className="text-xs text-muted-foreground whitespace-nowrap">{dateLabel}</p>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
+                  </>
+                )}
               </div>
             )}
 
@@ -1096,7 +1301,11 @@ export default function WarehouseStorePage() {
                 <div className="bg-muted/50 rounded-lg p-4 text-sm text-center">
                   <p className="text-muted-foreground">Current Stock</p>
                   <p className="text-2xl sm:text-3xl font-bold">
-                    {formatPackDisplay(Number(selectedBatch.quantity || 0), selectedMedication?.packSize)}
+                    {formatInventoryStockDisplay(
+                      Number(selectedBatch.quantity || 0),
+                      selectedMedication?.packSize,
+                      selectedMedication?.unit || selectedBatch.unit,
+                    )}
                   </p>
                 </div>
 
@@ -1192,7 +1401,11 @@ export default function WarehouseStorePage() {
                             adjustmentForm.type === "increase"
                               ? current + adjustUnits
                               : current - adjustUnits;
-                          return formatPackDisplay(Math.max(0, next), packSize);
+                          return formatInventoryStockDisplay(
+                            Math.max(0, next),
+                            packSize,
+                            selectedMedication?.unit || selectedBatch.unit,
+                          );
                         })()}
                       </strong>{" "}
                     </p>
@@ -1228,13 +1441,35 @@ export default function WarehouseStorePage() {
               <DialogTitle>Receive Stock</DialogTitle>
               <DialogDescription>Add a batch into Central store inventory</DialogDescription>
             </DialogHeader>
+            {selectedMedication ? (
+              <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                <p className="font-medium">{selectedMedication.name}</p>
+                <p className="text-muted-foreground text-xs mt-0.5">
+                  {joinDisplayParts([
+                    selectedMedication.strength,
+                    selectedMedication.form,
+                    `Central store`,
+                  ])}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Use the manufacturer batch/lot number from the package label.
+                </p>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <Label>Batch Number *</Label>
-                <Input className="mt-1" value={receiveForm.batch_number} onChange={(e) => setReceiveForm({ ...receiveForm, batch_number: e.target.value })} />
+                <Input className="mt-1" value={receiveForm.batch_number} onChange={(e) => setReceiveForm({ ...receiveForm, batch_number: e.target.value })} placeholder="From package label" />
+                <p className="text-xs text-muted-foreground mt-1">
+                  If this batch already exists, quantity will be added to it (same expiry required).
+                </p>
               </div>
               <div>
-                <Label>Quantity (Packs) *</Label>
+                <Label>
+                  {selectedMedication && resolvePackSize(selectedMedication) > 1
+                    ? "Quantity (Packs) *"
+                    : `Quantity (${selectedMedication?.unit || "units"}) *`}
+                </Label>
                 <Input
                   className="mt-1"
                   type="number"
@@ -1242,11 +1477,16 @@ export default function WarehouseStorePage() {
                   value={receiveForm.quantity}
                   onChange={(e) => setReceiveForm({ ...receiveForm, quantity: e.target.value })}
                 />
-                {receiveForm.quantity && selectedMedication?.packSize && (
+                {receiveForm.quantity && selectedMedication?.packSize ? (
                   <p className="text-xs text-muted-foreground mt-1">
-                    Total units: {(Number(receiveForm.quantity) * resolvePackSize(selectedMedication)).toLocaleString()}
+                    Total:{" "}
+                    {formatInventoryStockDisplay(
+                      Number(receiveForm.quantity) * resolvePackSize(selectedMedication),
+                      selectedMedication.packSize,
+                      selectedMedication.unit,
+                    )}
                   </p>
-                )}
+                ) : null}
               </div>
               <div>
                 <Label>Expiry Date *</Label>

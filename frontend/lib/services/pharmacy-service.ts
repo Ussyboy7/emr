@@ -139,15 +139,29 @@ export interface MedicationInventory {
   supplier?: string;
   received_unit_type?: string;
   received_unit_quantity?: number;
+  received_at?: string;
+  received_by?: number;
+  received_by_name?: string;
+  created_at?: string;
   is_low_stock?: boolean;
   is_expired?: boolean;
 }
+
+export type BatchStockEventType =
+  | 'initial_receive'
+  | 'receive'
+  | 'adjustment'
+  | 'duplicate_merge'
+  | 'opening_balance'
+  | 'update';
 
 export interface BatchAdjustmentHistory {
   id: number;
   batch_inventory: number;
   medication_name?: string;
   batch_number?: string;
+  event_type?: BatchStockEventType;
+  event_label?: string;
   quantity_before: number;
   quantity_after: number;
   quantity_unit: string;
@@ -159,6 +173,7 @@ export interface BatchAdjustmentHistory {
   created_by?: number;
   created_by_name?: string;
   created_at: string;
+  is_synthetic?: boolean;
 }
 
 export interface Dispense {

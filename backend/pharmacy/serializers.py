@@ -192,6 +192,7 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
     """Serializer for MedicationInventory model."""
 
     medication_name = serializers.CharField(source="medication.name", read_only=True)
+    received_by_name = serializers.SerializerMethodField()
     is_low_stock = serializers.BooleanField(read_only=True)
     is_expired = serializers.BooleanField(read_only=True)
     medication = MedicationSerializer(read_only=True)
@@ -203,6 +204,14 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
         required=True,
     )
     source_from_central_store = serializers.SerializerMethodField()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_received_by_name(self, obj):
+        user = getattr(obj, "received_by", None)
+        if not user:
+            return None
+        full = getattr(user, "get_full_name", lambda: "")() or ""
+        return full.strip() or getattr(user, "username", None)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_source_from_central_store(self, obj):
@@ -241,13 +250,16 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
             "location",
             "supplier",
             "purchase_price",
+            "received_at",
+            "received_by",
+            "received_by_name",
             "created_at",
             "updated_at",
             "is_low_stock",
             "is_expired",
             "source_from_central_store",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at", "received_by", "received_by_name"]
 
 
 class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
@@ -258,6 +270,7 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
 
     medication = MedicationSerializer(read_only=True)
     medication_name = serializers.CharField(source="medication.name", read_only=True)
+    received_by_name = serializers.SerializerMethodField()
     source_from_central_store = serializers.SerializerMethodField()
     supplier = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
@@ -270,6 +283,17 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
         req = getattr(obj, 'request', None)
         req_clinic = getattr(req, 'clinic', None) if req else None
         return req_clinic.name if req_clinic else None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_received_by_name(self, obj):
+        issue = getattr(obj, "issue", None)
+        if not issue:
+            return None
+        user = getattr(issue, "issued_by", None)
+        if not user:
+            return None
+        full = getattr(user, "get_full_name", lambda: "")() or ""
+        return full.strip() or getattr(user, "username", None)
 
     @staticmethod
     def _resolve_source_location(obj):
@@ -314,6 +338,7 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
             "quantity",
             "quantity_remaining",
             "received_at",
+            "received_by_name",
             "request",
             "issue",
             "supplier",

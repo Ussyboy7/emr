@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -35,12 +36,15 @@ import {
 } from "@/components/pharmacy/PharmacyPackQuantityFields";
 import {
   asPackQuantityMedication,
+  formatInventoryStockDisplay,
   formatPackDisplay,
   getPackSize,
   resolvePackSize,
   toInventoryUnits,
   type QuantityEntryMode,
 } from "@/lib/pharmacy/dispense-quantity";
+import { formatBatchReceivedMeta } from "@/lib/pharmacy/batch-display";
+import { formatDisplayDate } from "@/lib/dates";
 import {
   pharmacyService,
   type Medication,
@@ -147,6 +151,7 @@ export default function HodStorePage() {
   const [selectedMedication, setSelectedMedication] = useState<MedicationWithStock | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showBatchesModal, setShowBatchesModal] = useState(false);
+  const [showDepletedBatches, setShowDepletedBatches] = useState(false);
 
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [issueBatches, setIssueBatches] = useState<MedicationInventory[]>([]);
@@ -291,6 +296,7 @@ export default function HodStorePage() {
 
   const handleViewBatches = async (med: MedicationWithStock) => {
     setSelectedMedication({ ...med, batches: [] });
+    setShowDepletedBatches(false);
     setShowBatchesModal(true);
     const batches = await fetchBatchesForMedication(med);
     setSelectedMedication((prev) => (prev?.id === med.id ? { ...prev, batches } : prev));
@@ -623,7 +629,7 @@ export default function HodStorePage() {
                                 {stockStatus}
                               </Badge>
                               <span className="text-[10px] font-medium text-muted-foreground">
-                                {formatPackDisplay(med.storeQuantity, med.packSize)}
+                                {formatInventoryStockDisplay(med.storeQuantity, med.packSize, med.unit)}
                               </span>
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
@@ -784,18 +790,20 @@ export default function HodStorePage() {
                     <div className="grid grid-cols-2 gap-4 text-center mb-3">
                       <div>
                         <p className="text-2xl font-bold text-foreground">
-                          {formatPackDisplay(
+                          {formatInventoryStockDisplay(
                             selectedMedication.storeQuantity,
-                            selectedMedication.packSize
+                            selectedMedication.packSize,
+                            selectedMedication.unit,
                           )}
                         </p>
                         <p className="text-xs text-muted-foreground">Current</p>
                       </div>
                       <div>
                         <p className="text-2xl font-bold text-amber-600">
-                          {formatPackDisplay(
+                          {formatInventoryStockDisplay(
                             selectedMedication.minimumStock,
-                            selectedMedication.packSize
+                            selectedMedication.packSize,
+                            selectedMedication.unit,
                           )}
                         </p>
                         <p className="text-xs text-muted-foreground">Minimum</p>
@@ -842,7 +850,13 @@ export default function HodStorePage() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={showBatchesModal} onOpenChange={setShowBatchesModal}>
+        <Dialog
+          open={showBatchesModal}
+          onOpenChange={(open) => {
+            setShowBatchesModal(open);
+            if (!open) setShowDepletedBatches(false);
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -853,37 +867,69 @@ export default function HodStorePage() {
             </DialogHeader>
             {selectedMedication && (
               <div className="space-y-3">
-                {selectedMedication.batches.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-6">No batches found</p>
-                ) : (
-                  selectedMedication.batches
+                <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-3 py-2">
+                  <label htmlFor="show-depleted-hod-batches" className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      id="show-depleted-hod-batches"
+                      checked={showDepletedBatches}
+                      onCheckedChange={(checked) => setShowDepletedBatches(checked === true)}
+                    />
+                    Show depleted batches (0 stock)
+                  </label>
+                </div>
+                {(() => {
+                  const visibleBatches = selectedMedication.batches
+                    .filter((batch) => showDepletedBatches || Number(batch.quantity) > 0)
                     .slice()
-                    .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)))
-                    .map((batch) => (
-                      <Card key={batch.id}>
+                    .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
+
+                  if (visibleBatches.length === 0) {
+                    return (
+                      <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
+                        {selectedMedication.batches.length === 0
+                          ? "No batches found"
+                          : "No in-stock batches. Enable “Show depleted batches” to view empty batches."}
+                      </div>
+                    );
+                  }
+
+                  return visibleBatches.map((batch) => {
+                    const isDepleted = Number(batch.quantity) <= 0;
+                    return (
+                      <Card key={batch.id} className={isDepleted ? "opacity-75" : undefined}>
                         <CardContent className="p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <Hash className="h-4 w-4 text-muted-foreground" />
                                 <span className="font-semibold">{batch.batch_number}</span>
-                                <Badge variant="outline">Exp: {batch.expiry_date}</Badge>
+                                <Badge variant="outline">Exp: {formatDisplayDate(batch.expiry_date)}</Badge>
+                                {isDepleted ? (
+                                  <Badge variant="secondary" className="text-xs">Depleted</Badge>
+                                ) : null}
                               </div>
                               <div className="text-sm text-muted-foreground mt-1">
                                 Qty:{" "}
                                 <span className="font-medium text-foreground">
-                                  {formatPackDisplay(
+                                  {formatInventoryStockDisplay(
                                     Number(batch.quantity),
-                                    selectedMedication?.packSize
+                                    selectedMedication?.packSize,
+                                    selectedMedication?.unit || batch.unit,
                                   )}
                                 </span>
                               </div>
+                              {formatBatchReceivedMeta(batch) ? (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {formatBatchReceivedMeta(batch)}
+                                </p>
+                              ) : null}
                             </div>
                           </div>
                         </CardContent>
                       </Card>
-                    ))
-                )}
+                    );
+                  });
+                })()}
               </div>
             )}
             <DialogFooter>
@@ -915,7 +961,11 @@ export default function HodStorePage() {
                 <div className="bg-muted/50 rounded-lg p-3 text-sm">
                   <p className="text-muted-foreground">Available stock</p>
                   <p className="font-semibold">
-                    {formatPackDisplay(availableIssueStock, selectedMedication.packSize)}
+                    {formatInventoryStockDisplay(
+                      availableIssueStock,
+                      selectedMedication.packSize,
+                      selectedMedication.unit,
+                    )}
                   </p>
                 </div>
 

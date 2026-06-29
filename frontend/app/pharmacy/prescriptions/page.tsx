@@ -37,6 +37,7 @@ import {
 import {
   toInventoryUnits,
   usesPackQuantityEntry,
+  formatInventoryStockDisplay,
   type QuantityEntryMode,
 } from '@/lib/pharmacy/dispense-quantity';
 import { 
@@ -198,6 +199,33 @@ const resolveGenericIdForBrandSelect = (med: any): number | null => {
     if (id != null && id > 0) return id;
   }
   return null;
+};
+
+/** e.g. Amoxicillin + 500mg → "Amoxicillin 500mg" (fixes jammed names like Amoxicillin500mg). */
+const formatMedicationDisplayName = (med: {
+  name?: string | null;
+  strength?: string | null;
+}): string => {
+  const name = String(med.name || "").trim();
+  const strength = String(med.strength || "").trim();
+  if (!name) return strength;
+  if (!strength) return name;
+  const compactName = name.replace(/\s+/g, "").toLowerCase();
+  const compactStrength = strength.replace(/\s+/g, "").toLowerCase();
+  if (compactName.endsWith(compactStrength)) {
+    const base = name.slice(0, name.length - strength.length).trim() || name.replace(new RegExp(`${strength}$`, "i"), "").trim();
+    return base ? `${base} ${strength}` : name;
+  }
+  if (name.toLowerCase().includes(strength.toLowerCase())) return name;
+  return `${name} ${strength}`;
+};
+
+const formatGenericPresentation = (option: {
+  strength?: string;
+  dosageForm?: string;
+  route?: string;
+}): string => {
+  return [option.strength, option.dosageForm, option.route].filter(Boolean).join(" • ");
 };
 
 /** Batch is expired only if calendar expiry is strictly before today (local). */
@@ -388,6 +416,7 @@ export default function PrescriptionsPage() {
   const brandSelectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const substituteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const brandSelectionGenericIdRef = useRef<number | null>(null);
+  const substituteExcludeGenericIdRef = useRef<number | null>(null);
   const dispensaryBrandSearchSeqRef = useRef(0);
 
   // Print functionality
@@ -838,7 +867,7 @@ export default function PrescriptionsPage() {
         const seq = ++dispensaryBrandSearchSeqRef.current;
 
         const aggregateRows = (items: any[]): SubstituteOption[] => {
-          const byMed = new Map<number, { med: any; stock: number; expiryDate: string; isNearExpiry: boolean }>();
+          const byMed = new Map<number, { med: any; stock: number; unit: string; packSize?: number; expiryDate: string; isNearExpiry: boolean }>();
           for (const item of items) {
             const med = (item as any).medication;
             const medId = typeof med === 'object' && med?.id != null ? Number(med.id) : Number((item as any).medication);
@@ -849,17 +878,25 @@ export default function PrescriptionsPage() {
             const exp = (item as any).expiry_date;
             if (isBatchExpired(exp)) continue;
             const medObj = typeof med === 'object' && med ? med : { id: medId, name: (item as any).medication_name || '', strength: '' };
+            const rowUnit =
+              String(medObj.unit || (item as any).unit || medObj.form || medObj.generic?.unit || "").trim();
+            const rowPackSize = Number(medObj.pack_size);
+            const packSize = Number.isFinite(rowPackSize) && rowPackSize > 0 ? rowPackSize : undefined;
             const existing = byMed.get(medId);
             if (!existing) {
               const daysToExpiry = exp ? Math.ceil((new Date(exp).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
               byMed.set(medId, {
                 med: medObj,
                 stock: qty,
+                unit: rowUnit,
+                packSize,
                 expiryDate: exp ? formatDisplayDate(exp) : '',
                 isNearExpiry: daysToExpiry <= 90,
               });
             } else {
               existing.stock += qty;
+              if (!existing.unit && rowUnit) existing.unit = rowUnit;
+              if (!existing.packSize && packSize) existing.packSize = packSize;
               if (exp) {
                 const existingExp = existing.expiryDate ? new Date(existing.expiryDate) : null;
                 const newExp = new Date(exp);
@@ -873,10 +910,14 @@ export default function PrescriptionsPage() {
           }
           return Array.from(byMed.values())
             .filter(({ stock }) => stock > 0)
-            .map(({ med, stock, expiryDate, isNearExpiry }) => ({
+            .map(({ med, stock, unit, packSize, expiryDate, isNearExpiry }) => ({
               id: String(med.id),
               name: med.name,
               strength: med.strength || med.form || '',
+              dosageForm: med.form || med.dosage_form || med.generic?.dosage_form || '',
+              unit,
+              packSize,
+              route: med.route || med.generic?.route || '',
               type: 'brand' as const,
               stock,
               expiryDate,
@@ -908,12 +949,18 @@ export default function PrescriptionsPage() {
         const results = await pharmacyService.getGenerics({
           ...(search && { search }),
           page: 1,
-          page_size: search ? 50 : 20, // Show more results when no search filter
+          page_size: search ? 50 : 30,
         });
-        const options: SubstituteOption[] = results.results.map((g) => ({
+        const excludeId = substituteExcludeGenericIdRef.current;
+        const options: SubstituteOption[] = results.results
+          .filter((g) => !excludeId || g.id !== excludeId)
+          .map((g) => ({
           id: g.id.toString(),
           name: g.name,
           strength: g.strength || '',
+          dosageForm: g.dosage_form || '',
+          unit: g.unit || '',
+          route: g.route || '',
           type: 'generic' as const,
           stock: 0,
           expiryDate: '',
@@ -974,7 +1021,7 @@ export default function PrescriptionsPage() {
     }
   }, [getCachedMedication, performSubstituteSearch]);
 
-  const openSubstitutionForMed = useCallback((med: any) => {
+  const openSubstitutionForMed = useCallback(async (med: any) => {
     setSubstitutionMed(med);
     setSubstituteSearchResults([]);
     setSubstituteBrandOptions([]);
@@ -987,7 +1034,26 @@ export default function PrescriptionsPage() {
     setSubstituteSearchQuery('');
     brandSelectionGenericIdRef.current = null;
     setShowSubstitutionModal(true);
-  }, []);
+    setIsLoadingSubstitutes(true);
+    try {
+      let genericId = resolveGenericIdForBrandSelect(med);
+      if (!genericId && med.medication) {
+        const medDetail = await getCachedMedication(Number(med.medication));
+        genericId =
+          parseNumericId(medDetail?.generic?.id) ??
+          resolveGenericIdForBrandSelect(medDetail) ??
+          null;
+      }
+      substituteExcludeGenericIdRef.current = genericId;
+      await performSubstituteSearch('', 'substitute');
+    } catch (err) {
+      console.error('Failed to load substitute options:', err);
+      setSubstituteSearchResults([]);
+      toast.error('Failed to load substitute options');
+    } finally {
+      setIsLoadingSubstitutes(false);
+    }
+  }, [getCachedMedication]);
 
   // Load brands when pharmacist selects a generic in Substitute modal
   useEffect(() => {
@@ -1010,6 +1076,9 @@ export default function PrescriptionsPage() {
           id: b.id.toString(),
           name: b.name,
           strength: b.strength || '',
+          dosageForm: b.form || b.dosage_form || b.generic?.dosage_form || '',
+          unit: b.unit || b.generic?.unit || '',
+          packSize: Number.isFinite(Number(b.pack_size)) && Number(b.pack_size) > 0 ? Number(b.pack_size) : undefined,
           type: 'brand' as const,
           stock: Math.round(Number(b.available_stock) || 0),
           expiryDate: '',
@@ -2196,13 +2265,13 @@ export default function PrescriptionsPage() {
                   {(() => {
                     const { activeCount, remainingCount } = summarizeActiveMedications(selectedPrescriptionMedications);
                     return (
-                      <h4 className="font-semibold mb-3 flex items-center gap-2">
-                        <Pill className="h-4 w-4 text-violet-500" />
+                  <h4 className="font-semibold mb-3 flex items-center gap-2">
+                    <Pill className="h-4 w-4 text-violet-500" />
                         Medications ({activeCount})
                         {remainingCount > 0 ? (
                           <span className="text-sm font-normal text-muted-foreground">
                             · {remainingCount} line{remainingCount === 1 ? '' : 's'} remaining
-                          </span>
+                            </span>
                         ) : null}
                       </h4>
                     );
@@ -2360,14 +2429,14 @@ export default function PrescriptionsPage() {
                     const { remainingCount } = summarizeActiveMedications(actionable);
                     return (
                       <h4 className="font-medium mb-3 flex items-center gap-2 flex-wrap">
-                        <Pill className="h-4 w-4 text-violet-500" />
+                    <Pill className="h-4 w-4 text-violet-500" />
                         Medications ({actionable.length})
                         {remainingCount > 0 ? (
                           <span className="text-sm font-normal text-muted-foreground">
                             · {remainingCount} line{remainingCount === 1 ? '' : 's'} to dispense
                           </span>
                         ) : null}
-                      </h4>
+                  </h4>
                     );
                   })()}
                   <div className="border rounded-lg overflow-hidden divide-y">
@@ -2384,7 +2453,7 @@ export default function PrescriptionsPage() {
                       )
                       .map((med) => (
                         <DispenseMedicationLineCard
-                          key={med.id}
+                          key={med.id} 
                           med={med}
                           isSelected={selectedMedications.includes(med.id)}
                           batches={medicationBatches[med.id] || []}
@@ -2400,16 +2469,16 @@ export default function PrescriptionsPage() {
                           onMedToSplit={setMedToSplit}
                           onToggleSelect={(checked) =>
                             handleMedicationSelection(
-                              med.id,
+                                med.id,
                               checked,
                               Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0)),
                             )
                           }
                           onRowActivate={() => {
                             const isSelected = selectedMedications.includes(med.id);
-                            handleMedicationSelection(
-                              med.id,
-                              !isSelected,
+                                  handleMedicationSelection(
+                                    med.id,
+                                    !isSelected,
                               Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0)),
                             );
                           }}
@@ -2517,11 +2586,10 @@ export default function PrescriptionsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-medium">
-                        {substitutionMed.name}
-                        {(substitutionMed as any).strength &&
-                        !String(substitutionMed.name || '').toLowerCase().includes(String((substitutionMed as any).strength || '').toLowerCase()) && (
-                          <span className="font-normal text-muted-foreground ml-1">{(substitutionMed as any).strength}</span>
-                        )}
+                        {formatMedicationDisplayName({
+                          name: substitutionMed.name,
+                          strength: (substitutionMed as any).strength,
+                        })}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {substitutionMed.route}
@@ -2633,7 +2701,8 @@ export default function PrescriptionsPage() {
                                   : 'border-transparent hover:border-amber-300 hover:bg-muted/50'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-medium text-sm">{sub.name}</span>
                                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
@@ -2648,6 +2717,17 @@ export default function PrescriptionsPage() {
                                       Near Expiry
                                     </Badge>
                                   )}
+                                  </div>
+                                  {sub.type === 'generic' && formatGenericPresentation(sub) ? (
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      {formatGenericPresentation(sub)}
+                                    </p>
+                                  ) : null}
+                                  {sub.type === 'brand' && (sub.strength || sub.dosageForm) ? (
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      {formatGenericPresentation(sub)}
+                                    </p>
+                                  ) : null}
                                 </div>
                                 {substitutionForm.selectedSubstitute === sub.id && (
                                   <CheckCircle2 className="h-4 w-4 text-amber-500 flex-shrink-0" />
@@ -2655,7 +2735,12 @@ export default function PrescriptionsPage() {
                               </div>
                               {sub.type !== 'generic' && (
                                 <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                                  <span>Stock: <strong className={(sub.stock || 0) < 50 ? 'text-red-600' : 'text-emerald-600'}>{Math.round(sub.stock || 0).toLocaleString()}</strong></span>
+                                  <span>
+                                    Stock:{' '}
+                                    <strong className={(sub.stock || 0) < 50 ? 'text-red-600' : 'text-emerald-600'}>
+                                      {formatInventoryStockDisplay(sub.stock ?? 0, sub.packSize, sub.unit)}
+                                    </strong>
+                                  </span>
                                   {sub.expiryDate ? (
                                     <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate}</strong></span>
                                   ) : null}
@@ -2669,7 +2754,9 @@ export default function PrescriptionsPage() {
                     </div>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground text-sm">
-                      No generics found{substituteSearchQuery ? ` matching "${substituteSearchQuery}"` : ''}
+                      {substituteSearchQuery.trim().length >= 2
+                        ? `No substitute generics found matching "${substituteSearchQuery}"`
+                        : 'No substitute generics available. Try searching by name.'}
                     </div>
                   )
                 })()}
@@ -2699,8 +2786,15 @@ export default function PrescriptionsPage() {
                                 : 'border-transparent hover:border-emerald-300 hover:bg-muted/50'
                             }`}
                           >
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
                               <span className="font-medium text-sm">{brand.name}</span>
+                                {(brand.strength || brand.dosageForm) ? (
+                                  <p className="text-xs text-muted-foreground mt-0.5">
+                                    {formatGenericPresentation(brand)}
+                                  </p>
+                                ) : null}
+                              </div>
                               {substitutionForm.selectedSubstituteBrand === brand.id && (
                                 <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                               )}
@@ -2713,7 +2807,7 @@ export default function PrescriptionsPage() {
                                     (brand.stock || 0) < 50 ? 'text-red-600' : 'text-emerald-600'
                                   }
                                 >
-                                  {Math.round(brand.stock || 0).toLocaleString()}
+                                  {formatInventoryStockDisplay(brand.stock ?? 0, brand.packSize, brand.unit)}
                                 </strong>
                               </span>
                             </div>
