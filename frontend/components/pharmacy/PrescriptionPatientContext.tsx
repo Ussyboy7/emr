@@ -12,7 +12,6 @@ type PrescriptionLike = {
     name?: string;
     allergies?: string[];
     photo?: string | null;
-    photo?: string | null;
   };
   patient_details?: {
     name?: string;

@@ -8,7 +8,7 @@ import { transformPriority } from '@/lib/services/transformers';
 export interface CompletedRadiologyReport {
   id: string;
   orderId: string;
-  patient: { id: string; name: string; age: number | null; gender: string };
+  patient: { id: string; name: string; age: number | null; gender: string; photo?: string | null };
   patientName: string;
   patientId: string;
   age: number;
@@ -210,7 +210,7 @@ export interface VerificationRadiologyReport {
   id: string;
   orderId: string;
   studyId: string;
-  patient: { id: string; name: string; age: number; gender: string };
+  patient: { id: string; name: string; age: number; gender: string; photo?: string | null };
   doctor: { id: string; name: string; specialty: string };
   study: VerificationRadiologyStudy;
   priority: 'Routine' | 'Urgent' | 'STAT';

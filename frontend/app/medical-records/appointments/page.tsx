@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { AdvancedDateRangeDialog } from "@/components/shared/AdvancedDateRangeDialog";
+import { CustomDateRangeButton } from "@/components/shared/CustomDateRangeButton";
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import {
   formatDisplayDate,

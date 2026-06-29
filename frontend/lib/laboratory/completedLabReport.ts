@@ -83,7 +83,7 @@ export interface CompletedTest {
   /** LabResult.id — required for PDF download (never use ``id`` for download_report). */
   labResultId: string;
   orderId: string;
-  patient: { id: string; name: string; age: number | null; gender: string };
+  patient: { id: string; name: string; age: number | null; gender: string; photo?: string | null };
   doctor: { id: string; name: string; specialty: string };
   testName: string;
   testCode: string;
@@ -257,7 +257,7 @@ export interface VerificationLabResult {
   id: string;
   testId: string;
   orderId: string;
-  patient: { id: string; name: string; age: number; gender: string };
+  patient: { id: string; name: string; age: number; gender: string; photo?: string | null };
   doctor: { id: string; name: string; specialty: string };
   testName: string;
   testCode: string;
