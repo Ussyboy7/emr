@@ -15,17 +15,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { SHEET_SIZES } from "@/components/ui/modal-sizes";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { toast } from "sonner";
 import {
   AlertTriangle,
   ChevronRight,
+  Globe,
   Key,
   Loader2,
   Lock,
@@ -36,10 +38,41 @@ import { adminService, type Role as ApiRole } from "@/lib/services";
 import {
   ALL_PAGE_PERMISSIONS,
   convertPermissionsFromBackend,
+  isGlobalUserPage,
   normalizeRolePagePaths,
   PAGE_MODULE_ORDER,
   type PagePermission,
 } from "@/lib/page-permissions";
+
+type PageGrantStatus = "global" | "granted" | "unassigned";
+
+function pageGrantStatus(pageId: string, grantCount: number): PageGrantStatus {
+  if (isGlobalUserPage(pageId)) return "global";
+  if (grantCount > 0) return "granted";
+  return "unassigned";
+}
+
+function borderClassForStatus(status: PageGrantStatus): string {
+  switch (status) {
+    case "global":
+      return "border-l-sky-500";
+    case "granted":
+      return "border-l-emerald-500";
+    default:
+      return "border-l-rose-500";
+  }
+}
+
+function iconBgForStatus(status: PageGrantStatus): string {
+  switch (status) {
+    case "global":
+      return "bg-sky-500/10 text-sky-600 dark:text-sky-400";
+    case "granted":
+      return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+    default:
+      return "bg-rose-500/10 text-rose-600 dark:text-rose-400";
+  }
+}
 
 type RoleLite = {
   id: number;
@@ -128,8 +161,9 @@ export function PermissionsCatalogTab() {
         if (!haystack.includes(q)) continue;
       }
       const grantCount = rolesByPage.get(page.id)?.length ?? 0;
-      if (usageFilter === "used" && grantCount === 0) continue;
-      if (usageFilter === "unused" && grantCount > 0) continue;
+      const status = pageGrantStatus(page.id, grantCount);
+      if (usageFilter === "used" && status !== "granted") continue;
+      if (usageFilter === "unused" && status !== "unassigned") continue;
       if (!byModule[page.module]) byModule[page.module] = [];
       byModule[page.module].push(page);
     }
@@ -142,9 +176,24 @@ export function PermissionsCatalogTab() {
     return [...known, ...unknown.sort()];
   }, [groupedPages]);
 
-  const totalPages = ALL_PAGE_PERMISSIONS.length;
-  const usedPages = ALL_PAGE_PERMISSIONS.filter((p) => rolesByPage.has(p.id)).length;
-  const unusedPages = totalPages - usedPages;
+  const pageStats = useMemo(() => {
+    let global = 0;
+    let granted = 0;
+    let unassigned = 0;
+    for (const page of ALL_PAGE_PERMISSIONS) {
+      const grantCount = rolesByPage.get(page.id)?.length ?? 0;
+      const status = pageGrantStatus(page.id, grantCount);
+      if (status === "global") global += 1;
+      else if (status === "granted") granted += 1;
+      else unassigned += 1;
+    }
+    return {
+      total: ALL_PAGE_PERMISSIONS.length,
+      global,
+      granted,
+      unassigned,
+    };
+  }, [rolesByPage]);
 
   const emptyRoles = useMemo(
     () => roles.filter((r) => r.is_active && r.pages.length === 0),
@@ -242,6 +291,61 @@ export function PermissionsCatalogTab() {
         </Card>
       )}
 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="border-l-4 border-l-purple-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Pages</p>
+                <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">
+                  {pageStats.total}
+                </p>
+              </div>
+              <Key className="h-8 w-8 text-purple-500 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-emerald-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">On Access Roles</p>
+                <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                  {pageStats.granted}
+                </p>
+              </div>
+              <Lock className="h-8 w-8 text-emerald-500 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-sky-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Global (all users)</p>
+                <p className="text-2xl sm:text-3xl font-bold text-sky-600 dark:text-sky-400">
+                  {pageStats.global}
+                </p>
+              </div>
+              <Globe className="h-8 w-8 text-sky-500 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-rose-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Needs assignment</p>
+                <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">
+                  {pageStats.unassigned}
+                </p>
+              </div>
+              <AlertTriangle className="h-8 w-8 text-rose-500 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
@@ -272,33 +376,16 @@ export function PermissionsCatalogTab() {
                 value={usageFilter}
                 onValueChange={(v) => setUsageFilter(v as typeof usageFilter)}
               >
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-[180px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All usage</SelectItem>
-                  <SelectItem value="used">Granted to ≥ 1 role</SelectItem>
-                  <SelectItem value="unused">Granted to no role</SelectItem>
+                  <SelectItem value="used">On ≥ 1 access role</SelectItem>
+                  <SelectItem value="unused">Needs role assignment</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-muted-foreground">
-            <span>{totalPages} pages</span>
-            <span>·</span>
-            <span>
-              <span className="font-medium text-emerald-700 dark:text-emerald-400">
-                {usedPages}
-              </span>{" "}
-              granted somewhere
-            </span>
-            <span>·</span>
-            <span>
-              <span className="font-medium text-rose-700 dark:text-rose-400">
-                {unusedPages}
-              </span>{" "}
-              not granted to any role
-            </span>
           </div>
         </CardContent>
       </Card>
@@ -328,125 +415,152 @@ export function PermissionsCatalogTab() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {orderedModules.map((moduleName) => {
             const pages = groupedPages[moduleName] || [];
             return (
-              <Card key={moduleName}>
-                <CardContent className="p-0">
-                  <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b bg-muted/30">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Shield className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-semibold truncate">{moduleName}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {pages.length} page{pages.length === 1 ? "" : "s"}
-                      </Badge>
-                    </div>
-                  </div>
-                  <ul className="divide-y">
-                    {pages.map((page) => {
-                      const granters = rolesByPage.get(page.id) ?? [];
-                      const grantCount = granters.length;
-                      return (
-                        <li key={page.id}>
-                          <button
-                            type="button"
-                            onClick={() => openPanel(page)}
-                            className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
-                          >
+              <div key={moduleName} className="space-y-3">
+                <div className="flex items-center gap-2 px-1">
+                  <Shield className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="font-semibold text-foreground">{moduleName}</h3>
+                  <Badge variant="secondary" className="text-xs">
+                    {pages.length} page{pages.length === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+                <div className="space-y-3">
+                  {pages.map((page) => {
+                    const granters = rolesByPage.get(page.id) ?? [];
+                    const grantCount = granters.length;
+                    const status = pageGrantStatus(page.id, grantCount);
+                    const StatusIcon =
+                      status === "global" ? Globe : status === "granted" ? Lock : AlertTriangle;
+                    return (
+                      <Card
+                        key={page.id}
+                        className={`border-l-4 hover:shadow-md transition-shadow cursor-pointer ${borderClassForStatus(status)}`}
+                        onClick={() => openPanel(page)}
+                      >
+                        <CardContent className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${iconBgForStatus(status)}`}
+                            >
+                              <StatusIcon className="h-4 w-4" />
+                            </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-medium truncate">{page.name}</span>
-                                <code className="text-[11px] text-muted-foreground font-mono truncate">
-                                  {page.id}
-                                </code>
-                                {grantCount === 0 ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] border-rose-300 text-rose-700 dark:text-rose-400"
-                                  >
-                                    No role
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="secondary" className="text-[10px]">
-                                    <Lock className="h-3 w-3 mr-1" />
-                                    {grantCount} role{grantCount === 1 ? "" : "s"}
-                                  </Badge>
-                                )}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                  <span className="font-semibold text-foreground truncate">
+                                    {page.name}
+                                  </span>
+                                  {status === "global" ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] px-1.5 py-0 border-sky-300 text-sky-700 dark:text-sky-400"
+                                    >
+                                      Global
+                                    </Badge>
+                                  ) : grantCount === 0 ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] px-1.5 py-0 border-rose-300 text-rose-700 dark:text-rose-400"
+                                    >
+                                      Needs role
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                      {grantCount} role{grantCount === 1 ? "" : "s"}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                               </div>
-                              {page.description ? (
-                                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                                  {page.description}
-                                </p>
-                              ) : null}
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                <code className="font-mono text-[11px]">{page.id}</code>
+                                {page.description ? (
+                                  <>
+                                    <span>•</span>
+                                    <span className="truncate">{page.description}</span>
+                                  </>
+                                ) : null}
+                              </div>
                               {grantCount > 0 ? (
                                 <div className="mt-1.5 flex flex-wrap gap-1">
                                   {granters.slice(0, 6).map((r) => (
                                     <Badge
                                       key={r.id}
                                       variant="outline"
-                                      className={`text-[10px] ${
-                                        r.is_active ? "" : "opacity-60"
-                                      }`}
+                                      className={`text-[10px] ${r.is_active ? "" : "opacity-60"}`}
                                     >
                                       {r.name}
                                     </Badge>
                                   ))}
                                   {granters.length > 6 ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px] text-muted-foreground"
-                                    >
+                                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
                                       +{granters.length - 6} more
                                     </Badge>
                                   ) : null}
                                 </div>
                               ) : null}
                             </div>
-                            <ChevronRight className="h-4 w-4 text-muted-foreground self-center flex-shrink-0" />
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </CardContent>
-              </Card>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
             );
           })}
         </div>
       )}
 
-      <Sheet open={activePage != null} onOpenChange={(o) => !o && closePanel()}>
-        <SheetContent side="right" className={SHEET_SIZES.lg}>
+      <Dialog open={activePage != null} onOpenChange={(o) => !o && closePanel()}>
+        <DialogContent className={MODAL_SIZES.lg}>
           {activePage ? (
             <>
-              <SheetHeader>
-                <SheetTitle className="flex items-center gap-2">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
                   <Key className="h-4 w-4 text-purple-500" />
                   {activePage.name}
-                </SheetTitle>
-                <SheetDescription className="space-y-2">
-                  <code className="text-[11px] font-mono block">{activePage.id}</code>
-                  {activePage.description ? (
-                    <span className="text-xs">{activePage.description}</span>
-                  ) : null}
-                  <span className="block text-xs">
-                    Module: <span className="font-medium">{activePage.module}</span>
-                  </span>
-                </SheetDescription>
-              </SheetHeader>
+                </DialogTitle>
+                <DialogDescription asChild>
+                  <div className="space-y-1 text-left">
+                    <code className="text-[11px] font-mono block text-muted-foreground">
+                      {activePage.id}
+                    </code>
+                    {activePage.description ? (
+                      <span className="text-xs block">{activePage.description}</span>
+                    ) : null}
+                    <span className="text-xs block">
+                      Module: <span className="font-medium text-foreground">{activePage.module}</span>
+                    </span>
+                  </div>
+                </DialogDescription>
+              </DialogHeader>
 
-              <div className="mt-4 space-y-3">
+              <div className="space-y-3">
+                {isGlobalUserPage(activePage.id) ? (
+                  <Card className="border-l-4 border-l-sky-500 bg-sky-50/40 dark:bg-sky-950/10">
+                    <CardContent className="p-3 text-xs text-muted-foreground">
+                      This page is <span className="font-medium text-foreground">global</span> — every
+                      signed-in user can open it without an access role. Role ticks below are optional
+                      (catalog only).
+                    </CardContent>
+                  </Card>
+                ) : null}
                 <p className="text-sm font-medium">
                   Tick the access roles that should grant this page:
                 </p>
-                <div className="border rounded-lg divide-y max-h-[60vh] overflow-y-auto">
+                <div className="border rounded-lg divide-y max-h-[50vh] overflow-y-auto">
                   {roles.length === 0 ? (
                     <div className="p-4 text-sm text-muted-foreground text-center">
                       No access roles exist yet.
                     </div>
                   ) : (
-                    roles.map((role) => {
+                    roles
+                      .filter((role) => role.is_active || pendingRoleIds.has(role.id))
+                      .map((role) => {
                       const checked = pendingRoleIds.has(role.id);
                       return (
                         <label
@@ -485,27 +599,25 @@ export function PermissionsCatalogTab() {
                     })
                   )}
                 </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t">
-                  <Button variant="outline" onClick={closePanel} disabled={saving}>
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={() => void savePanel()}
-                    disabled={saving}
-                    className="bg-purple-600 hover:bg-purple-700"
-                  >
-                    {saving ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : null}
-                    Save changes
-                  </Button>
-                </div>
               </div>
+
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={closePanel} disabled={saving}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void savePanel()}
+                  disabled={saving}
+                  className="bg-purple-600 hover:bg-purple-700"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  Save changes
+                </Button>
+              </DialogFooter>
             </>
           ) : null}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

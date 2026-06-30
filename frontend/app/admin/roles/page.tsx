@@ -489,13 +489,6 @@ export default function RolesPermissionsPage() {
           <Button onClick={openCreate} className="bg-purple-600 hover:bg-purple-700 text-white"><Plus className="h-4 w-4 mr-2" />Create Access Role</Button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Roles</p><p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{roleStats.total}</p></div><Shield className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Roles</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{roleStats.active}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Clinical Roles</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{roleStats.clinical}</p></div><Stethoscope className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Users with Roles</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{roleStats.totalUsers}</p></div><Users className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
-        </div>
-
         {/* Main Content Tabs */}
         <Tabs defaultValue="access-roles" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
@@ -515,6 +508,12 @@ export default function RolesPermissionsPage() {
 
           {/* Access Roles Tab */}
           <TabsContent value="access-roles" className="space-y-4 mt-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Roles</p><p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{roleStats.total}</p></div><Shield className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
+              <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Roles</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{roleStats.active}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
+              <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Clinical Roles</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{roleStats.clinical}</p></div><Stethoscope className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
+              <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Users with Roles</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{roleStats.totalUsers}</p></div><Users className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
+            </div>
             {/* Trap-detector: any active role granting zero pages locks its
                 users out of the EMR with the "Access not configured" screen.
                 Surface them here with a one-click jump to Edit so admins
@@ -716,17 +715,22 @@ export default function RolesPermissionsPage() {
 
               <div className="grid gap-3">
                 {allSystemRoles.map(role => (
-                  <Card key={role.id} className={`border-l-4 ${role.is_active ? 'border-l-green-500' : 'border-l-gray-400'}`}>
+                  <Card key={role.id} className={`border-l-4 hover:shadow-md transition-shadow ${role.is_active ? 'border-l-emerald-500' : 'border-l-gray-400'} ${!role.is_active ? 'opacity-60' : ''}`}>
                     <CardContent className="py-3 px-4">
                       <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h4 className="font-medium">{role.name}</h4>
-                            {!role.is_active && <Badge variant="secondary" className="text-xs">Inactive</Badge>}
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${role.is_active ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                            <UserCog className="h-4 w-4" />
                           </div>
-                          <p className="text-sm text-muted-foreground">{role.description || 'No description'}</p>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className="font-medium">{role.name}</h4>
+                              {!role.is_active && <Badge variant="secondary" className="text-xs">Inactive</Badge>}
+                            </div>
+                            <p className="text-sm text-muted-foreground">{role.description || 'No description'}</p>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           <Button variant="ghost" size="sm" onClick={() => openSystemRoleDialog(role)}>
                             <Edit className="h-4 w-4" />
                           </Button>

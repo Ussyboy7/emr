@@ -29,7 +29,12 @@ REQUIRED_PAGES_BY_ROLE_NAME: dict[str, tuple[str, ...]] = {
         "/medical-records/reports/lab-statistics",
         "/medical-records/reports/patient-demographics",
     ),
-    "System Administrator": ("/admin/health", "/admin/support-tickets"),
+    "Radiologist": ("/radiology/analytics",),
+    "System Administrator": (
+        "/admin/health",
+        "/admin/support-tickets",
+        "/radiology/analytics",
+    ),
 }
 
 

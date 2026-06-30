@@ -10,7 +10,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   // Overview (Global EMR)
   { id: "/dashboard", name: "Overview Dashboard", description: "Global EMR overview dashboard", module: "Overview" },
 
-  // Global User Features (available to all authenticated users)
+// Global User Features (available to all authenticated users)
   { id: "/notifications", name: "Notifications", description: "View and manage notifications", module: "User" },
   { id: "/settings", name: "Settings", description: "User settings and preferences", module: "User" },
   { id: "/help", name: "Help & Support", description: "Help and support resources", module: "User" },
@@ -195,6 +195,19 @@ export const PAGE_MODULE_ORDER = [
   "Analytics",
   "Administration",
 ] as const;
+
+/** Auto-granted to every signed-in user (keep in sync with backend `GLOBAL_USER_PAGES`). */
+export const GLOBAL_USER_PAGE_IDS = new Set<string>([
+  "/notifications",
+  "/settings",
+  "/help",
+  "/help/tickets",
+  "/help/docs",
+]);
+
+export function isGlobalUserPage(pageId: string): boolean {
+  return GLOBAL_USER_PAGE_IDS.has(normalizeRolePagePath(pageId));
+}
 
 /** Role.permissions from API — array of paths or legacy `{ pages: string[] }`. */
 export function convertPermissionsFromBackend(

@@ -179,11 +179,7 @@ export default function ClinicDepartmentPage() {
     is_active: true,
   });
 
-  const loadData = async (
-    roleCounts: Record<string, number> = {},
-    clinicalRoles: Set<string> = clinicalSystemRoleNames,
-    tab: ClinicTab = activeTab,
-  ) => {
+  const loadData = async (tab: ClinicTab = activeTab) => {
     try {
       const needClinics = tab === 'facilities';
       const needDepts = tab === 'departments';
@@ -264,42 +260,44 @@ export default function ClinicDepartmentPage() {
     }
   }, []);
 
-  useEffect(() => {
-    const loadAllData = async () => {
-      let counts: Record<string, number> = {};
-      let clinical: Set<string> = clinicalSystemRoleNames;
-      try {
-        const [userStats, systemRolesRaw] = await Promise.all([
-          adminService.getUserStats().catch((err) => {
-            console.error('Error loading user stats:', err);
-            return null;
-          }),
-          adminService.getSystemRoles().catch((err) => {
-            console.error('Error loading system roles:', err);
-            return null;
-          }),
-        ]);
-        counts = userStats?.by_system_role || {};
-        setUserRoleCounts(counts);
+  const loadStaffKpiBootstrap = useCallback(async () => {
+    try {
+      const [userStats, systemRolesRaw] = await Promise.all([
+        adminService.getUserStats().catch((err) => {
+          console.error('Error loading user stats:', err);
+          return null;
+        }),
+        adminService.getSystemRoles().catch((err) => {
+          console.error('Error loading system roles:', err);
+          return null;
+        }),
+      ]);
+      setUserRoleCounts(userStats?.by_system_role || {});
 
-        if (systemRolesRaw) {
-          const rows = parseSystemRolesResponse(systemRolesRaw);
-          clinical = new Set(
+      if (systemRolesRaw) {
+        const rows = parseSystemRolesResponse(systemRolesRaw);
+        setClinicalSystemRoleNames(
+          new Set(
             rows
               .filter((r) => r.is_active && !NON_CLINICAL_SYSTEM_ROLE_NAMES.has(r.name))
               .map((r) => r.name),
-          );
-          setClinicalSystemRoleNames(clinical);
-        }
-      } catch (err: any) {
-        console.error('Error loading bootstrap stats:', err);
+          ),
+        );
       }
+    } catch (err: unknown) {
+      console.error('Error loading bootstrap stats:', err);
+    }
+  }, []);
 
-      await loadData(counts, clinical, activeTab);
-    };
+  useEffect(() => {
     if (!ready) return;
-    loadAllData();
-    // clinicalSystemRoleNames intentionally omitted: we read & set it inside.
+    void loadStaffKpiBootstrap();
+    void loadKpiStats();
+  }, [ready, loadStaffKpiBootstrap, loadKpiStats]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadData(activeTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, currentPage, itemsPerPage, debouncedSearch, statusFilter, activeTab]);
 
@@ -309,10 +307,6 @@ export default function ClinicDepartmentPage() {
     params.set('tab', activeTab);
     router.replace(`?${params.toString()}`, { scroll: false });
   }, [activeTab, router, searchParams]);
-
-  useEffect(() => {
-    void loadKpiStats();
-  }, [loadKpiStats]);
 
   const departmentsWithStaffCounts = departments;
 
@@ -530,7 +524,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Facility "${clinicForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetClinicForm();
-      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
+      await Promise.all([loadData(), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create clinic');
       console.error('Error creating clinic:', err);
@@ -560,7 +554,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedClinic(null);
       resetClinicForm();
-      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
+      await Promise.all([loadData(), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update clinic');
       console.error('Error updating clinic:', err);
@@ -579,7 +573,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Clinic "${selectedClinic.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedClinic(null);
-      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
+      await Promise.all([loadData(), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete clinic');
       console.error('Error deleting clinic:', err);
@@ -613,7 +607,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${deptForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetDeptForm();
-      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
+      await Promise.all([loadData(), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create department');
       console.error('Error creating department:', err);
@@ -646,7 +640,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedDepartment(null);
       resetDeptForm();
-      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
+      await Promise.all([loadData(), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update department');
       console.error('Error updating department:', err);
@@ -665,7 +659,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${selectedDepartment.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedDepartment(null);
-      await Promise.all([loadData(userRoleCounts), loadKpiStats()]);
+      await Promise.all([loadData(), loadKpiStats()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete department');
       console.error('Error deleting department:', err);
@@ -898,7 +892,7 @@ export default function ClinicDepartmentPage() {
           )}
 
           <TabsContent value="facilities">
-            {loading ? (
+            {loading && clinics.length === 0 ? (
               <Card className="mt-4">
                 <CardContent className="p-8 text-center text-muted-foreground">
                   <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
@@ -906,7 +900,7 @@ export default function ClinicDepartmentPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3 mt-4">
+              <div className={`space-y-3 mt-4 ${loading ? 'opacity-60 pointer-events-none' : ''}`}>
                 {clinics.map((clinic) => (
                 <Card key={clinic.id} className={`border-l-4 hover:shadow-md transition-shadow ${clinic.isActive ? 'border-l-teal-500' : 'border-l-gray-500'} ${!clinic.isActive ? 'opacity-60' : ''}`}>
                   <CardContent className="py-3 px-4">
@@ -964,7 +958,7 @@ export default function ClinicDepartmentPage() {
           </TabsContent>
 
           <TabsContent value="departments">
-            {loading ? (
+            {loading && departments.length === 0 ? (
               <Card className="mt-4">
                 <CardContent className="p-8 text-center text-muted-foreground">
                   <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
@@ -972,7 +966,7 @@ export default function ClinicDepartmentPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3 mt-4">
+              <div className={`space-y-3 mt-4 ${loading ? 'opacity-60 pointer-events-none' : ''}`}>
                 {departments.map((dept) => (
                 <Card key={dept.id} className={`border-l-4 hover:shadow-md transition-shadow ${dept.isActive ? 'border-l-blue-500' : 'border-l-gray-500'} ${!dept.isActive ? 'opacity-60' : ''}`}>
                   <CardContent className="py-3 px-4">
