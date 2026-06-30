@@ -284,6 +284,10 @@ class PatientAdmission(models.Model):
     admission_date = models.DateTimeField(default=timezone.now)
     admission_diagnosis = models.TextField(help_text="Primary diagnosis for admission")
     presenting_complaint = models.TextField(blank=True)
+    admission_instructions = models.TextField(
+        blank=True,
+        help_text="Doctor instructions for nursing at admission (observation handoff)",
+    )
     admission_notes = models.TextField(blank=True)
 
     # Current status
@@ -540,7 +544,7 @@ class AdmissionObservationVital(models.Model):
     bp_diastolic = models.PositiveSmallIntegerField(null=True, blank=True)
     fbs_mmol = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     rbs_mmol = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    notes = models.CharField(max_length=500, blank=True)
+    notes = models.TextField(blank=True)
     recorded_by = models.ForeignKey(
         "accounts.User",
         on_delete=models.SET_NULL,

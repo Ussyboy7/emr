@@ -60,7 +60,7 @@ interface AnnualCheckupPanelProps {
   patientBloodGroup?: string;
   patientGenotype?: string;
   consultationSessionId?: number | null;
-  systemRole?: string | null;
+  capabilities?: string[] | null;
   isSuperuser?: boolean;
   onSignedOff?: () => void;
   onNavigateTab?: (tab: string) => void;
@@ -69,9 +69,9 @@ interface AnnualCheckupPanelProps {
   readOnly?: boolean;
 }
 
-function canSignOffAnnualCheckup(systemRole?: string | null, isSuperuser?: boolean): boolean {
+function canSignOffAnnualCheckup(capabilities?: string[] | null, isSuperuser?: boolean): boolean {
   if (isSuperuser) return true;
-  return systemRole === "Medical Doctor";
+  return (capabilities ?? []).includes('annual_checkup_signoff');
 }
 
 const COMPLETION_HINTS: Record<string, string> = {
@@ -105,7 +105,7 @@ export function AnnualCheckupPanel({
   patientBloodGroup,
   patientGenotype,
   consultationSessionId,
-  systemRole,
+  capabilities,
   isSuperuser,
   onSignedOff,
   onNavigateTab,
@@ -131,7 +131,7 @@ export function AnnualCheckupPanel({
   const [recordGenotype, setRecordGenotype] = useState("");
   const [savingRecord, setSavingRecord] = useState(false);
 
-  const doctor = canSignOffAnnualCheckup(systemRole, isSuperuser);
+  const doctor = canSignOffAnnualCheckup(capabilities, isSuperuser);
   const numericVisitId = visitId ? Number(visitId) : NaN;
 
   const loadCheckup = useCallback(async () => {

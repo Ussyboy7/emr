@@ -1,8 +1,9 @@
 """API tests: admission filter on nursing orders and finalized order updates."""
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -113,3 +114,75 @@ class NursingOrderAdmissionApiTests(TestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         order.refresh_from_db()
         self.assertEqual(order.status, "cancelled")
+
+    def test_for_admission_excludes_unlinked_visit_orders(self):
+        orphan = NursingOrder.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            order_type="injection",
+            description="Ceftriaxone 1g IM",
+            ordered_by=self.user,
+            created_by=self.user,
+            ordered_at=timezone.now(),
+        )
+        self.assertIsNone(orphan.admission_id)
+
+        url = f"/api/v1/nursing/orders/?for_admission={self.admission.id}"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        ids = {r["id"] for r in res.data.get("results", [])}
+        self.assertNotIn(orphan.id, ids)
+
+    def test_for_admission_excludes_pre_admission_orders(self):
+        early = NursingOrder.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            admission=self.admission,
+            order_type="dressing",
+            description="Pre-stay dressing",
+            ordered_by=self.user,
+            created_by=self.user,
+        )
+        NursingOrder.objects.filter(pk=early.pk).update(
+            ordered_at=self.admission.admission_date - timedelta(hours=2),
+        )
+
+        url = f"/api/v1/nursing/orders/?for_admission={self.admission.id}"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        ids = {r["id"] for r in res.data.get("results", [])}
+        self.assertNotIn(early.id, ids)
+
+    def test_create_auto_links_active_admission(self):
+        payload = {
+            "patient": self.patient.id,
+            "visit": self.visit.id,
+            "order_type": "injection",
+            "description": "Vitamin B12 IM",
+            "status": "pending",
+            "priority": "medium",
+        }
+        res = self.client.post("/api/v1/nursing/orders/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data["admission"], self.admission.id)
+
+    def test_create_rejects_admission_patient_mismatch(self):
+        other_patient = Patient.objects.create(
+            patient_id="WOTEST-PT-002",
+            surname="Other",
+            first_name="Patient",
+            gender="female",
+            date_of_birth=date(1992, 2, 2),
+        )
+        payload = {
+            "patient": other_patient.id,
+            "visit": self.visit.id,
+            "admission": self.admission.id,
+            "order_type": "injection",
+            "description": "Wrong patient link",
+            "status": "pending",
+            "priority": "medium",
+        }
+        res = self.client.post("/api/v1/nursing/orders/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("admission", res.data)

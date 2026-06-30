@@ -8,6 +8,8 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from patients.photo import patient_photo_url
+from .handoff import is_informational_handoff_order
+from .admission_orders import resolve_active_admission
 from .models import NursingOrder, Procedure
 
 
@@ -53,6 +55,43 @@ class NursingOrderSerializer(serializers.ModelSerializer):
         model = NursingOrder
         fields = '__all__'
         read_only_fields = ['order_id', 'ordered_at']
+
+    def validate(self, attrs):
+        admission = attrs.get('admission')
+        patient = attrs.get('patient')
+        if self.instance:
+            if admission is None:
+                admission = self.instance.admission
+            if patient is None:
+                patient = self.instance.patient
+
+        if admission and patient:
+            admission_patient_id = getattr(admission, 'patient_id', None)
+            patient_id = getattr(patient, 'id', patient)
+            if admission_patient_id and int(patient_id) != int(admission_patient_id):
+                raise serializers.ValidationError(
+                    {'admission': 'Nursing order patient must match the admission patient.'},
+                )
+        return attrs
+
+    def create(self, validated_data):
+        if is_informational_handoff_order(
+            validated_data.get('order_type'),
+            validated_data.get('description'),
+        ):
+            validated_data['is_informational'] = True
+
+        if not validated_data.get('admission'):
+            patient = validated_data.get('patient')
+            visit = validated_data.get('visit')
+            patient_id = getattr(patient, 'id', patient)
+            visit_id = getattr(visit, 'id', visit)
+            if patient_id and visit_id:
+                active = resolve_active_admission(patient_id=int(patient_id), visit_id=int(visit_id))
+                if active:
+                    validated_data['admission'] = active
+
+        return super().create(validated_data)
 
     def validate_order_type(self, value):
         """Normalize legacy/new observation admission order type names."""

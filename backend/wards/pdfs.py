@@ -234,6 +234,8 @@ def build_admission_summary_pdf(admission) -> bytes:
     story.append(_kv("Diagnosis", admission.admission_diagnosis or "—"))
     if admission.presenting_complaint:
         story.append(_kv("Presenting complaint", admission.presenting_complaint))
+    if admission.admission_instructions:
+        story.append(_kv("Instructions", admission.admission_instructions))
     if admission.admission_notes:
         story.append(_kv("Notes", admission.admission_notes))
 
@@ -671,9 +673,13 @@ def _kv(label: str, value: str) -> Paragraph:
 def _load_nursing_orders(admission) -> list[dict]:
     try:
         from nursing.models import NursingOrder
+        from nursing.admission_orders import filter_orders_for_admission
     except Exception:
         return []
-    qs = NursingOrder.objects.filter(admission=admission).order_by("ordered_at")
+    qs = filter_orders_for_admission(
+        NursingOrder.objects.all(),
+        admission.pk,
+    ).order_by("ordered_at")
     return [
         {
             "order_type": getattr(o, "order_type", "") or "",

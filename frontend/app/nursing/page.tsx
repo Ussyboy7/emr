@@ -22,8 +22,10 @@ import {
   Loader2,
   BarChart3,
   DoorOpen,
+  Building2,
 } from "lucide-react";
 import { useNursingPageAuth } from "@/hooks/use-nursing-page-auth";
+import { canNavigateToPage } from "@/lib/can-navigate-to-page";
 import { useServerToday } from "@/hooks/use-server-today";
 import {
   nursingService,
@@ -51,7 +53,7 @@ const defaultDashboard: NursingDashboardData = {
 export default function NursingDashboardPage() {
   const router = useRouter();
   const serverToday = useServerToday();
-  const { ready, handleAuthError } = useNursingPageAuth();
+  const { ready, currentUser, handleAuthError } = useNursingPageAuth();
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState<NursingDashboardData>(defaultDashboard);
 
@@ -73,6 +75,27 @@ export default function NursingDashboardPage() {
     if (!ready) return;
     void loadDashboard();
   }, [ready, loadDashboard]);
+
+  const quickNav = useMemo(() => {
+    if (!currentUser) {
+      return {
+        poolQueue: false,
+        vitalsHistory: false,
+        procedures: false,
+        wardCare: false,
+        roomQueue: false,
+        analytics: false,
+      };
+    }
+    return {
+      poolQueue: canNavigateToPage(currentUser, '/nursing/pool-queue'),
+      vitalsHistory: canNavigateToPage(currentUser, '/nursing/vitals-history'),
+      procedures: canNavigateToPage(currentUser, '/nursing/procedures'),
+      wardCare: canNavigateToPage(currentUser, '/nursing/wards'),
+      roomQueue: canNavigateToPage(currentUser, '/nursing/room-queue'),
+      analytics: canNavigateToPage(currentUser, '/nursing/analytics'),
+    };
+  }, [currentUser]);
 
   const { metrics, pendingTasks, recentActivities, criticalAlerts, poolQueueCount, roomQueueCount } =
     dashboard;
@@ -231,7 +254,8 @@ export default function NursingDashboardPage() {
             <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
             Quick Actions
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            {quickNav.poolQueue ? (
             <Button
               onClick={() => router.push("/nursing/pool-queue")}
               className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white border-l-4 border-l-white/20"
@@ -247,6 +271,8 @@ export default function NursingDashboardPage() {
               <span className="text-xs sm:text-sm font-medium">Pool Queue</span>
               <span className="text-[10px] sm:text-xs opacity-90">Patient assignments</span>
             </Button>
+            ) : null}
+            {quickNav.vitalsHistory ? (
             <Button
               onClick={() => router.push("/nursing/vitals-history")}
               variant="outline"
@@ -256,6 +282,8 @@ export default function NursingDashboardPage() {
               <span className="text-xs sm:text-sm font-medium">Vitals History</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">View recorded vitals</span>
             </Button>
+            ) : null}
+            {quickNav.procedures ? (
             <Button
               onClick={() => router.push("/nursing/procedures")}
               variant="outline"
@@ -265,6 +293,19 @@ export default function NursingDashboardPage() {
               <span className="text-xs sm:text-sm font-medium">Procedures</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Nursing orders & tasks</span>
             </Button>
+            ) : null}
+            {quickNav.wardCare ? (
+            <Button
+              onClick={() => router.push("/nursing/wards")}
+              variant="outline"
+              className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-indigo-500"
+            >
+              <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-indigo-500 dark:text-indigo-400" />
+              <span className="text-xs sm:text-sm font-medium">Ward Care</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Inpatients, orders & vitals</span>
+            </Button>
+            ) : null}
+            {quickNav.roomQueue ? (
             <Button
               onClick={() => router.push("/nursing/room-queue")}
               variant="outline"
@@ -281,6 +322,8 @@ export default function NursingDashboardPage() {
               <span className="text-xs sm:text-sm font-medium">Room Queue</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Room assignments</span>
             </Button>
+            ) : null}
+            {quickNav.analytics ? (
             <Button
               onClick={() => router.push("/nursing/analytics")}
               variant="outline"
@@ -290,6 +333,7 @@ export default function NursingDashboardPage() {
               <span className="text-xs sm:text-sm font-medium">Analytics</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Pool metrics</span>
             </Button>
+            ) : null}
           </div>
         </div>
 

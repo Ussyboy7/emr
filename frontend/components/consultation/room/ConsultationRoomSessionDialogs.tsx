@@ -28,6 +28,7 @@ import type { ConsultationRoom, ConsultationRoomPatient } from '@/lib/consultati
 import type { PausedDuplicateStartDialogState } from '@/hooks/use-consultation-room-session';
 import { formatDisplayDateTime, todayApiDateString } from '@/lib/dates';
 import {
+  AlertTriangle,
   CheckCircle,
   Clock,
   FileText,
@@ -144,6 +145,15 @@ export function ConsultationRoomSessionDialogs({
           </AlertDialogHeader>
 
           <div className="space-y-6 my-6">
+            {draftObservationCount > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                <p className="text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  This will now hand off the patient to Nursing/Ward observation and complete this consultation session.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-3">
               <div className="flex items-center space-x-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-200 dark:border-blue-800">
                 <input

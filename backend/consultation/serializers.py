@@ -2,6 +2,7 @@
 Serializers for the Consultation app.
 """
 from rest_framework import serializers
+from django.db import IntegrityError
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from .models import (
@@ -412,6 +413,52 @@ class DiagnosisSerializer(serializers.ModelSerializer):
             'correction_reason',
             'correction_notes',
         ]
+        validators = []
+
+    def _duplicate_visit_diagnosis_exists(self, *, patient, visit, icd10_code, exclude_pk=None):
+        patient_id = getattr(patient, 'pk', patient)
+        icd10_code_id = getattr(icd10_code, 'pk', icd10_code)
+        visit_id = getattr(visit, 'pk', visit) if visit is not None else None
+
+        qs = Diagnosis.objects.filter(
+            patient_id=patient_id,
+            icd10_code_id=icd10_code_id,
+        )
+        if visit_id is None:
+            qs = qs.filter(visit__isnull=True)
+        else:
+            qs = qs.filter(visit_id=visit_id)
+        if exclude_pk is not None:
+            qs = qs.exclude(pk=exclude_pk)
+        return qs.exists()
+
+    def validate(self, attrs):
+        patient = attrs.get('patient') or getattr(self.instance, 'patient', None)
+        visit = attrs.get('visit', getattr(self.instance, 'visit', None) if self.instance else None)
+        icd10_code = attrs.get('icd10_code') or getattr(self.instance, 'icd10_code', None)
+
+        if patient is not None and icd10_code is not None:
+            exclude_pk = self.instance.pk if self.instance else None
+            if self._duplicate_visit_diagnosis_exists(
+                patient=patient,
+                visit=visit,
+                icd10_code=icd10_code,
+                exclude_pk=exclude_pk,
+            ):
+                raise serializers.ValidationError(
+                    {'icd10_code': 'This ICD-10 code is already recorded for this visit.'}
+                )
+        return attrs
+
+    def create(self, validated_data):
+        try:
+            return super().create(validated_data)
+        except IntegrityError as exc:
+            if 'diagnoses' in str(exc).lower() or 'unique' in str(exc).lower():
+                raise serializers.ValidationError(
+                    {'icd10_code': 'This ICD-10 code is already recorded for this visit.'}
+                ) from exc
+            raise
 
     def _icd10_details(self, icd):
         if not icd:

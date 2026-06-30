@@ -391,6 +391,18 @@ class AdmissionCreateTests(WardsSetupMixin, APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["admission_type"], "emergency")
 
+    def test_create_admission_with_bed_occupies_bed(self):
+        resp = self.client.post(
+            ADMISSIONS_URL,
+            self._admission_payload(bed=self.bed.pk),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.bed.refresh_from_db()
+        self.assertEqual(self.bed.status, "occupied")
+        self.assertEqual(self.bed.current_patient_id, self.patient.pk)
+        self.assertEqual(resp.data["bed"], self.bed.pk)
+
 
 class AdmissionRetrieveTests(WardsSetupMixin, APITestCase):
     """GET /api/v1/admissions/{id}/"""
@@ -624,9 +636,43 @@ class TransferTests(WardsSetupMixin, APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         admission.refresh_from_db()
-        self.assertEqual(admission.status, "transferred")
+        self.assertEqual(admission.status, "admitted")
+        self.assertEqual(admission.ward_id, self.ward2.pk)
         self.assertEqual(admission.transfer_to_ward_id, self.ward2.pk)
         self.assertEqual(admission.transfer_reason, "Requires surgical intervention")
+        self.assertIsNone(admission.bed_id)
+
+    def test_transfer_frees_bed_and_moves_patient_to_new_ward(self):
+        admission = self._create_admission(bed=self.bed)
+        self.bed.status = "occupied"
+        self.bed.current_patient = self.patient
+        self.bed.save()
+
+        resp = self.client.post(
+            f"{ADMISSIONS_URL}{admission.pk}/transfer/",
+            {
+                "new_ward_id": self.ward2.pk,
+                "transfer_reason": "Step-down",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        admission.refresh_from_db()
+        self.bed.refresh_from_db()
+        self.assertEqual(admission.ward_id, self.ward2.pk)
+        self.assertEqual(admission.status, "admitted")
+        self.assertIsNone(admission.bed_id)
+        self.assertEqual(self.bed.status, "available")
+        self.assertIsNone(self.bed.current_patient_id)
+
+    def test_transfer_same_ward_returns_400(self):
+        admission = self._create_admission()
+        resp = self.client.post(
+            f"{ADMISSIONS_URL}{admission.pk}/transfer/",
+            {"new_ward_id": self.ward.pk},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_transfer_requires_new_ward_id(self):
         admission = self._create_admission()
@@ -740,8 +786,24 @@ class AdmissionListStatsTests(WardsSetupMixin, APITestCase):
         self.assertIn("total", resp.data)
         self.assertIn("admitted", resp.data)
         self.assertIn("pending_discharge", resp.data)
+        self.assertIn("escalated", resp.data)
+        self.assertIn("unassigned_bed", resp.data)
         self.assertGreaterEqual(resp.data["total"], 2)
         self.assertGreaterEqual(resp.data["admitted"], 2)
+
+    def test_list_stats_unassigned_bed_count(self):
+        self._create_admission()
+        adm2 = self._create_admission(
+            patient=self.patient2,
+            visit=self.visit2,
+            ward=self.ward2,
+            admission_diagnosis="Fracture",
+        )
+        adm2.bed = None
+        adm2.save(update_fields=['bed'])
+        resp = self.client.get(f"{ADMISSIONS_URL}list-stats/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(resp.data["unassigned_bed"], 1)
 
 
 # ── Authentication ───────────────────────────────────────────────────────────

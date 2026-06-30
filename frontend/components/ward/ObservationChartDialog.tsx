@@ -41,6 +41,12 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   admission: PatientAdmission | null;
+  /** When true, renders chart body only (for embedding in admission details tabs). */
+  embedded?: boolean;
+  /** Hide inpatient treatment sheet (e.g. observation / day care). */
+  hideTreatmentSheet?: boolean;
+  /** Embedded in nursing tab: history table only, hide empty state & entry form. */
+  historyOnly?: boolean;
 };
 
 // Reference ranges for adult ward patients. Cells colour-code when a recorded
@@ -78,7 +84,14 @@ const dayLabel = (d: Date) => {
 
 const timeLabel = (d: Date) => formatDisplayTime(d);
 
-export function ObservationChartDialog({ open, onOpenChange, admission }: Props) {
+export function ObservationChartDialog({
+  open,
+  onOpenChange,
+  admission,
+  embedded = false,
+  hideTreatmentSheet = false,
+  historyOnly = false,
+}: Props) {
   const { currentUser } = useCurrentUser();
   const [vitals, setVitals] = useState<AdmissionObservationVital[]>([]);
   const [treatments, setTreatments] = useState<AdmissionTreatmentRow[]>([]);
@@ -237,57 +250,20 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
   const statusLabel =
     admission.status?.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ?? '—';
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-[920px] lg:max-w-[980px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <DialogTitle className="flex items-center gap-2 text-lg">
-              <Activity className="h-5 w-5 text-teal-600 shrink-0" />
-              Full observation chart
-            </DialogTitle>
-            <Badge variant="secondary" className="capitalize font-normal">
-              {statusLabel}
-            </Badge>
-          </div>
-          <div className="space-y-1">
-            <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-              <span className="font-medium text-foreground">{admission.patient_name}</span>
-              <span className="text-muted-foreground">·</span>
-              <span className="font-mono text-xs">{admission.admission_id}</span>
-              <span className="text-muted-foreground">·</span>
-              <span>{admission.ward_name}</span>
-              {admission.bed_number ? (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <span>Bed {admission.bed_number}</span>
-                </>
-              ) : null}
-            </DialogDescription>
-            {admission.admission_diagnosis?.trim() ? (
-              <p className="text-xs text-muted-foreground leading-snug pt-0.5">
-                <span className="font-medium text-foreground/80">Dx </span>
-                {admission.admission_diagnosis.length > 160
-                  ? `${admission.admission_diagnosis.slice(0, 160)}…`
-                  : admission.admission_diagnosis}
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground italic">No admission diagnosis on file.</p>
-            )}
-          </div>
-        </DialogHeader>
-
-        {loading ? (
-          <div className="flex flex-1 min-h-[200px] items-center justify-center text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin" />
-          </div>
-        ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-6">
-            <section className="rounded-lg border border-border/80 bg-muted/20 p-4 space-y-3">
+  const chartBody = loading ? (
+    <div className="flex flex-1 min-h-[200px] items-center justify-center text-muted-foreground">
+      <Loader2 className="h-8 w-8 animate-spin" />
+    </div>
+  ) : (
+    <div className={`flex-1 min-h-0 overflow-y-auto space-y-6 ${embedded ? 'px-1 py-2' : 'px-5 py-4'}`}>
+      {!(historyOnly && vitals.length === 0) && (
+            <section className={`${embedded && historyOnly ? 'border-0 bg-transparent p-0 space-y-2' : 'rounded-lg border border-border/80 bg-muted/20 p-4 space-y-3'}`}>
+              {!(historyOnly && vitals.length > 0) && (
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Continuous vitals
+                  {embedded ? 'Vitals history' : 'Continuous vitals'}
                 </h3>
+                {!historyOnly && (
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">
                     {vitals.length} {vitals.length === 1 ? 'entry' : 'entries'}
@@ -307,12 +283,19 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
                     ) : (
                       <>
                         <Plus className="h-3.5 w-3.5 mr-1" />
-                        New row
+                        {embedded ? 'Glucose / extra' : 'New row'}
                       </>
                     )}
                   </Button>
                 </div>
+                )}
               </div>
+              )}
+              {historyOnly && vitals.length > 0 && (
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Vitals history
+                </h3>
+              )}
               <div className="overflow-x-auto border rounded-md bg-background">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
@@ -390,7 +373,7 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
                   </tbody>
                 </table>
               </div>
-              {showVitalForm && (
+              {showVitalForm && !historyOnly && (
                 <div className="rounded-md border border-dashed border-border/80 bg-background p-3 space-y-2">
                   <p className="text-[11px] text-muted-foreground">All fields optional — leave blank if not measured.</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -438,7 +421,9 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
                 </div>
               )}
             </section>
+      )}
 
+            {!hideTreatmentSheet && (
             <section className="rounded-lg border border-border/80 bg-muted/20 p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Treatment sheet</h3>
@@ -558,9 +543,44 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
                 </div>
               )}
             </section>
-          </div>
-        )}
+            )}
+    </div>
+  );
 
+  if (embedded) {
+    return <div className="flex flex-col flex-1 min-h-0">{chartBody}</div>;
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[95vw] sm:max-w-[920px] lg:max-w-[980px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <Activity className="h-5 w-5 text-teal-600 shrink-0" />
+              Full observation chart
+            </DialogTitle>
+            <Badge variant="secondary" className="capitalize font-normal">
+              {statusLabel}
+            </Badge>
+          </div>
+          <div className="space-y-1">
+            <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span className="font-medium text-foreground">{admission.patient_name}</span>
+              <span className="text-muted-foreground">·</span>
+              <span className="font-mono text-xs">{admission.admission_id}</span>
+              <span className="text-muted-foreground">·</span>
+              <span>{admission.ward_name}</span>
+              {admission.bed_number ? (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <span>Bed {admission.bed_number}</span>
+                </>
+              ) : null}
+            </DialogDescription>
+          </div>
+        </DialogHeader>
+        {chartBody}
         <DialogFooter className="px-5 py-4 border-t shrink-0 sm:justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close

@@ -1733,7 +1733,8 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                   <div className="border-b pb-4">
                     <AnnualCheckupPanel
                       visitId={safeConsultation.visitId}
-                      systemRole={currentUser?.systemRole}
+                      capabilities={currentUser?.capabilities}
+                      isSuperuser={currentUser?.isSuperuser}
                     />
                   </div>
                 )}

@@ -9,86 +9,33 @@ import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api-client';
-import { wardService, nursingService, visitService } from '@/lib/services';
+import { wardService, nursingService } from '@/lib/services';
 import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
-  formatCompletedProcedureDescription,
-  parseProcedureDetails,
-} from '@/lib/nursing/procedure-description';
-import {
   Syringe, Bandage, Pill, Search, Users, Clock, CheckCircle2, AlertTriangle,
-  Eye, Calendar, Loader2, Save, Activity, ArrowRight, User, Stethoscope, DoorOpen, Plus, Building2
+  Eye, Calendar, Loader2, Activity, ArrowRight, User, Stethoscope, DoorOpen, Plus, Building2
 } from 'lucide-react';
-import { NURSING_DRESSING_PROCEDURE_TYPES } from '@/lib/constants/medical-data';
 import {
   AddNursingProcedureDialog,
   type AddNursingProcedureResult,
 } from '@/components/nursing/AddNursingProcedureDialog';
+import { PerformNursingProcedureDialog } from '@/components/nursing/PerformNursingProcedureDialog';
+import {
+  nursingOrderToProcedure,
+  type NursingProcedureItem,
+} from '@/lib/nursing/nursing-procedure-queue';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
-import { resolvePatientPhoto } from '@/lib/patient-photo';
-import { completeNursingProcedureVisit } from '@/lib/nursing/nursing-repeat-procedure';
 
-const DRESSING_INTERVENTION_MAP: Record<string, string> = {
-  Dressing: 'dressing',
-  Suturing: 'sutures',
-  'Suture removal': 'suture_removal',
-  'Incision and drainage': 'i_and_d',
-};
-
-// ==================== TYPES ====================
-interface Procedure {
-  id: string;
-  patientDbId?: number;
-  visitId?: number;
-  consultationSessionId?: number;
-  /** True when a new nursing_procedure visit was created for this queue item. */
-  createdNursingVisit?: boolean;
-  type: 'injection' | 'dressing' | 'medication' | 'ward_admission';
-  status: 'pending' | 'completed';
-  patientName: string;
-  patientPhoto?: string | null;
-  patientId: string;
-  personalNumber: string;
-  age: number;
-  gender: string;
-  ward: string;
-  orderedAt: string;
-  completedAt?: string;
-  orderedBy: string;
-  priority: 'Emergency' | 'High' | 'Medium' | 'Low';
-  allergies: string[];
-  description?: string;
-  // Type-specific details
-  details: {
-    // Injection
-    medication?: string;
-    dosage?: string;
-    route?: string;
-    frequency?: string;
-    // Dressing
-    woundType?: string;
-    woundLocation?: string;
-    instructions?: string;
-    // Medication
-    scheduledTime?: string;
-    // Observation Admission (from order description)
-    admissionDiagnosis?: string;
-    presentingComplaint?: string;
-  };
-}
-
-// Procedures data will be loaded from API
+type Procedure = NursingProcedureItem;
 
 // ==================== HELPERS ====================
 const getPriorityBadge = (priority: string) => {
@@ -149,66 +96,6 @@ const getTimeSince = (dateString: string) => {
   return `${diffHrs}h ${diffMins % 60}m ago`;
 };
 
-/** Anatomical sites where left/right must be recorded */
-const INJECTION_SITES_NEEDING_LATERALITY = new Set([
-  'Deltoid',
-  'Vastus Lateralis',
-  'Dorsogluteal',
-  'Ventrogluteal',
-  'Forearm vein',
-  'Hand vein',
-]);
-
-function injectionSiteNeedsLaterality(site: string): boolean {
-  return INJECTION_SITES_NEEDING_LATERALITY.has(site);
-}
-
-function getInjectionSiteOptions(route?: string): { value: string; label: string }[] {
-  const r = (route || '').toLowerCase();
-  const hasSc = r.includes('subcutaneous') || /\bsc\b/.test(r);
-  const hasIm = r.includes('intramuscular') || /\bim\b/.test(r);
-  const hasIv = r.includes('intravenous') || /\biv\b/.test(r) || r.includes('infusion');
-
-  if (hasIv && !hasIm && !hasSc) {
-    return [
-      { value: 'Forearm vein', label: 'Forearm (peripheral IV)' },
-      { value: 'Hand vein', label: 'Hand (peripheral IV)' },
-      { value: 'Other IV site', label: 'Other (specify in notes)' },
-    ];
-  }
-  if (hasSc && !hasIm) {
-    return [
-      { value: 'Abdomen', label: 'Abdomen (SC)' },
-      { value: 'Deltoid', label: 'Outer upper arm / Deltoid (SC)' },
-      { value: 'Vastus Lateralis', label: 'Anterolateral thigh (SC)' },
-      { value: 'Other SC site', label: 'Other (specify in notes)' },
-    ];
-  }
-  return [
-    { value: 'Deltoid', label: 'Deltoid (Upper arm)' },
-    { value: 'Vastus Lateralis', label: 'Vastus Lateralis (Thigh)' },
-    { value: 'Dorsogluteal', label: 'Dorsogluteal (Buttock)' },
-    { value: 'Ventrogluteal', label: 'Ventrogluteal (Hip)' },
-    { value: 'Abdomen', label: 'Abdomen' },
-    { value: 'Other', label: 'Other (specify in notes)' },
-  ];
-}
-
-const emptyInjectionForm = () => ({
-  site: '',
-  administeredTime: '',
-  notes: '',
-  laterality: '' as '' | 'Left' | 'Right',
-  immediateReaction: 'none' as 'none' | 'yes',
-  reactionDetail: '',
-});
-
-function formatAdministrationNote(timeHm: string): string {
-  const t = (timeHm || '').trim();
-  if (!t) return '';
-  return `Time of administration: ${t} on ${formatDisplayDate(new Date())}`;
-}
-
 function procedureSummaryLine(procedure: Procedure): string {
   const desc = (procedure.description || '').trim();
   if (procedure.type === 'injection' || procedure.type === 'medication') {
@@ -225,106 +112,14 @@ function procedureSummaryLine(procedure: Procedure): string {
     return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
   }
   if (procedure.type === 'ward_admission') {
-    const bits = [procedure.details.admissionDiagnosis, procedure.details.presentingComplaint].filter(Boolean);
+    const diagnosisSummary = procedure.details.admissionDiagnosesList?.length
+      ? procedure.details.admissionDiagnosesList[0]
+      : procedure.details.admissionDiagnosis;
+    const bits = [diagnosisSummary, procedure.details.presentingComplaint].filter(Boolean);
     if (bits.length) return bits.join(' · ');
     return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
   }
   return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
-}
-
-function nursingOrderToProcedure(order: any): Procedure {
-  const typeMap: Record<string, Procedure['type']> = {
-    injection: 'injection',
-    dressing: 'dressing',
-    wound_care: 'dressing',
-    medication: 'medication',
-    'iv infusion': 'injection',
-    'ward admission': 'ward_admission',
-    'observation admission': 'ward_admission',
-    ward_admission: 'ward_admission',
-    observation_admission: 'ward_admission',
-  };
-  const procedureType = typeMap[String(order.order_type || '').toLowerCase()] || 'medication';
-
-  const priorityMap: Record<string, Procedure['priority']> = {
-    urgent: 'Emergency',
-    high: 'High',
-    medium: 'Medium',
-    low: 'Low',
-  };
-  const priority = priorityMap[String(order.priority || '').toLowerCase()] || 'Medium';
-
-  const allergies = Array.isArray(order.patient_allergies)
-    ? order.patient_allergies.map((a: unknown) => String(a))
-    : [];
-
-  const description = order.description || '';
-  let parsedWard = '';
-  let details: Procedure['details'] = {};
-
-  if (procedureType === 'ward_admission') {
-    const wardMatch = description.match(/to\s+([^.,;]+)/i);
-    if (wardMatch?.[1]) {
-      parsedWard = wardMatch[1].trim();
-    }
-    const diagPcMatch = description.match(/Diagnosis:\s*(.+?)\.\s*Presenting complaint:\s*(.+?)(?:\s*\.|$)/i);
-    if (diagPcMatch) {
-      const diag = diagPcMatch[1].trim();
-      const pc = diagPcMatch[2].trim();
-      details.admissionDiagnosis = diag && diag.toLowerCase() !== 'n/a' ? diag : undefined;
-      details.presentingComplaint = pc && pc.toLowerCase() !== 'n/a' ? pc : undefined;
-    }
-  } else {
-    details = parseProcedureDetails(procedureType, description, order.frequency || '');
-  }
-
-  const visitRaw = order.visit;
-  const visitId =
-    typeof visitRaw === 'number'
-      ? visitRaw
-      : visitRaw && typeof visitRaw === 'object' && visitRaw.id != null
-        ? Number(visitRaw.id)
-        : undefined;
-  const patientRaw = order.patient;
-  const patientDbId =
-    typeof patientRaw === 'number'
-      ? patientRaw
-      : patientRaw && typeof patientRaw === 'object' && patientRaw.id != null
-        ? Number(patientRaw.id)
-        : undefined;
-  const sessionRaw = order.consultation_session;
-  const consultationSessionId =
-    typeof sessionRaw === 'number'
-      ? sessionRaw
-      : sessionRaw && typeof sessionRaw === 'object' && sessionRaw.id != null
-        ? Number(sessionRaw.id)
-        : undefined;
-
-  return {
-    id: String(order.id),
-    patientDbId: patientDbId != null && Number.isFinite(patientDbId) ? patientDbId : undefined,
-    visitId: visitId != null && Number.isFinite(visitId) ? visitId : undefined,
-    consultationSessionId:
-      consultationSessionId != null && Number.isFinite(consultationSessionId)
-        ? consultationSessionId
-        : undefined,
-    type: procedureType,
-    status: order.status === 'completed' ? 'completed' : 'pending',
-    patientName: order.patient_name ?? '',
-    patientPhoto: resolvePatientPhoto(order),
-    patientId: order.patient_patient_id ?? '',
-    personalNumber: order.patient_personal_number ?? '',
-    age: order.patient_age ?? 0,
-    gender: order.patient_gender ?? '',
-    ward: parsedWard,
-    orderedAt: order.ordered_at,
-    completedAt: order.completed_at || order.updated_at || undefined,
-    orderedBy: order.ordered_by_name || 'Unknown',
-    priority,
-    allergies,
-    details,
-    description,
-  };
 }
 
 // ==================== MAIN COMPONENT ====================
@@ -388,48 +183,7 @@ export default function ProceduresQueuePage() {
     performed_at?: string;
   } | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Form states
-  const [injectionForm, setInjectionForm] = useState(() => emptyInjectionForm());
-  const [dressingForm, setDressingForm] = useState({ dressingType: '', woundCondition: '', observations: '' });
-  const [medicationForm, setMedicationForm] = useState({ site: '', administeredTime: '', notes: '' });
-  const [wardAdmissionForm, setWardAdmissionForm] = useState({ notes: '' });
-
-  const resetForms = () => {
-    setInjectionForm(emptyInjectionForm());
-    setDressingForm({ dressingType: '', woundCondition: '', observations: '' });
-    setMedicationForm({ site: '', administeredTime: '', notes: '' });
-    setWardAdmissionForm({ notes: '' });
-  };
-
-  const injectionSiteOptionsForDialog = useMemo(() => {
-    if (!selectedProcedure || selectedProcedure.type !== 'injection') return [];
-    return getInjectionSiteOptions(selectedProcedure.details.route);
-  }, [selectedProcedure]);
-
-  const injectionCanComplete = useMemo(() => {
-    if (!selectedProcedure || selectedProcedure.type !== 'injection') return true;
-    const opts = injectionSiteOptionsForDialog;
-    const validSite = !!injectionForm.site && opts.some((o) => o.value === injectionForm.site);
-    if (!validSite) return false;
-    if (!injectionForm.administeredTime.trim()) return false;
-    if (injectionSiteNeedsLaterality(injectionForm.site) && !injectionForm.laterality) return false;
-    if (injectionForm.immediateReaction === 'yes' && !injectionForm.reactionDetail.trim()) return false;
-    return true;
-  }, [selectedProcedure, injectionForm, injectionSiteOptionsForDialog]);
-
-  const dressingCanComplete = useMemo(() => {
-    if (!selectedProcedure || selectedProcedure.type !== 'dressing') return true;
-    return Boolean(dressingForm.dressingType && dressingForm.woundCondition);
-  }, [selectedProcedure, dressingForm.dressingType, dressingForm.woundCondition]);
-
-  const medicationCanComplete = useMemo(() => {
-    if (!selectedProcedure || selectedProcedure.type !== 'medication') return true;
-    if (!medicationForm.administeredTime.trim()) return false;
-    return true;
-  }, [selectedProcedure, medicationForm.administeredTime]);
-  
   useEffect(() => {
     if (!ready) return;
     wardService
@@ -607,319 +361,8 @@ export default function ProceduresQueuePage() {
   };
 
   const openPerformDialog = (procedure: Procedure) => {
-    resetForms();
     setSelectedProcedure(procedure);
     setIsPerformDialogOpen(true);
-    if (procedure.type === 'injection') {
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
-      setInjectionForm({ ...emptyInjectionForm(), administeredTime: `${hh}:${mm}` });
-    }
-    if (procedure.type === 'medication') {
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
-      setMedicationForm((prev) => ({ ...prev, administeredTime: `${hh}:${mm}` }));
-    }
-  };
-
-  const handleComplete = async () => {
-    if (!selectedProcedure) return;
-    setIsSubmitting(true);
-    
-    try {
-      const orderId = parseInt(selectedProcedure.id);
-      if (isNaN(orderId)) {
-        toast.error('Invalid order ID');
-        return;
-      }
-
-      if (selectedProcedure.type === 'injection') {
-        const opts = getInjectionSiteOptions(selectedProcedure.details.route);
-        if (!injectionForm.site || !opts.some((o) => o.value === injectionForm.site)) {
-          toast.error('Select a valid injection site for the ordered route.');
-          return;
-        }
-        if (!injectionForm.administeredTime.trim()) {
-          toast.error('Enter the time of administration.');
-          return;
-        }
-        if (injectionSiteNeedsLaterality(injectionForm.site) && !injectionForm.laterality) {
-          toast.error('Select left or right for this injection site.');
-          return;
-        }
-        if (injectionForm.immediateReaction === 'yes' && !injectionForm.reactionDetail.trim()) {
-          toast.error('Describe the immediate reaction, or set immediate reaction to None.');
-          return;
-        }
-      }
-
-      if (selectedProcedure.type === 'medication') {
-        if (!medicationForm.administeredTime.trim()) {
-          toast.error('Enter the time of administration.');
-          return;
-        }
-      }
-
-      // Map frontend type to backend procedure_type
-      const typeMap: Record<string, string> = {
-        'injection': 'injection',
-        'dressing': 'dressing',
-        'medication': 'medication',
-        'ward_admission': 'ward_admission',
-      };
-      
-      // Use the nursing order's patient FK — do not re-resolve via ?patient_id= (not a backend filter).
-      let patientDbId = selectedProcedure.patientDbId;
-      if (!patientDbId) {
-        const patientsResponse = await apiFetch<{ results: any[] }>(
-          `/patients/?search=${encodeURIComponent(selectedProcedure.patientId)}`,
-        );
-        const patients = patientsResponse.results || [];
-        const exact = patients.find((p) => p.patient_id === selectedProcedure.patientId);
-        if (!exact) {
-          throw new Error('Patient not found. Cannot complete procedure.');
-        }
-        patientDbId = exact.id;
-      }
-      if (!patientDbId) {
-        throw new Error('Patient not found. Cannot complete procedure.');
-      }
-      
-      // Create procedure record with all form data
-      let description = '';
-      let notes = '';
-      
-      if (selectedProcedure.type === 'injection') {
-        description = formatCompletedProcedureDescription('injection', selectedProcedure.details, selectedProcedure.description);
-        
-        const injectionNotes = [
-          formatAdministrationNote(injectionForm.administeredTime),
-          injectionSiteNeedsLaterality(injectionForm.site) && injectionForm.laterality && `Laterality: ${injectionForm.laterality}`,
-          injectionForm.site && `Site: ${injectionForm.site}`,
-          injectionForm.immediateReaction === 'yes'
-            ? `Immediate reaction: ${injectionForm.reactionDetail.trim()}`
-            : 'Immediate reaction: none',
-          injectionForm.notes && `Notes: ${injectionForm.notes}`,
-        ].filter(Boolean).join(' | ');
-        
-        notes = injectionNotes || injectionForm.notes || '';
-      } else if (selectedProcedure.type === 'dressing') {
-        description = formatCompletedProcedureDescription('dressing', selectedProcedure.details, selectedProcedure.description);
-        
-        const dressingNotes = [
-          dressingForm.dressingType && `Type: ${dressingForm.dressingType}`,
-          dressingForm.woundCondition && `Condition: ${dressingForm.woundCondition}`,
-          dressingForm.observations && `Observations: ${dressingForm.observations}`,
-        ].filter(Boolean).join(' | ');
-        
-        notes = dressingNotes || dressingForm.observations || '';
-      } else if (selectedProcedure.type === 'ward_admission') {
-        // For ward admissions, create both procedure record and admission record
-        const wardName = selectedProcedure.ward || 'Female Medical Ward';
-        description = `Observation Admission: Admitted to ${wardName}`;
-        notes = wardAdmissionForm.notes || 'Patient admitted to ward';
-
-        // Resolve ward ID from available wards (no hardcoded PK fallback).
-        const byCode = wards.find(
-          (w) => String(w.ward_code || '').toLowerCase() === String(wardName || '').toLowerCase()
-        );
-        const byName = wards.find(
-          (w) => String(w.name || '').toLowerCase() === String(wardName || '').toLowerCase()
-        );
-        const fallbackWard = wards[0];
-        const wardId = byCode?.id ?? byName?.id ?? fallbackWard?.id;
-        if (!wardId) {
-          throw new Error('No active ward found for admission. Please configure wards first.');
-        }
-
-        // Resolve visit for admission:
-        // 1) use visit attached to nursing order
-        // 2) use consultation session's visit if available
-        // 3) fallback to in-progress visit
-        // 4) fallback to latest visit (session may already be ended/completed)
-        let visitId: number | undefined = selectedProcedure.visitId;
-        if (!visitId && selectedProcedure.consultationSessionId) {
-          try {
-            const session = await apiFetch<any>(`/consultation/sessions/${selectedProcedure.consultationSessionId}/`);
-            if (typeof session?.visit === 'number' && Number.isFinite(session.visit)) {
-              visitId = session.visit;
-            }
-          } catch (sessionErr) {
-            console.warn('Could not resolve visit from consultation session:', sessionErr);
-          }
-        }
-        if (!visitId) {
-          const activeVisit = await visitService.resolveVisit({
-            patient: patientDbId,
-            status: 'in_progress',
-          });
-          if (activeVisit?.id) {
-            visitId = activeVisit.id;
-          }
-        }
-        if (!visitId) {
-          const latestVisit = await visitService.resolveVisit({
-            patient: patientDbId,
-            ordering: '-date,-time',
-          });
-          if (latestVisit?.id) {
-            visitId = latestVisit.id;
-          }
-        }
-        if (!visitId) {
-          throw new Error('Patient has no visit record. Cannot create observation admission.');
-        }
-
-        // Check if patient is already admitted before creating admission
-        try {
-          const existingAdmissions = await apiFetch<{ results: any[] }>(`/admissions/?patient=${patientDbId}&status=admitted`);
-          const admissions = existingAdmissions.results || [];
-          if (admissions.length > 0) {
-            throw new Error(`Patient is already admitted to ward. Please discharge first.`);
-          }
-        } catch (error: any) {
-          if (error.message.includes('already admitted')) {
-            throw error;
-          }
-          console.warn('Could not check existing admissions:', error);
-        }
-
-        const admissionDiagnosis =
-          selectedProcedure.details.admissionDiagnosis ||
-          wardAdmissionForm.notes ||
-          `Observation admission ordered by ${selectedProcedure.orderedBy}`;
-        const presentingComplaint =
-          selectedProcedure.details.presentingComplaint ||
-          selectedProcedure.details.admissionDiagnosis ||
-          wardAdmissionForm.notes ||
-          `Observation admission ordered by ${selectedProcedure.orderedBy}`;
-
-        const admissionData = {
-          patient: patientDbId,
-          visit: visitId,
-          ward: wardId,
-          admission_type: 'observation',
-          admitting_doctor: null,
-          admission_diagnosis: admissionDiagnosis,
-          presenting_complaint: presentingComplaint,
-          admission_notes: `Admitted to ${wardName}. ${wardAdmissionForm.notes || ''}`.trim(),
-          created_by: currentUser?.id,
-        };
-        await apiFetch('/admissions/', {
-          method: 'POST',
-          body: JSON.stringify(admissionData),
-        });
-      } else {
-        description = formatCompletedProcedureDescription('medication', selectedProcedure.details, selectedProcedure.description);
-
-        const medicationNotes = [
-          medicationForm.administeredTime && `Administered at: ${medicationForm.administeredTime}`,
-          medicationForm.site && `Site: ${medicationForm.site}`,
-          medicationForm.notes && `Notes: ${medicationForm.notes}`,
-        ].filter(Boolean).join(' | ');
-
-        notes = medicationNotes || medicationForm.notes || '';
-      }
-      
-      const performedSite =
-        selectedProcedure.type === 'ward_admission'
-          ? ''
-          : selectedProcedure.type === 'injection'
-            ? injectionSiteNeedsLaterality(injectionForm.site) && injectionForm.laterality
-              ? `${injectionForm.laterality} — ${injectionForm.site}`
-              : injectionForm.site
-            : selectedProcedure.type === 'dressing'
-              ? (selectedProcedure.details.woundLocation || '')
-              : medicationForm.site || '';
-
-      const procedureData: any = {
-        patient: patientDbId,  // Use correct patient database ID
-        nursing_order: orderId,  // Link to the original nursing order
-        visit: selectedProcedure.visitId ?? null,
-        procedure_type: typeMap[selectedProcedure.type] || 'other',
-        description,
-        site: performedSite,
-        notes,
-        performed_by: currentUser?.id ? Number(currentUser.id) : null,
-        medication_name:
-          selectedProcedure.type === 'injection'
-            ? (selectedProcedure.details.medication || '').slice(0, 200)
-            : selectedProcedure.type === 'dressing'
-              ? (selectedProcedure.details.woundType || '').slice(0, 200)
-              : selectedProcedure.type === 'medication'
-                ? (selectedProcedure.details.medication || '').slice(0, 200)
-                : '',
-        dosage:
-          selectedProcedure.type === 'injection' || selectedProcedure.type === 'medication'
-            ? (selectedProcedure.details.dosage || '').slice(0, 200)
-            : '',
-        route:
-          selectedProcedure.type === 'injection' || selectedProcedure.type === 'medication'
-            ? (selectedProcedure.details.route || '').slice(0, 100)
-            : '',
-        wound_intervention:
-          selectedProcedure.type === 'dressing'
-            ? DRESSING_INTERVENTION_MAP[dressingForm.dressingType] || ''
-            : '',
-      };
-      
-      // Create procedure
-      try {
-        await apiFetch('/nursing/procedures/', {
-          method: 'POST',
-          body: JSON.stringify(procedureData),
-        });
-      } catch (procedureError: unknown) {
-        console.error('Procedure creation failed:', procedureError);
-        throw procedureError;
-      }
-
-      // Update order status to completed
-      await apiFetch(`/nursing/orders/${orderId}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'completed' }),
-      });
-
-      if (selectedProcedure.createdNursingVisit && selectedProcedure.visitId) {
-        try {
-          await completeNursingProcedureVisit(selectedProcedure.visitId);
-        } catch (visitErr) {
-          console.warn('Failed to mark nursing procedure visit completed:', visitErr);
-        }
-      }
-
-      void loadOrders();
-      void loadQueueStats();
-      
-      const typeLabel = getTypeConfig(selectedProcedure.type).label;
-      toast.success(`${typeLabel} completed for ${selectedProcedure.patientName}`, {
-        description: 'Procedure recorded successfully'
-      });
-
-      setIsPerformDialogOpen(false);
-      resetForms();
-    } catch (err: any) {
-      const userMsg = err?.apiMessage || err?.message;
-      if (userMsg) {
-        toast.error(userMsg);
-      } else {
-        toast.error('Failed to complete procedure. Please try again.');
-      }
-      // Only log unexpected errors (not user-facing validation messages)
-      const isExpectedError =
-        userMsg?.includes('already admitted') ||
-        userMsg?.includes('Patient not found') ||
-        userMsg?.includes('No active ward') ||
-        userMsg?.includes('no visit record') ||
-        userMsg?.includes('Invalid order ID');
-      if (!isExpectedError) {
-        console.error('Error completing procedure:', err);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   // ==================== RENDER ====================
@@ -1393,275 +836,20 @@ export default function ProceduresQueuePage() {
           }}
         />
 
-        {/* Perform Dialog */}
-        <Dialog
+        <PerformNursingProcedureDialog
           open={isPerformDialogOpen}
           onOpenChange={(open) => {
             setIsPerformDialogOpen(open);
-            if (!open) {
-              resetForms();
-              setSelectedProcedure(null);
-            }
+            if (!open) setSelectedProcedure(null);
           }}
-        >
-          <DialogContent className={MODAL_SIZES.md}>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {selectedProcedure && (() => {
-                  const config = getTypeConfig(selectedProcedure.type);
-                  const Icon = config.icon;
-                  return <><Icon className={`h-5 w-5 ${config.color}`} />{config.label}</>;
-                })()}
-              </DialogTitle>
-              <DialogDescription>{selectedProcedure?.patientName} - {selectedProcedure?.patientId}</DialogDescription>
-            </DialogHeader>
-
-            {selectedProcedure && (
-              <div className="py-4 space-y-4">
-                {/* Allergy Warning */}
-                {selectedProcedure.allergies.length > 0 && (
-                  <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30">
-                    <p className="text-sm font-medium text-rose-600 flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4" />Allergy Alert: {selectedProcedure.allergies.join(', ')}
-                    </p>
-                  </div>
-                )}
-
-                {/* Order Info */}
-                <div className="p-4 rounded-lg bg-muted/50">
-                  <p className="text-xs text-muted-foreground mb-1">Ordered by {selectedProcedure.orderedBy}</p>
-                  {selectedProcedure.type === 'injection' && (
-                    <>
-                      <p className="font-medium text-foreground">{selectedProcedure.details.medication} - {selectedProcedure.details.dosage}</p>
-                      <p className="text-sm text-muted-foreground">{selectedProcedure.details.route} • {selectedProcedure.details.frequency}</p>
-                    </>
-                  )}
-                  {selectedProcedure.type === 'dressing' && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Wound type</p>
-                        <p className="font-medium">{selectedProcedure.details.woundType || '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Location</p>
-                        <p className="font-medium">{selectedProcedure.details.woundLocation || '—'}</p>
-                      </div>
-                      {selectedProcedure.details.instructions ? (
-                        <div className="col-span-2">
-                          <p className="text-xs text-muted-foreground">Instructions</p>
-                          <p className="text-sm">{selectedProcedure.details.instructions}</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                  {selectedProcedure.type === 'medication' && (
-                    <>
-                      <p className="font-medium text-foreground">{selectedProcedure.details.medication}</p>
-                      <p className="text-sm text-muted-foreground">{selectedProcedure.details.route}{selectedProcedure.details.scheduledTime ? ` • Scheduled: ${selectedProcedure.details.scheduledTime}` : ''}</p>
-                    </>
-                  )}
-                  {selectedProcedure.type === 'ward_admission' && (
-                    <>
-                      <p className="font-medium text-foreground">Observation Admission</p>
-                      <p className="text-sm text-muted-foreground">{selectedProcedure.description}</p>
-                    </>
-                  )}
-                </div>
-
-                {/* Type-specific forms */}
-                {selectedProcedure.type === 'injection' && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <p className="col-span-2 text-xs text-muted-foreground">
-                      Sites match the ordered route when possible (IM / SC / IV). Confirm the vial or syringe matches the order before administering.
-                    </p>
-                    <div className="space-y-2">
-                      <Label>Injection Site *</Label>
-                      <Select
-                        value={injectionForm.site}
-                        onValueChange={(v) =>
-                          setInjectionForm((p) => ({
-                            ...p,
-                            site: v,
-                            laterality: injectionSiteNeedsLaterality(v) ? p.laterality : '',
-                          }))
-                        }
-                      >
-                        <SelectTrigger><SelectValue placeholder="Select site" /></SelectTrigger>
-                        <SelectContent>
-                          {injectionSiteOptionsForDialog.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {injectionSiteNeedsLaterality(injectionForm.site) && (
-                      <div className="space-y-2">
-                        <Label>Laterality *</Label>
-                        <Select
-                          value={injectionForm.laterality}
-                          onValueChange={(v) => setInjectionForm((p) => ({ ...p, laterality: v as 'Left' | 'Right' }))}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Left or right" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Left">Left</SelectItem>
-                            <SelectItem value="Right">Right</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    <div className="col-span-2 space-y-2">
-                      <Label>Time of administration *</Label>
-                      <Input
-                        type="time"
-                        value={injectionForm.administeredTime ?? ''}
-                        onChange={(e) => setInjectionForm((p) => ({ ...p, administeredTime: e.target.value }))}
-                      />
-                      <p className="text-xs text-muted-foreground">Defaults to current time; adjust if the dose was given earlier.</p>
-                    </div>
-                    <div className="col-span-2 space-y-2">
-                      <Label>Immediate reaction after dose</Label>
-                      <Select
-                        value={injectionForm.immediateReaction}
-                        onValueChange={(v) =>
-                          setInjectionForm((p) => ({
-                            ...p,
-                            immediateReaction: v as 'none' | 'yes',
-                            reactionDetail: v === 'none' ? '' : p.reactionDetail,
-                          }))
-                        }
-                      >
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None observed</SelectItem>
-                          <SelectItem value="yes">Yes — describe below</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {injectionForm.immediateReaction === 'yes' && (
-                      <div className="col-span-2 space-y-2">
-                        <Label>Reaction details *</Label>
-                        <Textarea
-                          value={injectionForm.reactionDetail ?? ''}
-                          onChange={(e) => setInjectionForm((p) => ({ ...p, reactionDetail: e.target.value }))}
-                          placeholder="e.g., urticaria at site, nausea, dizziness..."
-                          rows={2}
-                        />
-                      </div>
-                    )}
-                    <div className="col-span-2 space-y-2">
-                      <Label>Notes</Label>
-                      <Textarea value={injectionForm.notes ?? ''} onChange={(e) => setInjectionForm(p => ({ ...p, notes: e.target.value }))} placeholder="Observations..." rows={2} />
-                    </div>
-                  </div>
-                )}
-
-                {selectedProcedure.type === 'dressing' && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Dressing Type *</Label>
-                      <Select value={dressingForm.dressingType} onValueChange={(v) => setDressingForm(p => ({ ...p, dressingType: v }))}>
-                        <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                        <SelectContent>
-                          {NURSING_DRESSING_PROCEDURE_TYPES.map((type) => (
-                            <SelectItem key={type} value={type}>
-                              {type}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Wound Condition *</Label>
-                      <Select value={dressingForm.woundCondition} onValueChange={(v) => setDressingForm(p => ({ ...p, woundCondition: v }))}>
-                        <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Healing">Healing</SelectItem>
-                          <SelectItem value="Infected">Infected</SelectItem>
-                          <SelectItem value="Stagnant">Stagnant</SelectItem>
-                          <SelectItem value="Deteriorating">Deteriorating</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-2 space-y-2">
-                      <Label>Observations</Label>
-                      <Textarea value={dressingForm.observations} onChange={(e) => setDressingForm(p => ({ ...p, observations: e.target.value }))} placeholder="Detailed observations..." rows={3} />
-                    </div>
-                  </div>
-                )}
-
-                {selectedProcedure.type === 'medication' && (
-                  <div className="space-y-4">
-                    {['IV', 'IM', 'SC'].includes(selectedProcedure.details.route || '') && (
-                      <div className="space-y-2">
-                        <Label>Administration Site</Label>
-                        <Select value={medicationForm.site} onValueChange={(v) => setMedicationForm(p => ({ ...p, site: v }))}>
-                          <SelectTrigger><SelectValue placeholder="Select site" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="left-arm">Left Arm</SelectItem>
-                            <SelectItem value="right-arm">Right Arm</SelectItem>
-                            <SelectItem value="left-thigh">Left Thigh</SelectItem>
-                            <SelectItem value="right-thigh">Right Thigh</SelectItem>
-                            <SelectItem value="abdomen">Abdomen</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <Label>Time of administration <span className="text-red-500">*</span></Label>
-                      <Input type="time" value={medicationForm.administeredTime} onChange={(e) => setMedicationForm(p => ({ ...p, administeredTime: e.target.value }))} />
-                      <p className="text-xs text-muted-foreground">Record when the medication was administered</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Notes</Label>
-                      <Textarea value={medicationForm.notes} onChange={(e) => setMedicationForm(p => ({ ...p, notes: e.target.value }))} placeholder="Any observations..." rows={2} />
-                    </div>
-                  </div>
-                )}
-
-                {selectedProcedure.type === 'ward_admission' && (
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                      <p className="text-sm text-amber-700 dark:text-amber-300">
-                        Admit patient to ward as ordered by doctor. This will create the admission record and assign a bed.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Admission Notes</Label>
-                      <Textarea value={wardAdmissionForm.notes} onChange={(e) => setWardAdmissionForm(p => ({ ...p, notes: e.target.value }))} placeholder="Admission notes (vitals, observations, bed assignment)..." rows={3} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsPerformDialogOpen(false)}>Cancel</Button>
-              <Button
-                onClick={handleComplete}
-                disabled={
-                  isSubmitting ||
-                  (selectedProcedure?.type === 'injection' && !injectionCanComplete) ||
-                  (selectedProcedure?.type === 'dressing' && !dressingCanComplete) ||
-                  (selectedProcedure?.type === 'medication' && !medicationCanComplete)
-                }
-                className={`text-white ${
-                selectedProcedure?.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
-                selectedProcedure?.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :
-                selectedProcedure?.type === 'medication' ? 'bg-blue-500 hover:bg-blue-600' :
-                'bg-amber-500 hover:bg-amber-600'
-              }`}>
-                {isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Recording...</>
-                : <><CheckCircle2 className="h-4 w-4 mr-2" />{
-                  selectedProcedure?.type === 'injection' ? 'Administer' :
-                  selectedProcedure?.type === 'dressing' ? 'Complete Dressing' :
-                  selectedProcedure?.type === 'medication' ? 'Administer' :
-                  selectedProcedure?.type === 'ward_admission' ? 'Admit Patient' :
-                  'Complete'
-                }</>}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          procedure={selectedProcedure}
+          currentUserId={currentUser?.id ? Number(currentUser.id) : undefined}
+          wards={wards}
+          onCompleted={() => {
+            void loadOrders();
+            void loadQueueStats();
+          }}
+        />
       </div>
     </DashboardLayout>
   );

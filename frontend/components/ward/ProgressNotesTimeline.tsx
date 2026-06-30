@@ -25,8 +25,9 @@
  * The very last entry can also be a *system / on-admission* note that has
  * no ``[header]`` line. The parser handles both shapes.
  */
-import { FileText, User } from 'lucide-react';
+import { User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { isHandoffNoteBody } from '@/lib/ward-admission-ui';
 
 export interface ProgressNoteEntry {
   /** Raw header inside the brackets ("10 May 2026, 06:38 — Dr. admin"). */
@@ -51,6 +52,24 @@ export interface ProgressNoteEntry {
  *   3. Untagged entries are surfaced as ``isSystem: true`` so the UI can
  *      label them (e.g. the auto-written "Admitted to …" line).
  */
+const systemEntryLabel = (body: string): string => {
+  const lower = body.toLowerCase();
+  if (lower.includes('consultation handoff') || lower.includes('observation ward')) {
+    return 'Admission handoff';
+  }
+  if (lower.includes('admitted to')) return 'Admission note';
+  return 'System';
+};
+
+/** Strip legacy vitals echo lines from note bodies (vitals live in the chart). */
+export function sanitizeNursingNoteBody(body: string): string {
+  return body
+    .split('\n')
+    .filter((line) => !/^Vitals\s*—/i.test(line.trim()))
+    .join('\n')
+    .trim();
+}
+
 export function parseAdmissionNotes(notes: string | null | undefined): ProgressNoteEntry[] {
   if (!notes || !notes.trim()) return [];
 
@@ -101,14 +120,23 @@ interface ProgressNotesTimelineProps {
   emptyState?: React.ReactNode;
   /** Add the section heading "Previous notes" above the list. */
   showHeading?: boolean;
+  /** Hide consultation handoff blobs (shown on Orders → Admission summary). */
+  excludeHandoff?: boolean;
 }
 
 export function ProgressNotesTimeline({
   notes,
   emptyState,
   showHeading = false,
+  excludeHandoff = false,
 }: ProgressNotesTimelineProps) {
-  const entries = parseAdmissionNotes(notes);
+  const entries = parseAdmissionNotes(notes)
+    .filter((e) => !(excludeHandoff && e.isSystem && isHandoffNoteBody(e.body)))
+    .map((e) => ({
+      ...e,
+      body: sanitizeNursingNoteBody(e.body),
+    }))
+    .filter((e) => e.body.length > 0);
 
   if (entries.length === 0) {
     return (
@@ -137,36 +165,40 @@ export function ProgressNotesTimeline({
         {entries.map((entry, idx) => (
           <li
             key={idx}
-            className={`rounded-md border bg-card p-3 ${
-              entry.isSystem ? 'border-dashed border-muted-foreground/30 bg-muted/40' : 'border-border'
+            className={`rounded-md border p-3 ${
+              entry.isSystem
+                ? 'border-dashed border-muted-foreground/20 bg-muted/20 py-2 px-2.5'
+                : 'border-border bg-card'
             }`}
           >
-            <div className="flex items-center justify-between gap-2 mb-1.5">
+            <div className="flex items-center justify-between gap-2 mb-1">
               <div className="flex items-center gap-1.5 text-xs min-w-0">
                 {entry.isSystem
-                  ? <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                  ? null
                   : <User className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
                 }
-                <span className="font-medium text-foreground truncate">
-                  {entry.author ?? 'System'}
+                <span className={`truncate ${entry.isSystem ? 'text-muted-foreground text-[11px]' : 'font-medium text-foreground'}`}>
+                  {entry.isSystem ? systemEntryLabel(entry.body) : (entry.author ?? 'Unknown')}
                 </span>
-                {entry.timestamp && (
+                {entry.timestamp && !entry.isSystem && (
                   <>
                     <span className="text-muted-foreground">·</span>
                     <span className="text-muted-foreground truncate">{entry.timestamp}</span>
                   </>
                 )}
               </div>
-              {entry.isSystem && (
+              {entry.isSystem && !isHandoffNoteBody(entry.body) && (
                 <Badge
                   variant="outline"
                   className="text-[10px] h-5 px-1.5 border-muted-foreground/40 text-muted-foreground bg-transparent flex-shrink-0"
                 >
-                  System
+                  Auto
                 </Badge>
               )}
             </div>
-            <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+            <p className={`whitespace-pre-wrap leading-relaxed ${
+              entry.isSystem ? 'text-xs text-muted-foreground' : 'text-sm text-foreground'
+            }`}>
               {entry.body}
             </p>
           </li>

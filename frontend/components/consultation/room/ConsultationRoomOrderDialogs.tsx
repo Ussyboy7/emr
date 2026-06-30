@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -27,6 +28,11 @@ import { PrescriptionOrderModal } from '@/components/consultation/orders/Prescri
 import { PrescriptionRefillDialog } from '@/components/consultation/orders/PrescriptionRefillDialog';
 import { Icd10DiagnosisMultiPicker } from '@/components/medical/Icd10DiagnosisMultiPicker';
 import { validateOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
+import {
+  DUPLICATE_VISIT_DIAGNOSIS_MESSAGE,
+  getDuplicateVisitDiagnosisMessage,
+  hasVisitDiagnosis,
+} from '@/lib/consultation/visit-diagnoses';
 import { prescriptionModalCopy } from '@/lib/consultation/prescription-refill';
 import { debugConsultationRoom } from '@/lib/consultation/room-helpers';
 import { getNursingOrderIcon } from '@/lib/consultation/room-nursing-helpers';
@@ -41,7 +47,7 @@ import {
   LAB_OTHER_TEMPLATE_CODE,
   RAD_OTHER_TEMPLATE_CODE,
 } from '@/lib/constants/order-template-codes';
-import type { Diagnosis } from '@/lib/services';
+import type { Diagnosis, ICD10Code } from '@/lib/services';
 import { consultationService } from '@/lib/services';
 import {
   Activity,
@@ -74,6 +80,77 @@ export type ConsultationRoomOrderDialogsProps = {
 };
 
 export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrderDialogsProps) {
+  const addingDiagnosisRef = useRef(false);
+  const addedIcd10Ids = useMemo(
+    () => new Set(workspace.diagnoses.map((d) => d.icd10_code)),
+    [workspace.diagnoses],
+  );
+
+  const addDiagnosisFromCode = async (dx: ICD10Code) => {
+    if (addingDiagnosisRef.current) return;
+
+    const {
+      currentPatient,
+      diagnoses,
+      diagnosisNotes,
+      selectedDiagnosisType,
+      sessionId,
+      setDiagnoses,
+      setDiagnosisNotes,
+      setDiagnosisSearch,
+      setShowAddDiagnosis,
+      setShowDiagnosisDropdown,
+    } = workspace;
+
+    if (!currentPatient) {
+      toast.error('No patient selected');
+      return;
+    }
+
+    const patientVisitId = currentPatient.visitId ? Number(currentPatient.visitId) : null;
+    if (hasVisitDiagnosis(diagnoses, dx.id, patientVisitId)) {
+      toast.message(DUPLICATE_VISIT_DIAGNOSIS_MESSAGE);
+      return;
+    }
+
+    addingDiagnosisRef.current = true;
+    try {
+      const diagnosisData: Partial<Diagnosis> = {
+        patient: Number(currentPatient.id),
+        visit: patientVisitId ?? undefined,
+        session: sessionId || undefined,
+        icd10_code: dx.id,
+        diagnosis_text: diagnosisNotes || '',
+        status: 'confirmed',
+        certainty:
+          selectedDiagnosisType === 'Primary'
+            ? 'confirmed'
+            : selectedDiagnosisType === 'Secondary'
+              ? 'probable'
+              : 'possible',
+        notes: diagnosisNotes || '',
+      };
+
+      const newDiagnosis = await consultationService.createDiagnosis(diagnosisData);
+      setDiagnoses([...diagnoses, newDiagnosis]);
+      toast.success(`Added diagnosis: ${dx.code} - ${dx.description}`);
+      setShowAddDiagnosis(false);
+      setDiagnosisSearch('');
+      setShowDiagnosisDropdown(false);
+      setDiagnosisNotes('');
+    } catch (err: unknown) {
+      const duplicateMessage = getDuplicateVisitDiagnosisMessage(err);
+      if (duplicateMessage) {
+        toast.message(duplicateMessage);
+        return;
+      }
+      console.error('Error creating diagnosis:', err);
+      toast.error('Failed to add diagnosis. Please try again.');
+    } finally {
+      addingDiagnosisRef.current = false;
+    }
+  };
+
   const {
   addEyeOrder,
   addLabOrder,
@@ -265,13 +342,12 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                     {(() => {
                       let displayCodes;
                       if (diagnosisSearch.trim()) {
-                        // Use API search results
                         displayCodes = icd10SearchResults;
                         debugConsultationRoom(`[ICD-10 Search] "${diagnosisSearch}" returned ${displayCodes.length} results from API`);
                       } else {
-                        // Show first 20 codes when no search
                         displayCodes = icd10Codes.slice(0, 20);
                       }
+                      displayCodes = displayCodes.filter((dx) => !addedIcd10Ids.has(dx.id));
 
                       if (displayCodes.length === 0) {
                         if (isSearchingICD10) {
@@ -283,13 +359,17 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                         } else if (diagnosisSearch.trim()) {
                           return (
                             <div className="p-4 text-center text-muted-foreground text-sm">
-                              No matching ICD-10 codes found
+                              {addedIcd10Ids.size > 0
+                                ? 'Matching codes are already on this visit'
+                                : 'No matching ICD-10 codes found'}
                             </div>
                           );
                         } else {
                           return (
                             <div className="p-4 text-center text-muted-foreground text-sm">
-                              Start typing to search ICD-10 codes
+                              {addedIcd10Ids.size > 0
+                                ? 'All shown codes are already on this visit — search for another'
+                                : 'Start typing to search ICD-10 codes'}
                             </div>
                           );
                         }
@@ -298,39 +378,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                       return displayCodes.map((dx, index) => (
                         <div 
                           key={`${dx.code}-${index}`}
-                          onClick={async () => {
-                            try {
-                              if (!currentPatient) {
-                                toast.error('No patient selected');
-                                return;
-                              }
-
-                              // Create diagnosis in database
-                              const diagnosisData: Partial<Diagnosis> = {
-                                patient: Number(currentPatient.id),
-                                visit: currentPatient.visitId ? Number(currentPatient.visitId) : undefined,
-                                session: sessionId || undefined,
-                                icd10_code: dx.id,
-                                diagnosis_text: diagnosisNotes || '',
-                                status: 'confirmed',
-                                certainty: selectedDiagnosisType === 'Primary' ? 'confirmed' :
-                                          selectedDiagnosisType === 'Secondary' ? 'probable' : 'possible',
-                                notes: diagnosisNotes || ''
-                              };
-
-                              // Security: Removed console.log to prevent diagnosis data exposure
-                              const newDiagnosis = await consultationService.createDiagnosis(diagnosisData);
-                              setDiagnoses([...diagnoses, newDiagnosis]);
-                              toast.success(`Added diagnosis: ${dx.code} - ${dx.description}`);
-                              setShowAddDiagnosis(false);
-                              setDiagnosisSearch("");
-                              setShowDiagnosisDropdown(false);
-                              setDiagnosisNotes("");
-                            } catch (err: any) {
-                              console.error('Error creating diagnosis:', err);
-                              toast.error('Failed to add diagnosis. Please try again.');
-                            }
-                          }}
+                          onClick={() => void addDiagnosisFromCode(dx)}
                           className="p-2 hover:bg-muted cursor-pointer"
                         >
                           <div className="flex items-center justify-between">
@@ -617,7 +665,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
               <Select 
                 value={newNursingOrder.type} 
                 onValueChange={(v) => {
-                  setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", ward: "", admissionDiagnosis: "", presentingComplaint: "" });
+                  setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", ward: "", admissionDiagnoses: [], presentingComplaint: "" });
                   setInjectionSelectedIds(new Set());
                   setInjectionConfigs(new Map());
                   setInjectionMedicationSearch("");
@@ -665,7 +713,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                         .filter((ward) => ward.available_beds > 0)
                         .sort((a, b) => b.available_beds - a.available_beds)
                         .map((ward) => (
-                          <SelectItem key={ward.id} value={ward.ward_code}>
+                          <SelectItem key={ward.id} value={String(ward.id)}>
                             <div className="flex items-center justify-between w-full">
                               <span className="font-medium">{ward.name}</span>
                               <span className={`text-xs px-2 py-1 rounded ${
@@ -678,24 +726,20 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                             </div>
                           </SelectItem>
                         ))}
-                      {wards.filter((ward) => ward.available_beds > 0).length === 0 && (
-                        <>
-                          <SelectItem value="FEMALE-MED">Female Medical Ward (5 beds available)</SelectItem>
-                          <SelectItem value="MALE-MED">Male Medical Ward (5 beds available)</SelectItem>
-                        </>
-                      )}
+                      {wards.filter((ward) => ward.available_beds > 0).length === 0 ? (
+                        <div className="px-2 py-2 text-xs text-muted-foreground">
+                          No wards with available beds right now.
+                        </div>
+                      ) : null}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label>Observation Diagnosis *</Label>
-                  <Textarea
-                    value={newNursingOrder.admissionDiagnosis || ''}
-                    onChange={(e) => setNewNursingOrder({ ...newNursingOrder, admissionDiagnosis: e.target.value })}
-                    placeholder="Primary diagnosis for observation"
-                    rows={3}
-                  />
-                </div>
+                <Icd10DiagnosisMultiPicker
+                  diagnoses={newNursingOrder.admissionDiagnoses}
+                  onChange={(admissionDiagnoses) =>
+                    setNewNursingOrder({ ...newNursingOrder, admissionDiagnoses })
+                  }
+                />
                 <div className="space-y-2">
                   <Label>Presenting Complaint *</Label>
                   <Textarea
@@ -1077,7 +1121,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                 !newNursingOrder.instructions ||
                 (newNursingOrder.type === 'Injection' && !newNursingOrder.medication && injectionSelectedIds.size === 0) ||
                 (newNursingOrder.type === 'Dressing' && (!newNursingOrder.woundLocation || !newNursingOrder.woundType)) ||
-                (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionDiagnosis || !newNursingOrder.presentingComplaint))
+                (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || validateOrderDiagnoses(newNursingOrder.admissionDiagnoses) !== null || !newNursingOrder.presentingComplaint))
               }
               className="bg-cyan-600 hover:bg-cyan-700"
             >

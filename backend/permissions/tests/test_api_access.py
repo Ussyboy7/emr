@@ -155,6 +155,18 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/consultation/start"}
         self.assertFalse(check_api_page_access("laboratory/verification/9/", "PATCH", allowed))
 
+    def test_nursing_order_patch_allowed_for_consultation_wards(self):
+        allowed = {"/consultation/wards"}
+        self.assertTrue(check_api_page_access("nursing/orders/42/", "PATCH", allowed))
+
+    def test_nursing_order_patch_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("nursing/orders/42/", "PATCH", allowed))
+
+    def test_nursing_order_patch_denied_without_nursing_or_consultation(self):
+        allowed = {"/laboratory"}
+        self.assertFalse(check_api_page_access("nursing/orders/42/", "PATCH", allowed))
+
     def test_nursing_order_create_denied_without_nursing_or_consultation(self):
         allowed = {"/laboratory"}
         self.assertFalse(check_api_page_access("nursing/orders/", "POST", allowed))
@@ -279,6 +291,43 @@ class ApiAccessTests(SimpleTestCase):
     def test_admissions_api_denied_without_ward_pages(self):
         allowed = {"/laboratory"}
         self.assertFalse(check_api_page_access("admissions/", "GET", allowed))
+
+    def test_ward_care_sub_apis_allowed_for_nursing_wards_page(self):
+        allowed = {"/nursing/wards"}
+        paths = (
+            "beds/",
+            "beds/12/",
+            "beds/12/assign_patient/",
+            "assignments/",
+            "assignments/active-for-admissions/",
+            "assignments/3/complete/",
+            "observation-vitals/",
+            "observation-vitals/9/",
+            "treatment-sheet-rows/",
+            "treatment-sheet-rows/4/",
+            "admission-escorts/",
+            "admission-escorts/7/confirm_arrival/",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue(check_api_page_access(path, "GET", allowed))
+                self.assertTrue(check_api_page_access(path, "POST", allowed))
+
+    def test_ward_care_sub_apis_allowed_for_consultation_wards_page(self):
+        allowed = {"/consultation/wards"}
+        self.assertTrue(check_api_page_access("observation-vitals/", "GET", allowed))
+        self.assertTrue(check_api_page_access("assignments/", "POST", allowed))
+
+    def test_ward_care_sub_apis_read_allowed_for_consultation_start(self):
+        allowed = {"/consultation/start"}
+        self.assertTrue(check_api_page_access("beds/", "GET", allowed))
+        self.assertTrue(check_api_page_access("assignments/active-for-admissions/", "GET", allowed))
+        self.assertFalse(check_api_page_access("beds/", "POST", allowed))
+
+    def test_ward_care_sub_apis_denied_without_ward_pages(self):
+        allowed = {"/laboratory"}
+        self.assertFalse(check_api_page_access("observation-vitals/", "GET", allowed))
+        self.assertFalse(check_api_page_access("assignments/", "POST", allowed))
 
     def test_security_settings_get_allowed_for_any_authenticated_pages(self):
         allowed = {"/nursing"}

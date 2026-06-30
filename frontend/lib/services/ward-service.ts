@@ -95,6 +95,7 @@ export interface PatientAdmission {
   admission_date: string;
   admission_diagnosis: string;
   presenting_complaint?: string;
+  admission_instructions?: string;
   admission_notes?: string;
   status: string;
   current_condition?: string;
@@ -310,6 +311,8 @@ class WardService {
     discharged_after?: string;
     discharged_before?: string;
     search?: string;
+    escalated?: string | number | boolean;
+    unassigned_bed?: string | number | boolean;
   }): Promise<{ results: PatientAdmission[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: PatientAdmission[]; count: number }>(`/admissions/${query}`);
@@ -322,6 +325,8 @@ class WardService {
     total: number;
     admitted: number;
     pending_discharge: number;
+    escalated: number;
+    unassigned_bed: number;
   }> {
     const query = buildQueryString(params || {});
     const path = query ? `/admissions/list-stats/${query}` : '/admissions/list-stats/';
@@ -348,6 +353,7 @@ class WardService {
     nursing_order?: number;
     admission_diagnosis: string;
     presenting_complaint?: string;
+    admission_instructions?: string;
     admission_notes?: string;
   }): Promise<PatientAdmission> {
     return apiFetch<PatientAdmission>('/admissions/', {

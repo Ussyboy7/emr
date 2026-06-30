@@ -4,6 +4,7 @@ Views for the Wards app.
 import logging
 
 from django.core.files.base import ContentFile
+from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from django.http import HttpResponse
 from django.utils import timezone
@@ -40,6 +41,8 @@ from common.mixins import ClinicScopedMixin
 from common.openapi import document_viewset
 from organization.models import SystemConfig
 from audit.services import AuditService
+from nursing.admission_orders import link_nursing_orders_to_admission
+from .bed_ops import assign_admission_bed, clear_admission_bed, sync_bed_occupancy_after_admission_create
 
 
 @document_viewset(tag="Wards", resource="wards")
@@ -266,6 +269,17 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if admission_date_before:
             qs = qs.filter(admission_date__date__lte=admission_date_before)
 
+        if self.request.query_params.get('escalated') == '1':
+            qs = qs.filter(
+                Q(current_condition__icontains='needs doctor review')
+                | Q(current_condition__icontains='escalat')
+                | Q(current_condition__icontains='critical')
+                | Q(current_condition__icontains='serious')
+            )
+
+        if self.request.query_params.get('unassigned_bed') == '1':
+            qs = qs.filter(status='admitted', bed__isnull=True)
+
         return self.scope_queryset(qs)
 
     @extend_schema(tags=["Wards"], summary="List stats", description="Admission KPI counts (replaces parallel COUNT requests).")
@@ -275,16 +289,37 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         from common.list_stats import viewset_queryset_excluding_params
 
         qs = viewset_queryset_excluding_params(
-            self, frozenset({'status', 'page', 'page_size', 'ordering'})
+            self,
+            frozenset({
+                'status',
+                'status_in',
+                'page',
+                'page_size',
+                'ordering',
+                'escalated',
+                'unassigned_bed',
+            }),
+        )
+        admitted_qs = qs.filter(status='admitted')
+        escalated_q = (
+            Q(current_condition__icontains='needs doctor review')
+            | Q(current_condition__icontains='escalat')
+            | Q(current_condition__icontains='critical')
+            | Q(current_condition__icontains='serious')
         )
         return Response({
             'total': qs.count(),
-            'admitted': qs.filter(status='admitted').count(),
+            'admitted': admitted_qs.count(),
             'pending_discharge': qs.filter(status='pending_discharge').count(),
+            'escalated': admitted_qs.filter(escalated_q).count(),
+            'unassigned_bed': admitted_qs.filter(bed__isnull=True).count(),
         })
 
     def perform_create(self, serializer):
         admission = serializer.save(created_by=self.request.user)
+
+        link_nursing_orders_to_admission(admission)
+        sync_bed_occupancy_after_admission_create(admission)
 
         # Log audit
         AuditService.log_activity(
@@ -1028,47 +1063,14 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         try:
             if bed_id is None:
-                # Remove from bed
-                old_bed = admission.bed
-                if old_bed:
-                    old_bed.current_patient = None
-                    old_bed.status = 'available'
-                    old_bed.admission_date = None
-                    old_bed.save(update_fields=['current_patient', 'status', 'admission_date'])
-                    old_bed.ward.recalculate_occupancy()
-
+                clear_admission_bed(admission)
                 admission.bed = None
                 admission.save(update_fields=['bed'])
                 serializer = self.get_serializer(admission)
                 return Response(serializer.data)
 
             new_bed = Bed.objects.select_related('ward').get(id=bed_id)
-
-            if new_bed.ward_id != admission.ward_id:
-                return Response(
-                    {'error': 'Bed does not belong to this patient\'s ward'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Free the old bed if switching
-            old_bed = admission.bed
-            if old_bed and old_bed.id != new_bed.id:
-                old_bed.current_patient = None
-                old_bed.status = 'available'
-                old_bed.admission_date = None
-                old_bed.save(update_fields=['current_patient', 'status', 'admission_date'])
-
-            # Occupy the new bed
-            new_bed.current_patient = admission.patient
-            new_bed.status = 'occupied'
-            new_bed.save(update_fields=['current_patient', 'status'])
-
-            # Link bed to admission
-            admission.bed = new_bed
-            admission.save(update_fields=['bed'])
-
-            # Recalculate ward occupancy from source of truth
-            admission.ward.recalculate_occupancy()
+            assign_admission_bed(admission, new_bed)
 
             AuditService.log_activity(
                 user=request.user,
@@ -1087,17 +1089,25 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         except Bed.DoesNotExist:
             return Response({'error': 'Bed not found'}, status=status.HTTP_404_NOT_FOUND)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(tags=["Wards"], summary="Transfer", description="Transfer patient to another ward.")
     @action(detail=True, methods=['post'])
     def transfer(self, request, pk=None):
-        """Transfer patient to another ward."""
+        """Transfer patient to another ward (active stay continues in destination ward)."""
         admission = self.get_object()
         transfer_data = request.data
 
         try:
+            if admission.status != 'admitted':
+                return Response(
+                    {'error': 'Only actively admitted patients can be transferred between wards'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             new_ward_id = transfer_data.get('new_ward_id')
             transfer_reason = transfer_data.get('transfer_reason', '')
 
@@ -1106,13 +1116,27 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
             new_ward = Ward.objects.get(id=new_ward_id)
 
-            # Update admission
+            if new_ward.id == admission.ward_id:
+                return Response(
+                    {'error': 'Patient is already in this ward'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            old_ward = admission.ward
+            clear_admission_bed(admission)
+
+            admission.ward = new_ward
+            admission.bed = None
             admission.transfer_to_ward = new_ward
             admission.transfer_reason = transfer_reason
-            admission.status = 'transferred'
-            admission.save()
+            admission.status = 'admitted'
+            admission.save(update_fields=[
+                'ward', 'bed', 'transfer_to_ward', 'transfer_reason', 'status',
+            ])
 
-            # Log audit
+            old_ward.recalculate_occupancy()
+            new_ward.recalculate_occupancy()
+
             AuditService.log_activity(
                 user=self.request.user,
                 action='update',
@@ -1120,13 +1144,17 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 object_id=str(admission.id),
                 module='wards',
                 object_repr=f'Admission {admission.admission_id}',
-                description=f'Transferred patient {admission.patient.get_full_name()} from {admission.ward.name} to {new_ward.name}',
-                old_values={'ward': admission.ward.name, 'status': 'admitted'},
-                new_values={'transfer_to_ward': new_ward.name, 'status': 'transferred'},
+                description=(
+                    f'Transferred patient {admission.patient.get_full_name()} '
+                    f'from {old_ward.name} to {new_ward.name}'
+                ),
+                old_values={'ward': old_ward.name, 'status': 'admitted'},
+                new_values={'ward': new_ward.name, 'transfer_to_ward': new_ward.name},
                 request=self.request,
             )
 
-            return Response({'message': 'Patient transferred successfully'})
+            serializer = self.get_serializer(admission)
+            return Response(serializer.data)
         except Ward.DoesNotExist:
             return Response({'error': 'New ward not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
@@ -1259,7 +1287,16 @@ class AdmissionObservationVitalViewSet(ClinicScopedMixin, viewsets.ModelViewSet)
         )
 
     def perform_create(self, serializer):
-        serializer.save(recorded_by=self.request.user)
+        instance = serializer.save(recorded_by=self.request.user)
+        try:
+            from .observation_vitals_sync import sync_observation_vital_to_patient_vitals
+
+            sync_observation_vital_to_patient_vitals(instance)
+        except Exception:
+            logger.exception(
+                'Failed to mirror observation vital %s to patient vitals',
+                instance.pk,
+            )
 
 
 @document_viewset(tag="Wards", resource="admission escorts")

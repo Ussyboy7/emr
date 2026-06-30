@@ -29,6 +29,7 @@ import { getNursingOrderIcon } from '@/lib/consultation/room-nursing-helpers';
 export type ConsultationRoomNursingTabProps = {
   nursingOrders: any[];
   currentPatient: ConsultationRoomPatient | null;
+  draftObservationCount: number;
   onShowAddNursingOrder: () => void;
   onSendToNursing: () => void | Promise<void>;
   onEditNursingOrder: (orderId: string) => void;
@@ -38,11 +39,15 @@ export type ConsultationRoomNursingTabProps = {
 export function ConsultationRoomNursingTab({
   nursingOrders,
   currentPatient,
+  draftObservationCount,
   onShowAddNursingOrder,
   onSendToNursing,
   onEditNursingOrder,
   onRemoveNursingOrder,
 }: ConsultationRoomNursingTabProps) {
+  const hasDraftOrders = nursingOrders.some((order) => order.status === 'Draft');
+  const shouldShowSendButton = hasDraftOrders && draftObservationCount === 0;
+
   return (
           <TabsContent value="nursing">
             <Card>
@@ -61,7 +66,7 @@ export function ConsultationRoomNursingTab({
                     }}>
                       <Plus className="mr-2 h-4 w-4" />Add Procedure
                     </Button>
-                    {nursingOrders.length > 0 && nursingOrders.some(order => order.status === 'Draft') && (
+                    {nursingOrders.length > 0 && shouldShowSendButton && (
                       <Button
                         onClick={() => void onSendToNursing()}
                         className="bg-cyan-600 hover:bg-cyan-700"
@@ -74,6 +79,15 @@ export function ConsultationRoomNursingTab({
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {draftObservationCount > 0 && (
+                  <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                    <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      Observation admission handoff happens on <strong>End Session</strong>. Use End Session to transfer the patient to Nursing/Ward.
+                    </p>
+                  </div>
+                )}
+
                 {/* Allergy Warning for Injections */}
                 {currentPatient?.allergies && currentPatient.allergies.length > 0 && (
                   <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
@@ -220,7 +234,11 @@ export function ConsultationRoomNursingTab({
                     <span>→</span>
                     <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Completed ✓</Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">Click "Send to Nursing" to queue procedures for the nursing team</p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {draftObservationCount > 0
+                      ? 'Observation admissions are queued when you End Session.'
+                      : 'Click "Send to Nursing" to queue procedures for the nursing team.'}
+                  </p>
                 </div>
               </CardContent>
             </Card>

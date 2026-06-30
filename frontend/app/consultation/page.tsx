@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { consultationService, radiologyService } from '@/lib/services';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { canNavigateToPage } from '@/lib/can-navigate-to-page';
 
 interface ConsultationStats {
   totalConsultations: number;
@@ -26,6 +27,23 @@ export default function ConsultationPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
+
+  const quickNav = useMemo(() => {
+    if (!currentUser) {
+      return {
+        start: false,
+        history: false,
+        wardRounds: false,
+        referrals: false,
+      };
+    }
+    return {
+      start: canNavigateToPage(currentUser, '/consultation/start'),
+      history: canNavigateToPage(currentUser, '/consultation/history'),
+      wardRounds: canNavigateToPage(currentUser, '/consultation/wards'),
+      referrals: canNavigateToPage(currentUser, '/consultation/referrals'),
+    };
+  }, [currentUser]);
 
   const [stats, setStats] = useState<ConsultationStats>({
     totalConsultations: 0,
@@ -239,6 +257,7 @@ export default function ConsultationPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {quickNav.start ? (
             <Button onClick={() => router.push('/consultation/start')} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
                 <Plus className="h-5 w-5 sm:h-6 sm:w-6" />
@@ -246,21 +265,28 @@ export default function ConsultationPage() {
               <span className="text-xs sm:text-sm font-medium">Start New Consultation</span>
               <span className="text-[10px] sm:text-xs opacity-90">Begin patient consultation</span>
             </Button>
+            ) : null}
+            {quickNav.history ? (
             <Button onClick={() => router.push('/consultation/history?scope=my')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-emerald-500/30 hover:bg-emerald-500/10 border-l-4 border-l-emerald-500">
               <Eye className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
               <span className="text-xs sm:text-sm font-medium">View My Sessions</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Review completed consultations</span>
             </Button>
+            ) : null}
+            {quickNav.wardRounds ? (
             <Button onClick={() => router.push('/consultation/wards')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
               <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-xs sm:text-sm font-medium">Patient Queue</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Manage waiting patients</span>
+              <span className="text-xs sm:text-sm font-medium">Ward Rounds</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Ward rounds and inpatient orders</span>
             </Button>
+            ) : null}
+            {quickNav.referrals ? (
             <Button onClick={() => router.push('/consultation/referrals')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
               <Hospital className="h-6 w-6 text-purple-500 dark:text-purple-400" />
               <span className="text-sm font-medium">Clinical Reports</span>
               <span className="text-xs text-muted-foreground">Access patient reports</span>
             </Button>
+            ) : null}
           </div>
         </div>
 

@@ -24,11 +24,11 @@ import { apiFetch } from '@/lib/api-client';
 import { resolvePatientNumericId } from '@/lib/utils/patient-id';
 import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSection';
 import {
-  WardDoctorOrdersSection,
   userCanAddWardDoctorOrders,
   userCanEditCancelWardOrders,
-} from '@/components/ward/WardDoctorOrdersSection';
+} from '@/lib/ward-order-permissions';
 import type { PatientAdmission } from '@/lib/services/ward-service';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
@@ -1216,14 +1216,8 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                   <TabsContent value="orders" className="mt-0">
                     <WardDoctorOrdersSection
                       admission={admissionForOrders}
-                      allowAddOrders={
-                        !!currentUser?.isSuperuser ||
-                        userCanAddWardDoctorOrders(currentUser?.systemRole)
-                      }
-                      allowEditCancelOrders={
-                        !!currentUser?.isSuperuser ||
-                        userCanEditCancelWardOrders(currentUser?.systemRole)
-                      }
+                      allowAddOrders={userCanAddWardDoctorOrders(currentUser)}
+                      allowEditCancelOrders={userCanEditCancelWardOrders(currentUser)}
                       currentUserId={
                         currentUser?.id != null ? Number(currentUser.id) : undefined
                       }

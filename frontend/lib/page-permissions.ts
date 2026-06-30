@@ -65,7 +65,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/consultation/start", name: "Start Consultation", description: "Start a new consultation", module: "Consultation" },
   { id: "/consultation/room", name: "Consultation Room", description: "Active consultation workspace (opened from Start Consultation)", module: "Consultation" },
   { id: "/consultation/history", name: "Consultation History", description: "View consultation history", module: "Consultation" },
-  { id: "/consultation/wards", name: "Ward Overview", description: "View ward overview", module: "Consultation" },
+  { id: "/consultation/wards", name: "Ward Rounds", description: "Ward rounds and inpatient orders", module: "Consultation" },
   { id: "/consultation/referrals", name: "Referrals & forms", description: "Manage referrals and forms", module: "Consultation" },
   { id: "/consultation/analytics", name: "Consultation Analytics", description: "View consultation analytics", module: "Consultation" },
 

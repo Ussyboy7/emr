@@ -412,7 +412,8 @@ export function ConsultationReportModal({
                 </h3>
                 <AnnualCheckupPanel
                   visitId={session.visit}
-                  systemRole={currentUser?.systemRole}
+                  capabilities={currentUser?.capabilities}
+                  isSuperuser={currentUser?.isSuperuser}
                   readOnly
                 />
               </div>

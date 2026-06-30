@@ -17,6 +17,9 @@ export const ALL_CAPABILITIES: Capability[] = [
   { id: "notification_routing_manage", name: "Manage notification routing", module: "Administration", description: "Edit notification routing matrix" },
   { id: "hr_compliance_manage", name: "HR compliance administration", module: "Human Resources", description: "Write HR compliance endpoints" },
   { id: "annual_checkup_signoff", name: "Annual check-up medical sign-off", module: "Human Resources", description: "Doctor sign-off on annual check-ups" },
+  { id: "ward_order_create", name: "Create ward doctor orders", module: "Consultation", description: "Add nursing orders on Ward Rounds" },
+  { id: "ward_order_edit", name: "Edit/cancel ward doctor orders", module: "Consultation", description: "Edit or cancel pending ward orders" },
+  { id: "ward_order_perform", name: "Perform ward nursing tasks", module: "Nursing", description: "Administer injections, dressings, and ward instructions" },
 ];
 
 /** Capabilities stripped when duplicating or seeding support roles. */
@@ -40,6 +43,8 @@ export const PAGE_TO_CAPABILITIES: Record<string, string[]> = {
   "/hr": ["hr_compliance_manage"],
   "/hr/annual-checkups": ["hr_compliance_manage"],
   "/hr/exemptions": ["hr_compliance_manage"],
+  "/consultation/wards": ["ward_order_create", "ward_order_edit"],
+  "/nursing/wards": ["ward_order_perform"],
 };
 
 export function convertCapabilitiesFromBackend(

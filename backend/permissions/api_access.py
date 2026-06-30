@@ -288,12 +288,14 @@ def check_api_page_access(
             )
         return has_any( ("/pharmacy/prescriptions", "/pharmacy"))
 
-    # Consultation can create nursing procedure orders (injection, dressing, observation admission).
+    # Consultation can create/update nursing procedure orders on ward rounds.
     if api_path.startswith("nursing/orders/"):
         if method in ("GET", "HEAD", "OPTIONS", "POST"):
             return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/nursing/procedures", "/nursing"),
             )
-        return has_any( ("/nursing/procedures", "/nursing"))
+        return _consultation_clinical_access(allowed_pages, denied) or has_any(
+            ("/nursing/procedures", "/nursing", "/consultation/wards"),
+        )
 
     # Consultation observation admission needs ward list + existing-admission checks.
     if api_path.startswith("wards/"):
@@ -308,6 +310,16 @@ def check_api_page_access(
             )
         if "discharge" in api_path:
             return _consultation_clinical_access(allowed_pages, denied) or has_any( ("/nursing/wards", "/consultation/wards"),
+            )
+        return has_any( ("/nursing/wards", "/consultation/wards"))
+
+    # Ward Care chart APIs (beds, nurse assignments, vitals, treatment sheet, escorts).
+    if api_path.startswith(
+        ("beds/", "assignments/", "observation-vitals/", "treatment-sheet-rows/", "admission-escorts/")
+    ):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return _consultation_clinical_access(allowed_pages, denied) or has_any(
+                ("/nursing/wards", "/consultation/wards"),
             )
         return has_any( ("/nursing/wards", "/consultation/wards"))
 

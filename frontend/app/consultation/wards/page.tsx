@@ -11,15 +11,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSection';
 import {
-  WardDoctorOrdersSection,
   userCanAddWardDoctorOrders,
   userCanEditCancelWardOrders,
-} from '@/components/ward/WardDoctorOrdersSection';
+} from '@/lib/ward-order-permissions';
+import { useWardAdmissionDateParams } from '@/hooks/use-ward-admission-date-params';
+import { WARD_ACTIVE_STATUS_IN } from '@/lib/ward/ward-admission-list-params';
 import { ProgressNotesTimeline } from '@/components/ward/ProgressNotesTimeline';
+import { WardAdmissionDocumentsMenu } from '@/components/ward/WardAdmissionDocumentsMenu';
 import {
-  Building2, Users, Search, Eye, AlertTriangle, CheckCircle,
-  Bed, Activity, RefreshCw, Loader2, FileText, User,
+  type WardDoctorDetailsTab,
+  resolveDefaultDoctorDetailsTab,
+  isEscalatedCondition,
+} from '@/lib/ward-admission-ui';
+import {
+  Users, Search, Eye, AlertTriangle, CheckCircle,
+  Bed, Loader2, FileText, User,
   Send, Download, FileCheck,
 } from 'lucide-react';
 import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/components/referrals/FacilityPartnerSelect';
@@ -29,15 +37,27 @@ import { StandardPagination } from '@/components/shared/StandardPagination';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { resolvePatientPhoto } from '@/lib/patient-photo';
 import { toast } from 'sonner';
-import { formatDisplayDateMedium, formatDisplayDateTime, localWeekToTodayBounds } from '@/lib/dates';
+import { formatDisplayDateMedium, formatDisplayDateTime } from '@/lib/dates';
 import { wardService, type Ward, type PatientAdmission, type WardAssignment } from '@/lib/services/ward-service';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
 import { useServerToday } from '@/hooks/use-server-today';
-import { formatLocalYmd } from '@/lib/laboratory/constants';
 
-export default function WardOverviewPage() {
+const formatAdmissionTypeLabel = (type?: string | null): string | null => {
+  if (!type) return null;
+  const labels: Record<string, string> = {
+    observation: 'Observation',
+    daycare_observation: 'Day care',
+    emergency: 'Emergency',
+    elective: 'Elective',
+    transfer: 'Transfer',
+    readmission: 'Readmission',
+  };
+  return labels[type] || type.replace(/_/g, ' ');
+};
+
+export default function WardRoundsPage() {
   const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
   const serverToday = useServerToday();
   const [wards, setWards] = useState<Ward[]>([]);
@@ -49,6 +69,8 @@ export default function WardOverviewPage() {
   const [admissionsTotal, setAdmissionsTotal] = useState(0);
   const [kpiAdmittedTotal, setKpiAdmittedTotal] = useState(0);
   const [kpiPendingDischargeTotal, setKpiPendingDischargeTotal] = useState(0);
+  const [kpiEscalatedTotal, setKpiEscalatedTotal] = useState(0);
+  const [kpiUnassignedBedTotal, setKpiUnassignedBedTotal] = useState(0);
 
   // Filters
   const [selectedWard, setSelectedWard] = useState<string>('all');
@@ -63,9 +85,10 @@ export default function WardOverviewPage() {
   // text rather than a backend `status`, so a dedicated toggle keeps the API
   // filters simple and the stat-card click-through accurate.
   const [escalatedOnly, setEscalatedOnly] = useState(false);
+  const [unassignedBedOnly, setUnassignedBedOnly] = useState(false);
   // Default tab the admission details dialog should open on. Lets us deep-link
   // from per-row quick actions (View / Orders / Notes) without juggling refs.
-  const [detailsInitialTab, setDetailsInitialTab] = useState<'clinical' | 'orders' | 'progress'>('clinical');
+  const [detailsTab, setDetailsTab] = useState<WardDoctorDetailsTab>('overview');
 
   // Progress note form
   const [progressNote, setProgressNote] = useState('');
@@ -146,28 +169,11 @@ export default function WardOverviewPage() {
     });
   };
 
-  const buildDateParams = useCallback(() => {
-    // Anchor "today" on the server's calendar so ward filters align with the
-    // rest of the app.
-    const today = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
-    const todayYmd = serverToday || formatLocalYmd(today);
-    if (dateRange.from || dateRange.to) {
-      return {
-        admission_date_after: dateRange.from || undefined,
-        admission_date_before: dateRange.to || undefined,
-      };
-    }
-    if (dateFilter === 'today') return { admission_date: todayYmd };
-    if (dateFilter === 'week') {
-      const { start, end } = localWeekToTodayBounds(serverToday || undefined);
-      return { admission_date_after: start, admission_date_before: end };
-    }
-    if (dateFilter === 'month') {
-      const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      return { admission_date_after: formatLocalYmd(start), admission_date_before: todayYmd };
-    }
-    return {};
-  }, [dateFilter, dateRange.from, dateRange.to, serverToday]);
+  const buildDateParams = useWardAdmissionDateParams({
+    dateFilter,
+    dateRange,
+    serverToday,
+  });
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -193,22 +199,31 @@ export default function WardOverviewPage() {
       const stats = await wardService.getAdmissionListStats(kpiBase);
       setKpiAdmittedTotal(stats.admitted ?? 0);
       setKpiPendingDischargeTotal(stats.pending_discharge ?? 0);
+      setKpiEscalatedTotal(stats.escalated ?? 0);
+      setKpiUnassignedBedTotal(stats.unassigned_bed ?? 0);
     } catch (error: unknown) {
       console.error('Error fetching admission KPI counts:', error);
       if (handleAuthError(error)) return;
       setKpiAdmittedTotal(0);
       setKpiPendingDischargeTotal(0);
+      setKpiEscalatedTotal(0);
+      setKpiUnassignedBedTotal(0);
     }
 
     try {
+      const ACTIVE_STATUSES = WARD_ACTIVE_STATUS_IN;
       const listParams = {
         ...dateParams,
         page: admissionsPage,
         page_size: admissionsPageSize,
-        ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+        ...(statusFilter !== 'all'
+          ? { status: statusFilter }
+          : { status_in: ACTIVE_STATUSES }),
         ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
         ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
         ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+        ...(escalatedOnly ? { escalated: 1 } : {}),
+        ...(unassignedBedOnly ? { unassigned_bed: 1 } : {}),
       };
       const admissionsResponse = await wardService.getAdmissions(listParams);
       const loaded = admissionsResponse.results || [];
@@ -247,11 +262,13 @@ export default function WardOverviewPage() {
     admissionsPage,
     admissionsPageSize,
     handleAuthError,
+    escalatedOnly,
+    unassignedBedOnly,
   ]);
 
   useEffect(() => {
     setAdmissionsPage(1);
-  }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, debouncedSearch]);
+  }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, debouncedSearch, escalatedOnly, unassignedBedOnly]);
 
   useEffect(() => {
     if (!ready) return;
@@ -260,10 +277,10 @@ export default function WardOverviewPage() {
 
   const handleViewAdmission = (
     admission: PatientAdmission,
-    initialTab: 'clinical' | 'orders' | 'progress' = 'clinical',
+    initialTab?: WardDoctorDetailsTab,
   ) => {
     setSelectedAdmission(admission);
-    setDetailsInitialTab(initialTab);
+    setDetailsTab(initialTab ?? resolveDefaultDoctorDetailsTab(admission));
     setShowAdmissionDetails(true);
   };
 
@@ -533,29 +550,36 @@ export default function WardOverviewPage() {
   const getPatientAssignments = (admissionId: number) =>
     assignments.filter(a => a.admission === admissionId && a.is_active);
 
-  const wardStats = useMemo(() => {
-    const totalCapacity = wards.reduce((sum, w) => sum + w.total_beds, 0);
-    const totalOccupied = wards.reduce((sum, w) => sum + w.occupied_beds, 0);
-    const criticalPatients = admissions.filter(a =>
-      (a.status === 'admitted' || a.status === 'pending_discharge') &&
-      /critical|serious|needs doctor review/i.test(a.current_condition || '')
-    ).length;
-    return {
-      totalCapacity,
-      totalAdmissions: kpiAdmittedTotal,
-      criticalPatients,
-      pendingDischarge: kpiPendingDischargeTotal,
-      occupancyRate: totalCapacity > 0 ? Math.round((totalOccupied / totalCapacity) * 100) : 0,
-    };
-  }, [wards, admissions, kpiAdmittedTotal, kpiPendingDischargeTotal]);
+  const applyKpiFilter = useCallback((filter: 'admitted' | 'pending_discharge' | 'escalated' | 'unassigned_bed') => {
+    if (filter === 'admitted') {
+      setStatusFilter('admitted');
+      setEscalatedOnly(false);
+      setUnassignedBedOnly(false);
+      return;
+    }
+    if (filter === 'pending_discharge') {
+      setStatusFilter('pending_discharge');
+      setEscalatedOnly(false);
+      setUnassignedBedOnly(false);
+      return;
+    }
+    if (filter === 'escalated') {
+      setStatusFilter('admitted');
+      setEscalatedOnly(true);
+      setUnassignedBedOnly(false);
+      return;
+    }
+    setStatusFilter('admitted');
+    setEscalatedOnly(false);
+    setUnassignedBedOnly(true);
+  }, []);
 
-  const isEscalated = (admission: PatientAdmission) =>
-    /critical|serious|needs doctor review/i.test(admission.current_condition || '');
-
-  const filteredAdmissions = admissions.filter(admission => {
-    if (escalatedOnly && !isEscalated(admission)) return false;
-    return true;
-  });
+  const kpiCardsActive = useMemo(() => ({
+    admitted: statusFilter === 'admitted' && !escalatedOnly && !unassignedBedOnly,
+    pending_discharge: statusFilter === 'pending_discharge',
+    escalated: escalatedOnly,
+    unassigned_bed: unassignedBedOnly,
+  }), [statusFilter, escalatedOnly, unassignedBedOnly]);
 
   const activeFilterCount =
     (selectedWard !== 'all' ? 1 : 0) +
@@ -564,6 +588,7 @@ export default function WardOverviewPage() {
     (dateFilter !== 'all' ? 1 : 0) +
     (dateRange.from || dateRange.to ? 1 : 0) +
     (escalatedOnly ? 1 : 0) +
+    (unassignedBedOnly ? 1 : 0) +
     (searchQuery ? 1 : 0);
 
   const getStatusColor = (status: string, condition?: string) => {
@@ -626,132 +651,49 @@ export default function WardOverviewPage() {
           <p className="text-muted-foreground mt-1">Review patients, write orders, record progress notes, and manage discharges</p>
         </div>
 
-        {/* Stats — clicking a card applies that card's filter so the list
-            below narrows immediately. The Total Capacity card has no
-            corresponding patient filter, so it stays decorative. */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {([
-            {
-              label: 'Total Capacity', value: wardStats.totalCapacity, icon: Bed,
-              color: 'text-blue-500', bg: 'bg-blue-500/10', onClick: undefined,
-              isActive: false,
-            },
-            {
-              label: 'Admitted Patients', value: wardStats.totalAdmissions, icon: Users,
-              color: 'text-green-500', bg: 'bg-green-500/10',
-              onClick: () => { setStatusFilter('admitted'); setEscalatedOnly(false); },
-              isActive: statusFilter === 'admitted' && !escalatedOnly,
-            },
-            {
-              label: 'Pending Discharge', value: wardStats.pendingDischarge, icon: CheckCircle,
-              color: 'text-amber-500', bg: 'bg-amber-500/10',
-              onClick: () => { setStatusFilter('pending_discharge'); setEscalatedOnly(false); },
-              isActive: statusFilter === 'pending_discharge',
-            },
-            {
-              label: 'Critical / Escalated', value: wardStats.criticalPatients, icon: AlertTriangle,
-              color: 'text-red-500', bg: 'bg-red-500/10',
-              onClick: () => { setEscalatedOnly((v) => !v); },
-              isActive: escalatedOnly,
-            },
-          ] as const).map((stat, i) => {
-            const interactive = !!stat.onClick;
-            return (
-              <Card
-                key={i}
-                onClick={stat.onClick}
-                className={`${interactive ? 'cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5' : ''} ${stat.isActive ? `ring-2 ring-offset-1 ${stat.color.replace('text-', 'ring-')}` : ''}`}
-                role={interactive ? 'button' : undefined}
-                tabIndex={interactive ? 0 : undefined}
-                onKeyDown={interactive ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stat.onClick?.(); } } : undefined}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">{stat.label}</p>
-                      <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
-                    </div>
-                    <div className={`p-3 rounded-full ${stat.bg}`}>
-                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                    </div>
+            { key: 'admitted' as const, label: 'On ward', value: kpiAdmittedTotal, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10', ring: 'ring-blue-500' },
+            { key: 'pending_discharge' as const, label: 'Pending discharge', value: kpiPendingDischargeTotal, icon: CheckCircle, color: 'text-amber-500', bg: 'bg-amber-500/10', ring: 'ring-amber-500' },
+            { key: 'escalated' as const, label: 'Escalated', value: kpiEscalatedTotal, icon: AlertTriangle, color: 'text-orange-500', bg: 'bg-orange-500/10', ring: 'ring-orange-500' },
+            { key: 'unassigned_bed' as const, label: 'No bed assigned', value: kpiUnassignedBedTotal, icon: Bed, color: 'text-violet-500', bg: 'bg-violet-500/10', ring: 'ring-violet-500' },
+          ]).map((stat) => (
+            <Card
+              key={stat.key}
+              onClick={() => applyKpiFilter(stat.key)}
+              className={`cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${
+                kpiCardsActive[stat.key] ? `ring-2 ring-offset-1 ${stat.ring}` : ''
+              }`}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyKpiFilter(stat.key); } }}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
-        {/* Ward Capacity Cards */}
-        {!isLoading && wards.length === 0 ? (
-          <Card className="border-dashed border-2">
-            <CardContent className="p-8 text-center">
-              <Building2 className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-muted-foreground mb-2">No Wards Configured</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Please contact your system administrator to configure hospital wards.
-              </p>
-              <Button variant="outline" onClick={fetchData} disabled={isLoading}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                Try Again
-              </Button>
-            </CardContent>
-          </Card>
-        ) : wards.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {wards.map((ward) => {
-              const pct = ward.total_beds > 0 ? Math.round((ward.occupied_beds / ward.total_beds) * 100) : 0;
-              const isFull = pct >= 90;
-              const hasAvailability = ward.available_beds > 0;
-              const isActive = selectedWard === ward.id.toString();
-              return (
-                <Card
-                  key={ward.id}
-                  onClick={() => setSelectedWard(isActive ? 'all' : ward.id.toString())}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setSelectedWard(isActive ? 'all' : ward.id.toString());
-                    }
-                  }}
-                  className={`cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${
-                    isActive ? 'ring-2 ring-blue-500 ring-offset-1' :
-                    isFull ? 'border-red-200 dark:border-red-800' :
-                    hasAvailability ? 'border-green-200 dark:border-green-800' :
-                    'border-yellow-200 dark:border-yellow-800'
-                  }`}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Building2 className={`h-4 w-4 ${hasAvailability ? 'text-green-500' : 'text-red-500'}`} />
-                      <p className="font-medium text-sm truncate">{ward.name}</p>
-                    </div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-2xl font-bold">{ward.occupied_beds}/{ward.total_beds}</span>
-                      <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${
-                        isFull ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
-                        hasAvailability ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                        'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
-                      }`}>{pct}%</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mb-2">{ward.available_beds} beds available</p>
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-                      <div
-                        className={`h-1.5 rounded-full transition-all ${isFull ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                        style={{ width: `${Math.min(pct, 100)}%` }}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {/* Filters */}
         <Card>
-          <CardContent className="p-4">
+          <CardContent className="p-4 space-y-3">
+            {wards.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-xs text-muted-foreground mr-1">Ward:</span>
+                <button type="button" onClick={() => setSelectedWard('all')} className={`px-3 py-1.5 rounded-md transition-colors ${selectedWard === 'all' ? 'bg-teal-600 text-white' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}>All</button>
+                {wards.map((ward) => (
+                  <button key={ward.id} type="button" onClick={() => setSelectedWard(ward.id.toString())} className={`px-3 py-1.5 rounded-md transition-colors ${selectedWard === ward.id.toString() ? 'bg-teal-600 text-white' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}>{ward.name}</button>
+                ))}
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
               <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -773,16 +715,10 @@ export default function WardOverviewPage() {
                     <SelectItem value="month">This month</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={selectedWard} onValueChange={setSelectedWard}>
-                  <SelectTrigger className="w-[180px]"><SelectValue placeholder="All Wards" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Wards</SelectItem>
-                    {wards.map(w => (
-                      <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(v) => { setStatusFilter(v); setEscalatedOnly(false); setUnassignedBedOnly(false); }}
+                >
                   <SelectTrigger className="w-[170px]"><SelectValue placeholder="All Status" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
@@ -797,9 +733,11 @@ export default function WardOverviewPage() {
                   <SelectContent>
                     <SelectItem value="all">All Types</SelectItem>
                     <SelectItem value="observation">Observation</SelectItem>
+                    <SelectItem value="daycare_observation">Day care</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                     <SelectItem value="elective">Elective</SelectItem>
-                    <SelectItem value="regular">Regular</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
+                    <SelectItem value="readmission">Readmission</SelectItem>
                   </SelectContent>
                 </Select>
                 <ResetFiltersButton
@@ -812,6 +750,7 @@ export default function WardOverviewPage() {
                     setDateRange({ from: '', to: '' });
                     setSearchQuery('');
                     setEscalatedOnly(false);
+                    setUnassignedBedOnly(false);
                   }}
                 />
               </div>
@@ -841,30 +780,16 @@ export default function WardOverviewPage() {
           <>
             <div className="flex items-center justify-between px-1 gap-2 flex-wrap">
               <p className="text-sm text-muted-foreground">
-                {escalatedOnly ? 'Escalated only · ' : ''}
-                Showing <span className="font-medium text-foreground">{filteredAdmissions.length}</span>
-                {!escalatedOnly && admissionsTotal > filteredAdmissions.length ? (
+                Showing <span className="font-medium text-foreground">{admissions.length}</span>
+                {admissionsTotal > admissions.length ? (
                   <> of <span className="font-medium text-foreground">{admissionsTotal}</span></>
                 ) : null}
-                {' '}patient{filteredAdmissions.length !== 1 ? 's' : ''}
+                {' '}patient{admissions.length !== 1 ? 's' : ''}
               </p>
-              {!escalatedOnly && filteredAdmissions.some(a => /needs doctor review/i.test(a.current_condition || '')) && (
-                <button
-                  type="button"
-                  onClick={() => setEscalatedOnly(true)}
-                  className="inline-flex"
-                  title="Filter list to escalated patients"
-                >
-                  <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/50 text-xs hover:bg-orange-500/20 cursor-pointer">
-                    <AlertTriangle className="h-3 w-3 mr-1" />
-                    {filteredAdmissions.filter(a => /needs doctor review/i.test(a.current_condition || '')).length} need{filteredAdmissions.filter(a => /needs doctor review/i.test(a.current_condition || '')).length === 1 ? 's' : ''} review
-                  </Badge>
-                </button>
-              )}
             </div>
 
             <div className="space-y-2">
-              {filteredAdmissions.length === 0 ? (
+              {admissions.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center">
                     <Search className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -873,7 +798,8 @@ export default function WardOverviewPage() {
                   </CardContent>
                 </Card>
               ) : (
-                filteredAdmissions.map((admission) => {
+                admissions.map((admission) => {
+                  const typeLabel = formatAdmissionTypeLabel(admission.admission_type);
                   const patientAssignments = getPatientAssignments(admission.id);
                   const avatar = getAvatarStyle(admission.status);
                   return (
@@ -883,18 +809,20 @@ export default function WardOverviewPage() {
                     >
                       <CardContent className="py-3 px-4">
                         <div className="flex items-center gap-3">
-                          {/* Avatar */}
                           <PatientAvatar name={admission.patient_name} photoUrl={resolvePatientPhoto(admission)} size="sm" />
 
-                          {/* Info */}
                           <div className="flex-1 min-w-0">
-                            {/* Row 1 */}
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap min-w-0">
                                 <span className="font-semibold text-foreground truncate">{admission.patient_name}</span>
                                 <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadgeClass(admission.status)}`}>
                                   {formatStatus(admission.status)}
                                 </Badge>
+                                {typeLabel && (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-teal-500/50 text-teal-700 dark:text-teal-300 bg-teal-500/10">
+                                    {typeLabel}
+                                  </Badge>
+                                )}
                                 {admission.current_condition && (
                                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getConditionBadgeClass(admission.current_condition)}`}>
                                     {admission.current_condition}
@@ -902,16 +830,12 @@ export default function WardOverviewPage() {
                                 )}
                               </div>
                               <div className="flex items-center gap-1 flex-shrink-0">
-                                {/* One entry to the patient details dialog — its
-                                    Clinical / Orders / Progress Notes tabs handle
-                                    the rest. Keeping separate row buttons for
-                                    each tab was clutter. */}
                                 <Button
                                   size="icon"
-                                  variant="ghost"
+                                  variant="outline"
                                   className="h-7 w-7"
-                                  onClick={() => handleViewAdmission(admission, 'clinical')}
-                                  title="View details (Clinical · Orders · Progress notes)"
+                                  onClick={() => handleViewAdmission(admission, 'overview')}
+                                  title="View patient details"
                                 >
                                   <Eye className="h-3.5 w-3.5" />
                                 </Button>
@@ -927,27 +851,10 @@ export default function WardOverviewPage() {
                                   </Button>
                                 )}
                                 {admission.status === 'pending_discharge' && (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 h-5 border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10 animate-pulse">
+                                  <Badge variant="outline" className="text-[10px] px-1.5 h-5 border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
                                     Awaiting nurse
                                   </Badge>
                                 )}
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-7 w-7"
-                                  onClick={() => handleDownloadSummary(admission)}
-                                  disabled={isDownloadingSummary}
-                                  title={
-                                    admission.status === 'discharged'
-                                      ? 'Download admission summary (PDF)'
-                                      : 'Download interim admission summary (PDF)'
-                                  }
-                                >
-                                  {isDownloadingSummary
-                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    : <Download className="h-3.5 w-3.5" />
-                                  }
-                                </Button>
                               </div>
                             </div>
 
@@ -991,7 +898,7 @@ export default function WardOverviewPage() {
               )}
             </div>
 
-            {!escalatedOnly && admissionsTotal > 0 && (
+            {admissionsTotal > 0 && (
               <Card className="p-4">
                 <StandardPagination
                   currentPage={admissionsPage}
@@ -1011,57 +918,71 @@ export default function WardOverviewPage() {
         {selectedAdmission && (
           <Dialog open={showAdmissionDetails} onOpenChange={setShowAdmissionDetails}>
             <DialogContent className="w-[95vw] sm:max-w-[920px] lg:max-w-[1000px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
-              <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-2">
+              <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <DialogTitle className="flex items-center gap-2 text-lg">
-                    <User className="h-5 w-5 text-blue-500 shrink-0" />
-                    {selectedAdmission.patient_name}
-                  </DialogTitle>
-                  {/* Header keeps just the status pill — PDF actions live in
-                      the dialog footer with the Close button (consistent with
-                      the rest of the EMR's modals). */}
-                  <Badge variant="outline" className={`${getStatusBadgeClass(selectedAdmission.status)} font-normal`}>
-                    {formatStatus(selectedAdmission.status)}
-                  </Badge>
-                </div>
-                {/* asChild + div: DialogDescription defaults to <p> — Badges are <div>s and cannot nest inside <p>. */}
-                <DialogDescription asChild>
-                  <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                    <span className="font-mono text-xs">{selectedAdmission.admission_id}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span>{selectedAdmission.ward_name}</span>
-                    {selectedAdmission.location_clinic_name && (<><span className="text-muted-foreground">·</span><span>{selectedAdmission.location_clinic_name}</span></>)}
-                    {selectedAdmission.bed_number ? (
-                      <>
-                        <span className="text-muted-foreground">·</span>
-                        <span>Bed {selectedAdmission.bed_number}</span>
-                      </>
-                    ) : null}
-                    {selectedAdmission.current_condition && (
-                      <>
-                        <span className="text-muted-foreground">·</span>
-                        <Badge variant="outline" className={`text-[10px] capitalize px-1.5 py-0 h-5 ${getConditionBadgeClass(selectedAdmission.current_condition)}`}>
-                          {selectedAdmission.current_condition}
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <PatientAvatar
+                      name={selectedAdmission.patient_name}
+                      photoUrl={resolvePatientPhoto(selectedAdmission)}
+                      size="md"
+                      className="shrink-0 hidden sm:flex"
+                    />
+                    <div className="min-w-0">
+                      <DialogTitle className="flex items-center gap-2 text-lg flex-wrap">
+                        {selectedAdmission.patient_name}
+                        <Badge variant="outline" className={`${getStatusBadgeClass(selectedAdmission.status)} font-normal text-[10px]`}>
+                          {formatStatus(selectedAdmission.status)}
                         </Badge>
-                      </>
-                    )}
+                      </DialogTitle>
+                      <DialogDescription asChild>
+                        <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm mt-1">
+                          <span className="font-mono text-xs">{selectedAdmission.admission_id}</span>
+                          <span>·</span>
+                          <span>{selectedAdmission.ward_name}</span>
+                          {selectedAdmission.bed_number && (<><span>·</span><span>Bed {selectedAdmission.bed_number}</span></>)}
+                          {selectedAdmission.admitting_doctor_name && (
+                            <><span>·</span><span>Dr {selectedAdmission.admitting_doctor_name}</span></>
+                          )}
+                          {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
+                            <>
+                              <span>·</span>
+                              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getConditionBadgeClass(selectedAdmission.current_condition)}`}>
+                                ⚠️ {selectedAdmission.current_condition}
+                              </Badge>
+                            </>
+                          )}
+                        </div>
+                      </DialogDescription>
+                    </div>
                   </div>
-                </DialogDescription>
+                  <WardAdmissionDocumentsMenu
+                    admission={selectedAdmission}
+                    isDownloadingSummary={isDownloadingSummary}
+                    isDownloadingSlip={isDownloadingSlip}
+                    isDownloadingReferralLetter={isDownloadingReferralLetter}
+                    isDownloadingResponsibility={isDownloadingResponsibility}
+                    onDownloadSummary={() => void handleDownloadSummary(selectedAdmission)}
+                    onDownloadSlip={() => void handleDownloadSlip(selectedAdmission)}
+                    onDownloadReferralLetter={() => void handleDownloadReferralLetter(selectedAdmission)}
+                    onDownloadResponsibility={(formType) => void handleDownloadResponsibilityForm(selectedAdmission, formType)}
+                    getResponsibilityFormVariant={getResponsibilityFormVariant}
+                  />
+                </div>
               </DialogHeader>
-              <Tabs defaultValue={detailsInitialTab} key={`${selectedAdmission.id}-${detailsInitialTab}`} className="flex-1 min-h-0 flex flex-col">
+              <Tabs value={detailsTab} onValueChange={(v) => setDetailsTab(v as WardDoctorDetailsTab)} className="flex-1 min-h-0 flex flex-col">
                 <TabsList className="mx-5 mt-3 grid grid-cols-3 h-9 shrink-0">
-                  <TabsTrigger value="clinical" className="text-xs">Clinical</TabsTrigger>
+                  <TabsTrigger value="overview" className="text-xs">Ward Rounds</TabsTrigger>
                   <TabsTrigger value="orders" className="text-xs">Orders</TabsTrigger>
-                  <TabsTrigger value="progress" className="text-xs">
+                  <TabsTrigger value="notes" className="text-xs">
                     <FileText className="h-3 w-3 mr-1 hidden sm:inline" />
-                    Progress Notes
+                    Notes
                   </TabsTrigger>
                 </TabsList>
-                <TabsContent value="clinical" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
+                <TabsContent value="overview" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
                   {/* Nurse escalation alert — shown at top so doctor sees it immediately */}
                   {selectedAdmission.current_condition && (
                     <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm ${
-                      /needs doctor review/i.test(selectedAdmission.current_condition)
+                      isEscalatedCondition(selectedAdmission.current_condition)
                         ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400'
                         : 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400'
                     }`}>
@@ -1112,6 +1033,12 @@ export default function WardOverviewPage() {
                     <div>
                       <Label className="text-muted-foreground text-xs">Presenting Complaint</Label>
                       <p className="text-sm bg-muted p-3 rounded mt-1">{selectedAdmission.presenting_complaint}</p>
+                    </div>
+                  )}
+                  {selectedAdmission.admission_instructions?.trim() && (
+                    <div>
+                      <Label className="text-muted-foreground text-xs">Admission Instructions</Label>
+                      <p className="text-sm bg-muted p-3 rounded mt-1 whitespace-pre-wrap">{selectedAdmission.admission_instructions}</p>
                     </div>
                   )}
 
@@ -1296,13 +1223,14 @@ export default function WardOverviewPage() {
                 <TabsContent value="orders" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2">
                   <WardDoctorOrdersSection
                     admission={selectedAdmission}
-                    allowAddOrders={!!currentUser?.isSuperuser || userCanAddWardDoctorOrders(currentUser?.systemRole)}
-                    allowEditCancelOrders={!!currentUser?.isSuperuser || userCanEditCancelWardOrders(currentUser?.systemRole)}
+                    allowAddOrders={userCanAddWardDoctorOrders(currentUser)}
+                    allowEditCancelOrders={userCanEditCancelWardOrders(currentUser)}
+                    excludeHandoffFromList
                     currentUserId={currentUser?.id != null ? Number(currentUser.id) : undefined}
                   />
                 </TabsContent>
 
-                <TabsContent value="progress" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
+                <TabsContent value="notes" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
                   {/* Write new note — only while the patient is still
                       admitted. Once discharged the note feed is read-only. */}
                   {selectedAdmission.status === 'admitted' && (
@@ -1337,10 +1265,15 @@ export default function WardOverviewPage() {
                       than a single text dump. The timeline component owns
                       parsing of the prepended note format. */}
                   {selectedAdmission.admission_notes ? (
-                    <ProgressNotesTimeline
-                      notes={selectedAdmission.admission_notes}
-                      showHeading
-                    />
+                    <section>
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+                        Notes & handoff history
+                      </h3>
+                      <ProgressNotesTimeline
+                        notes={selectedAdmission.admission_notes}
+                        excludeHandoff
+                      />
+                    </section>
                   ) : (
                     !selectedAdmission.current_condition && (
                       <div className="rounded-lg border border-dashed p-6 text-center">
@@ -1356,85 +1289,7 @@ export default function WardOverviewPage() {
                   )}
                 </TabsContent>
               </Tabs>
-              <DialogFooter className="px-5 py-3 border-t shrink-0 gap-2 sm:justify-between flex-col-reverse sm:flex-row sm:items-center">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => handleDownloadSummary(selectedAdmission)}
-                    disabled={isDownloadingSummary}
-                    title={
-                      selectedAdmission.status === 'discharged'
-                        ? 'Download full chart-copy admission summary (PDF)'
-                        : 'Download interim admission summary (PDF)'
-                    }
-                  >
-                    {isDownloadingSummary
-                      ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      : <Download className="h-3.5 w-3.5 mr-1.5" />
-                    }
-                    {selectedAdmission.status === 'discharged' ? 'Summary PDF' : 'Interim PDF'}
-                  </Button>
-                  {(selectedAdmission.status === 'discharged' || selectedAdmission.status === 'pending_discharge') && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => handleDownloadSlip(selectedAdmission)}
-                      disabled={isDownloadingSlip}
-                      title="Download patient discharge slip (one-page handout)"
-                    >
-                      {isDownloadingSlip
-                        ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                        : <FileText className="h-3.5 w-3.5 mr-1.5" />
-                      }
-                      Patient Slip
-                    </Button>
-                  )}
-                  {/* Referral Letter — only when an external referral is
-                      linked (escort exists). Doctors print this to hand to
-                      the receiving facility / send with the escort. */}
-                  {selectedAdmission.escort && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => handleDownloadReferralLetter(selectedAdmission)}
-                      disabled={isDownloadingReferralLetter}
-                      title="Download formal referral letter for the receiving facility (PDF)"
-                    >
-                      {isDownloadingReferralLetter
-                        ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                        : <Send className="h-3.5 w-3.5 mr-1.5" />
-                      }
-                      Referral Letter
-                    </Button>
-                  )}
-                  {/* Responsibility form — context-driven label/variant.
-                      Skipped when the admission state can't yet support a
-                      meaningful form (still admitted, no discharge plan). */}
-                  {(() => {
-                    const v = getResponsibilityFormVariant(selectedAdmission);
-                    if (!v) return null;
-                    return (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-xs"
-                        onClick={() => handleDownloadResponsibilityForm(selectedAdmission, v.formType)}
-                        disabled={isDownloadingResponsibility}
-                        title={`Download ${v.label.toLowerCase()} for patient / guardian signature (PDF)`}
-                      >
-                        {isDownloadingResponsibility
-                          ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                          : <FileCheck className="h-3.5 w-3.5 mr-1.5" />
-                        }
-                        {v.label}
-                      </Button>
-                    );
-                  })()}
-                </div>
+              <DialogFooter className="px-5 py-3 border-t shrink-0">
                 <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setShowAdmissionDetails(false)}>
                   Close
                 </Button>

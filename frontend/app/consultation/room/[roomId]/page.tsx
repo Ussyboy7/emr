@@ -1168,7 +1168,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <ConsultationRoomAnnualCheckupTab
             patient={currentPatient}
             sessionId={sessionId}
-            systemRole={currentUser?.systemRole}
+            capabilities={currentUser?.capabilities}
             isSuperuser={currentUser?.isSuperuser}
             onNavigateTab={setActiveTab}
             onPatientRecordUpdated={({ bloodGroup, genotype }) => {
@@ -1245,6 +1245,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <ConsultationRoomNursingTab
             nursingOrders={nursingOrders}
             currentPatient={currentPatient}
+            draftObservationCount={draftObservationCount}
             onShowAddNursingOrder={() => {
               loadWards();
               setShowAddNursingOrder(true);

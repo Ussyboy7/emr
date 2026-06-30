@@ -7,7 +7,7 @@ import type { ConsultationRoomPatient } from "@/lib/consultation/room-types";
 type ConsultationRoomAnnualCheckupTabProps = {
   patient: ConsultationRoomPatient;
   sessionId: number | null;
-  systemRole?: string;
+  capabilities?: string[];
   isSuperuser?: boolean;
   onNavigateTab: (tab: string) => void;
   onPatientRecordUpdated: (updates: { bloodGroup?: string; genotype?: string }) => void;
@@ -16,7 +16,7 @@ type ConsultationRoomAnnualCheckupTabProps = {
 export function ConsultationRoomAnnualCheckupTab({
   patient,
   sessionId,
-  systemRole,
+  capabilities,
   isSuperuser,
   onNavigateTab,
   onPatientRecordUpdated,
@@ -33,7 +33,7 @@ export function ConsultationRoomAnnualCheckupTab({
         patientBloodGroup={patient.bloodGroup}
         patientGenotype={patient.genotype}
         consultationSessionId={sessionId}
-        systemRole={systemRole}
+        capabilities={capabilities}
         isSuperuser={isSuperuser}
         onNavigateTab={onNavigateTab}
         onPatientRecordUpdated={({ bloodGroup, genotype }) => {

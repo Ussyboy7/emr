@@ -175,7 +175,7 @@ export function useConsultationRoomOrders({
     status: 'Draft' | 'Sent to Nursing' | 'In Progress' | 'Completed';
     // Observation admission fields
     ward?: string;
-    admissionDiagnosis?: string;
+    admissionDiagnoses?: OrderDiagnosisEntry[];
     presentingComplaint?: string;
   }[]>([]);
 
@@ -191,7 +191,7 @@ export function useConsultationRoomOrders({
     instructions: "",
     priority: "Routine",
     ward: "",
-    admissionDiagnosis: "",
+    admissionDiagnoses: [] as OrderDiagnosisEntry[],
     presentingComplaint: ""
   });
   const draftObservationCount = nursingOrders.filter(
@@ -1090,8 +1090,9 @@ export function useConsultationRoomOrders({
         toast.error('Please select an observation ward');
         return;
       }
-      if (!newNursingOrder.admissionDiagnosis) {
-        toast.error('Please enter observation diagnosis');
+      const diagnosisError = validateOrderDiagnoses(newNursingOrder.admissionDiagnoses);
+      if (diagnosisError) {
+        toast.error(diagnosisError);
         return;
       }
       if (!newNursingOrder.presentingComplaint) {
@@ -1144,17 +1145,23 @@ export function useConsultationRoomOrders({
       status: 'Draft',
       // Observation admission fields
       ward: newNursingOrder.ward || undefined,
-      admissionDiagnosis: newNursingOrder.admissionDiagnosis || undefined,
+      admissionDiagnoses: newNursingOrder.admissionDiagnoses.length
+        ? [...newNursingOrder.admissionDiagnoses]
+        : undefined,
       presentingComplaint: newNursingOrder.presentingComplaint || undefined
     }]);
     
-    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", instructions: "", priority: "Routine", ward: "", admissionDiagnosis: "", presentingComplaint: "" });
+    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", instructions: "", priority: "Routine", ward: "", admissionDiagnoses: [], presentingComplaint: "" });
     setInjectionSelectedIds(new Set());
     setInjectionConfigs(new Map());
     setInjectionMedicationSearch("");
     setShowInjectionMedicationDropdown(false);
     setShowAddNursingOrder(false);
-    toast.success("Nursing order added to draft");
+    if (newNursingOrder.type === 'Observation Admission') {
+      toast.message('Observation admission queued. End session to transfer to Nursing/Ward.');
+    } else {
+      toast.success("Nursing order added to draft");
+    }
   };
 
   // Send all draft nursing orders to nursing (like sendPrescriptionsToPharmacy, sendLabOrdersToLab, sendRadiologyOrders)
@@ -1187,47 +1194,55 @@ export function useConsultationRoomOrders({
         'STAT': 'urgent',
       };
       
-      // Send each draft order to backend
-      const sendPromises = draftOrders.map(async (order) => {
-        // Handle observation admission orders differently
+      const sendOneDraftOrder = async (order: (typeof draftOrders)[number]) => {
         if (order.type === 'Observation Admission') {
-          // Check if patient is already admitted
           try {
             const existingAdmissions = await wardService.getAdmissions({
               patient: numericPatientId,
-              status: 'admitted'
+              status: 'admitted',
             });
 
             if (existingAdmissions.results && existingAdmissions.results.length > 0) {
-              throw new Error(`Patient is already admitted to ${existingAdmissions.results[0].ward_name}. Please discharge first or transfer.`);
+              throw new Error(
+                `Patient is already admitted to ${existingAdmissions.results[0].ward_name}. Please discharge first or transfer.`,
+              );
             }
           } catch (error: any) {
             if (error.message.includes('already admitted')) {
               throw error;
             }
-            // If it's a different error (like network), continue
             console.warn('Could not check existing admissions:', error);
           }
 
-          // Create nursing order only - nurse will do the actual observation admission
-          return apiFetch('/nursing/orders/', {
-            method: 'POST',
-            body: JSON.stringify({
-              patient: numericPatientId,
-              visit: numericVisitId,
-              consultation_session: sessionId,
-              ordered_by: orderedByUserId,
-              order_type: 'observation admission',
-              description: `Observation admission (Day Care) to ${order.ward}. Diagnosis: ${order.admissionDiagnosis}. Presenting complaint: ${order.presentingComplaint || 'N/A'}. ${order.instructions}`,
-              frequency: '',
-              duration: '',
-              status: 'pending',
-              priority: priorityMap[order.priority] || 'medium',
-            }),
+          const selectedWard = wards.find(
+            (w) => String(w.id) === String(order.ward) || String(w.ward_code) === String(order.ward),
+          );
+          if (!selectedWard?.id) {
+            throw new Error('Selected observation ward is invalid. Please edit the order and reselect ward.');
+          }
+          const primaryDx =
+            order.admissionDiagnoses?.find((d) => d.type === 'Primary') || order.admissionDiagnoses?.[0];
+          if (!primaryDx) {
+            throw new Error('Observation admission requires at least one diagnosis.');
+          }
+          if (!numericVisitId) {
+            throw new Error('Patient has no active visit. Cannot create observation admission.');
+          }
+
+          await wardService.createAdmission({
+            patient: numericPatientId,
+            visit: numericVisitId,
+            ward: Number(selectedWard.id),
+            admission_type: 'observation',
+            admitting_doctor: orderedByUserId,
+            admission_diagnosis: `${primaryDx.code} - ${primaryDx.description}`,
+            presenting_complaint: order.presentingComplaint || '',
+            admission_instructions: order.instructions || '',
           });
-        } else {
-          // Regular nursing orders (Injection, Dressing, etc.)
-        // Build description from order details
+
+          return null;
+        }
+
         let description = order.instructions;
         if (order.type === 'Injection' && order.medication) {
           description = `${order.medication} - ${order.dosage || ''} via ${order.route || ''}. ${order.instructions}`;
@@ -1236,26 +1251,32 @@ export function useConsultationRoomOrders({
         } else if (order.type === 'IV Infusion' && order.medication) {
           description = `IV Infusion: ${order.medication}${order.dosage ? ` — ${order.dosage}` : ''}. ${order.instructions}`;
         }
-        
-          return apiFetch('/nursing/orders/', {
+
+        return apiFetch('/nursing/orders/', {
           method: 'POST',
           body: JSON.stringify({
             patient: numericPatientId,
             visit: numericVisitId,
-              consultation_session: sessionId,
-              ordered_by: orderedByUserId,
+            consultation_session: sessionId,
+            ordered_by: orderedByUserId,
             order_type: order.type,
-            description: description,
+            description,
             frequency: order.type === 'Injection' ? 'As ordered' : '',
             duration: '',
             status: 'pending',
             priority: priorityMap[order.priority] || 'medium',
           }),
         });
-        }
-      });
-      
-      await Promise.all(sendPromises);
+      };
+
+      const observationOrders = draftOrders.filter((o) => o.type === 'Observation Admission');
+      const procedureOrders = draftOrders.filter((o) => o.type !== 'Observation Admission');
+
+      // Create admissions first so procedure orders auto-link to the active stay.
+      for (const order of observationOrders) {
+        await sendOneDraftOrder(order);
+      }
+      await Promise.all(procedureOrders.map((order) => sendOneDraftOrder(order)));
       
       // Update status of sent orders
       setNursingOrders(prev => prev.map(order => 
@@ -1264,7 +1285,21 @@ export function useConsultationRoomOrders({
           : order
       ));
       
-      toast.success(`${draftOrders.length} nursing order(s) sent to Nursing Procedures queue`);
+      const observationCount = draftOrders.filter((o) => o.type === 'Observation Admission').length;
+      const procedureCount = draftOrders.length - observationCount;
+      if (observationCount > 0 && procedureCount === 0) {
+        toast.success(
+          observationCount === 1
+            ? 'Observation admission created — continue care in Ward Care'
+            : `${observationCount} observation admissions created — continue care in Ward Care`,
+        );
+      } else if (observationCount > 0) {
+        toast.success(
+          `${procedureCount} procedure order(s) sent to Nursing; ${observationCount} observation admission(s) created in Ward Care`,
+        );
+      } else {
+        toast.success(`${draftOrders.length} nursing order(s) sent to Nursing Procedures queue`);
+      }
       return draftOrders.length;
     } catch (err: any) {
       console.error('Error creating nursing orders:', err);
@@ -1288,7 +1323,7 @@ export function useConsultationRoomOrders({
       instructions: "",
       priority: "Routine",
       ward: "",
-      admissionDiagnosis: "",
+      admissionDiagnoses: [],
       presentingComplaint: ""
     });
 
@@ -1303,7 +1338,7 @@ export function useConsultationRoomOrders({
       instructions: orderToEdit.instructions,
       priority: orderToEdit.priority,
       ward: orderToEdit.ward || "",
-      admissionDiagnosis: orderToEdit.admissionDiagnosis || "",
+      admissionDiagnoses: orderToEdit.admissionDiagnoses ? [...orderToEdit.admissionDiagnoses] : [],
       presentingComplaint: orderToEdit.presentingComplaint || ""
     });
 

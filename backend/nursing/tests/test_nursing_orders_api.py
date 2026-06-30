@@ -144,6 +144,16 @@ class NursingOrderCreateTests(NursingOrderAPITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["order_type"], "observation admission")
 
+    def test_create_observation_admission_is_informational(self):
+        payload = {
+            **self.valid_payload,
+            "order_type": "observation admission",
+            "description": "Observation admission to Male Medical Ward.",
+        }
+        resp = self.client.post(BASE_URL, payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(resp.data.get("is_informational"))
+
     def test_create_multiple_orders_unique_ids(self):
         r1 = self.client.post(BASE_URL, self.valid_payload, format="json")
         r2 = self.client.post(BASE_URL, self.valid_payload, format="json")
@@ -440,6 +450,15 @@ class NursingOrderQueueTests(NursingOrderAPITestCase):
         results = resp.data.get("results", resp.data)
         types = [r["order_type"].lower() for r in results]
         self.assertNotIn("ward instruction", types)
+        self.assertEqual(len(results), 3)
+
+    def test_procedures_queue_excludes_observation_admissions(self):
+        self._create_order(order_type="observation admission", status="pending")
+        resp = self.client.get(BASE_URL, {"procedures_queue": "1"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        results = resp.data.get("results", resp.data)
+        types = [r["order_type"].lower() for r in results]
+        self.assertNotIn("observation admission", types)
         self.assertEqual(len(results), 3)
 
     def test_queue_type_injection(self):

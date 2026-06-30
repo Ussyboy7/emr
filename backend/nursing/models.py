@@ -43,6 +43,10 @@ class NursingOrder(models.Model):
     duration = models.CharField(max_length=100, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
+    is_informational = models.BooleanField(
+        default=False,
+        help_text='Consultation handoff / observation admission context — not a nursing task',
+    )
     
     ordered_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)

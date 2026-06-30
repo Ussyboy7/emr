@@ -16,6 +16,9 @@ CAPABILITY_CATALOG: tuple[tuple[str, str, str, str], ...] = (
     ("notification_routing_manage", "Manage notification routing", "Administration", "Edit notification routing matrix"),
     ("hr_compliance_manage", "HR compliance administration", "Human Resources", "Write HR compliance endpoints"),
     ("annual_checkup_signoff", "Annual check-up medical sign-off", "Human Resources", "Doctor sign-off on annual check-ups"),
+    ("ward_order_create", "Create ward doctor orders", "Consultation", "Add nursing orders on Ward Rounds"),
+    ("ward_order_edit", "Edit/cancel ward doctor orders", "Consultation", "Edit or cancel pending ward orders"),
+    ("ward_order_perform", "Perform ward nursing tasks", "Nursing", "Administer injections, dressings, and ward instructions"),
 )
 
 ALL_CAPABILITY_IDS: frozenset[str] = frozenset(c[0] for c in CAPABILITY_CATALOG)
@@ -29,6 +32,8 @@ PAGE_TO_CAPABILITIES: dict[str, frozenset[str]] = {
     "/hr": frozenset({"hr_compliance_manage"}),
     "/hr/annual-checkups": frozenset({"hr_compliance_manage"}),
     "/hr/exemptions": frozenset({"hr_compliance_manage"}),
+    "/consultation/wards": frozenset({"ward_order_create", "ward_order_edit"}),
+    "/nursing/wards": frozenset({"ward_order_perform"}),
 }
 
 # Documented API families per page (for admin effective-access preview).

@@ -52,6 +52,7 @@ import { LabOrderModal, type LabOrderSubmitInput } from "@/components/consultati
 import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from "@/components/consultation/orders/RadiologyOrderModal";
 import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/consultation/orders/PhysioOrderModal";
 import { NursingOrderModal, type NursingOrderSubmitInput } from "@/components/consultation/orders/NursingOrderModal";
+import { buildObservationAdmissionOrderDescription } from '@/lib/ward-admission-ui';
 import { extractSessionEditState } from '@/lib/consultation/workspace-bundle-enrichment';
 
 // NOTE: doctor name is now taken directly from the session serializer (doctor_name)
@@ -957,7 +958,10 @@ export default function ConsultationHistoryPage() {
 
     if (payload.type === "Observation Admission") {
       orderTypeForApi = "observation admission";
-      description = `Observation admission (Day Care) to ${payload.ward}. Diagnosis: ${payload.admissionDiagnosis}. Presenting complaint: ${payload.presentingComplaint || "N/A"}. ${payload.instructions}`;
+      description = buildObservationAdmissionOrderDescription({
+        ward: payload.ward,
+        instructions: payload.instructions,
+      });
     } else if (payload.type === "Injection" && payload.medication) {
       description = `${payload.medication} - ${payload.dosage || ""} via ${payload.route || ""}. ${payload.instructions}`;
     } else if (payload.type === "Dressing") {

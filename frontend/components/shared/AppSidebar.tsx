@@ -142,7 +142,7 @@ export const menuSections: MenuSection[] = [
       { label: "Home", href: "/consultation", icon: LayoutDashboard },
       { label: "Start Consultation", href: "/consultation/start", icon: Play },
       { label: "Consultation History", href: "/consultation/history", icon: History },
-      { label: "Ward Overview", href: "/consultation/wards", icon: Building2 },
+      { label: "Ward Rounds", href: "/consultation/wards", icon: Building2 },
       { label: "Referrals", href: "/consultation/referrals", icon: ArrowRight },
       { label: "Analytics", href: "/consultation/analytics", icon: BarChart3 },
 

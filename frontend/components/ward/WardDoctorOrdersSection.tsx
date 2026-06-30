@@ -53,6 +53,18 @@ import {
   Info,
   Check,
 } from 'lucide-react';
+import { ConsultationOrderListCard } from '@/components/consultation/room/ConsultationOrderListCard';
+import { PerformNursingProcedureDialog } from '@/components/nursing/PerformNursingProcedureDialog';
+import {
+  isPerformableWardOrderType,
+  nursingOrderToProcedure,
+  type NursingProcedureItem,
+} from '@/lib/nursing/nursing-procedure-queue';
+import { isObservationAdmission, isWardHandoffOrder } from '@/lib/ward-admission-ui';
+import {
+  normalizePrescriptionDoseUnit,
+  PRESCRIPTION_DOSE_UNITS,
+} from '@/lib/pharmacy/infer-dose-unit';
 
 /** Shape returned by `/v1/pharmacy/generics/for_prescription/`. */
 type GenericLike = {
@@ -64,7 +76,14 @@ type GenericLike = {
   dosage_form?: string;
   strength?: string;
   route?: string;
+  unit?: string;
 };
+
+function parseDoseNumber(dose?: string): string {
+  if (!dose) return '1';
+  const m = String(dose).trim().match(/^([\d.]+)/);
+  return m ? m[1] : '1';
+}
 
 const formatGenericLabel = (g: GenericLike): string => {
   const name = g.name?.trim() || '';
@@ -133,6 +152,7 @@ const WOUND_LOCATIONS = [
 type MedConfig = {
   generic: GenericLike;
   dosage: string;
+  unit: string;
   frequency: string;
   durationDays: string;
   route: string;
@@ -148,16 +168,33 @@ export interface WardNursingOrderRow {
   priority: string;
   ordered_at: string;
   ordered_by_name?: string | null;
+  frequency?: string;
   /** 'nursing' rows are NursingOrder records (editable from the ward). */
   /** 'pharmacy' rows are virtual rows synthesized from a Pharmacy
    * prescription so the ward can show medications it sent. They're
    * read-only here — cancellation lives in the pharmacy module. */
   source?: 'nursing' | 'pharmacy';
+  is_informational?: boolean;
   /** Original prescription PK, only set for source='pharmacy'. */
   prescription_id_pk?: number;
 }
 
 type OrderKind = 'instruction' | 'medication' | 'injection' | 'dressing';
+
+/** Ward follow-up orders — procedures first, then pharmacy, then general instructions. */
+const WARD_ADD_ORDER_KINDS: {
+  value: OrderKind;
+  label: string;
+  queue: string;
+  icon: typeof Syringe;
+}[] = [
+  { value: 'injection', label: 'Injection', queue: 'Procedures', icon: Syringe },
+  { value: 'dressing', label: 'Dressing / wound care', queue: 'Procedures', icon: Bandage },
+  { value: 'medication', label: 'Medication', queue: 'Pharmacy', icon: Pill },
+  { value: 'instruction', label: 'Nursing instruction', queue: 'Ward task list', icon: ClipboardList },
+];
+
+const DEFAULT_WARD_ORDER_KIND: OrderKind = 'injection';
 
 type ListFilter = 'active' | 'history' | 'all';
 
@@ -235,24 +272,53 @@ const relativeTime = (iso: string) => {
   return ''; // older than a month — absolute date is enough
 };
 
+function wardOrderRowToProcedure(
+  order: WardNursingOrderRow,
+  admission: PatientAdmission,
+): NursingProcedureItem {
+  return nursingOrderToProcedure({
+    id: order.id,
+    order_type: order.order_type,
+    description: order.description,
+    status: order.status,
+    priority: order.priority,
+    ordered_at: order.ordered_at,
+    ordered_by_name: order.ordered_by_name,
+    frequency: order.frequency ?? '',
+    patient: admission.patient,
+    visit: admission.visit,
+    admission: admission.id,
+    patient_name: admission.patient_name,
+  });
+}
+
 export function WardDoctorOrdersSection({
   admission,
   allowAddOrders,
   allowEditCancelOrders,
+  allowPerformOrders = false,
   currentUserId,
+  showRoutingInfo = true,
+  excludeHandoffFromList = true,
 }: {
   admission: PatientAdmission;
   allowAddOrders: boolean;
   /** Doctors + nursing staff can edit/cancel pending ward orders */
   allowEditCancelOrders: boolean;
+  /** Nurses can administer injections and perform dressings on this tab */
+  allowPerformOrders?: boolean;
   currentUserId?: number;
+  /** Training banner about Pharmacy vs Procedures routing */
+  showRoutingInfo?: boolean;
+  /** Pull admission handoff instructions out of the task list */
+  excludeHandoffFromList?: boolean;
 }) {
   const [orders, setOrders] = useState<WardNursingOrderRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(true);
   const [listFilter, setListFilter] = useState<ListFilter>('active');
   const [addOpen, setAddOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [orderKind, setOrderKind] = useState<OrderKind>('instruction');
+  const [orderKind, setOrderKind] = useState<OrderKind>(DEFAULT_WARD_ORDER_KIND);
   const [priority, setPriority] = useState<string>('medium');
   const [instructionText, setInstructionText] = useState('');
   const [woundType, setWoundType] = useState('');
@@ -266,6 +332,9 @@ export function WardDoctorOrdersSection({
 
   const [cancelTarget, setCancelTarget] = useState<WardNursingOrderRow | null>(null);
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
+
+  const [performTarget, setPerformTarget] = useState<NursingProcedureItem | null>(null);
+  const [performOpen, setPerformOpen] = useState(false);
 
   // Multi-select medication picker (same data source + UX as the consultation
   // prescription modal). The doctor can pick several generics, configure each,
@@ -284,35 +353,18 @@ export function WardDoctorOrdersSection({
   const genericKey = (g: GenericLike): string => `g:${String(g.id)}`;
 
   const loadOrders = useCallback(async () => {
-    try {
-      setLoading(true);
-      // Doctor orders span two queues: NursingOrder (instructions /
-      // injections / dressings) and pharmacy.Prescription (medications).
-      // We fetch both and present them in one merged list so the ward
-      // doctor sees everything they've ordered for this admission.
-      const [nursingRes, rxRes] = await Promise.all([
-        apiFetch<{ results: WardNursingOrderRow[] }>(
-          `/nursing/orders/?admission=${admission.id}&ordering=-ordered_at&page_size=${MAX_LIST_PAGE_SIZE}`,
-        ),
-        admission.visit
-          ? apiFetch<{ results: any[] }>(
-              `/v1/pharmacy/prescriptions/?visit=${admission.visit}&page_size=${MAX_LIST_PAGE_SIZE}&ordering=-prescribed_at`,
-            ).catch(() => ({ results: [] as any[] }))
-          : Promise.resolve({ results: [] as any[] }),
-      ]);
+    const observation = isObservationAdmission(admission);
 
-      const nursingRows: WardNursingOrderRow[] = (nursingRes.results || []).map((r) => ({
-        ...r,
-        source: 'nursing' as const,
-      }));
-
-      // Synthesize one row per prescription item so the merged list
-      // matches the ward's "one medication = one row" mental model.
+    const mergeRxInto = (nursingRows: WardNursingOrderRow[], rxResults: any[]) => {
+      const admissionStartMs = admission.admission_date
+        ? new Date(admission.admission_date).getTime()
+        : 0;
       const rxRows: WardNursingOrderRow[] = [];
-      for (const rx of rxRes.results || []) {
+      for (const rx of rxResults || []) {
+        const prescribedMs = new Date(rx.prescribed_at || rx.created_at || 0).getTime();
+        if (admissionStartMs && prescribedMs < admissionStartMs) continue;
         const items: any[] = rx.items || rx.medications || [];
         const rxStatus = String(rx.status || 'pending').toLowerCase();
-        // Map pharmacy lifecycle to the active/history split this UI uses.
         const mappedStatus =
           rxStatus === 'pending' || rxStatus === 'dispensing' || rxStatus === 'partially_dispensed'
             ? 'pending'
@@ -345,39 +397,71 @@ export function WardDoctorOrdersSection({
           });
         }
       }
-
-      // Merge + sort by ordered_at desc.
-      const merged = [...nursingRows, ...rxRows].sort(
+      return [...nursingRows, ...rxRows].sort(
         (a, b) => new Date(b.ordered_at).getTime() - new Date(a.ordered_at).getTime(),
       );
-      setOrders(merged);
+    };
+
+    try {
+      setOrdersLoading(true);
+      setOrders([]);
+      const nursingRes = await apiFetch<{ results: WardNursingOrderRow[] }>(
+        `/nursing/orders/?for_admission=${admission.id}&ordering=-ordered_at&page_size=${MAX_LIST_PAGE_SIZE}`,
+      );
+
+      const nursingRows: WardNursingOrderRow[] = (nursingRes.results || []).map((r) => ({
+        ...r,
+        source: 'nursing' as const,
+      }));
+
+      // Show nursing orders immediately so handoff vs tasks split is ready.
+      setOrders(nursingRows);
+      setOrdersLoading(false);
+
+      if (!admission.visit) return;
+
+      // Defer pharmacy merge — keeps observation handoff view snappy.
+      try {
+        const rxRes = await apiFetch<{ results: any[] }>(
+          `/v1/pharmacy/prescriptions/?visit=${admission.visit}&page_size=${MAX_LIST_PAGE_SIZE}&ordering=-prescribed_at`,
+        );
+        setOrders(mergeRxInto(nursingRows, rxRes.results || []));
+      } catch {
+        if (!observation) {
+          // Non-observation: nursing-only list is still usable.
+        }
+      }
     } catch (e: any) {
       console.error(e);
       toast.error(e?.message || 'Failed to load doctor orders');
       setOrders([]);
-    } finally {
-      setLoading(false);
+      setOrdersLoading(false);
     }
-  }, [admission.id, admission.visit]);
+  }, [admission.id, admission.visit, admission.admission_type, admission.admission_date]);
 
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
 
-  const filteredOrders = useMemo(() => {
-    if (listFilter === 'all') return orders;
-    if (listFilter === 'active') return orders.filter((o) => isActiveStatus(o.status));
-    return orders.filter((o) => isHistoryStatus(o.status));
-  }, [orders, listFilter]);
+  const taskOrders = useMemo(() => {
+    if (!excludeHandoffFromList) return orders;
+    return orders.filter((o) => !isWardHandoffOrder(o));
+  }, [orders, excludeHandoffFromList]);
 
   const counts = useMemo(() => ({
-    active:  orders.filter((o) => isActiveStatus(o.status)).length,
-    history: orders.filter((o) => isHistoryStatus(o.status)).length,
-    all:     orders.length,
-  }), [orders]);
+    active: taskOrders.filter((o) => isActiveStatus(o.status)).length,
+    history: taskOrders.filter((o) => isHistoryStatus(o.status)).length,
+    all: taskOrders.length,
+  }), [taskOrders]);
+
+  useEffect(() => {
+    if (listFilter === 'history' && counts.history === 0) {
+      setListFilter('active');
+    }
+  }, [listFilter, counts.history]);
 
   const resetAddForm = () => {
-    setOrderKind('instruction');
+    setOrderKind(DEFAULT_WARD_ORDER_KIND);
     setPriority('medium');
     setInstructionText('');
     setWoundType('');
@@ -444,18 +528,15 @@ export function WardDoctorOrdersSection({
     return () => clearTimeout(t);
   }, [addOpen, medSearch, orderKind, showMedDropdown]);
 
-  // Close the dropdown when the user clicks anywhere outside the search box.
   useEffect(() => {
-    if (!showMedDropdown) return;
+    if (!addOpen || !showMedDropdown) return;
     const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (medSearchBoxRef.current && !medSearchBoxRef.current.contains(target)) {
-        setShowMedDropdown(false);
-      }
+      const el = medSearchBoxRef.current;
+      if (el && !el.contains(e.target as Node)) setShowMedDropdown(false);
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, [showMedDropdown]);
+  }, [addOpen, showMedDropdown]);
 
   const toggleGeneric = (g: GenericLike) => {
     const key = genericKey(g);
@@ -465,13 +546,14 @@ export function WardDoctorOrdersSection({
       return;
     }
     const route = mapGenericRouteToOption(g.route, 'Oral');
-    const dosage = (g.strength || '').trim();
+    const form = (g.dosage_form || g.form || '').trim();
     setSelectedMedKeys((prev) => [...prev, key]);
     setMedConfigs((prev) => {
       const next = new Map(prev);
       next.set(key, {
         generic: g,
-        dosage,
+        dosage: parseDoseNumber(g.strength),
+        unit: normalizePrescriptionDoseUnit(g.unit, form),
         frequency: 'Once daily (OD)',
         durationDays: '',
         route,
@@ -479,15 +561,12 @@ export function WardDoctorOrdersSection({
       });
       return next;
     });
-    // Keep the search focused so the doctor can quickly add the next med —
-    // mirrors how the consultation prescription modal stays sticky.
-    setMedSearch('');
   };
 
   const buildMedDescription = (cfg: MedConfig): string => {
     const parts: Array<string | false> = [
       formatGenericLabel(cfg.generic) || 'Medication',
-      cfg.dosage.trim() && `Dose: ${cfg.dosage.trim()}`,
+      cfg.dosage.trim() && `Dose: ${cfg.dosage.trim()}${cfg.unit ? ` ${cfg.unit}` : ''}`,
       cfg.frequency.trim() && `Frequency: ${cfg.frequency.trim()}`,
       cfg.durationDays.trim() && `Duration: ${cfg.durationDays.trim()} day(s)`,
       cfg.route.trim() && `Route: ${cfg.route.trim()}`,
@@ -585,16 +664,14 @@ export function WardDoctorOrdersSection({
             ? dosageNum
             : Math.max(Math.ceil(dosageNum * dailyDoses * dayCount), 1);
           const form = (cfg.generic.dosage_form || cfg.generic.form || '').trim();
+          const unit = normalizePrescriptionDoseUnit(cfg.unit, form);
           return {
             generic: typeof cfg.generic.id === 'number'
               ? cfg.generic.id
               : parseInt(String(cfg.generic.id), 10),
             medication: null,
             medication_name: cfg.generic.name || formatGenericLabel(cfg.generic),
-            unit: form.toLowerCase().includes('tablet') ? 'tablet'
-              : form.toLowerCase().includes('capsule') ? 'capsule'
-              : form.toLowerCase().includes('syrup') || form.toLowerCase().includes('suspension') ? 'ml'
-              : 'tablet',
+            unit,
             dosage_form: form,
             strength: (cfg.generic.strength || '').trim(),
             route: cfg.route || 'Oral',
@@ -764,86 +841,135 @@ export function WardDoctorOrdersSection({
     isActiveStatus(o.status) &&
     o.source !== 'pharmacy';
 
+  const canCompleteInstruction = (o: WardNursingOrderRow) =>
+    (allowPerformOrders || allowEditCancelOrders) &&
+    admission.status === 'admitted' &&
+    isInstructionType(o.order_type) &&
+    isActiveStatus(o.status);
+
+  const canPerformPending = (o: WardNursingOrderRow) =>
+    allowPerformOrders &&
+    admission.status === 'admitted' &&
+    isActiveStatus(o.status) &&
+    o.source === 'nursing' &&
+    isPerformableWardOrderType(o.order_type);
+
+  const openPerform = (o: WardNursingOrderRow) => {
+    setPerformTarget(wardOrderRowToProcedure(o, admission));
+    setPerformOpen(true);
+  };
+
   const renderOrderRow = (o: WardNursingOrderRow) => {
     const meta = kindMeta(o.order_type);
     const KindIcon = meta.icon;
     const parsed = parseDescription(o.order_type, o.description);
     const orderedAt = new Date(o.ordered_at);
     const rel = relativeTime(o.ordered_at);
+    const detailLine = parsed.fields.map((f) => `${f.label}: ${f.value}`).join(' · ');
+    const metaLine = `${o.ordered_by_name || '—'} · ${formatDisplayDateTime(orderedAt)}${rel ? ` · ${rel}` : ''}`;
+    const proceduresHint =
+      showRoutingInfo &&
+      !allowPerformOrders &&
+      isActiveStatus(o.status) &&
+      o.source === 'nursing' &&
+      isPerformableWardOrderType(o.order_type)
+        ? ' · Also in Procedures queue'
+        : '';
 
     return (
-      <li
+      <ConsultationOrderListCard
         key={o.id}
-        className={`rounded-lg border border-l-4 ${meta.accent} p-3 text-sm flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between`}
-      >
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${meta.tint}`}>
-              <KindIcon className="h-3 w-3" />
-              {meta.label}
-            </span>
-            <span className="font-mono text-[10px] text-muted-foreground">{o.order_id}</span>
+        borderClassName={meta.accent}
+        icon={<KindIcon className="h-3.5 w-3.5" />}
+        iconWrapClassName={meta.tint}
+        title={meta.label}
+        titleExtra={
+          <span className="font-mono text-[10px] text-muted-foreground">{o.order_id}</span>
+        }
+        badges={
+          <>
             {o.source === 'pharmacy' && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <Badge variant="outline" className="px-1.5 py-0 h-5 text-[10px] border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
                 Pharmacy queue
-              </span>
+              </Badge>
             )}
-            <Badge variant={statusBadge(o.status)} className="text-[10px] capitalize">
+            <Badge variant={statusBadge(o.status)} className="px-1.5 py-0.5 text-xs capitalize">
               {String(o.status).replace('_', ' ')}
             </Badge>
             {o.source !== 'pharmacy' && (
-              <Badge variant="secondary" className="text-[10px] capitalize">
+              <Badge variant="secondary" className="px-1.5 py-0.5 text-xs capitalize">
                 {o.priority}
               </Badge>
             )}
-          </div>
-
-          <p className="text-foreground font-medium whitespace-pre-wrap break-words leading-snug">
-            {parsed.primary}
-          </p>
-
-          {parsed.fields.length > 0 && (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-              {parsed.fields.map((f) => (
-                <div key={f.label} className="contents">
-                  <dt className="text-muted-foreground">{f.label}</dt>
-                  <dd className="text-foreground break-words">{f.value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-
-          <p className="text-[11px] text-muted-foreground">
-            {o.ordered_by_name || '—'}
-            {' · '}
-            <span title={formatDisplayDateTime(orderedAt)}>
-              {formatDisplayDateTime(orderedAt)}
-              {rel && <span className="text-muted-foreground/70"> · {rel}</span>}
-            </span>
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-1 shrink-0 justify-end">
-          {isInstructionType(o.order_type) && o.status === 'pending' && admission.status === 'admitted' && (
-            <Button type="button" size="sm" variant="outline" onClick={() => markInstructionDone(o)}>
-              <CheckCircle2 className="h-4 w-4 mr-1" />
-              Mark done
-            </Button>
-          )}
-          {canModifyPending(o) && (
-            <>
-              <Button type="button" size="sm" variant="outline" onClick={() => openEdit(o)}>
-                <Pencil className="h-4 w-4 mr-1" />
-                Edit
+          </>
+        }
+        subtitle={parsed.primary}
+        secondarySubtitle={detailLine || undefined}
+        queueHint={`${metaLine}${proceduresHint}`}
+        actions={
+          <>
+            {canPerformPending(o) && (
+              <Button
+                type="button"
+                size="sm"
+                className={`h-7 px-2 text-xs text-white ${
+                  String(o.order_type).toLowerCase() === 'dressing'
+                    ? 'bg-violet-500 hover:bg-violet-600'
+                    : 'bg-emerald-500 hover:bg-emerald-600'
+                }`}
+                onClick={() => openPerform(o)}
+              >
+                {String(o.order_type).toLowerCase() === 'dressing' ? (
+                  <>
+                    <Bandage className="h-3 w-3 mr-1" />
+                    Perform
+                  </>
+                ) : (
+                  <>
+                    <Syringe className="h-3 w-3 mr-1" />
+                    Administer
+                  </>
+                )}
               </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => setCancelTarget(o)}>
-                <Ban className="h-4 w-4 mr-1" />
-                Cancel
+            )}
+            {canCompleteInstruction(o) && (
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => markInstructionDone(o)}
+              >
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                Done
               </Button>
-            </>
-          )}
-        </div>
-      </li>
+            )}
+            {canModifyPending(o) && (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600"
+                  onClick={() => openEdit(o)}
+                  title="Edit order"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-rose-500 hover:text-rose-600"
+                  onClick={() => setCancelTarget(o)}
+                  title="Cancel order"
+                >
+                  <Ban className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </>
+        }
+      />
     );
   };
 
@@ -858,77 +984,132 @@ export function WardDoctorOrdersSection({
     return <span className={`ml-1.5 inline-flex items-center justify-center min-w-4 h-4 px-1 text-[10px] font-semibold rounded ${cls}`}>{n}</span>;
   };
 
-  const ListBody = ({ emptyMsg }: { emptyMsg: React.ReactNode }) => (
-    loading ? (
-      <div className="flex items-center justify-center py-8 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin mr-2" />
-        Loading…
-      </div>
-    ) : filteredOrders.length === 0 ? (
-      <p className="text-sm text-muted-foreground py-6 text-center border rounded-md bg-muted/30">
-        {emptyMsg}
-      </p>
+  const observationAdmission = isObservationAdmission(admission);
+  const showOrderTabs = counts.active > 0 || counts.history > 0;
+
+  const canAddOrders = allowAddOrders && admission.status === 'admitted';
+  const showOrdersToolbar = canAddOrders || showOrderTabs || allowPerformOrders;
+
+  const activeEmptyMessage =
+    counts.history > 0 ? (
+      <>
+        No active orders. See <strong>History</strong> for completed items.
+      </>
     ) : (
-      // Outer dialog already provides vertical scroll; let the list grow
-      // naturally instead of imposing a second scrollbar.
-      <ul className="space-y-2">
-        {filteredOrders.map(renderOrderRow)}
-      </ul>
-    )
-  );
+      'No active orders for this admission.'
+    );
+
+  const ListBody = ({ emptyMsg, filter }: { emptyMsg: React.ReactNode; filter: ListFilter }) => {
+    const rows =
+      filter === 'active'
+        ? taskOrders.filter((o) => isActiveStatus(o.status))
+        : taskOrders.filter((o) => isHistoryStatus(o.status));
+
+    if (ordersLoading && rows.length === 0) {
+      return (
+        <p className="text-xs text-muted-foreground flex items-center justify-center gap-2 py-4">
+          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+          Checking for orders…
+        </p>
+      );
+    }
+    if (rows.length === 0) {
+      return (
+        <p className="text-sm text-muted-foreground py-6 text-center border rounded-md bg-muted/30">
+          {emptyMsg}
+        </p>
+      );
+    }
+    return (
+      <div className="space-y-3">
+        {rows.map(renderOrderRow)}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <p className="flex items-start gap-1.5 text-xs text-muted-foreground leading-snug">
-          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span>
-            <span className="font-medium text-foreground">Medications</span> route to{' '}
-            <span className="font-medium text-foreground">Pharmacy</span> for dispensing.{' '}
-            <span className="font-medium text-foreground">Injections, dressings</span> route to{' '}
-            <span className="font-medium text-foreground">Procedures (Nursing)</span>.{' '}
-            <span className="font-medium text-foreground">Instructions</span> live here only.
-          </span>
+      {showOrdersToolbar && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          {showRoutingInfo ? (
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground leading-snug">
+              <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                <span className="font-medium text-foreground">Medications</span> route to{' '}
+                <span className="font-medium text-foreground">Pharmacy</span>.{' '}
+                <span className="font-medium text-foreground">Injections & dressings</span> are completed by nursing in{' '}
+                <span className="font-medium text-foreground">Ward Care</span> (also on the Procedures queue).
+              </span>
+            </p>
+          ) : allowPerformOrders ? (
+            <p className="text-xs text-muted-foreground leading-snug">
+              Complete injections and dressings here. Orders also appear in the Procedures queue.
+            </p>
+          ) : showOrderTabs ? (
+            <p className="text-xs text-muted-foreground">Doctor orders for this admission</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Add follow-up orders for this stay.</p>
+          )}
+          {canAddOrders && (
+            <Button type="button" size="sm" onClick={() => setAddOpen(true)} className="shrink-0">
+              <Plus className="h-4 w-4 mr-1" />
+              Add order
+            </Button>
+          )}
+        </div>
+      )}
+
+      {showOrderTabs ? (
+        <>
+          <Tabs value={listFilter} onValueChange={(v) => setListFilter(v as ListFilter)} className="w-full">
+            <TabsList className={`grid w-full h-9 ${counts.history > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              <TabsTrigger value="active" className="text-xs">
+                Active
+                <TabCount n={counts.active} tone="active" />
+              </TabsTrigger>
+              {counts.history > 0 && (
+                <TabsTrigger value="history" className="text-xs gap-1">
+                  <History className="h-3 w-3 hidden sm:inline" />
+                  History
+                  <TabCount n={counts.history} tone="history" />
+                </TabsTrigger>
+              )}
+            </TabsList>
+            <TabsContent value="active" className="mt-3 space-y-0">
+              <ListBody emptyMsg={activeEmptyMessage} filter="active" />
+            </TabsContent>
+            {counts.history > 0 && (
+              <TabsContent value="history" className="mt-3">
+                <ListBody emptyMsg="No history yet." filter="history" />
+              </TabsContent>
+            )}
+          </Tabs>
+        </>
+      ) : ordersLoading && !observationAdmission ? (
+        <p className="text-xs text-muted-foreground flex items-center gap-2 py-1">
+          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+          Checking for doctor orders…
         </p>
-        {allowAddOrders && admission.status === 'admitted' && (
-          <Button type="button" size="sm" onClick={() => setAddOpen(true)} className="shrink-0">
-            <Plus className="h-4 w-4 mr-1" />
-            Add order
-          </Button>
-        )}
-      </div>
-
-      <Tabs value={listFilter} onValueChange={(v) => setListFilter(v as ListFilter)} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 h-9">
-          <TabsTrigger value="active" className="text-xs">
-            Active
-            <TabCount n={counts.active} tone="active" />
-          </TabsTrigger>
-          <TabsTrigger value="history" className="text-xs gap-1">
-            <History className="h-3 w-3 hidden sm:inline" />
-            History
-            <TabCount n={counts.history} tone="history" />
-          </TabsTrigger>
-          <TabsTrigger value="all" className="text-xs">
-            All
-            <TabCount n={counts.all} tone="all" />
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="active" className="mt-3 space-y-0">
-          <ListBody emptyMsg={<>No active orders. Completed and cancelled orders are under <strong>History</strong>.</>} />
-        </TabsContent>
-        <TabsContent value="history" className="mt-3">
-          <p className="text-xs text-muted-foreground mb-2">
-            Completed instructions and cancelled orders for this admission.
+      ) : observationAdmission ? (
+        <div className="rounded-md border border-dashed border-border/80 bg-muted/20 px-4 py-5 text-center">
+          <p className="text-sm text-muted-foreground">
+            Observation admission — clinical handoff details are on the patient overview tab.
+            {canAddOrders ? ' Add follow-up orders when needed.' : ''}
           </p>
-          <ListBody emptyMsg="No history yet." />
-        </TabsContent>
-        <TabsContent value="all" className="mt-3">
-          <ListBody emptyMsg="No doctor orders for this admission yet." />
-        </TabsContent>
-      </Tabs>
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-border/80 bg-muted/20 px-4 py-5 text-center">
+          <p className="text-sm text-muted-foreground">{activeEmptyMessage}</p>
+        </div>
+      )}
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <Dialog
+        open={addOpen}
+        onOpenChange={(open) => {
+          setAddOpen(open);
+          if (open) resetAddForm();
+        }}
+      >
         <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
           <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-1">
             <DialogTitle className="flex items-center gap-2 text-lg">
@@ -954,54 +1135,71 @@ export function WardDoctorOrdersSection({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 px-5 py-4 overflow-y-auto flex-1 min-h-0">
-            <div className="space-y-2">
-              <Label>Order type</Label>
-              <Select
-                value={orderKind}
-                onValueChange={(v) => {
-                  const next = v as OrderKind;
-                  setOrderKind(next);
-                  // Clear context that doesn't apply to the next kind, so the
-                  // doctor never accidentally submits stale state from a
-                  // previous selection.
-                  if (next !== 'medication' && next !== 'injection') {
-                    setSelectedMedKeys([]);
-                    setMedConfigs(new Map());
-                    setMedSearch('');
-                    setShowMedDropdown(false);
-                  }
-                  if (next !== 'dressing') {
-                    setWoundType('');
-                    setWoundLocation('');
-                    setDressingNotes('');
-                  }
-                  if (next !== 'instruction') setInstructionText('');
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="instruction">Instruction (monitor vitals, general care)</SelectItem>
-                  <SelectItem value="medication">Medication (goes to Pharmacy queue)</SelectItem>
-                  <SelectItem value="injection">Injection (goes to Procedures queue)</SelectItem>
-                  <SelectItem value="dressing">Dressing / wound care (goes to Procedures queue)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="urgent">Urgent</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_8.5rem] gap-3">
+              <div className="space-y-2">
+                <Label>Order type</Label>
+                <Select
+                  value={orderKind}
+                  onValueChange={(v) => {
+                    const next = v as OrderKind;
+                    setOrderKind(next);
+                    if (next !== 'medication' && next !== 'injection') {
+                      setSelectedMedKeys([]);
+                      setMedConfigs(new Map());
+                      setMedSearch('');
+                      setShowMedDropdown(false);
+                    }
+                    if (next !== 'dressing') {
+                      setWoundType('');
+                      setWoundLocation('');
+                      setDressingNotes('');
+                    }
+                    if (next !== 'instruction') setInstructionText('');
+                  }}
+                >
+                  <SelectTrigger>
+                    {(() => {
+                      const kind = WARD_ADD_ORDER_KINDS.find((k) => k.value === orderKind);
+                      if (!kind) return <SelectValue placeholder="Select order type" />;
+                      const Icon = kind.icon;
+                      return (
+                        <span className="flex items-center gap-2 truncate">
+                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{kind.label}</span>
+                        </span>
+                      );
+                    })()}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WARD_ADD_ORDER_KINDS.map((kind) => {
+                      const Icon = kind.icon;
+                      return (
+                        <SelectItem key={kind.value} value={kind.value}>
+                          <div className="flex items-center gap-2">
+                            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span>{kind.label}</span>
+                            <span className="text-xs text-muted-foreground">→ {kind.queue}</span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <Select value={priority} onValueChange={setPriority}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             {orderKind === 'instruction' && (
               <div className="space-y-2">
@@ -1047,22 +1245,18 @@ export function WardDoctorOrdersSection({
                           ? 'Type to search injectable generics — e.g. Ceftriaxone'
                           : 'Type to search pharmacy generics — e.g. Paracetamol'
                       }
+                      autoComplete="off"
                     />
                     {showMedDropdown && medSearch.trim() && (
-                      <div className="absolute z-50 left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-[260px] overflow-y-auto">
+                      <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md max-h-[280px] overflow-y-auto">
                         {medSearchLoading ? (
                           <div className="p-3 text-center text-sm text-muted-foreground">
                             <Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" />
                             Searching generics…
                           </div>
                         ) : medGenerics.length === 0 ? (
-                          <div className="p-3 text-sm">
-                            <p className="text-muted-foreground">
-                              No generic matches "{medSearch.trim()}".
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Configure entries in <span className="font-medium">Pharmacy → Generics</span>.
-                            </p>
+                          <div className="p-3 text-sm text-muted-foreground">
+                            No generics found for &ldquo;{medSearch.trim()}&rdquo;.
                           </div>
                         ) : (
                           medGenerics.map((g) => {
@@ -1073,11 +1267,10 @@ export function WardDoctorOrdersSection({
                               .filter(Boolean)
                               .join(' · ');
                             return (
-                              <button
+                              <div
                                 key={String(g.id)}
-                                type="button"
                                 onClick={() => toggleGeneric(g)}
-                                className={`w-full text-left px-3 py-2 hover:bg-muted text-sm border-b last:border-b-0 flex items-start gap-2 ${
+                                className={`px-3 py-2 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-2 text-sm ${
                                   isSelected ? 'bg-emerald-500/10' : ''
                                 }`}
                               >
@@ -1093,12 +1286,10 @@ export function WardDoctorOrdersSection({
                                 <span className="min-w-0 flex-1">
                                   <div className="font-medium">{formatGenericLabel(g)}</div>
                                   {subline && (
-                                    <div className="text-xs text-muted-foreground mt-0.5">
-                                      {subline}
-                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-0.5">{subline}</div>
                                   )}
                                 </span>
-                              </button>
+                              </div>
                             );
                           })
                         )}
@@ -1191,22 +1382,46 @@ export function WardDoctorOrdersSection({
                               Remove
                             </Button>
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="space-y-1.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                            <div className="space-y-1.5 sm:col-span-4">
                               <Label className="text-xs">Dose per administration</Label>
                               <Input
+                                type="text"
+                                inputMode="decimal"
                                 value={cfg.dosage}
                                 onChange={(e) => updateMedConfig(k, { dosage: e.target.value })}
-                                placeholder="e.g., 500mg, 1 tab"
+                                placeholder="e.g., 1, 5"
+                                className="h-9"
                               />
                             </div>
-                            <div className="space-y-1.5">
+                            <div className="space-y-1.5 sm:col-span-3">
+                              <Label className="text-xs">Dose unit *</Label>
+                              <Select
+                                value={normalizePrescriptionDoseUnit(
+                                  cfg.unit,
+                                  cfg.generic.dosage_form || cfg.generic.form,
+                                )}
+                                onValueChange={(v) => updateMedConfig(k, { unit: v })}
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PRESCRIPTION_DOSE_UNITS.map((u) => (
+                                    <SelectItem key={u} value={u}>
+                                      {u}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1.5 sm:col-span-5">
                               <Label className="text-xs">Frequency *</Label>
                               <Select
                                 value={cfg.frequency}
                                 onValueChange={(v) => updateMedConfig(k, { frequency: v })}
                               >
-                                <SelectTrigger>
+                                <SelectTrigger className="h-9">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1218,6 +1433,8 @@ export function WardDoctorOrdersSection({
                                 </SelectContent>
                               </Select>
                             </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1.5">
                               <Label className="text-xs">Duration (days)</Label>
                               <Input
@@ -1385,19 +1602,17 @@ export function WardDoctorOrdersSection({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <PerformNursingProcedureDialog
+        open={performOpen}
+        onOpenChange={(open) => {
+          setPerformOpen(open);
+          if (!open) setPerformTarget(null);
+        }}
+        procedure={performTarget}
+        currentUserId={currentUserId}
+        onCompleted={() => void loadOrders()}
+      />
     </div>
-  );
-}
-
-export function userCanAddWardDoctorOrders(systemRole: string | undefined | null): boolean {
-  if (!systemRole) return false;
-  return /doctor|consultant|resident|physician|medical officer|mo\b/i.test(systemRole);
-}
-
-export function userCanEditCancelWardOrders(systemRole: string | undefined | null): boolean {
-  if (!systemRole) return false;
-  return (
-    userCanAddWardDoctorOrders(systemRole) ||
-    /nurse|midwife|nursing officer/i.test(systemRole)
   );
 }

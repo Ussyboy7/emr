@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import Link from 'next/link';
-import { formatDisplayDateMedium, formatDisplayDateTime, localWeekToTodayBounds } from '@/lib/dates';
+import { formatDisplayDateMedium, formatDisplayDateTime } from '@/lib/dates';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,9 +20,9 @@ import { resolvePatientPhoto } from '@/lib/patient-photo';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Building2, Users, Search, Eye, CheckCircle, AlertTriangle,
-  Bed as BedIcon, Activity, Loader2, Thermometer, Bell,
-  Clock, ArrowDown, ArrowUp, PhoneCall, Send, MapPin, Download, FileText,
-  FileCheck,
+  Bed as BedIcon, Loader2, Thermometer,
+  PhoneCall, Send, MapPin, Download, FileText,
+  FileCheck, Bell,
 } from 'lucide-react';
 import { adminService, type User as StaffUser } from '@/lib/services/admin-service';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -39,28 +39,36 @@ import {
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
 import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSection';
-import { ObservationChartDialog } from '@/components/ward/ObservationChartDialog';
-import { ProgressNotesTimeline } from '@/components/ward/ProgressNotesTimeline';
+import { userCanPerformWardOrders } from '@/lib/ward-order-permissions';
+import { useWardAdmissionDateParams } from '@/hooks/use-ward-admission-date-params';
+import { WARD_ACTIVE_STATUS_IN } from '@/lib/ward/ward-admission-list-params';
+import { WardVitalsHistory } from '@/components/ward/WardVitalsHistory';
+import { WardLatestHandoverCard } from '@/components/ward/WardLatestHandoverCard';
+import { WardHandoverNotesSection } from '@/components/ward/WardHandoverNotesSection';
+import {
+  WardQuickObservationForm,
+  emptyWardObservationForm,
+  type WardObservationFormData,
+} from '@/components/ward/WardQuickObservationForm';
+import { WardAdmissionDocumentsMenu } from '@/components/ward/WardAdmissionDocumentsMenu';
+import {
+  type WardDetailsTab,
+  resolveDefaultWardDetailsTab,
+  buildNurseObservationNotePayload,
+  isObservationAdmission,
+  isEscalatedCondition,
+} from '@/lib/ward-admission-ui';
+import {
+  hasAnyVitalsEntry,
+  parseOptionalInt,
+} from '@/lib/vitals-entry-form';
 import { useServerToday } from '@/hooks/use-server-today';
 import { useNursingPageAuth } from '@/hooks/use-nursing-page-auth';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
 import { MODAL_SIZES, modalNoOverflow } from '@/components/ui/modal-sizes';
-import { formatLocalYmd } from '@/lib/laboratory/constants';
 
-// Single source of truth for the condition vocabulary used in the observation
-// dialog, the badges, and the row accents. `current_condition` is a free-text
-// field on the backend, so we still need `conditionSeverity()` to fall back
-// gracefully when older records contain off-list values.
-const WARD_CONDITION_PRESETS = [
-  { value: 'Stable', label: 'Stable' },
-  { value: 'Improving', label: 'Improving' },
-  { value: 'Guarded', label: 'Guarded' },
-  { value: 'Deteriorating', label: 'Deteriorating' },
-  { value: 'Critical', label: 'Critical' },
-  { value: 'Needs Doctor Review', label: '⚠️ Needs Doctor Review' },
-] as const;
-
+// Single source of truth for condition severity on rows/badges.
 type ConditionSeverity = 'escalated' | 'critical' | 'guarded' | 'stable' | 'unknown';
 
 const conditionSeverity = (condition?: string | null): ConditionSeverity => {
@@ -89,6 +97,19 @@ const SEVERITY_BADGE: Record<ConditionSeverity, string> = {
   unknown:   'border-muted-foreground/50 text-muted-foreground',
 };
 
+const formatAdmissionTypeLabel = (type?: string | null): string | null => {
+  if (!type) return null;
+  const labels: Record<string, string> = {
+    observation: 'Observation',
+    daycare_observation: 'Day care',
+    emergency: 'Emergency',
+    elective: 'Elective',
+    transfer: 'Transfer',
+    readmission: 'Readmission',
+  };
+  return labels[type] || type.replace(/_/g, ' ');
+};
+
 export default function WardCarePage() {
   const { currentUser } = useCurrentUser();
   const { ready, handleAuthError } = useNursingPageAuth();
@@ -104,14 +125,14 @@ export default function WardCarePage() {
   /** KPI scope = date / ward / admission-type filters only (not status search). */
   const [kpiAdmittedTotal, setKpiAdmittedTotal] = useState(0);
   const [kpiPendingDischargeTotal, setKpiPendingDischargeTotal] = useState(0);
+  const [kpiEscalatedTotal, setKpiEscalatedTotal] = useState(0);
+  const [kpiUnassignedBedTotal, setKpiUnassignedBedTotal] = useState(0);
 
   // Filters
   const [selectedWard, setSelectedWard] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  // 'active' = the live ward; 'discharged' = read-only records office view of
-  // the last 30 days. Discharged-view forces status=discharged and applies a
-  // discharge_date >= today-30d filter on the server.
-  const [viewMode, setViewMode] = useState<'active' | 'discharged'>('active');
+  const [escalatedOnly, setEscalatedOnly] = useState(false);
+  const [unassignedBedOnly, setUnassignedBedOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -121,7 +142,7 @@ export default function WardCarePage() {
 
   // Dialog states
   const [showAdmissionDetails, setShowAdmissionDetails] = useState(false);
-  const [showObservationDialog, setShowObservationDialog] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<WardDetailsTab>('overview');
   const [showAssignBedDialog, setShowAssignBedDialog] = useState(false);
   const [showCompleteDischargeDialog, setShowCompleteDischargeDialog] = useState(false);
   const [showRemoveBedDialog, setShowRemoveBedDialog] = useState(false);
@@ -188,43 +209,20 @@ export default function WardCarePage() {
   }, [nurseDirectory.length, nurseDirectoryLoading, handleAuthError]);
 
   // Observation form
-  const [observationData, setObservationData] = useState({
-    current_condition: '',
-    bp: '',
-    temperature: '',
-    pulse: '',
-    spo2: '',
-    shift_notes: '',
-    escalate: false,
-  });
+  const [observationData, setObservationData] = useState<WardObservationFormData>(emptyWardObservationForm());
   const [isSavingObservation, setIsSavingObservation] = useState(false);
-  const [observationChartOpen, setObservationChartOpen] = useState(false);
-  const [chartAdmission, setChartAdmission] = useState<PatientAdmission | null>(null);
+  const [isSavingHandover, setIsSavingHandover] = useState(false);
+  const [chartRefreshKey, setChartRefreshKey] = useState(0);
+  const [notesRefreshKey, setNotesRefreshKey] = useState(0);
 
   const getPatientAssignments = (admissionId: number) =>
     allAssignments.filter(a => a.admission === admissionId && a.is_active);
 
-  const buildDateParams = useCallback(() => {
-    // Anchor on the server's "today" so filters align with the server calendar.
-    const today = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
-    const todayYmd = serverToday || formatLocalYmd(today);
-    if (dateRange.from || dateRange.to) {
-      return {
-        admission_date_after: dateRange.from || undefined,
-        admission_date_before: dateRange.to || undefined,
-      };
-    }
-    if (dateFilter === 'today') return { admission_date: todayYmd };
-    if (dateFilter === 'week') {
-      const { start, end } = localWeekToTodayBounds(serverToday || undefined);
-      return { admission_date_after: start, admission_date_before: end };
-    }
-    if (dateFilter === 'month') {
-      const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      return { admission_date_after: formatLocalYmd(start), admission_date_before: todayYmd };
-    }
-    return {};
-  }, [dateFilter, dateRange.from, dateRange.to, serverToday]);
+  const buildDateParams = useWardAdmissionDateParams({
+    dateFilter,
+    dateRange,
+    serverToday,
+  });
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -251,44 +249,31 @@ export default function WardCarePage() {
       const stats = await wardService.getAdmissionListStats(kpiBase);
       setKpiAdmittedTotal(stats.admitted ?? 0);
       setKpiPendingDischargeTotal(stats.pending_discharge ?? 0);
+      setKpiEscalatedTotal(stats.escalated ?? 0);
+      setKpiUnassignedBedTotal(stats.unassigned_bed ?? 0);
     } catch (error: unknown) {
       console.error('Error fetching admission KPI counts:', error);
       if (handleAuthError(error)) return;
       setKpiAdmittedTotal(0);
       setKpiPendingDischargeTotal(0);
+      setKpiEscalatedTotal(0);
+      setKpiUnassignedBedTotal(0);
     }
 
     try {
-      // Discharged view: lock to status=discharged and constrain to the
-      // last 30 days (by discharge date). Records office only needs the
-      // recent window; older audit copies are reachable via search.
-      const dischargedScope: Record<string, string> = {};
-      if (viewMode === 'discharged') {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        dischargedScope.discharged_after = formatLocalYmd(thirtyDaysAgo);
-      }
-      // Resolve status filter:
-      //   * Discharged view → status=discharged.
-      //   * Active view + specific status → status=<that>.
-      //   * Active view + "All Status" → status_in=admitted,pending_discharge,transferred
-      //     (so Discharged never bleeds into the live ward list when the
-      //     user has the Recently-discharged toggle for that explicitly).
-      const effectiveStatus = viewMode === 'discharged' ? 'discharged' : statusFilter;
-      const ACTIVE_STATUSES = 'admitted,pending_discharge,transferred';
+      const ACTIVE_STATUSES = WARD_ACTIVE_STATUS_IN;
       const listParams = {
         ...dateParams,
         page: admissionsPage,
         page_size: admissionsPageSize,
-        ...(effectiveStatus !== 'all'
-          ? { status: effectiveStatus }
-          : viewMode === 'active'
-            ? { status_in: ACTIVE_STATUSES }
-            : {}),
+        ...(statusFilter !== 'all'
+          ? { status: statusFilter }
+          : { status_in: ACTIVE_STATUSES }),
         ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
         ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
         ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
-        ...dischargedScope,
+        ...(escalatedOnly ? { escalated: 1 } : {}),
+        ...(unassignedBedOnly ? { unassigned_bed: 1 } : {}),
       };
       const admissionsResponse = await wardService.getAdmissions(listParams);
       const loaded = admissionsResponse.results || [];
@@ -326,24 +311,15 @@ export default function WardCarePage() {
     typeFilter,
     admissionsPage,
     admissionsPageSize,
-    viewMode,
     debouncedSearch,
+    escalatedOnly,
+    unassignedBedOnly,
     handleAuthError,
   ]);
 
   useEffect(() => {
     setAdmissionsPage(1);
-  }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, viewMode, debouncedSearch]);
-
-  // Defensive: if the user lands on the active view with a stale
-  // statusFilter='discharged', reset it. We removed the Discharged
-  // option from the dropdown in active mode, so the Select would have
-  // no matching SelectItem otherwise.
-  useEffect(() => {
-    if (viewMode === 'active' && statusFilter === 'discharged') {
-      setStatusFilter('all');
-    }
-  }, [viewMode, statusFilter]);
+  }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, debouncedSearch, escalatedOnly, unassignedBedOnly]);
 
   useEffect(() => {
     if (!ready) return;
@@ -371,98 +347,80 @@ export default function WardCarePage() {
     };
   }, [admissions, handleAuthError]);
 
-  const handleViewAdmission = (admission: PatientAdmission) => {
+  const handleViewAdmission = (
+    admission: PatientAdmission,
+    tab?: WardDetailsTab,
+  ) => {
     setSelectedAdmission(admission);
+    setDetailsTab(tab ?? resolveDefaultWardDetailsTab(admission, 'nurse'));
+    setObservationData(emptyWardObservationForm());
     setShowAdmissionDetails(true);
-  };
-
-  const openObservationChart = (admission: PatientAdmission) => {
-    setChartAdmission(admission);
-    setObservationChartOpen(true);
-  };
-
-  const openObservationDialog = (admission: PatientAdmission) => {
-    setSelectedAdmission(admission);
-    setObservationData({
-      current_condition: admission.current_condition || '',
-      bp: '',
-      temperature: '',
-      pulse: '',
-      spo2: '',
-      shift_notes: '',
-      escalate: false,
-    });
-    setShowObservationDialog(true);
   };
 
   const handleSaveObservation = async () => {
     if (!selectedAdmission) return;
-    if (!observationData.current_condition && !observationData.shift_notes && !observationData.escalate) {
-      toast.error('Please enter at least a condition or shift notes');
+    const v = observationData.vitals;
+    if (
+      !observationData.current_condition &&
+      !observationData.vitals_notes.trim() &&
+      !observationData.escalate &&
+      !hasAnyVitalsEntry(v)
+    ) {
+      toast.error('Please enter a condition, vitals, or escalation');
       return;
     }
+    const pulseInt = parseOptionalInt(v.pulse);
+    const hasNumericVitals =
+      v.temperature.trim() !== '' ||
+      pulseInt != null ||
+      v.bloodPressureSystolic.trim() !== '' ||
+      v.bloodPressureDiastolic.trim() !== '' ||
+      v.respiratoryRate.trim() !== '';
+    const hasVitalsReading = hasNumericVitals || v.oxygenSaturation.trim() !== '';
+
+    if (observationData.vitals_notes.trim() && !hasVitalsReading) {
+      toast.error('Enter vitals to save a vitals note');
+      return;
+    }
+
     setIsSavingObservation(true);
     try {
-      const vitals = [
-        observationData.bp && `BP: ${observationData.bp}`,
-        observationData.temperature && `Temp: ${observationData.temperature}°C`,
-        observationData.pulse && `Pulse: ${observationData.pulse} bpm`,
-        observationData.spo2 && `SpO2: ${observationData.spo2}%`,
-      ].filter(Boolean).join(' | ');
-
-      const noteLines = [
-        vitals && `Vitals — ${vitals}`,
-        observationData.shift_notes,
+      const vitalsNoteLines = [
+        observationData.vitals_notes.trim(),
         observationData.escalate ? '⚠️ ESCALATED — Needs Doctor Review' : '',
-      ].filter(Boolean).join('\n');
+      ].filter(Boolean);
 
       const condition = observationData.escalate
         ? 'Needs Doctor Review'
         : observationData.current_condition || selectedAdmission.current_condition;
 
-      const prevNotes = selectedAdmission.admission_notes?.trim();
-      const notesPayload =
-        noteLines.trim().length > 0
-          ? prevNotes
-            ? `${prevNotes}\n\n${noteLines}`
-            : noteLines
-          : undefined;
-
-      // Best-effort: if any structured vitals were entered, also write a
-      // row to /observation-vitals/ so the Full chart picks it up. SpO2 is
-      // not a column on the model, so it travels along inside `notes`.
-      const bpMatch = observationData.bp.match(/^\s*(\d{2,3})\s*\/\s*(\d{2,3})\s*$/);
-      const pulseInt = observationData.pulse ? parseInt(observationData.pulse, 10) : NaN;
-      const hasNumericVitals =
-        observationData.temperature.trim() !== '' ||
-        Number.isFinite(pulseInt) ||
-        bpMatch != null;
-
-      if (hasNumericVitals) {
+      if (hasVitalsReading) {
         const vitalNoteParts: string[] = [];
-        if (observationData.spo2.trim()) vitalNoteParts.push(`SpO2 ${observationData.spo2}%`);
-        if (observationData.shift_notes.trim()) vitalNoteParts.push(observationData.shift_notes.trim());
+        if (v.oxygenSaturation.trim()) vitalNoteParts.push(`SpO2 ${v.oxygenSaturation}%`);
+        if (vitalsNoteLines.length) vitalNoteParts.push(...vitalsNoteLines);
         try {
           await wardService.createObservationVital({
             admission: selectedAdmission.id,
-            temperature_c: observationData.temperature || undefined,
-            pulse: Number.isFinite(pulseInt) ? pulseInt : undefined,
-            bp_systolic: bpMatch ? parseInt(bpMatch[1], 10) : undefined,
-            bp_diastolic: bpMatch ? parseInt(bpMatch[2], 10) : undefined,
-            notes: vitalNoteParts.length ? vitalNoteParts.join(' — ') : undefined,
+            temperature_c: v.temperature || undefined,
+            pulse: pulseInt,
+            respiratory_rate: parseOptionalInt(v.respiratoryRate),
+            bp_systolic: parseOptionalInt(v.bloodPressureSystolic),
+            bp_diastolic: parseOptionalInt(v.bloodPressureDiastolic),
+            notes: vitalNoteParts.length ? vitalNoteParts.join('\n\n') : undefined,
           });
         } catch (chartErr) {
-          // Don't block the diary save if the chart row fails (likely a
-          // permission edge case); surface a soft warning instead.
           // eslint-disable-next-line no-console
           console.warn('Failed to write observation vital row', chartErr);
         }
       }
 
-      const updated = await wardService.updateAdmission(selectedAdmission.id, {
-        current_condition: condition || undefined,
-        ...(notesPayload !== undefined ? { admission_notes: notesPayload } : {}),
-      });
+      if (condition) {
+        await wardService.updateAdmission(selectedAdmission.id, {
+          current_condition: condition,
+        });
+      }
+
+      const fresh = await wardService.getAdmission(selectedAdmission.id);
 
       if (observationData.escalate) {
         toast.warning('Patient escalated — doctor has been flagged for review', { duration: 5000 });
@@ -470,18 +428,49 @@ export default function WardCarePage() {
         toast.success('Observation recorded successfully');
       }
 
-      setShowObservationDialog(false);
-      setObservationData({ current_condition: '', bp: '', temperature: '', pulse: '', spo2: '', shift_notes: '', escalate: false });
-      setSelectedAdmission(updated);
-      setAdmissions((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-      if (chartAdmission?.id === updated.id) {
-        setChartAdmission(updated);
-      }
+      setObservationData(emptyWardObservationForm());
+      setSelectedAdmission(fresh);
+      setChartRefreshKey((k) => k + 1);
+      setNotesRefreshKey((k) => k + 1);
+      setAdmissions((prev) => prev.map((a) => (a.id === fresh.id ? fresh : a)));
       fetchData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to save observation');
     } finally {
       setIsSavingObservation(false);
+    }
+  };
+
+  const handleSaveHandoverNote = async (body: string) => {
+    if (!selectedAdmission) return;
+    const text = body.trim();
+    if (!text) return;
+
+    setIsSavingHandover(true);
+    try {
+      const authorName = currentUser?.name || currentUser?.username || 'Nurse';
+      const timestamp = formatDisplayDateTime(new Date());
+      const notesPayload = buildNurseObservationNotePayload({
+        authorName,
+        timestamp,
+        bodyLines: [text],
+        existingNotes: selectedAdmission.admission_notes,
+      });
+
+      await wardService.updateAdmission(selectedAdmission.id, {
+        admission_notes: notesPayload,
+      });
+
+      const fresh = await wardService.getAdmission(selectedAdmission.id);
+      setSelectedAdmission(fresh);
+      setNotesRefreshKey((k) => k + 1);
+      setAdmissions((prev) => prev.map((a) => (a.id === fresh.id ? fresh : a)));
+      toast.success('Handover note saved');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save handover note');
+      throw error;
+    } finally {
+      setIsSavingHandover(false);
     }
   };
 
@@ -730,18 +719,6 @@ export default function WardCarePage() {
   };
 
   /** Badges above the list — scoped to the current result page. */
-  const escalatedOnPage = useMemo(
-    () => admissions.filter(
-      a => a.status === 'admitted' && conditionSeverity(a.current_condition) === 'escalated',
-    ).length,
-    [admissions],
-  );
-
-  const pendingDischargeOnPage = useMemo(
-    () => admissions.filter(a => a.status === 'pending_discharge').length,
-    [admissions],
-  );
-
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (selectedWard !== 'all') n++;
@@ -750,8 +727,41 @@ export default function WardCarePage() {
     if (dateFilter !== 'all') n++;
     if (dateRange.from || dateRange.to) n++;
     if (searchQuery.trim()) n++;
+    if (escalatedOnly) n++;
+    if (unassignedBedOnly) n++;
     return n;
-  }, [selectedWard, statusFilter, typeFilter, dateFilter, dateRange.from, dateRange.to, searchQuery]);
+  }, [selectedWard, statusFilter, typeFilter, dateFilter, dateRange.from, dateRange.to, searchQuery, escalatedOnly, unassignedBedOnly]);
+
+  const applyKpiFilter = useCallback((filter: 'admitted' | 'pending_discharge' | 'escalated' | 'unassigned_bed') => {
+    if (filter === 'admitted') {
+      setStatusFilter('admitted');
+      setEscalatedOnly(false);
+      setUnassignedBedOnly(false);
+      return;
+    }
+    if (filter === 'pending_discharge') {
+      setStatusFilter('pending_discharge');
+      setEscalatedOnly(false);
+      setUnassignedBedOnly(false);
+      return;
+    }
+    if (filter === 'escalated') {
+      setStatusFilter('admitted');
+      setEscalatedOnly(true);
+      setUnassignedBedOnly(false);
+      return;
+    }
+    setStatusFilter('admitted');
+    setEscalatedOnly(false);
+    setUnassignedBedOnly(true);
+  }, []);
+
+  const kpiCardsActive = useMemo(() => ({
+    admitted: statusFilter === 'admitted' && !escalatedOnly && !unassignedBedOnly,
+    pending_discharge: statusFilter === 'pending_discharge',
+    escalated: escalatedOnly,
+    unassigned_bed: unassignedBedOnly,
+  }), [statusFilter, escalatedOnly, unassignedBedOnly]);
 
   // Row accent: terminal statuses (discharged/transferred/pending_discharge)
   // win because they're unambiguous; admitted patients are coloured by the
@@ -830,154 +840,129 @@ export default function WardCarePage() {
           </div>
         </div>
 
-        {/* KPIs — three numbers a nurse can act on right now:
-            "in beds", "doctor cleared, awaiting me", "in transit, phone-back".
-            All three respect the date / ward / type filter scope so the
-            scoreboard tracks the list view. */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {[
+        {/* KPIs — four actionable counts aligned with Procedures / Requests pages */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {([
             {
-              label: 'Admitted',
+              key: 'admitted' as const,
+              label: 'On ward',
               value: kpiAdmittedTotal,
-              sub: 'Currently in beds — round, observe, execute orders',
               icon: Users,
               color: 'text-blue-500',
               bg: 'bg-blue-500/10',
+              ring: 'ring-blue-500',
             },
             {
+              key: 'pending_discharge' as const,
               label: 'Pending discharge',
               value: kpiPendingDischargeTotal,
-              sub: 'Doctor cleared them — write exit summary & sign out',
               icon: CheckCircle,
               color: 'text-amber-500',
               bg: 'bg-amber-500/10',
+              ring: 'ring-amber-500',
             },
             {
-              label: 'Leaving with us',
-              value: pendingEscorts.length,
-              sub: 'Escorted to receiving facility — phone back when handed over',
-              icon: Send,
-              color: 'text-teal-600',
-              bg: 'bg-teal-500/10',
-              onClick: pendingEscorts.length > 0
-                ? () => document.getElementById('escort-queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                : undefined,
+              key: 'escalated' as const,
+              label: 'Escalated',
+              value: kpiEscalatedTotal,
+              icon: AlertTriangle,
+              color: 'text-orange-500',
+              bg: 'bg-orange-500/10',
+              ring: 'ring-orange-500',
             },
-          ].map((stat, i) => (
-            <Card
-              key={i}
-              onClick={stat.onClick}
-              className={stat.onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : undefined}
-              role={stat.onClick ? 'button' : undefined}
-              tabIndex={stat.onClick ? 0 : undefined}
-              onKeyDown={stat.onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') stat.onClick?.(); } : undefined}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
-                    <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{stat.sub}</p>
+            {
+              key: 'unassigned_bed' as const,
+              label: 'No bed assigned',
+              value: kpiUnassignedBedTotal,
+              icon: BedIcon,
+              color: 'text-violet-500',
+              bg: 'bg-violet-500/10',
+              ring: 'ring-violet-500',
+            },
+          ]).map((stat) => {
+            const isActive = kpiCardsActive[stat.key];
+            return (
+              <Card
+                key={stat.key}
+                onClick={() => applyKpiFilter(stat.key)}
+                className={`cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${
+                  isActive ? `ring-2 ring-offset-1 ${stat.ring}` : ''
+                }`}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    applyKpiFilter(stat.key);
+                  }
+                }}
+                title={`Filter list to ${stat.label.toLowerCase()}`}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">{stat.label}</p>
+                      <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                    </div>
+                    <div className={`p-3 rounded-full ${stat.bg}`}>
+                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                    </div>
                   </div>
-                  <div className={`p-3 rounded-full ${stat.bg} shrink-0`}>
-                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
-        {/* Ward Capacity Cards */}
+        {/* Filters */}
         {!isLoading && wards.length === 0 ? (
           <Card className="border-dashed border-2">
-            <CardContent className="p-8 text-center">
-              <Building2 className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-muted-foreground mb-2">No Wards Configured</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Add wards and beds under{' '}
+            <CardContent className="p-6 text-center">
+              <Building2 className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
+              <p className="text-sm font-medium text-muted-foreground mb-2">No wards configured</p>
+              <p className="text-xs text-muted-foreground mb-3">
+                Add wards under{' '}
                 <Link href="/admin/clinics" className="text-teal-600 underline font-medium">
-                  Administration → Facilities &amp; Departments → Wards (inpatient)
+                  Administration → Facilities &amp; Departments
                 </Link>
-                , or ask an administrator.
               </p>
-              <Button variant="outline" onClick={fetchData} disabled={isLoading}>
-                <Activity className="h-4 w-4 mr-2" />Try Again
-              </Button>
+              <Button variant="outline" size="sm" onClick={fetchData}>Try again</Button>
             </CardContent>
           </Card>
-        ) : wards.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {wards.map((ward) => {
-              const pct = ward.total_beds > 0 ? Math.round((ward.occupied_beds / ward.total_beds) * 100) : 0;
-              const isSelected = selectedWard === ward.id.toString();
-              // Clicking a ward card filters the list to that ward.
-              // Clicking the already-selected ward clears the filter.
-              const toggleSelect = () => setSelectedWard(isSelected ? 'all' : ward.id.toString());
-              return (
-                <Card
-                  key={ward.id}
-                  onClick={toggleSelect}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSelect(); } }}
-                  className={`cursor-pointer transition-shadow hover:shadow-md ${
-                    isSelected ? 'ring-2 ring-primary border-primary/50' : ''
-                  }`}
-                  title={isSelected ? 'Click to clear ward filter' : `Filter list to ${ward.name}`}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="font-medium text-sm">{ward.name}</p>
-                      <Badge variant="outline" className="text-xs">{ward.occupied_beds}/{ward.total_beds}</Badge>
-                    </div>
-                    <div className="w-full bg-muted rounded-full h-1.5 mb-2">
-                      <div
-                        className={`h-1.5 rounded-full ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-orange-400' : 'bg-blue-500'}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{pct}%</span>
-                      <span>{ward.available_beds} bed{ward.available_beds !== 1 ? 's' : ''} available</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
         ) : null}
 
-        {/* Filters */}
         <Card>
           <CardContent className="p-4 space-y-3">
-            {/* View toggle: live ward vs records-office discharged view */}
-            <div className="flex items-center gap-2 text-sm">
-              <button
-                type="button"
-                onClick={() => setViewMode('active')}
-                className={`px-3 py-1.5 rounded-md transition-colors ${
-                  viewMode === 'active'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted hover:bg-muted/80 text-muted-foreground'
-                }`}
-              >
-                Active patients
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('discharged')}
-                className={`px-3 py-1.5 rounded-md transition-colors ${
-                  viewMode === 'discharged'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted hover:bg-muted/80 text-muted-foreground'
-                }`}
-                title="Last 30 days of discharged patients"
-              >
-                Recently discharged
-                <span className="ml-1.5 text-xs opacity-80">· 30d</span>
-              </button>
-            </div>
+            {wards.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-xs text-muted-foreground mr-1">Ward:</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedWard('all')}
+                  className={`px-3 py-1.5 rounded-md transition-colors ${
+                    selectedWard === 'all'
+                      ? 'bg-teal-600 text-white'
+                      : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+                  }`}
+                >
+                  All
+                </button>
+                {wards.map((ward) => (
+                  <button
+                    key={ward.id}
+                    type="button"
+                    onClick={() => setSelectedWard(ward.id.toString())}
+                    className={`px-3 py-1.5 rounded-md transition-colors ${
+                      selectedWard === ward.id.toString()
+                        ? 'bg-teal-600 text-white'
+                        : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+                    }`}
+                  >
+                    {ward.name}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
               <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -999,34 +984,22 @@ export default function WardCarePage() {
                     <SelectItem value="month">This month</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={selectedWard} onValueChange={setSelectedWard}>
-                  <SelectTrigger className="w-[180px]"><SelectValue placeholder="All Wards" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Wards</SelectItem>
-                    {wards.map(w => (
-                      <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
                 <Select
-                  value={viewMode === 'discharged' ? 'discharged' : statusFilter}
-                  onValueChange={setStatusFilter}
-                  disabled={viewMode === 'discharged'}
+                  value={statusFilter}
+                  onValueChange={(v) => {
+                    setStatusFilter(v);
+                    setEscalatedOnly(false);
+                    setUnassignedBedOnly(false);
+                  }}
                 >
-                  <SelectTrigger className="w-[170px]" title={viewMode === 'discharged' ? 'Status is locked in Recently Discharged view' : undefined}>
+                  <SelectTrigger className="w-[170px]">
                     <SelectValue placeholder="All Status" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="admitted">Admitted</SelectItem>
                     <SelectItem value="pending_discharge">Pending Discharge</SelectItem>
-                    {/* "Discharged" is reachable via the Recently-discharged
-                        toggle above — keeping it here too caused the live
-                        ward list to mix in already-gone patients. Only
-                        render it in discharged-view mode. */}
-                    {viewMode === 'discharged' && (
-                      <SelectItem value="discharged">Discharged</SelectItem>
-                    )}
+                    <SelectItem value="discharged">Discharged</SelectItem>
                     <SelectItem value="transferred">Transferred</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1035,9 +1008,11 @@ export default function WardCarePage() {
                   <SelectContent>
                     <SelectItem value="all">All Types</SelectItem>
                     <SelectItem value="observation">Observation</SelectItem>
+                    <SelectItem value="daycare_observation">Day care</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                     <SelectItem value="elective">Elective</SelectItem>
-                    <SelectItem value="regular">Regular</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
+                    <SelectItem value="readmission">Readmission</SelectItem>
                   </SelectContent>
                 </Select>
                 <ResetFiltersButton
@@ -1049,7 +1024,8 @@ export default function WardCarePage() {
                     setDateFilter('all');
                     setDateRange({ from: '', to: '' });
                     setSearchQuery('');
-                    setViewMode('active');
+                    setEscalatedOnly(false);
+                    setUnassignedBedOnly(false);
                   }}
                 />
               </div>
@@ -1084,8 +1060,7 @@ export default function WardCarePage() {
                   copy of the same numbers here was just clutter. The
                   search-narrowing hint stays because it's a state the
                   pagination footer can't show. */}
-              {(searchQuery.trim() || activeFilterCount > 0
-                || pendingEscorts.length > 0 || pendingDischargeOnPage > 0 || escalatedOnPage > 0) && (
+              {(searchQuery.trim() || activeFilterCount > 0) && (
                 <div className="flex items-center justify-between px-1 flex-wrap gap-2">
                   <p className="text-xs text-muted-foreground">
                     {searchQuery.trim() && (
@@ -1104,33 +1079,6 @@ export default function WardCarePage() {
                       </>
                     )}
                   </p>
-                  <div className="flex items-center gap-2">
-                    {pendingEscorts.length > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/50 text-xs cursor-pointer hover:bg-amber-500/20"
-                        title="Pending escorts — click to view leaving-with-us queue"
-                        onClick={() => {
-                          document.getElementById('escort-queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }}
-                      >
-                        <Send className="h-3 w-3 mr-1" />
-                        {pendingEscorts.length} leaving with us
-                      </Badge>
-                    )}
-                    {pendingDischargeOnPage > 0 && (
-                      <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/50 text-xs" title="On this page only">
-                        <CheckCircle className="h-3 w-3 mr-1" />
-                        {pendingDischargeOnPage} pending discharge
-                      </Badge>
-                    )}
-                    {escalatedOnPage > 0 && (
-                      <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-500/50 text-xs" title="On this page only">
-                        <Bell className="h-3 w-3 mr-1" />
-                        {escalatedOnPage} escalated
-                      </Badge>
-                    )}
-                  </div>
                 </div>
               )}
 
@@ -1230,8 +1178,8 @@ export default function WardCarePage() {
                   </Card>
                 ) : (
                   admissions.map((admission) => {
-                    const avatar = getAvatarStyle(admission);
                     const isEscalated = conditionSeverity(admission.current_condition) === 'escalated';
+                    const typeLabel = formatAdmissionTypeLabel(admission.admission_type);
                     return (
                       <Card
                         key={admission.id}
@@ -1248,6 +1196,11 @@ export default function WardCarePage() {
                                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadgeClass(admission.status)}`}>
                                     {formatStatus(admission.status)}
                                   </Badge>
+                                  {typeLabel && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-teal-500/50 text-teal-700 dark:text-teal-300 bg-teal-500/10">
+                                      {typeLabel}
+                                    </Badge>
+                                  )}
                                   {admission.current_condition && (
                                     <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getConditionBadgeClass(admission.current_condition)}`}>
                                       {isEscalated ? '⚠️ ' : ''}{admission.current_condition}
@@ -1255,36 +1208,15 @@ export default function WardCarePage() {
                                   )}
                                 </div>
                                 <div className="flex items-center gap-1 flex-shrink-0">
-                                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewAdmission(admission)} title="View Details">
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    className="h-7 w-7"
+                                    onClick={() => handleViewAdmission(admission)}
+                                    title="View patient care"
+                                  >
                                     <Eye className="h-3.5 w-3.5" />
                                   </Button>
-                                  {admission.status === 'admitted' && !admission.bed_number && (
-                                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleAssignBed(admission)} title="Assign Bed">
-                                      <BedIcon className="h-3.5 w-3.5" />
-                                    </Button>
-                                  )}
-                                  {admission.status === 'admitted' && (
-                                    <>
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-7 w-7 text-teal-600 hover:text-teal-700 hover:bg-teal-50"
-                                        onClick={() => openObservationDialog(admission)}
-                                        title="Record Observation"
-                                      >
-                                        <Thermometer className="h-3.5 w-3.5" />
-                                      </Button>
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-7 w-7 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-                                        onClick={() => openObservationChart(admission)}
-                                        title="Full observation chart (vitals + treatment sheet)"
-                                      >
-                                        <Activity className="h-3.5 w-3.5" />
-                                      </Button>
-                                    </>
-                                  )}
                                   {admission.status === 'pending_discharge' && (
                                     <Button
                                       size="sm"
@@ -1302,23 +1234,6 @@ export default function WardCarePage() {
                                       <CheckCircle className="h-3 w-3 mr-1" />Complete
                                     </Button>
                                   )}
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-7 w-7"
-                                    onClick={() => handleDownloadSummary(admission)}
-                                    disabled={isDownloadingSummary}
-                                    title={
-                                      admission.status === 'discharged'
-                                        ? 'Download admission summary (PDF)'
-                                        : 'Download interim admission summary (PDF)'
-                                    }
-                                  >
-                                    {isDownloadingSummary
-                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      : <Download className="h-3.5 w-3.5" />
-                                    }
-                                  </Button>
                                 </div>
                               </div>
 
@@ -1380,88 +1295,122 @@ export default function WardCarePage() {
               scrollable without overflowing the header.
             */}
             <DialogContent className={`${modalNoOverflow('lg')} max-h-[90vh] flex flex-col p-0 gap-0`}>
-              <DialogHeader className="p-5 pb-3 border-b">
+              <DialogHeader className="p-5 pb-3 border-b shrink-0">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <DialogTitle className="text-base sm:text-lg flex items-center gap-2 flex-wrap">
-                      <span className="truncate">{selectedAdmission.patient_name}</span>
-                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadgeClass(selectedAdmission.status)}`}>
-                        {formatStatus(selectedAdmission.status)}
-                      </Badge>
-                      {selectedAdmission.current_condition && (
-                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getConditionBadgeClass(selectedAdmission.current_condition)}`}>
-                          {conditionSeverity(selectedAdmission.current_condition) === 'escalated' ? '⚠️ ' : ''}
-                          {selectedAdmission.current_condition}
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <PatientAvatar
+                      name={selectedAdmission.patient_name}
+                      photoUrl={resolvePatientPhoto(selectedAdmission)}
+                      size="md"
+                      className="shrink-0 hidden sm:flex"
+                    />
+                    <div className="min-w-0">
+                      <DialogTitle className="text-base sm:text-lg flex items-center gap-2 flex-wrap">
+                        <span className="truncate">{selectedAdmission.patient_name}</span>
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadgeClass(selectedAdmission.status)}`}>
+                          {formatStatus(selectedAdmission.status)}
                         </Badge>
-                      )}
-                    </DialogTitle>
-                    <DialogDescription className="mt-1 flex items-center gap-2 flex-wrap text-xs">
-                      <span className="font-mono">{selectedAdmission.admission_id}</span>
-                      <span>·</span>
-                      <span>{selectedAdmission.ward_name}</span>
-                      {selectedAdmission.bed_number && (<><span>·</span><span>Bed {selectedAdmission.bed_number}</span></>)}
-                      {selectedAdmission.admitting_doctor_name && (<><span>·</span><span>Dr {selectedAdmission.admitting_doctor_name}</span></>)}
-                    </DialogDescription>
+                        {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
+                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getConditionBadgeClass(selectedAdmission.current_condition)}`}>
+                            ⚠️ {selectedAdmission.current_condition}
+                          </Badge>
+                        )}
+                      </DialogTitle>
+                      <DialogDescription className="mt-1 flex items-center gap-2 flex-wrap text-xs">
+                        <span className="font-mono">{selectedAdmission.admission_id}</span>
+                        <span>·</span>
+                        <span>{selectedAdmission.ward_name}</span>
+                        {selectedAdmission.bed_number && (<><span>·</span><span>Bed {selectedAdmission.bed_number}</span></>)}
+                        {selectedAdmission.admitting_doctor_name && (<><span>·</span><span>Dr {selectedAdmission.admitting_doctor_name}</span></>)}
+                      </DialogDescription>
+                    </div>
                   </div>
-                  {/* PDF actions moved to the footer below (next to Close)
-                      so the modal header reads cleanly and matches the rest
-                      of the EMR's dialog patterns. */}
+                  <WardAdmissionDocumentsMenu
+                    admission={selectedAdmission}
+                    isDownloadingSummary={isDownloadingSummary}
+                    isDownloadingSlip={isDownloadingSlip}
+                    isDownloadingReferralLetter={isDownloadingReferralLetter}
+                    isDownloadingResponsibility={isDownloadingResponsibility}
+                    onDownloadSummary={() => void handleDownloadSummary(selectedAdmission)}
+                    onDownloadSlip={() => void handleDownloadSlip(selectedAdmission)}
+                    onDownloadReferralLetter={() => void handleDownloadReferralLetter(selectedAdmission)}
+                    onDownloadResponsibility={(formType) => void handleDownloadResponsibilityForm(selectedAdmission, formType)}
+                    getResponsibilityFormVariant={getResponsibilityFormVariant}
+                  />
                 </div>
               </DialogHeader>
 
-              <Tabs defaultValue="care" className="w-full flex-1 min-h-0 flex flex-col">
+              <Tabs value={detailsTab} onValueChange={(v) => setDetailsTab(v as WardDetailsTab)} className="w-full flex-1 min-h-0 flex flex-col">
                 <div className="px-5 pt-3">
                   <TabsList className="grid w-full grid-cols-3 h-9">
-                    <TabsTrigger value="care" className="text-xs">Care Plan</TabsTrigger>
-                    <TabsTrigger value="orders" className="text-xs">Doctor&apos;s Orders</TabsTrigger>
-                    <TabsTrigger value="observations" className="text-xs">Observations</TabsTrigger>
+                    <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
+                    <TabsTrigger value="orders" className="text-xs">Orders</TabsTrigger>
+                    <TabsTrigger value="nursing" className="text-xs">Nursing</TabsTrigger>
                   </TabsList>
                 </div>
 
-                <TabsContent value="care" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
-                  {/* Stay information */}
-                  <section>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Stay</h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <TabsContent value="overview" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
+                  {selectedAdmission.current_condition && (
+                    <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm ${
+                      isEscalatedCondition(selectedAdmission.current_condition)
+                        ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700'
+                        : 'bg-muted/40 border-border'
+                    }`}>
+                      <Thermometer className="h-4 w-4 shrink-0 mt-0.5 text-teal-600" />
                       <div>
-                        <Label className="text-muted-foreground text-xs">Ward</Label>
-                        <p className="font-medium text-sm mt-0.5">{selectedAdmission.ward_name}</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">Current condition</p>
+                        <p className="font-medium">{selectedAdmission.current_condition}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <section className="space-y-3">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Clinical</h3>
+                    <div className="space-y-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground text-xs">Diagnosis · </span>
+                        <span>{selectedAdmission.admission_diagnosis || '—'}</span>
+                      </div>
+                      {selectedAdmission.presenting_complaint && (
+                        <div>
+                          <span className="text-muted-foreground text-xs">Complaint · </span>
+                          <span>{selectedAdmission.presenting_complaint}</span>
+                        </div>
+                      )}
+                      {selectedAdmission.admission_instructions?.trim() && (
+                        <div>
+                          <span className="text-muted-foreground text-xs">Instructions · </span>
+                          <span className="whitespace-pre-wrap">{selectedAdmission.admission_instructions}</span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="border-t pt-4 space-y-2">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stay</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Ward</p>
+                        <p className="font-medium">{selectedAdmission.ward_name}</p>
                       </div>
                       <div>
-                        <Label className="text-muted-foreground text-xs">Location</Label>
-                        <p className="font-medium text-sm mt-0.5">{selectedAdmission.location_clinic_name || '—'}</p>
+                        <p className="text-xs text-muted-foreground">Type</p>
+                        <p className="font-medium capitalize">{selectedAdmission.admission_type?.replace(/_/g, ' ') || '—'}</p>
                       </div>
                       <div>
-                        <Label className="text-muted-foreground text-xs">Admission type</Label>
-                        <p className="font-medium text-sm mt-0.5 capitalize">
-                          {selectedAdmission.admission_type?.replace(/_/g, ' ') || '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-xs">Bed</Label>
-                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        <p className="text-xs text-muted-foreground">Bed</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           {selectedAdmission.bed_number
-                            ? <p className="font-medium text-sm">Bed {selectedAdmission.bed_number}</p>
-                            : <p className="text-sm text-amber-600 dark:text-amber-400 font-medium">Unassigned</p>
-                          }
+                            ? <p className="font-medium">Bed {selectedAdmission.bed_number}</p>
+                            : <p className="font-medium text-amber-600 dark:text-amber-400">Unassigned</p>}
                           {selectedAdmission.status === 'admitted' && (
                             <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-6 px-2 text-xs"
-                                onClick={() => handleAssignBed(selectedAdmission)}
-                              >
+                              <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => handleAssignBed(selectedAdmission)}>
                                 <BedIcon className="h-3 w-3 mr-1" />
                                 {selectedAdmission.bed_number ? 'Change' : 'Assign'}
                               </Button>
                               {selectedAdmission.bed_number && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                                  onClick={() => requestRemoveFromBed(selectedAdmission)}
-                                >
+                                <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => requestRemoveFromBed(selectedAdmission)}>
                                   Remove
                                 </Button>
                               )}
@@ -1470,75 +1419,33 @@ export default function WardCarePage() {
                         </div>
                       </div>
                       <div>
-                        <Label className="text-muted-foreground text-xs">Admission date</Label>
-                        <p className="font-medium text-sm mt-0.5">
-                          {formatDisplayDateMedium(selectedAdmission.admission_date)}
-                        </p>
+                        <p className="text-xs text-muted-foreground">Admitted</p>
+                        <p className="font-medium">{formatDisplayDateMedium(selectedAdmission.admission_date)}</p>
                       </div>
                       <div>
-                        <Label className="text-muted-foreground text-xs">Days admitted</Label>
-                        <p className="font-medium text-sm mt-0.5">
+                        <p className="text-xs text-muted-foreground">Length of stay</p>
+                        <p className="font-medium">
                           {selectedAdmission.length_of_stay === 0
                             ? 'Same day'
                             : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}
                         </p>
                       </div>
-                      {selectedAdmission.admitting_doctor_name && (
+                      {selectedAdmission.location_clinic_name && (
                         <div>
-                          <Label className="text-muted-foreground text-xs">Admitting doctor</Label>
-                          <p className="font-medium text-sm mt-0.5 truncate">{selectedAdmission.admitting_doctor_name}</p>
+                          <p className="text-xs text-muted-foreground">Location</p>
+                          <p className="font-medium">{selectedAdmission.location_clinic_name}</p>
                         </div>
                       )}
                     </div>
                   </section>
 
-                  {/* Clinical context */}
                   <section className="border-t pt-4">
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Clinical</h3>
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="text-muted-foreground text-xs">Admission diagnosis</Label>
-                        <p className="text-sm bg-muted p-2.5 rounded mt-1 whitespace-pre-wrap">{selectedAdmission.admission_diagnosis || '—'}</p>
-                      </div>
-                      {selectedAdmission.presenting_complaint && (
-                        <div>
-                          <Label className="text-muted-foreground text-xs">Presenting complaint</Label>
-                          <p className="text-sm bg-muted p-2.5 rounded mt-1 whitespace-pre-wrap">{selectedAdmission.presenting_complaint}</p>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  {/* Care team */}
-                  <section className="border-t pt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Care team</h3>
-                      <span className="text-[11px] text-muted-foreground">
-                        {getPatientAssignments(selectedAdmission.id).length} active
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      {getPatientAssignments(selectedAdmission.id).length > 0 ? (
-                        getPatientAssignments(selectedAdmission.id).map((assignment) => (
-                          <div key={assignment.id} className="flex items-center justify-between gap-2 p-2.5 bg-muted/60 border border-border/60 rounded">
-                            <div className="min-w-0">
-                              <p className="font-medium text-sm truncate">{assignment.nurse_name}</p>
-                              <p className="text-xs text-muted-foreground capitalize">
-                                {assignment.assignment_type}
-                                {assignment.assigned_at && (
-                                  <> · since {formatDisplayDateMedium(assignment.assigned_at)}</>
-                                )}
-                              </p>
-                            </div>
-                            <Badge variant="outline" className="text-[10px] capitalize px-1.5 py-0 h-5">{assignment.status}</Badge>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded border border-dashed p-3 text-sm text-muted-foreground italic">
-                          No nurse assigned yet — assignments are managed by the head nurse.
-                        </div>
-                      )}
-                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Care team:{' '}
+                      {getPatientAssignments(selectedAdmission.id).length > 0
+                        ? getPatientAssignments(selectedAdmission.id).map((a) => a.nurse_name).join(', ')
+                        : 'No nurse assigned (head nurse manages assignments)'}
+                    </p>
                   </section>
                 </TabsContent>
 
@@ -1547,147 +1454,47 @@ export default function WardCarePage() {
                     admission={selectedAdmission}
                     allowAddOrders={false}
                     allowEditCancelOrders={false}
+                    allowPerformOrders={
+                      !!currentUser?.isSuperuser ||
+                      userCanPerformWardOrders(currentUser)
+                    }
+                    showRoutingInfo={false}
+                    excludeHandoffFromList
                     currentUserId={currentUser?.id != null ? Number(currentUser.id) : undefined}
                   />
                 </TabsContent>
 
-                <TabsContent value="observations" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
-                  {/* Structured snapshot vs append-only ward diary */}
-                  {selectedAdmission.current_condition && (
-                    <section>
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Condition</h3>
-                      <p className={`text-sm font-medium px-3 py-2 rounded border ${getConditionBadgeClass(selectedAdmission.current_condition)}`}>
-                        {/needs doctor review/i.test(selectedAdmission.current_condition) ? '⚠️ ' : ''}{selectedAdmission.current_condition}
-                      </p>
-                    </section>
-                  )}
-
-                  {selectedAdmission.admission_notes && (
-                    <section className={selectedAdmission.current_condition ? 'border-t pt-4' : ''}>
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Ward observation diary</h3>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground mb-3 leading-snug">
-                        Append-only log of observations and shift notes — same field as the doctor's progress notes, parsed into a timeline below.
-                      </p>
-                      <ProgressNotesTimeline notes={selectedAdmission.admission_notes} />
-                    </section>
-                  )}
-
-                  {!selectedAdmission.current_condition && !selectedAdmission.admission_notes && (
-                    <div className="rounded-lg border border-dashed p-6 text-center">
-                      <Thermometer className="h-10 w-10 mx-auto mb-3 text-muted-foreground/40" />
-                      <p className="text-sm font-medium text-foreground">No structured observations yet</p>
-                      <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                        Record a quick observation or open the full chart for vitals grids and treatment-sheet rows.
-                      </p>
-                    </div>
-                  )}
+                <TabsContent value="nursing" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
+                  <WardLatestHandoverCard
+                    key={`handover-${notesRefreshKey}`}
+                    admissionNotes={selectedAdmission.admission_notes}
+                  />
 
                   {selectedAdmission.status === 'admitted' && (
-                    <div className="flex flex-col gap-2 pt-1 border-t">
-                      <p className="text-[11px] text-muted-foreground">
-                        Opens on top — your patient summary stays open underneath.
-                      </p>
-                      <Button
-                        size="sm"
-                        className="w-full"
-                        onClick={() => openObservationDialog(selectedAdmission)}
-                      >
-                        <Thermometer className="h-4 w-4 mr-2" />Record New Observation
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => openObservationChart(selectedAdmission)}
-                      >
-                        <Activity className="h-4 w-4 mr-2" />
-                        Full observation chart
-                      </Button>
-                    </div>
+                    <WardQuickObservationForm
+                      admission={selectedAdmission}
+                      value={observationData}
+                      onChange={setObservationData}
+                      onSubmit={() => void handleSaveObservation()}
+                      isSaving={isSavingObservation}
+                    />
                   )}
+
+                  <WardVitalsHistory
+                    admission={selectedAdmission}
+                    refreshKey={chartRefreshKey}
+                  />
+
+                  <WardHandoverNotesSection
+                    key={notesRefreshKey}
+                    admissionNotes={selectedAdmission.admission_notes}
+                    canAdd={selectedAdmission.status === 'admitted'}
+                    onAddNote={handleSaveHandoverNote}
+                    isSaving={isSavingHandover}
+                  />
                 </TabsContent>
               </Tabs>
-              <DialogFooter className="px-5 py-3 border-t shrink-0 gap-2 sm:justify-between flex-col-reverse sm:flex-row sm:items-center">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => handleDownloadSummary(selectedAdmission)}
-                    disabled={isDownloadingSummary}
-                    title={
-                      selectedAdmission.status === 'discharged'
-                        ? 'Download full chart-copy admission summary (PDF)'
-                        : 'Download interim admission summary (PDF)'
-                    }
-                  >
-                    {isDownloadingSummary
-                      ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      : <Download className="h-3.5 w-3.5 mr-1.5" />
-                    }
-                    {selectedAdmission.status === 'discharged' ? 'Summary PDF' : 'Interim PDF'}
-                  </Button>
-                  {(selectedAdmission.status === 'discharged' || selectedAdmission.status === 'pending_discharge') && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => handleDownloadSlip(selectedAdmission)}
-                      disabled={isDownloadingSlip}
-                      title="Download patient discharge slip (one-page handout)"
-                    >
-                      {isDownloadingSlip
-                        ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                        : <FileText className="h-3.5 w-3.5 mr-1.5" />
-                      }
-                      Patient Slip
-                    </Button>
-                  )}
-                  {/* Referral Letter — nurses also need to print this when
-                      they go to escort the patient. Doctor generates it,
-                      nurse carries / hands it over. */}
-                  {selectedAdmission.escort && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => handleDownloadReferralLetter(selectedAdmission)}
-                      disabled={isDownloadingReferralLetter}
-                      title="Download referral letter to take to the receiving facility (PDF)"
-                    >
-                      {isDownloadingReferralLetter
-                        ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                        : <Send className="h-3.5 w-3.5 mr-1.5" />
-                      }
-                      Referral Letter
-                    </Button>
-                  )}
-                  {/* Responsibility form — nurse usually collects the
-                      patient/relative signature at the bedside before
-                      escort departs (or before DAMA discharge). */}
-                  {(() => {
-                    const v = getResponsibilityFormVariant(selectedAdmission);
-                    if (!v) return null;
-                    return (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-xs"
-                        onClick={() => handleDownloadResponsibilityForm(selectedAdmission, v.formType)}
-                        disabled={isDownloadingResponsibility}
-                        title={`Download ${v.label.toLowerCase()} for patient / guardian signature (PDF)`}
-                      >
-                        {isDownloadingResponsibility
-                          ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                          : <FileCheck className="h-3.5 w-3.5 mr-1.5" />
-                        }
-                        {v.label}
-                      </Button>
-                    );
-                  })()}
-                </div>
+              <DialogFooter className="px-5 py-3 border-t shrink-0">
                 <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setShowAdmissionDetails(false)}>
                   Close
                 </Button>
@@ -1695,284 +1502,6 @@ export default function WardCarePage() {
             </DialogContent>
           </Dialog>
         )}
-
-        <ObservationChartDialog
-          open={observationChartOpen}
-          onOpenChange={(o) => {
-            setObservationChartOpen(o);
-            if (!o) setChartAdmission(null);
-          }}
-          admission={chartAdmission}
-        />
-
-        {/* Record Observation Dialog */}
-        {selectedAdmission && (() => {
-          // Derived UI state — kept inline so the dialog re-renders cheaply
-          // without lifting more state into the page component.
-          const tempVal = parseFloat(observationData.temperature);
-          const tempWarn: 'low' | 'high' | null = Number.isFinite(tempVal)
-            ? (tempVal < 36 ? 'low' : tempVal > 37.5 ? 'high' : null)
-            : null;
-          const pulseInt = parseInt(observationData.pulse, 10);
-          const pulseWarn: 'low' | 'high' | null = Number.isFinite(pulseInt)
-            ? (pulseInt < 60 ? 'low' : pulseInt > 100 ? 'high' : null)
-            : null;
-          const spo2Val = parseFloat(observationData.spo2);
-          const spo2Warn: 'low' | null = Number.isFinite(spo2Val)
-            ? (spo2Val < 94 ? 'low' : null)
-            : null;
-          const bpMatch = observationData.bp.match(/^\s*(\d{2,3})\s*\/\s*(\d{2,3})\s*$/);
-          const bpInvalid = observationData.bp.trim() !== '' && bpMatch == null;
-          const bpSys = bpMatch ? parseInt(bpMatch[1], 10) : NaN;
-          const bpDia = bpMatch ? parseInt(bpMatch[2], 10) : NaN;
-          const bpWarn: 'low' | 'high' | null = bpMatch
-            ? ((bpSys < 90 || bpDia < 60) ? 'low' : (bpSys > 140 || bpDia > 90) ? 'high' : null)
-            : null;
-
-          const hasContent =
-            !!observationData.current_condition ||
-            !!observationData.shift_notes.trim() ||
-            observationData.escalate ||
-            !!observationData.bp.trim() ||
-            !!observationData.temperature.trim() ||
-            !!observationData.pulse.trim() ||
-            !!observationData.spo2.trim();
-
-          const recordedAtLabel = formatDisplayDateTime(new Date());
-
-          const warnText = (kind: 'low' | 'high' | null, lowLabel: string, highLabel: string) =>
-            kind === 'low' ? lowLabel : kind === 'high' ? highLabel : null;
-          const warnClass = (kind: 'low' | 'high' | null) =>
-            kind === 'low'
-              ? 'text-blue-600 dark:text-blue-400'
-              : kind === 'high'
-                ? 'text-orange-600 dark:text-orange-400'
-                : 'text-muted-foreground';
-          const inputBorder = (invalid: boolean, kind: 'low' | 'high' | null) =>
-            invalid
-              ? 'border-red-400 focus-visible:ring-red-300'
-              : kind
-                ? 'border-orange-300 dark:border-orange-700'
-                : '';
-
-          return (
-          <Dialog open={showObservationDialog} onOpenChange={(open) => {
-            setShowObservationDialog(open);
-            if (!open) setObservationData({ current_condition: '', bp: '', temperature: '', pulse: '', spo2: '', shift_notes: '', escalate: false });
-          }}>
-            <DialogContent className={`${modalNoOverflow('md')} max-h-[92vh] flex flex-col gap-0 p-0`}>
-              <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-2">
-                <div className="flex items-start justify-between gap-3">
-                  <DialogTitle className="flex items-center gap-2 text-lg">
-                    <Thermometer className="h-5 w-5 text-teal-500 shrink-0" />
-                    Record observation
-                  </DialogTitle>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground whitespace-nowrap">
-                    <Clock className="h-3 w-3" />
-                    Now · {recordedAtLabel}
-                  </span>
-                </div>
-                <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                  <span className="font-medium text-foreground">{selectedAdmission.patient_name}</span>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="font-mono text-xs">{selectedAdmission.admission_id}</span>
-                  <span className="text-muted-foreground">·</span>
-                  <span>{selectedAdmission.ward_name}</span>
-                  {selectedAdmission.bed_number != null && selectedAdmission.bed_number !== '' && (
-                    <>
-                      <span className="text-muted-foreground">·</span>
-                      <span>Bed {selectedAdmission.bed_number}</span>
-                    </>
-                  )}
-                </DialogDescription>
-              </DialogHeader>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!hasContent || isSavingObservation) return;
-                  void handleSaveObservation();
-                }}
-                className="flex flex-col flex-1 min-h-0"
-              >
-                <div className="grid gap-5 py-4 px-5 overflow-y-auto flex-1 min-h-0">
-                  {selectedAdmission.current_condition && (
-                    <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs flex items-center gap-2">
-                      <span className="text-muted-foreground">Last recorded condition:</span>
-                      <span className="font-medium">{selectedAdmission.current_condition}</span>
-                    </div>
-                  )}
-
-                  <section className="space-y-2">
-                    <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Condition</Label>
-                    <Select
-                      value={observationData.current_condition}
-                      onValueChange={(v) => setObservationData(p => ({
-                        ...p,
-                        current_condition: v,
-                        // Picking "Needs Doctor Review" auto-escalates; picking
-                        // anything else clears the escalation flag so the two
-                        // controls can never disagree.
-                        escalate: v === 'Needs Doctor Review',
-                      }))}
-                    >
-                      <SelectTrigger autoFocus>
-                        <SelectValue placeholder="Select condition" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {WARD_CONDITION_PRESETS.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </section>
-
-                  <section className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Vitals</Label>
-                      <span className="text-[10px] text-muted-foreground">All optional · also saved to chart</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Blood Pressure (mmHg)</Label>
-                        <Input
-                          value={observationData.bp}
-                          onChange={(e) => setObservationData(p => ({ ...p, bp: e.target.value }))}
-                          placeholder="e.g. 120/80"
-                          inputMode="numeric"
-                          className={inputBorder(bpInvalid, bpWarn)}
-                          aria-invalid={bpInvalid || undefined}
-                        />
-                        {bpInvalid ? (
-                          <p className="text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" /> Use format <span className="font-mono">120/80</span>
-                          </p>
-                        ) : bpWarn ? (
-                          <p className={`text-[11px] flex items-center gap-1 ${warnClass(bpWarn)}`}>
-                            {bpWarn === 'low' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
-                            {warnText(bpWarn, 'Hypotensive', 'Hypertensive')}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Temperature (°C)</Label>
-                        <Input
-                          value={observationData.temperature}
-                          onChange={(e) => setObservationData(p => ({ ...p, temperature: e.target.value }))}
-                          placeholder="e.g. 36.8"
-                          inputMode="decimal"
-                          className={inputBorder(false, tempWarn)}
-                        />
-                        {tempWarn && (
-                          <p className={`text-[11px] flex items-center gap-1 ${warnClass(tempWarn)}`}>
-                            {tempWarn === 'low' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
-                            {warnText(tempWarn, 'Hypothermia', 'Pyrexia / fever')}
-                          </p>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Pulse (bpm)</Label>
-                        <Input
-                          value={observationData.pulse}
-                          onChange={(e) => setObservationData(p => ({ ...p, pulse: e.target.value }))}
-                          placeholder="e.g. 72"
-                          inputMode="numeric"
-                          className={inputBorder(false, pulseWarn)}
-                        />
-                        {pulseWarn && (
-                          <p className={`text-[11px] flex items-center gap-1 ${warnClass(pulseWarn)}`}>
-                            {pulseWarn === 'low' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
-                            {warnText(pulseWarn, 'Bradycardia', 'Tachycardia')}
-                          </p>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">SpO2 (%)</Label>
-                        <Input
-                          value={observationData.spo2}
-                          onChange={(e) => setObservationData(p => ({ ...p, spo2: e.target.value }))}
-                          placeholder="e.g. 98"
-                          inputMode="numeric"
-                          className={inputBorder(false, spo2Warn)}
-                        />
-                        {spo2Warn === 'low' && (
-                          <p className={`text-[11px] flex items-center gap-1 ${warnClass(spo2Warn)}`}>
-                            <ArrowDown className="h-3 w-3" /> Hypoxia — consider O₂
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </section>
-
-                  <section className="space-y-2">
-                    <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Shift notes</Label>
-                    <Textarea
-                      value={observationData.shift_notes}
-                      onChange={(e) => setObservationData(p => ({ ...p, shift_notes: e.target.value }))}
-                      placeholder="Clinical observations, patient complaints, response to treatment..."
-                      rows={3}
-                    />
-                    <p className="text-[11px] text-muted-foreground">Appended to the ward observation diary.</p>
-                  </section>
-
-                  <div className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
-                    observationData.escalate
-                      ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700'
-                      : 'bg-muted/30 border-border'
-                  }`}>
-                    <Checkbox
-                      id="escalate"
-                      checked={observationData.escalate}
-                      onCheckedChange={(checked) => setObservationData(p => ({
-                        ...p,
-                        escalate: !!checked,
-                        current_condition: checked ? 'Needs Doctor Review' : p.current_condition === 'Needs Doctor Review' ? '' : p.current_condition,
-                      }))}
-                    />
-                    <div className="space-y-1">
-                      <Label htmlFor="escalate" className={`font-medium cursor-pointer ${observationData.escalate ? 'text-orange-600 dark:text-orange-400' : ''}`}>
-                        {observationData.escalate ? '⚠️ Escalate to doctor' : 'Escalate to doctor'}
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Flags this patient on the doctor's Ward Rounds page as needing urgent review.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <DialogFooter className="px-5 py-4 border-t shrink-0 gap-2 sm:justify-between flex-col-reverse sm:flex-row sm:items-center">
-                  <p className="text-[11px] text-muted-foreground">
-                    {hasContent
-                      ? 'Saves to the diary' + (
-                          observationData.bp.trim() ||
-                          observationData.temperature.trim() ||
-                          observationData.pulse.trim()
-                            ? ' and full chart.'
-                            : '.'
-                        )
-                      : 'Enter a condition, vitals, or notes to save.'}
-                  </p>
-                  <div className="flex gap-2 sm:justify-end">
-                    <Button type="button" variant="outline" onClick={() => setShowObservationDialog(false)}>Cancel</Button>
-                    <Button
-                      type="submit"
-                      disabled={isSavingObservation || !hasContent || bpInvalid}
-                      className={observationData.escalate ? 'bg-orange-600 hover:bg-orange-700' : ''}
-                    >
-                      {isSavingObservation ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : observationData.escalate ? (
-                        <Bell className="h-4 w-4 mr-2" />
-                      ) : (
-                        <Thermometer className="h-4 w-4 mr-2" />
-                      )}
-                      {observationData.escalate ? 'Escalate & save' : 'Save observation'}
-                    </Button>
-                  </div>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-          );
-        })()}
 
         {/* Complete Discharge Dialog (Step 2) */}
         {selectedAdmission && (() => {

@@ -79,7 +79,9 @@ class WardTransferTest(APITestCase):
         }, format="json")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.admission.refresh_from_db()
-        self.assertEqual(self.admission.status, "transferred")
+        self.assertEqual(self.admission.status, "admitted")
+        self.assertEqual(self.admission.ward_id, self.ward_b.pk)
+        self.assertEqual(self.admission.transfer_to_ward_id, self.ward_b.pk)
 
 
 class WardBedAssignmentTest(APITestCase):

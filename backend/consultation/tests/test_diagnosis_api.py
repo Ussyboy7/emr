@@ -135,6 +135,12 @@ class DiagnosisCreateTests(DiagnosisSetupMixin, APITestCase):
         self.assertEqual(resp.data["status"], "suspected")
         self.assertEqual(resp.data["certainty"], "possible")
 
+    def test_create_duplicate_visit_icd10_returns_400(self):
+        self._create_diagnosis()
+        resp = self.client.post(BASE_URL, self._diagnosis_payload(), format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already recorded", str(resp.data).lower())
+
 
 class DiagnosisRetrieveTests(DiagnosisSetupMixin, APITestCase):
     """GET /api/v1/consultation/diagnoses/{id}/"""

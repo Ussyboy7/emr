@@ -19,6 +19,7 @@ from accounts.utils import resolve_clinic_id
 from organization.models import SystemConfig
 from .models import NursingOrder, Procedure
 from .serializers import NursingOrderSerializer, ProcedureSerializer
+from .admission_orders import filter_orders_for_admission
 from audit.services import AuditService
 
 
@@ -63,7 +64,11 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             )
         )
         if self.request.query_params.get('procedures_queue') == '1':
+            # Ward instructions are doctor orders on an existing admission (Ward Care).
+            # Observation admissions are created at consultation handoff (Ward Care), not here.
             qs = qs.exclude(order_type__iexact='ward instruction')
+            qs = qs.exclude(order_type__iexact='observation admission')
+            qs = qs.exclude(is_informational=True)
 
         from common.report_period import apply_date_preset
 
@@ -102,6 +107,30 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return self.scope_queryset(qs)
 
     def filter_queryset(self, queryset):
+        for_admission = (self.request.query_params.get('for_admission') or '').strip()
+        if for_admission:
+            try:
+                admission_pk = int(for_admission)
+            except (TypeError, ValueError):
+                admission_pk = None
+            if admission_pk:
+                queryset = filter_orders_for_admission(queryset, admission_pk)
+            queryset = super().filter_queryset(queryset)
+            if self.request.query_params.get("procedures_queue") == "1":
+                ordering_param = (self.request.query_params.get("ordering") or "").strip()
+                if not ordering_param:
+                    queryset = queryset.annotate(
+                        _pq_rank=Case(
+                            When(priority="urgent", then=0),
+                            When(priority="high", then=1),
+                            When(priority="medium", then=2),
+                            When(priority="low", then=3),
+                            default=2,
+                            output_field=IntegerField(),
+                        )
+                    ).order_by("_pq_rank", "ordered_at")
+            return queryset
+
         queryset = super().filter_queryset(queryset)
         if self.request.query_params.get("procedures_queue") == "1":
             ordering_param = (self.request.query_params.get("ordering") or "").strip()
