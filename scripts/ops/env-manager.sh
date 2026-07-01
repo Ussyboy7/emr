@@ -590,6 +590,10 @@ _deploy_build_up_fast() {
         ui_step "Fast deploy — restarting: ${up_services}"
         # shellcheck disable=SC2086
         stack_compose up -d --no-deps $up_services
+        if [[ "$STACK_ENVIRONMENT" == "production" ]] && echo " $up_services " | grep -q ' nginx '; then
+            ui_step "Reloading nginx (refresh upstream DNS after app container recreate)"
+            stack_compose restart nginx
+        fi
         return 0
     fi
 
@@ -617,6 +621,10 @@ _deploy_build_up_fast() {
     ui_step "Fast deploy — restarting: ${up_services}"
     # shellcheck disable=SC2086
     stack_compose up -d --no-deps $up_services
+    if [[ "$STACK_ENVIRONMENT" == "production" ]] && echo " $up_services " | grep -q ' nginx '; then
+        ui_step "Reloading nginx (refresh upstream DNS after app container recreate)"
+        stack_compose restart nginx
+    fi
 }
 
 _deploy_build_up_full() {
