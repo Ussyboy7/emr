@@ -5,7 +5,7 @@ from typing import Optional
 
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, Q, Prefetch
 from django.http import Http404, HttpResponse
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 from .models import (
     ConsultationRoom,
+    ConsultationRoomOccupancy,
     ConsultationSession,
     ConsultationQueue,
     consultation_queue_priority_for_visit,
@@ -53,6 +54,15 @@ from common.mixins import ClinicScopedMixin
 from common.openapi import REFERRAL_FORM_PK_PARAMS, document_viewset
 from accounts.utils import resolve_clinic_id
 from organization.models import SystemConfig
+from .room_presence import (
+    assert_room_accepting_patients,
+    checkout_other_rooms_for_doctor,
+    get_active_occupancy,
+    presence_override_audit_suffix,
+    touch_occupancy,
+    user_can_override_room_presence,
+)
+from .queue_notifications import notify_doctor_in_room
 
 DIAGNOSIS_REVIEW_PAGE = "/medical-records/diagnosis-review"
 
@@ -104,9 +114,21 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         # Use ``is_active`` / ``status`` query params to narrow results.
         if getattr(self, 'swagger_fake_view', False):
             return ConsultationRoom.objects.none()
+
+        active_occupancy_qs = ConsultationRoomOccupancy.objects.filter(
+            is_active=True,
+        ).select_related('doctor')
         
         return self.scope_queryset(
-            ConsultationRoom.objects.all().select_related('clinic')
+            ConsultationRoom.objects.all()
+            .select_related('clinic')
+            .prefetch_related(
+                Prefetch(
+                    'occupancies',
+                    queryset=active_occupancy_qs,
+                    to_attr='_active_occupancies',
+                ),
+            )
         )
     
     @extend_schema(tags=["Consultation"], summary="Queue", description="Get queue for a room.")
@@ -140,6 +162,123 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             },
         )
         return Response(data)
+
+    def _serialize_room(self, room):
+        return ConsultationRoomSerializer(room, context=self.get_serializer_context()).data
+
+    @extend_schema(tags=["Consultation"], summary="Check in to room")
+    @action(detail=True, methods=['post'], url_path='check-in')
+    def check_in(self, request, pk=None):
+        """Doctor checks into a consultation room (on seat, accepting patients)."""
+        room = self.get_object()
+        user = request.user
+
+        with transaction.atomic():
+            checkout_other_rooms_for_doctor(user, exclude_room_id=room.id)
+            existing = get_active_occupancy(room)
+
+            if existing and existing.doctor_id != user.id:
+                return Response(
+                    {
+                        'detail': (
+                            f'{room.name} is occupied by '
+                            f'{existing.doctor.get_full_name()}.'
+                        ),
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            if existing and existing.doctor_id == user.id:
+                existing.status = ConsultationRoomOccupancy.STATUS_ON_SEAT
+                touch_occupancy(existing)
+            else:
+                ConsultationRoomOccupancy.objects.create(
+                    room=room,
+                    doctor=user,
+                    status=ConsultationRoomOccupancy.STATUS_ON_SEAT,
+                    is_active=True,
+                )
+
+        room = self.get_queryset().get(pk=room.pk)
+        return Response(self._serialize_room(room))
+
+    @extend_schema(tags=["Consultation"], summary="Check out of room")
+    @action(detail=True, methods=['post'], url_path='check-out')
+    def check_out(self, request, pk=None):
+        """Doctor leaves the consultation room."""
+        room = self.get_object()
+        user = request.user
+        occupancy = get_active_occupancy(room)
+
+        if occupancy is None:
+            return Response(self._serialize_room(room))
+
+        if occupancy.doctor_id != user.id and not user_can_override_room_presence(user):
+            return Response(
+                {'detail': 'Only the doctor in this room can check out.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        now = timezone.now()
+        occupancy.is_active = False
+        occupancy.status = ConsultationRoomOccupancy.STATUS_AWAY
+        occupancy.checked_out_at = now
+        occupancy.last_seen_at = now
+        occupancy.save(
+            update_fields=['is_active', 'status', 'checked_out_at', 'last_seen_at'],
+        )
+
+        room = self.get_queryset().get(pk=room.pk)
+        return Response(self._serialize_room(room))
+
+    @extend_schema(tags=["Consultation"], summary="Set accepting patients")
+    @action(detail=True, methods=['post'], url_path='set-accepting')
+    def set_accepting(self, request, pk=None):
+        """Toggle whether the doctor in the room accepts new patients."""
+        room = self.get_object()
+        user = request.user
+        occupancy = get_active_occupancy(room)
+
+        if occupancy is None or occupancy.doctor_id != user.id:
+            return Response(
+                {'detail': 'You must be checked into this room to change availability.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        accepting = request.data.get('accepting')
+        if accepting is None:
+            return Response(
+                {'detail': 'accepting (boolean) is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        occupancy.status = (
+            ConsultationRoomOccupancy.STATUS_ON_SEAT
+            if bool(accepting)
+            else ConsultationRoomOccupancy.STATUS_NOT_ACCEPTING
+        )
+        touch_occupancy(occupancy)
+
+        room = self.get_queryset().get(pk=room.pk)
+        return Response(self._serialize_room(room))
+
+    @extend_schema(tags=["Consultation"], summary="Heartbeat while in room")
+    @action(detail=True, methods=['post'], url_path='heartbeat')
+    def heartbeat(self, request, pk=None):
+        """Refresh last-seen timestamp while the doctor remains in the room."""
+        room = self.get_object()
+        user = request.user
+        occupancy = get_active_occupancy(room)
+
+        if occupancy is None or occupancy.doctor_id != user.id:
+            return Response(
+                {'detail': 'You are not checked into this room.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        touch_occupancy(occupancy)
+        room = self.get_queryset().get(pk=room.pk)
+        return Response(self._serialize_room(room))
 
 
 @extend_schema_view(
@@ -1074,6 +1213,9 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         room = serializer.validated_data.get('room')
         patient = serializer.validated_data.get('patient')
         visit = serializer.validated_data.get('visit')
+
+        if room is not None:
+            assert_room_accepting_patients(room, request=self.request)
         
         # Deactivate any existing active queue items for this patient
         ConsultationQueue.objects.filter(
@@ -1227,7 +1369,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             object_id=str(queue_item.id),
             module='consultation',
             object_repr=f'Queue item for {queue_item.patient.get_full_name()} in {queue_item.room.name}',
-            description=f'Added {queue_item.patient.get_full_name()} to consultation queue for {queue_item.room.name}',
+            description=f'Added {queue_item.patient.get_full_name()} to consultation queue for {queue_item.room.name}{presence_override_audit_suffix(self.request)}',
             new_values={
                 'room': queue_item.room.name,
                 'patient': queue_item.patient.get_full_name(),
@@ -1237,27 +1379,17 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
-        # Notify doctors (Nursing -> Consultation)
+        # Notify the doctor checked into this room (if any).
         try:
-            from notifications.services import NotificationService
-
             patient_name = queue_item.patient.get_full_name()
             room_name = queue_item.room.name
-            title = "Patient sent to Consultation"
-            message = f"{patient_name} has been sent to {room_name} for consultation."
-
-            # A patient is now waiting in the queue for this room — that
-            # outranks routine background pings.
-            NotificationService.notify_role(
-                role_name='Medical Doctor',
-                title=title,
-                message=message,
-                notification_type='workflow',
-                priority='high',
+            notify_doctor_in_room(
+                queue_item.room,
+                title="Patient sent to Consultation",
+                message=f"{patient_name} has been sent to {room_name} for consultation.",
                 action_url=f"/consultation/room/{queue_item.room.id}",
                 object_type='consultation_queue',
                 object_id=str(queue_item.id),
-                clinic_id=getattr(self.request.user, 'clinic_id', None),
             )
         except Exception:
             # Notifications must never break queue operations
@@ -1280,6 +1412,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         # Check if room is being changed
         new_room = serializer.validated_data.get('room')
         if new_room and new_room != instance.room:
+            assert_room_accepting_patients(new_room, request=self.request)
             # If reassigning to a different room, ensure no duplicate active queue item
             existing = ConsultationQueue.objects.filter(
                 room=new_room,
@@ -1310,7 +1443,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 object_id=str(updated.id),
                 module='consultation',
                 object_repr=f'Queue item {updated.id} reassigned',
-                description=f'Queue item reassigned from {old_room.name} to {updated.room.name}',
+                description=f'Queue item reassigned from {old_room.name} to {updated.room.name}{presence_override_audit_suffix(self.request)}',
                 old_values={
                     'room': old_room.name,
                     'priority': instance.priority,
@@ -1325,27 +1458,17 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             # Audit logging should never break the main operation
             logger.warning(f"Failed to log audit for queue update {updated.id}: {audit_error}")
 
-        # If room changed, notify doctors again (reassignment).
+        # If room changed, notify the doctor in the target room.
         try:
             if old_room.id != updated.room.id:
-                from notifications.services import NotificationService
-
                 patient_name = updated.patient.get_full_name()
-                title = "Patient reassigned to Consultation room"
-                message = f"{patient_name} has been reassigned to {updated.room.name}."
-
-                # Reassignment also means a patient is now in this
-                # room's queue waiting — same priority as initial send.
-                NotificationService.notify_role(
-                    role_name='Medical Doctor',
-                    title=title,
-                    message=message,
-                    notification_type='workflow',
-                    priority='high',
+                notify_doctor_in_room(
+                    updated.room,
+                    title="Patient reassigned to Consultation room",
+                    message=f"{patient_name} has been reassigned to {updated.room.name}.",
                     action_url=f"/consultation/room/{updated.room.id}",
                     object_type='consultation_queue',
                     object_id=str(updated.id),
-                    clinic_id=getattr(self.request.user, 'clinic_id', None),
                 )
         except Exception:
             pass

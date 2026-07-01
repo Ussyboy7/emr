@@ -12,6 +12,11 @@ import {
   isEmergencyVisitType,
 } from '@/lib/utils/priority';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import {
+  presenceStatusBadgeClass,
+  presenceStatusLabel,
+  type RoomPresenceStatus,
+} from '@/lib/consultation/room-presence';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import {
   Activity,
@@ -37,10 +42,15 @@ export type ConsultationRoomIdleViewProps = {
   isStartingSession: boolean;
   isResumingPausedSession: boolean;
   isMarkingLeft: boolean;
+  presenceStatus?: RoomPresenceStatus;
+  acceptingPatients?: boolean;
+  isUpdatingPresence?: boolean;
   findPausedSessionsForPatient: (patient: ConsultationRoomPatient) => ConsultationSession[];
   onOpenQueueDialog: (tab?: 'waiting' | 'paused') => void;
   onQueuePatientAction: (patient: ConsultationRoomPatient) => void;
   onMarkPatientLeft: (patient: ConsultationRoomPatient) => void;
+  onToggleAccepting?: (accepting: boolean) => void;
+  onExitRoom?: () => void;
 };
 
 export function ConsultationRoomIdleView({
@@ -51,10 +61,15 @@ export function ConsultationRoomIdleView({
   isStartingSession,
   isResumingPausedSession,
   isMarkingLeft,
+  presenceStatus,
+  acceptingPatients,
+  isUpdatingPresence,
   findPausedSessionsForPatient,
   onOpenQueueDialog,
   onQueuePatientAction,
   onMarkPatientLeft,
+  onToggleAccepting,
+  onExitRoom,
 }: ConsultationRoomIdleViewProps) {
   const router = useRouter();
   const emergencyPatients = patients.filter((p) => isEmergencyVisitType(p.visitType));
@@ -95,12 +110,46 @@ export function ConsultationRoomIdleView({
               </span>
             )}
           </Button>
-          <Button variant="outline" onClick={() => router.push('/consultation/start')}>
+          <Button variant="outline" onClick={() => onExitRoom?.() ?? router.push('/consultation/start')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Exit Room
           </Button>
         </div>
       </div>
+
+      <Card className="border-l-4 border-l-emerald-500">
+        <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Your availability</p>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <Badge variant="outline" className={presenceStatusBadgeClass(presenceStatus)}>
+                {presenceStatusLabel(presenceStatus)}
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                {acceptingPatients
+                  ? 'Nurses can send patients to this room'
+                  : presenceStatus === 'not_accepting'
+                    ? 'Nurses cannot send new patients'
+                    : 'Check in to accept patients'}
+              </span>
+            </div>
+          </div>
+          {onToggleAccepting && presenceStatus && presenceStatus !== 'away' && (
+            <Button
+              variant={acceptingPatients ? 'outline' : 'default'}
+              disabled={isUpdatingPresence}
+              onClick={() => onToggleAccepting(!acceptingPatients)}
+              className={acceptingPatients ? '' : 'bg-amber-600 hover:bg-amber-700'}
+            >
+              {isUpdatingPresence
+                ? 'Updating...'
+                : acceptingPatients
+                  ? 'Pause accepting patients'
+                  : 'Resume accepting patients'}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="border-l-4 border-l-blue-500">
@@ -328,7 +377,13 @@ export function ConsultationRoomIdleView({
               </div>
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <CheckCircle className="h-4 w-4" />
-                <span>Room ready for new patients</span>
+                <span>
+                  {acceptingPatients
+                    ? 'Room ready for new patients'
+                    : presenceStatus === 'not_accepting'
+                      ? 'Not accepting new patients'
+                      : 'Check in to accept patients'}
+                </span>
               </div>
             </div>
           )}

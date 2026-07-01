@@ -30,11 +30,37 @@ router.register(r'presenting-complaints', PresentingComplaintViewSet, basename='
 # action registration is missing on older deployed images).
 referral_ack_form = ReferralViewSet.as_view({"post": "acknowledge_responsibility_form"})
 
+# Room presence actions — explicit routes so check-in/out survive stale router registration on deploy.
+room_check_in = ConsultationRoomViewSet.as_view({"post": "check_in"})
+room_check_out = ConsultationRoomViewSet.as_view({"post": "check_out"})
+room_set_accepting = ConsultationRoomViewSet.as_view({"post": "set_accepting"})
+room_heartbeat = ConsultationRoomViewSet.as_view({"post": "heartbeat"})
+
 urlpatterns = [
     path(
         "consultation/referrals/<int:pk>/acknowledge_responsibility_form/",
         referral_ack_form,
         name="referral-acknowledge-responsibility-form",
+    ),
+    path(
+        "consultation/rooms/<int:pk>/check-in/",
+        room_check_in,
+        name="consultation-room-check-in",
+    ),
+    path(
+        "consultation/rooms/<int:pk>/check-out/",
+        room_check_out,
+        name="consultation-room-check-out",
+    ),
+    path(
+        "consultation/rooms/<int:pk>/set-accepting/",
+        room_set_accepting,
+        name="consultation-room-set-accepting",
+    ),
+    path(
+        "consultation/rooms/<int:pk>/heartbeat/",
+        room_heartbeat,
+        name="consultation-room-heartbeat",
     ),
     path("consultation/", include(router.urls)),
 ]

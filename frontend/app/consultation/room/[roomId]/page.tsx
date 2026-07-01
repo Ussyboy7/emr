@@ -28,6 +28,8 @@ import type {
   VitalsData,
   ExtendedConsultationSession,
 } from '@/lib/consultation/room-types';
+import type { RoomPresenceStatus } from '@/lib/consultation/room-presence';
+import { ROOM_PRESENCE_HEARTBEAT_MS } from '@/lib/consultation/room-presence';
 import {
   debugConsultationRoom,
   formatRoomTime as formatTime,
@@ -534,6 +536,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [eyeSessionReportOrderId, setEyeSessionReportOrderId] = useState<number | undefined>(undefined);
 
   const [isMarkingLeft, setIsMarkingLeft] = useState(false);
+  const [presenceStatus, setPresenceStatus] = useState<RoomPresenceStatus>('away');
+  const [acceptingPatients, setAcceptingPatients] = useState(false);
+  const [isUpdatingPresence, setIsUpdatingPresence] = useState(false);
   const [showLeftWorkflowDialog, setShowLeftWorkflowDialog] = useState(false);
   const [leftWorkflowReason, setLeftWorkflowReason] = useState('Patient left before being seen');
   const [leftWorkflowTarget, setLeftWorkflowTarget] = useState<{ kind: 'queue'; patient: Patient } | { kind: 'session' } | null>(null);
@@ -551,8 +556,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      // Load room details
-      const roomData = await roomService.getRoom(numericRoomId);
+      // Load room details (check in when opening the room directly)
+      let roomData = await roomService.getRoom(numericRoomId);
+      const currentDoctorId = currentUser?.id ? Number(currentUser.id) : null;
+      if (currentDoctorId && roomData.current_doctor_id !== currentDoctorId) {
+        try {
+          roomData = await roomService.checkIn(numericRoomId);
+        } catch (checkInErr) {
+          console.error('Room check-in failed:', checkInErr);
+          if (handleAuthError(checkInErr)) return;
+        }
+      }
+      setPresenceStatus((roomData.presence_status || 'away') as RoomPresenceStatus);
+      setAcceptingPatients(roomData.accepting_patients === true);
       
       // Load queue items for this room - single optimized API call
       const queueItems = await fetchAllPaginatedResults((page, pageSize) =>
@@ -592,7 +608,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           status: roomData.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
           currentPatient: validPatients.length > 0 ? validPatients[0].name : undefined,
           startTime: undefined,
-          doctor: (roomData as any).assigned_doctor || undefined,
+          doctor: roomData.current_doctor_name || undefined,
+          presenceStatus: (roomData.presence_status || 'away') as RoomPresenceStatus,
+          acceptingPatients: roomData.accepting_patients === true,
           specialtyFocus: roomData.specialty || '',
           totalConsultationsToday: completedCount,
           averageConsultationTime: avgTime,
@@ -624,11 +642,70 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
     };
   
+  const handleToggleAccepting = useCallback(async (accepting: boolean) => {
+    const numericRoomId = parseInt(roomId, 10);
+    if (Number.isNaN(numericRoomId)) return;
+    setIsUpdatingPresence(true);
+    try {
+      const updated = await roomService.setAccepting(numericRoomId, accepting);
+      setPresenceStatus((updated.presence_status || 'away') as RoomPresenceStatus);
+      setAcceptingPatients(updated.accepting_patients === true);
+      setRoom((prev) =>
+        prev
+          ? {
+              ...prev,
+              doctor: updated.current_doctor_name || prev.doctor,
+              presenceStatus: (updated.presence_status || 'away') as RoomPresenceStatus,
+              acceptingPatients: updated.accepting_patients === true,
+            }
+          : prev,
+      );
+      toast.success(accepting ? 'Now accepting patients' : 'Not accepting new patients');
+    } catch (err) {
+      console.error('Failed to update room availability:', err);
+      if (handleAuthError(err)) return;
+      toast.error('Failed to update availability');
+    } finally {
+      setIsUpdatingPresence(false);
+    }
+  }, [roomId, handleAuthError]);
+
+  const handleExitRoom = useCallback(async () => {
+    const numericRoomId = parseInt(roomId, 10);
+    if (!Number.isNaN(numericRoomId)) {
+      try {
+        await roomService.checkOut(numericRoomId);
+      } catch (err) {
+        console.error('Room check-out failed:', err);
+      }
+    }
+    router.push('/consultation/start');
+  }, [roomId, router]);
+
   useEffect(() => {
     if (!ready) return;
     void loadRoomData();
-  }, [roomId, ready]);
+  }, [roomId, ready, currentUser?.id]);
 
+  // Keep doctor presence alive while in the room (auto-away after backend stale timeout).
+  useEffect(() => {
+    const numericRoomId = parseInt(roomId, 10);
+    if (Number.isNaN(numericRoomId)) return;
+    if (presenceStatus === 'away') return;
+
+    const sendHeartbeat = () => {
+      void roomService.heartbeat(numericRoomId).then((updated) => {
+        setPresenceStatus((updated.presence_status || 'away') as RoomPresenceStatus);
+        setAcceptingPatients(updated.accepting_patients === true);
+      }).catch((err) => {
+        console.error('Room heartbeat failed:', err);
+      });
+    };
+
+    sendHeartbeat();
+    const intervalId = window.setInterval(sendHeartbeat, ROOM_PRESENCE_HEARTBEAT_MS);
+    return () => window.clearInterval(intervalId);
+  }, [roomId, presenceStatus]);
 
   // Auto-refresh queue while waiting (no active consultation patient)
   useEffect(() => {
@@ -1130,10 +1207,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           isStartingSession={isStartingSession}
           isResumingPausedSession={isResumingPausedSession}
           isMarkingLeft={isMarkingLeft}
+          presenceStatus={presenceStatus}
+          acceptingPatients={acceptingPatients}
+          isUpdatingPresence={isUpdatingPresence}
           findPausedSessionsForPatient={findPausedSessionsForPatient}
           onOpenQueueDialog={openRoomPatientsDialog}
           onQueuePatientAction={handleQueuePatientAction}
           onMarkPatientLeft={handleMarkQueuePatientLeft}
+          onToggleAccepting={handleToggleAccepting}
+          onExitRoom={handleExitRoom}
         />
         {roomQueueDialog}
       </DashboardLayout>

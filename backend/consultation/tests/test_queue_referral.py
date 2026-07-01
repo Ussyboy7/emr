@@ -3,7 +3,7 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 
 from common.tests.support import create_test_user, create_test_patient_visit
-from consultation.models import ConsultationRoom
+from consultation.models import ConsultationRoom, ConsultationRoomOccupancy
 
 
 class ConsultationQueueTest(APITestCase):
@@ -19,6 +19,12 @@ class ConsultationQueueTest(APITestCase):
         self.client.force_authenticate(user=self.doctor)
 
     def test_add_patient_to_queue(self):
+        ConsultationRoomOccupancy.objects.create(
+            room=self.room,
+            doctor=self.doctor,
+            status=ConsultationRoomOccupancy.STATUS_ON_SEAT,
+            is_active=True,
+        )
         resp = self.client.post("/api/v1/consultation/queue/", {
             "room": self.room.pk,
             "patient": self.patient.pk,

@@ -19,6 +19,7 @@ CAPABILITY_CATALOG: tuple[tuple[str, str, str, str], ...] = (
     ("ward_order_create", "Create ward doctor orders", "Consultation", "Add nursing orders on Ward Rounds"),
     ("ward_order_edit", "Edit/cancel ward doctor orders", "Consultation", "Edit or cancel pending ward orders"),
     ("ward_order_perform", "Perform ward nursing tasks", "Nursing", "Administer injections, dressings, and ward instructions"),
+    ("consultation_queue_override", "Override consultation room presence", "Nursing", "Send or reassign patients when doctor is not on seat (requires reason)"),
 )
 
 ALL_CAPABILITY_IDS: frozenset[str] = frozenset(c[0] for c in CAPABILITY_CATALOG)

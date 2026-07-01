@@ -1,4 +1,5 @@
 import { apiFetch, buildQueryString } from '../api-client';
+import type { RoomPresenceStatus } from '../consultation/room-presence';
 
 export interface Room {
   id: number;
@@ -16,6 +17,17 @@ export interface Room {
   clinic_name?: string;
   created_at: string;
   updated_at: string;
+  current_doctor_id?: number | null;
+  current_doctor_name?: string | null;
+  presence_status?: RoomPresenceStatus;
+  accepting_patients?: boolean;
+  queue_count?: number;
+  active_session?: {
+    id: number;
+    session_id: string;
+    patient_name: string;
+    doctor_name?: string | null;
+  } | null;
 }
 
 export interface RoomFilters {
@@ -95,6 +107,31 @@ class RoomService {
   async deleteRoom(id: number): Promise<void> {
     return apiFetch<void>(`${this.basePath}/${id}/`, {
       method: 'DELETE',
+    });
+  }
+
+  async checkIn(id: number): Promise<Room> {
+    return apiFetch<Room>(`${this.basePath}/${id}/check-in/`, {
+      method: 'POST',
+    });
+  }
+
+  async checkOut(id: number): Promise<Room> {
+    return apiFetch<Room>(`${this.basePath}/${id}/check-out/`, {
+      method: 'POST',
+    });
+  }
+
+  async setAccepting(id: number, accepting: boolean): Promise<Room> {
+    return apiFetch<Room>(`${this.basePath}/${id}/set-accepting/`, {
+      method: 'POST',
+      body: JSON.stringify({ accepting }),
+    });
+  }
+
+  async heartbeat(id: number): Promise<Room> {
+    return apiFetch<Room>(`${this.basePath}/${id}/heartbeat/`, {
+      method: 'POST',
     });
   }
 }

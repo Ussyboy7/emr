@@ -46,6 +46,11 @@ import {
 import { apiFetch } from '@/lib/api-client';
 import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
+import {
+  presenceStatusBadgeClass,
+  presenceStatusLabel,
+  type RoomPresenceStatus,
+} from '@/lib/consultation/room-presence';
 
 // Types
 interface Patient {
@@ -88,6 +93,8 @@ interface ConsultationRoom {
     startedAt: string;
   };
   doctor?: string;
+  presenceStatus?: RoomPresenceStatus;
+  acceptingPatients?: boolean;
   specialtyFocus?: string;
   totalConsultationsToday: number;
   averageConsultationTime: number;
@@ -342,7 +349,9 @@ const StartConsultation = () => {
                   startedAt: openSessionRow.started_at,
                 }
               : undefined,
-            doctor: room.assigned_doctor || undefined,
+            doctor: room.current_doctor_name || undefined,
+            presenceStatus: (room.presence_status || 'away') as RoomPresenceStatus,
+            acceptingPatients: room.accepting_patients === true,
             specialtyFocus: room.specialty || undefined,
             totalConsultationsToday: todayForRoom?.completed ?? 0,
             averageConsultationTime: todayForRoom?.avgMinutes ?? 0,
@@ -623,7 +632,7 @@ const StartConsultation = () => {
         return;
       }
 
-      // Start consultation directly by navigating to room
+      await roomService.checkIn(parseInt(roomId, 10));
       toast.success("Entering consultation room...");
       router.push(`/consultation/room/${roomId}`);
 
@@ -634,10 +643,19 @@ const StartConsultation = () => {
     }
   };
 
-  const confirmStartConsultation = () => {
+  const confirmStartConsultation = async () => {
     setShowConfirmDialog(false);
-    toast.success("Entering consultation room...");
-    router.push(`/consultation/room/${selectedRoom}`);
+    if (!selectedRoom) return;
+    try {
+      setIsLoading(true);
+      await roomService.checkIn(parseInt(selectedRoom, 10));
+      toast.success("Entering consultation room...");
+      router.push(`/consultation/room/${selectedRoom}`);
+    } catch (error) {
+      console.error("Error checking into room:", error);
+      toast.error("Failed to enter consultation room");
+      setIsLoading(false);
+    }
   };
 
   const handleRoomSelect = (roomId: string, cardStatus: RoomCardStatus) => {
@@ -647,6 +665,7 @@ const StartConsultation = () => {
   };
 
   const selectedRoomData = consultationRooms.find((room) => room.id === selectedRoom);
+  const acceptingRooms = consultationRooms.filter((r) => r.acceptingPatients);
   const operationalRooms = consultationRooms.filter((r) => r.cardStatus !== "unavailable");
   const freeRooms = consultationRooms.filter((r) => r.cardStatus === "free");
   const inUseRooms = consultationRooms.filter(
@@ -751,7 +770,7 @@ const StartConsultation = () => {
                     {operationalRooms.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {freeRooms.length} free for new consult
+                    {acceptingRooms.length} accepting patients
                     {inUseRooms.length > 0 && (
                       <span className="block text-[11px] opacity-90">
                         {inUseRooms.length} in use or paused
@@ -939,17 +958,27 @@ const StartConsultation = () => {
               </CardHeader>
               <CardContent className="pt-0 flex-1 flex flex-col">
                 <div className="flex-1 flex flex-col space-y-3">
-                  {/* Doctor Info */}
-                  <div className="flex items-center gap-2">
+                  {/* Doctor / presence */}
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className={`w-2 h-2 rounded-full ${
-                      room.doctor ? "bg-green-500" : "bg-amber-500"
+                      room.presenceStatus === "on_seat"
+                        ? "bg-green-500"
+                        : room.presenceStatus === "not_accepting"
+                          ? "bg-amber-500"
+                          : "bg-gray-400"
                     }`} />
                     <div className="text-sm font-medium">
                       {room.doctor ? (
                         <span className="text-green-700 dark:text-green-400">{room.doctor}</span>
                       ) : (
-                        <span className="text-amber-700 dark:text-amber-400">Available for Assignment</span>
+                        <span className="text-gray-600 dark:text-gray-400">No doctor in room</span>
                       )}
+                      <Badge
+                        variant="outline"
+                        className={`ml-2 text-[10px] px-1.5 py-0 ${presenceStatusBadgeClass(room.presenceStatus)}`}
+                      >
+                        {presenceStatusLabel(room.presenceStatus)}
+                      </Badge>
                       {room.specialtyFocus && (
                         <span className="text-xs text-muted-foreground ml-2">
                           ({room.specialtyFocus})

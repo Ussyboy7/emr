@@ -64,6 +64,60 @@ class ConsultationRoom(models.Model):
         return f"{self.room_number} - {self.name}"
 
 
+class ConsultationRoomOccupancy(models.Model):
+    """
+    Tracks which doctor is in a consultation room and whether they accept new patients.
+    """
+
+    STATUS_ON_SEAT = 'on_seat'
+    STATUS_NOT_ACCEPTING = 'not_accepting'
+    STATUS_AWAY = 'away'
+
+    STATUS_CHOICES = [
+        (STATUS_ON_SEAT, 'On Seat'),
+        (STATUS_NOT_ACCEPTING, 'Not Accepting'),
+        (STATUS_AWAY, 'Away'),
+    ]
+
+    room = models.ForeignKey(
+        ConsultationRoom,
+        on_delete=models.CASCADE,
+        related_name='occupancies',
+    )
+    doctor = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.CASCADE,
+        related_name='room_occupancies',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ON_SEAT,
+        db_index=True,
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    checked_in_at = models.DateTimeField(auto_now_add=True)
+    checked_out_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'consultation_room_occupancies'
+        ordering = ['-checked_in_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['room'],
+                condition=models.Q(is_active=True),
+                name='uniq_active_room_occupancy',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['doctor', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.doctor} in {self.room} ({self.status})"
+
+
 class ConsultationSession(models.Model):
     """
     Active consultation session.

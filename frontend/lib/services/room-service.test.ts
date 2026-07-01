@@ -99,4 +99,36 @@ describe('roomService', () => {
       expect(url).toContain('/consultation/rooms/list-stats/');
     });
   });
+
+  describe('presence', () => {
+    it('checkIn posts to check-in endpoint', async () => {
+      mockApiFetch.mockResolvedValue({ id: 1, accepting_patients: true });
+
+      const res = await roomService.checkIn(1);
+
+      expect(mockApiFetch).toHaveBeenCalledWith('/consultation/rooms/1/check-in/', {
+        method: 'POST',
+      });
+      expect(res.accepting_patients).toBe(true);
+    });
+
+    it('setAccepting posts accepting flag', async () => {
+      mockApiFetch.mockResolvedValue({ id: 1, accepting_patients: false });
+
+      await roomService.setAccepting(1, false);
+
+      expect(mockApiFetch).toHaveBeenCalledWith('/consultation/rooms/1/set-accepting/', {
+        method: 'POST',
+        body: JSON.stringify({ accepting: false }),
+      });
+    });
+
+    it('heartbeat posts to heartbeat endpoint', async () => {
+      mockApiFetch.mockResolvedValueOnce({ id: 1, presence_status: 'on_seat' });
+      await roomService.heartbeat(1);
+      expect(mockApiFetch).toHaveBeenCalledWith('/consultation/rooms/1/heartbeat/', {
+        method: 'POST',
+      });
+    });
+  });
 });

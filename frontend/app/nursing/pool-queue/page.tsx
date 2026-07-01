@@ -46,6 +46,16 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
+import {
+  canNursingSendToRoom,
+  presenceStatusBadgeClass,
+  presenceStatusLabel,
+} from '@/lib/consultation/room-presence';
+import {
+  buildPresenceOverridePayload,
+  userCanOverrideRoomPresence,
+  type PresenceOverridePayload,
+} from '@/lib/consultation/queue-override-permissions';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 
@@ -112,11 +122,13 @@ interface VitalsData {
 interface ConsultationRoom {
   id: string;
   name: string;
-  status: 'available' | 'occupied';
+  status: 'available' | 'occupied' | 'unavailable';
   doctor?: string;
   specialty?: string;
   queueCount: number;
   currentPatient?: string;
+  presenceStatus?: 'on_seat' | 'not_accepting' | 'away';
+  acceptingPatients?: boolean;
 }
 
 // Patient and room data will be loaded from API
@@ -184,7 +196,14 @@ export default function NursingPoolQueuePage() {
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { ready, handleAuthError } = useNursingPageAuth();
+  const { ready, handleAuthError, currentUser } = useNursingPageAuth();
+  const canOverridePresence = useMemo(
+    () => userCanOverrideRoomPresence(currentUser),
+    [currentUser],
+  );
+  const [presenceOverrideRoomId, setPresenceOverrideRoomId] = useState<string | null>(null);
+  const [presenceOverrideReason, setPresenceOverrideReason] = useState('');
+  const [isPresenceOverrideDialogOpen, setIsPresenceOverrideDialogOpen] = useState(false);
   const [sendingToPhysioVisitId, setSendingToPhysioVisitId] = useState<number | null>(null);
   const [markingLeftVisitId, setMarkingLeftVisitId] = useState<number | null>(null);
   const [markLeftPatient, setMarkLeftPatient] = useState<NursingPatient | null>(null);
@@ -633,7 +652,6 @@ export default function NursingPoolQueuePage() {
       setRoomsLoading(false);
       return;
     }
-    if (rooms.length > 0) return;
     let cancelled = false;
     const loadRooms = async () => {
       setRoomsLoading(true);
@@ -642,15 +660,21 @@ export default function NursingPoolQueuePage() {
           roomService.getRooms({ page, page_size })
         );
         if (cancelled) return;
-        const transformedRooms: ConsultationRoom[] = allRooms.map((room: any) => ({
-          id: String(room.id),
-          name: room.name,
-          status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
-          doctor: room.assigned_doctor || undefined,
-          specialty: room.specialty || '',
-          queueCount: 0,
-          currentPatient: undefined,
-        }));
+        const transformedRooms: ConsultationRoom[] = allRooms.map((room: any) => {
+          const facilityActive = room.status?.toLowerCase() === 'active' && room.is_active !== false;
+          const canSend = canNursingSendToRoom(room);
+          return {
+            id: String(room.id),
+            name: room.name,
+            status: canSend ? 'available' as const : facilityActive ? 'occupied' as const : 'unavailable' as const,
+            doctor: room.current_doctor_name || undefined,
+            specialty: room.specialty || '',
+            queueCount: room.queue_count ?? 0,
+            currentPatient: room.active_session?.patient_name || undefined,
+            presenceStatus: room.presence_status || 'away',
+            acceptingPatients: room.accepting_patients === true,
+          };
+        });
         setRooms(transformedRooms);
       } catch (err) {
         console.error('Error loading rooms:', err);
@@ -665,7 +689,7 @@ export default function NursingPoolQueuePage() {
     return () => {
       cancelled = true;
     };
-  }, [isRoomPickerOpen, rooms.length, handleAuthError]);
+  }, [isRoomPickerOpen, handleAuthError]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -910,7 +934,10 @@ export default function NursingPoolQueuePage() {
     }
   };
 
-  const handleSendToRoom = async (roomId: string) => {
+  const handleSendToRoom = async (
+    roomId: string,
+    presenceOverride?: PresenceOverridePayload,
+  ) => {
     if (!selectedPatient) return;
     
     // Prevent double submission
@@ -953,6 +980,7 @@ export default function NursingPoolQueuePage() {
           room: parseInt(roomId), // Required: Room ID (numeric)
           priority: priority, // Required: Integer (0 = highest priority)
           is_active: true,
+          ...(presenceOverride ?? {}),
         };
         
         debugLog('Sending patient to queue for room:', room?.id || roomId);
@@ -1030,6 +1058,34 @@ export default function NursingPoolQueuePage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleRoomPickerSelect = (room: ConsultationRoom) => {
+    if (isSubmitting) return;
+    if (room.status === 'available') {
+      void handleSendToRoom(room.id);
+      return;
+    }
+    if (room.status === 'unavailable') return;
+    if (canOverridePresence) {
+      setPresenceOverrideRoomId(room.id);
+      setPresenceOverrideReason('');
+      setIsPresenceOverrideDialogOpen(true);
+    }
+  };
+
+  const confirmPresenceOverrideSend = async () => {
+    if (!presenceOverrideRoomId || !presenceOverrideReason.trim()) {
+      toast.error('Override reason is required');
+      return;
+    }
+    setIsPresenceOverrideDialogOpen(false);
+    await handleSendToRoom(
+      presenceOverrideRoomId,
+      buildPresenceOverridePayload(presenceOverrideReason),
+    );
+    setPresenceOverrideRoomId(null);
+    setPresenceOverrideReason('');
   };
 
   const getStatusColor = (status: string) => {
@@ -1786,15 +1842,22 @@ export default function NursingPoolQueuePage() {
                   <p className="text-sm mt-2">Please create rooms in the admin section</p>
                 </div>
               ) : (
-                rooms.map((room) => (
+                rooms.map((room) => {
+                  const canSend = room.status === 'available';
+                  const canOverrideRoom =
+                    canOverridePresence && room.status !== 'unavailable' && !canSend;
+                  const canClick = canSend || canOverrideRoom;
+                  return (
                   <div 
                     key={room.id} 
                     className={`p-4 rounded-lg border-2 transition-all ${
-                      room.status === 'available' 
+                      canSend
                         ? 'border-emerald-500/50 bg-emerald-500/5 hover:bg-emerald-500/10 cursor-pointer' 
+                        : canOverrideRoom
+                          ? 'border-amber-500/50 bg-amber-500/5 hover:bg-amber-500/10 cursor-pointer'
                         : 'border-muted bg-muted/30 opacity-60 cursor-not-allowed'
                     }`}
-                    onClick={() => room.status === 'available' && !isSubmitting && handleSendToRoom(room.id)}
+                    onClick={() => canClick && handleRoomPickerSelect(room)}
                   >
                     <div className="flex items-center justify-between">
                       <div>
@@ -1803,15 +1866,22 @@ export default function NursingPoolQueuePage() {
                           const sub = joinDisplayParts([room.doctor, room.specialty]);
                           return sub ? (
                             <p className="text-sm text-muted-foreground">{sub}</p>
-                          ) : null;
+                          ) : (
+                            <p className="text-sm text-muted-foreground">No doctor in room</p>
+                          );
                         })()}
                       </div>
-                      <div className="text-right">
-                        <Badge variant="outline" className={room.status === 'available' ? 'border-emerald-500 text-emerald-600' : 'border-rose-500 text-rose-600'}>
-                          {room.status === 'available' ? 'Available' : 'Occupied'}
+                      <div className="text-right space-y-1">
+                        <Badge variant="outline" className={presenceStatusBadgeClass(room.presenceStatus)}>
+                          {presenceStatusLabel(room.presenceStatus)}
                         </Badge>
+                        {!canSend && (
+                          <p className="text-xs text-muted-foreground">
+                            {canOverrideRoom ? 'Supervisor override available' : 'Cannot send here'}
+                          </p>
+                        )}
                         {room.queueCount > 0 && (
-                          <p className="text-xs text-muted-foreground mt-1">{room.queueCount} in queue</p>
+                          <p className="text-xs text-muted-foreground">{room.queueCount} in queue</p>
                         )}
                       </div>
                     </div>
@@ -1819,11 +1889,43 @@ export default function NursingPoolQueuePage() {
                       <p className="text-xs text-muted-foreground mt-2">Current: {room.currentPatient}</p>
                     )}
                   </div>
-                ))
+                );
+                })
               )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsRoomPickerOpen(false)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isPresenceOverrideDialogOpen} onOpenChange={setIsPresenceOverrideDialogOpen}>
+          <DialogContent className={MODAL_SIZES.sm2}>
+            <DialogHeader>
+              <DialogTitle>Override room presence</DialogTitle>
+              <DialogDescription>
+                The doctor in this room is not on seat or not accepting patients. Provide a reason to send anyway.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-2">
+              <Label htmlFor="presence-override-reason">Reason *</Label>
+              <Textarea
+                id="presence-override-reason"
+                value={presenceOverrideReason}
+                onChange={(e) => setPresenceOverrideReason(e.target.value)}
+                placeholder="e.g. Doctor requested urgent patient, covering colleague…"
+                rows={3}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsPresenceOverrideDialogOpen(false)}>Cancel</Button>
+              <Button
+                onClick={() => void confirmPresenceOverrideSend()}
+                disabled={isSubmitting || !presenceOverrideReason.trim()}
+                className="bg-amber-600 hover:bg-amber-700"
+              >
+                Send with override
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

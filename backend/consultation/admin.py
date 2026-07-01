@@ -4,6 +4,7 @@ Admin configuration for the Consultation app.
 from django.contrib import admin
 from .models import (
     ConsultationRoom,
+    ConsultationRoomOccupancy,
     ConsultationSession,
     ConsultationQueue,
     Referral,
@@ -37,6 +38,13 @@ class ConsultationRoomAdmin(admin.ModelAdmin):
     list_display = ['room_number', 'name', 'specialty', 'status', 'is_active', 'created_at']
     list_filter = ['status', 'specialty', 'is_active']
     search_fields = ['name', 'room_number', 'location']
+
+
+@admin.register(ConsultationRoomOccupancy)
+class ConsultationRoomOccupancyAdmin(admin.ModelAdmin):
+    list_display = ['room', 'doctor', 'status', 'is_active', 'checked_in_at', 'last_seen_at']
+    list_filter = ['status', 'is_active']
+    search_fields = ['room__name', 'doctor__first_name', 'doctor__last_name']
 
 
 @admin.register(ConsultationSession)

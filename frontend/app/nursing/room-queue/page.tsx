@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,6 +32,17 @@ import {
   ArrowRight, Stethoscope, Activity, Loader2, Eye,
   ArrowLeftRight, User, Calendar, Heart, Thermometer, X
 } from 'lucide-react';
+import {
+  canNursingSendToRoom,
+  presenceStatusBadgeClass,
+  presenceStatusLabel,
+  ROOM_QUEUE_POLL_MS,
+  type RoomPresenceStatus,
+} from '@/lib/consultation/room-presence';
+import {
+  buildPresenceOverridePayload,
+  userCanOverrideRoomPresence,
+} from '@/lib/consultation/queue-override-permissions';
 
 // Types
 interface QueuedPatient {
@@ -56,9 +68,11 @@ interface QueuedPatient {
 interface ConsultationRoom {
   id: string;
   name: string;
-  status: 'available' | 'occupied' | 'paused';
+  status: 'available' | 'occupied' | 'paused' | 'unavailable';
   doctor?: string;
   specialty?: string;
+  presenceStatus?: RoomPresenceStatus;
+  acceptingPatients?: boolean;
   currentPatient?: QueuedPatient;
   consultationsToday: number;
 }
@@ -70,16 +84,30 @@ export default function RoomQueuePage() {
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { ready, handleAuthError } = useNursingPageAuth();
+  const { ready, handleAuthError, currentUser } = useNursingPageAuth();
+  const canOverridePresence = useMemo(
+    () => userCanOverrideRoomPresence(currentUser),
+    [currentUser],
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [roomFilter, setRoomFilter] = useState('all');
   const [visitTypeFilter, setVisitTypeFilter] = useState('all');
+  const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
+  const [isPatientDetailsOpen, setIsPatientDetailsOpen] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState<QueuedPatient | null>(null);
+  const [selectedNewRoom, setSelectedNewRoom] = useState<string>('');
+  const [reassignOverrideReason, setReassignOverrideReason] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMarkingLeft, setIsMarkingLeft] = useState(false);
   
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
 
       const [roomsResult, activeSessions, today, queueItems, todayCountByRoom] = await Promise.all([
         fetchAllPaginatedResults((page, page_size) =>
@@ -113,14 +141,24 @@ export default function RoomQueuePage() {
         const transformedRooms: ConsultationRoom[] = roomsResult.map((room: any) => {
           const roomId = String(room.id);
           const activeSession = sessionsByRoom[roomId]?.[0];
-          const isOccupied = !!activeSession;
+          const isInConsult = !!activeSession;
+          const canSend = canNursingSendToRoom(room);
+          const facilityActive = room.status?.toLowerCase() === 'active' && room.is_active !== false;
           
           return {
             id: roomId,
             name: room.name,
-            status: isOccupied ? 'occupied' as const : (room.status?.toLowerCase() === 'active' ? 'available' as const : 'paused' as const),
-            doctor: activeSession?.doctor_name || room.assigned_doctor || undefined,
+            status: canSend
+              ? 'available' as const
+              : isInConsult
+                ? 'occupied' as const
+                : facilityActive
+                  ? 'paused' as const
+                  : 'unavailable' as const,
+            doctor: activeSession?.doctor_name || room.current_doctor_name || undefined,
             specialty: room.specialty || '',
+            presenceStatus: (room.presence_status || 'away') as RoomPresenceStatus,
+            acceptingPatients: room.accepting_patients === true,
             currentPatient: activeSession ? {
               id: String(activeSession.patient),
               name: activeSession.patient_name || '',
@@ -193,9 +231,13 @@ export default function RoomQueuePage() {
     } catch (err) {
       console.error('Error loading room queue data:', err);
       if (handleAuthError(err)) return;
-      setError('Failed to load room queue data. Please try again.');
+      if (!silent) {
+        setError('Failed to load room queue data. Please try again.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [handleAuthError]);
 
@@ -203,14 +245,17 @@ export default function RoomQueuePage() {
     if (!ready) return;
     void loadData();
   }, [ready, loadData]);
-  
-  // Dialog states
-  const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
-  const [isPatientDetailsOpen, setIsPatientDetailsOpen] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<QueuedPatient | null>(null);
-  const [selectedNewRoom, setSelectedNewRoom] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isMarkingLeft, setIsMarkingLeft] = useState(false);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (isReassignDialogOpen || isPatientDetailsOpen) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadData({ silent: true });
+    }, ROOM_QUEUE_POLL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [ready, loadData, isReassignDialogOpen, isPatientDetailsOpen]);
 
   // Filter patients
   const filteredPatients = useMemo(() => {
@@ -257,6 +302,7 @@ export default function RoomQueuePage() {
   const openReassignDialog = (patient: QueuedPatient) => {
     setSelectedPatient(patient);
     setSelectedNewRoom('');
+    setReassignOverrideReason('');
     setIsReassignDialogOpen(true);
   };
 
@@ -267,6 +313,14 @@ export default function RoomQueuePage() {
 
   const handleReassign = async () => {
     if (!selectedPatient || !selectedNewRoom) return;
+    const targetRoom = rooms.find((r) => r.id === selectedNewRoom);
+    const needsOverride = targetRoom?.status !== 'available';
+    if (needsOverride && !canOverridePresence) return;
+    if (needsOverride && !reassignOverrideReason.trim()) {
+      toast.error('Override reason is required for this room');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -284,10 +338,14 @@ export default function RoomQueuePage() {
         return;
       }
 
-      // Update queue item to assign to new room
+      const patchBody: Record<string, unknown> = { room: newRoomId };
+      if (needsOverride) {
+        Object.assign(patchBody, buildPresenceOverridePayload(reassignOverrideReason));
+      }
+
       await apiFetch(`/consultation/queue/${queueItemId}/`, {
         method: 'PATCH',
-        body: JSON.stringify({ room: newRoomId }),
+        body: JSON.stringify(patchBody),
       });
 
       const oldRoom = rooms.find(r => r.id === selectedPatient.roomId);
@@ -368,9 +426,22 @@ export default function RoomQueuePage() {
     switch (status) {
       case 'available': return 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
       case 'occupied': return 'text-amber-600 dark:text-amber-400 bg-amber-500/10';
-      case 'paused': return 'text-gray-600 dark:text-gray-400 bg-gray-500/10';
+      case 'paused': return 'text-amber-600 dark:text-amber-400 bg-amber-500/10';
+      case 'unavailable': return 'text-gray-600 dark:text-gray-400 bg-gray-500/10';
       default: return 'text-gray-600 bg-gray-500/10';
     }
+  };
+
+  const getStatusLabel = (room: ConsultationRoom) => {
+    if (room.status === 'available') return 'Accepting';
+    if (room.presenceStatus === 'not_accepting') return 'Not accepting';
+    if (room.presenceStatus === 'away') return 'No doctor';
+    return room.status;
+  };
+
+  const isPatientStuck = (patient: QueuedPatient) => {
+    const room = rooms.find((r) => r.id === patient.roomId);
+    return room ? !room.acceptingPatients : false;
   };
 
   if (loading) {
@@ -494,13 +565,16 @@ export default function RoomQueuePage() {
                         <DoorOpen className="h-4 w-4" />
                         {room.name}
                       </CardTitle>
-                      <CardDescription className="flex items-center gap-2 mt-1">
+                      <CardDescription className="flex items-center gap-2 mt-1 flex-wrap">
                         <Stethoscope className="h-3 w-3" />
-                        {room.doctor || 'No doctor assigned'}
+                        {room.doctor || 'No doctor in room'}
+                        <Badge variant="outline" className={`text-[10px] ${presenceStatusBadgeClass(room.presenceStatus)}`}>
+                          {presenceStatusLabel(room.presenceStatus)}
+                        </Badge>
                       </CardDescription>
                     </div>
                     <Badge variant="outline" className={getStatusColor(room.status)}>
-                      {room.status}
+                      {getStatusLabel(room)}
                     </Badge>
                   </div>
                   {room.currentPatient && (
@@ -529,7 +603,11 @@ export default function RoomQueuePage() {
                         <div 
                           key={patient.id} 
                           className={`p-3 rounded-lg border transition-colors hover:bg-muted/50 ${
-                            isEmergencyVisitType(patient.visitType) ? 'border-rose-500/50 bg-rose-500/5' : 'border-border'
+                            isPatientStuck(patient)
+                              ? 'border-amber-500/50 bg-amber-500/5'
+                              : isEmergencyVisitType(patient.visitType)
+                                ? 'border-rose-500/50 bg-rose-500/5'
+                                : 'border-border'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -539,6 +617,11 @@ export default function RoomQueuePage() {
                                 <Badge variant="outline" className={`text-xs ${getVisitTypeBadgeClass(patient.visitType)}`}>
                                   {getVisitTypeLabel(patient.visitType)}
                                 </Badge>
+                                {isPatientStuck(patient) && (
+                                  <Badge variant="outline" className="text-xs bg-amber-100 text-amber-800 border-amber-300">
+                                    Doctor not accepting
+                                  </Badge>
+                                )}
                               </div>
                               <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
                                 <p>{patient.patientId} • {patient.clinic}</p>
@@ -601,35 +684,82 @@ export default function RoomQueuePage() {
                 <Select value={selectedNewRoom} onValueChange={setSelectedNewRoom}>
                   <SelectTrigger><SelectValue placeholder="Choose a room..." /></SelectTrigger>
                   <SelectContent>
-                    {rooms.filter(r => r.id !== selectedPatient?.roomId).map(room => (
-                      <SelectItem key={room.id} value={room.id}>
+                    {rooms.filter(r => r.id !== selectedPatient?.roomId).map(room => {
+                      const canReassign = room.status === 'available';
+                      const canOverrideRoom =
+                        canOverridePresence && room.status !== 'unavailable' && !canReassign;
+                      return (
+                      <SelectItem
+                        key={room.id}
+                        value={room.id}
+                        disabled={!canReassign && !canOverrideRoom}
+                      >
                         <div className="flex items-center justify-between w-full gap-4">
                           <span>{room.name}</span>
-                          <Badge variant="outline" className={`text-xs ${getStatusColor(room.status)}`}>
-                            {room.status}
+                          <Badge variant="outline" className={`text-xs ${canReassign ? getStatusColor('available') : presenceStatusBadgeClass(room.presenceStatus)}`}>
+                            {canReassign ? 'Accepting' : presenceStatusLabel(room.presenceStatus)}
                           </Badge>
                         </div>
                       </SelectItem>
-                    ))}
+                    );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
 
               {/* New Room Info */}
-              {selectedNewRoom && (
-                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                  <p className="text-sm text-emerald-600 dark:text-emerald-400">New Room</p>
-                  <p className="font-medium">{rooms.find(r => r.id === selectedNewRoom)?.name}</p>
-                  <p className="text-sm text-muted-foreground">{rooms.find(r => r.id === selectedNewRoom)?.doctor}</p>
+              {selectedNewRoom && (() => {
+                const targetRoom = rooms.find(r => r.id === selectedNewRoom);
+                const canReassign = targetRoom?.status === 'available';
+                const needsOverride = Boolean(targetRoom && !canReassign && canOverridePresence);
+                return (
+                <div className={`p-3 rounded-lg border ${canReassign ? 'bg-emerald-500/10 border-emerald-500/20' : needsOverride ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-500/10 border-amber-500/20'}`}>
+                  <p className={`text-sm ${canReassign ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>New Room</p>
+                  <p className="font-medium">{targetRoom?.name}</p>
+                  <p className="text-sm text-muted-foreground">{targetRoom?.doctor || 'No doctor'}</p>
+                  {!canReassign && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                      {needsOverride
+                        ? 'Supervisor override required — provide a reason below'
+                        : 'This room is not accepting patients'}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground mt-1">
                     {patientsByRoom[selectedNewRoom]?.length || 0} patients currently waiting
                   </p>
+                  {needsOverride && (
+                    <div className="mt-3 space-y-2">
+                      <Label htmlFor="reassign-override-reason">Override reason *</Label>
+                      <Textarea
+                        id="reassign-override-reason"
+                        value={reassignOverrideReason}
+                        onChange={(e) => setReassignOverrideReason(e.target.value)}
+                        placeholder="Why is this patient being sent to a room that is not accepting?"
+                        rows={2}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
+              );
+              })()}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsReassignDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleReassign} disabled={isSubmitting || !selectedNewRoom} className="bg-blue-500 hover:bg-blue-600 text-white">
+              <Button
+                onClick={handleReassign}
+                disabled={
+                  isSubmitting ||
+                  !selectedNewRoom ||
+                  (() => {
+                    const target = rooms.find((r) => r.id === selectedNewRoom);
+                    if (!target) return true;
+                    if (target.status === 'available') return false;
+                    if (!canOverridePresence) return true;
+                    return !reassignOverrideReason.trim();
+                  })()
+                }
+                className="bg-blue-500 hover:bg-blue-600 text-white"
+              >
                 {isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Reassigning...</> : <><ArrowLeftRight className="h-4 w-4 mr-2" />Reassign Patient</>}
               </Button>
             </DialogFooter>

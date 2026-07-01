@@ -20,6 +20,7 @@ export const ALL_CAPABILITIES: Capability[] = [
   { id: "ward_order_create", name: "Create ward doctor orders", module: "Consultation", description: "Add nursing orders on Ward Rounds" },
   { id: "ward_order_edit", name: "Edit/cancel ward doctor orders", module: "Consultation", description: "Edit or cancel pending ward orders" },
   { id: "ward_order_perform", name: "Perform ward nursing tasks", module: "Nursing", description: "Administer injections, dressings, and ward instructions" },
+  { id: "consultation_queue_override", name: "Override consultation room presence", module: "Nursing", description: "Send or reassign when doctor is not on seat (requires reason)" },
 ];
 
 /** Capabilities stripped when duplicating or seeding support roles. */

@@ -7,6 +7,7 @@ from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from .models import (
     ConsultationRoom,
+    ConsultationRoomOccupancy,
     ConsultationSession,
     ConsultationQueue,
     consultation_queue_priority_for_visit,
@@ -20,6 +21,7 @@ from .models import (
 )
 from patients.serializers import PatientListSerializer, VitalReadingSerializer
 from patients.photo import patient_photo_url
+from .room_presence import get_active_occupancy
 
 
 class ConsultationRoomSerializer(serializers.ModelSerializer):
@@ -28,6 +30,10 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
     queue_count = serializers.SerializerMethodField()
     active_session = serializers.SerializerMethodField()
     clinic_name = serializers.CharField(source='clinic.name', read_only=True, allow_null=True)
+    current_doctor_id = serializers.SerializerMethodField()
+    current_doctor_name = serializers.SerializerMethodField()
+    presence_status = serializers.SerializerMethodField()
+    accepting_patients = serializers.SerializerMethodField()
     
     def _resolve_clinic_from_location(self, location_str):
         """Resolve clinic FK from location string when it matches a Clinic name."""
@@ -57,7 +63,46 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConsultationRoom
         fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at', 'queue_count', 'active_session', 'clinic_name']
+        read_only_fields = [
+            'created_at',
+            'updated_at',
+            'queue_count',
+            'active_session',
+            'clinic_name',
+            'current_doctor_id',
+            'current_doctor_name',
+            'presence_status',
+            'accepting_patients',
+        ]
+    
+    def _active_occupancy(self, obj):
+        return get_active_occupancy(obj)
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_current_doctor_id(self, obj):
+        occupancy = self._active_occupancy(obj)
+        return occupancy.doctor_id if occupancy else None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_current_doctor_name(self, obj):
+        occupancy = self._active_occupancy(obj)
+        if not occupancy:
+            return None
+        return occupancy.doctor.get_full_name()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_presence_status(self, obj):
+        occupancy = self._active_occupancy(obj)
+        if not occupancy:
+            return ConsultationRoomOccupancy.STATUS_AWAY
+        return occupancy.status
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_accepting_patients(self, obj):
+        occupancy = self._active_occupancy(obj)
+        return bool(
+            occupancy and occupancy.status == ConsultationRoomOccupancy.STATUS_ON_SEAT
+        )
     
     @extend_schema_field(OpenApiTypes.INT)
     def get_queue_count(self, obj):

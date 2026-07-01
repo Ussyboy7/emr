@@ -484,6 +484,19 @@ def check_api_page_access(
     for prefix, pages in MODULE_API_RULES:
         if api_path.startswith(prefix):
             if prefix == "consultation/":
+                if (
+                    "rooms/" in api_path
+                    and any(
+                        segment in api_path
+                        for segment in (
+                            "check-in",
+                            "check-out",
+                            "set-accepting",
+                            "heartbeat",
+                        )
+                    )
+                ):
+                    return _consultation_clinical_access(allowed_pages, denied)
                 return _consultation_clinical_access(allowed_pages, denied) or has_any( pages
                 )
             return has_any( pages)
