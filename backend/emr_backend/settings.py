@@ -34,7 +34,9 @@ else:
             final_fallback = BASE_DIR / ".env"
             if final_fallback.exists():
                 load_dotenv(final_fallback)
-    else:
+    elif not os.getenv("DJANGO_SECRET_KEY"):
+        # Docker Compose `env_file` injects variables without mounting the file
+        # at /app/env/ (see backend/.dockerignore). Accept injected runtime env.
         raise RuntimeError(
             f"Expected environment file not found: {env_file}. "
             "Refusing to use implicit .env fallbacks outside local."

@@ -85,6 +85,7 @@ services:
       - media_files_prod:/app/media
       - ./backups:/backups:ro
       - ./logs/production:/app/logs
+      - ./backend/env/prod.env:/app/env/prod.env:ro
     expose:
       - "8000"
     depends_on:
@@ -117,6 +118,7 @@ services:
     volumes:
       - media_files_prod:/app/media
       - ./logs/production:/app/logs
+      - ./backend/env/prod.env:/app/env/prod.env:ro
     depends_on:
       - backend
       - redis
@@ -138,6 +140,7 @@ services:
     command: python -m celery -A emr_backend beat -l info
     volumes:
       - ./logs/production:/app/logs
+      - ./backend/env/prod.env:/app/env/prod.env:ro
     depends_on:
       - backend
       - redis

@@ -89,6 +89,7 @@ services:
       - media_files_stag:/app/media
       - ./logs/staging:/app/logs
       - backups_stag:/backups
+      - ./backend/env/stag.env:/app/env/stag.env:ro
     ports:
       - "8047:8000"  # Matches frontend nginx port pattern (4647)
     depends_on:
@@ -122,6 +123,7 @@ services:
     volumes:
       - media_files_stag:/app/media
       - ./logs/staging:/app/logs
+      - ./backend/env/stag.env:/app/env/stag.env:ro
     depends_on:
       - backend
       - redis
@@ -143,6 +145,7 @@ services:
     command: python -m celery -A emr_backend beat -l info
     volumes:
       - ./logs/staging:/app/logs
+      - ./backend/env/stag.env:/app/env/stag.env:ro
     depends_on:
       - backend
       - redis

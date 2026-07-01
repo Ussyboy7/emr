@@ -713,8 +713,18 @@ _deploy_rollback() {
         stack_compose up -d "$STACK_POSTGRES_SERVICE"
         sleep 10
         if docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
-            docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" < "$latest" >/dev/null \
-                || ui_warning "psql restore reported errors (check logs)"
+            docker exec "$PG_CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" \
+                >/dev/null 2>&1 || true
+            docker exec "$PG_CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c \
+                "DROP DATABASE IF EXISTS \"${DB_NAME}\";" >/dev/null
+            docker exec "$PG_CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c \
+                "CREATE DATABASE \"${DB_NAME}\";" >/dev/null
+            if docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 < "$latest" >/dev/null; then
+                ui_success "Database restored from snapshot"
+            else
+                ui_warning "psql restore reported errors (check logs)"
+            fi
         fi
         stack_compose up -d
         ui_warning "Rolled back to snapshot — verify manually!"
