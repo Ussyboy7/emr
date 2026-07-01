@@ -21,6 +21,20 @@ from laboratory.pagination import FlexiblePageNumberPagination
 
 from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_PK_PARAMS, document_viewset
+logger = logging.getLogger(__name__)
+
+
+def _parse_location_clinic_id(request):
+    """Parse optional ``location_clinic`` query param (organization.Clinic PK)."""
+    raw = request.query_params.get('location_clinic')
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 from .models import (
     RadiologyTemplate,
     RadiologyOrder,
@@ -39,8 +53,6 @@ from .serializers import (
     RadiologyReferralDispatchSerializer,
 )
 from audit.services import AuditService
-
-logger = logging.getLogger(__name__)
 
 
 def _parse_custom_reports(value):
@@ -261,6 +273,9 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         gender = self.request.query_params.get('gender')
         if gender in ('male', 'female'):
             qs = qs.filter(patient__gender=gender)
+        location_clinic_id = _parse_location_clinic_id(self.request)
+        if location_clinic_id is not None:
+            qs = qs.filter(location_clinic_id=location_clinic_id)
         # Date filtering — defaults to the order timestamp, but callers can
         # ask for filtering on the study rejection timestamp instead
         # (e.g. the "Rejected" tab, which wants "today's rejections" regardless
@@ -314,6 +329,9 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         gender = request.query_params.get('gender')
         if gender in ('male', 'female'):
             base_qs = base_qs.filter(patient__gender=gender)
+        location_clinic_id = _parse_location_clinic_id(request)
+        if location_clinic_id is not None:
+            base_qs = base_qs.filter(location_clinic_id=location_clinic_id)
         base_qs = self.filter_queryset(base_qs)
 
         def with_date(qs, field):
@@ -1205,6 +1223,9 @@ class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         clinic = self.request.query_params.get('clinic')
         if clinic:
             queryset = queryset.filter(order__clinic=clinic)
+        location_clinic_id = _parse_location_clinic_id(self.request)
+        if location_clinic_id is not None:
+            queryset = queryset.filter(order__location_clinic_id=location_clinic_id)
         gender = self.request.query_params.get('gender')
         if gender in ('male', 'female'):
             queryset = queryset.filter(patient__gender=gender)

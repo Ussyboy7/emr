@@ -239,6 +239,8 @@ class RadiologyService {
      * order date (e.g. on the "Rejected" tab).
      */
     date_field?: 'ordered_at' | 'rejected_at';
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     page?: number;
     page_size?: number;
     consultation_session?: number;
@@ -384,6 +386,8 @@ class RadiologyService {
     overall_status?: string;
     priority?: string;
     clinic?: string;
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     gender?: string;
     processing_method?: 'in_house' | 'outsourced';
     category?: string;
@@ -408,6 +412,8 @@ class RadiologyService {
     overall_status?: string;
     priority?: string;
     clinic?: string;
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     gender?: string;
     processing_method?: 'in_house' | 'outsourced';
     category?: string;
@@ -558,6 +564,8 @@ class RadiologyService {
     date?: string;
     start_date?: string;
     end_date?: string;
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
   }): Promise<{
     total: number;
     pending: number;
@@ -575,6 +583,8 @@ class RadiologyService {
     overall_status?: string;
     priority?: string;
     clinic?: string;
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     gender?: string;
     processing_method?: 'in_house' | 'outsourced';
     category?: string;

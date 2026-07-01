@@ -15,7 +15,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { radiologyService } from '@/lib/services';
+import { radiologyService, adminService, type Clinic } from '@/lib/services';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { RADIOLOGY_VERIFICATION_POLL_INTERVAL } from '@/lib/constants/ui';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
@@ -54,6 +55,8 @@ export default function RadiologyVerificationPage() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [facilityFilter, setFacilityFilter] = useState('all');
+  const [facilities, setFacilities] = useState<Clinic[]>([]);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -120,7 +123,19 @@ export default function RadiologyVerificationPage() {
   useEffect(() => {
     setCurrentPage(1);
     setVerifiedCurrentPage(1);
-  }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
+  }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, facilityFilter, itemsPerPage]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void (async () => {
+      try {
+        const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
+        setFacilities(res.results || []);
+      } catch {
+        setFacilities([]);
+      }
+    })();
+  }, [ready]);
 
   const loadReports = useCallback(async () => {
     try {
@@ -132,6 +147,7 @@ export default function RadiologyVerificationPage() {
         page_size: itemsPerPage,
         search: searching ? searchQuery.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
+        location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
         ...(searching ? {} : buildDateQuery(dateFilter)),
       };
@@ -153,7 +169,7 @@ export default function RadiologyVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
+  }, [currentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
 
   const loadVerifiedReports = useCallback(async () => {
     try {
@@ -166,6 +182,7 @@ export default function RadiologyVerificationPage() {
         page_size: itemsPerPage,
         search: searching ? searchQuery.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
+        location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
         ...(searching ? {} : buildDateQuery(dateFilter)),
       };
@@ -187,7 +204,7 @@ export default function RadiologyVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
+  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
 
   const loadVerificationCounts = useCallback(async () => {
     try {
@@ -197,6 +214,7 @@ export default function RadiologyVerificationPage() {
         priority: priorityFilter !== 'all' ? priorityFilter.toLowerCase() : undefined,
         search: searching ? searchQuery.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
+        location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
         ...(searching ? {} : buildDateQuery(dateFilter)),
       };
@@ -216,7 +234,7 @@ export default function RadiologyVerificationPage() {
       if (handleAuthError(err)) return;
       toast.error('Failed to load verification counts');
     }
-  }, [priorityFilter, searchQuery, genderFilter, categoryFilter, dateFilter, serverToday, handleAuthError]);
+  }, [priorityFilter, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, serverToday, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;
@@ -494,6 +512,17 @@ export default function RadiologyVerificationPage() {
                       <SelectItem value="all">All Gender</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                       <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                    <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Facilities</SelectItem>
+                      {facilities.map((facility) => (
+                        <SelectItem key={facility.id} value={String(facility.id)}>
+                          {facility.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

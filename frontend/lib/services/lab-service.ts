@@ -274,6 +274,8 @@ class LabService {
     date_field?: 'ordered_at' | 'rejected_at';
     /** Orders with at least one test in this workflow stage (list tabs). */
     workflow_tab?: 'pending' | 'processing' | 'results_ready' | 'rejected';
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     page?: number;
     page_size?: number;
     consultation_session?: number;
@@ -293,6 +295,8 @@ class LabService {
     date?: string;
     start_date?: string;
     end_date?: string;
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
   }): Promise<{
     total: number;
     pending: number;
@@ -715,6 +719,8 @@ class LabService {
     search?: string;
     gender?: string;
     processing_method?: 'in_house' | 'outsourced';
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabResult[]; count: number }> {
@@ -766,6 +772,8 @@ class LabService {
     overall_status?: string;
     priority?: string;
     clinic?: string;
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     gender?: string;
     search?: string;
     processing_method?: 'in_house' | 'outsourced';
@@ -789,6 +797,8 @@ class LabService {
     overall_status?: string;
     priority?: string;
     clinic?: string;
+    /** Filter by requesting facility (organization.Clinic id). */
+    location_clinic?: number;
     gender?: string;
     search?: string;
     processing_method?: 'in_house' | 'outsourced';

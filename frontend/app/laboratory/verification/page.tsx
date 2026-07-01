@@ -15,7 +15,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { labService } from '@/lib/services';
+import { labService, adminService, type Clinic } from '@/lib/services';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
@@ -66,6 +67,8 @@ export default function ResultsVerificationPage() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [facilityFilter, setFacilityFilter] = useState('all');
+  const [facilities, setFacilities] = useState<Clinic[]>([]);
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   
   // Pagination state
@@ -112,12 +115,24 @@ export default function ResultsVerificationPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
+  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, facilityFilter, processingFilter, itemsPerPage]);
 
   // Reset verified page to 1 when filters change or items per page changes
   useEffect(() => {
     setVerifiedCurrentPage(1);
-  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
+  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, facilityFilter, processingFilter, itemsPerPage]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void (async () => {
+      try {
+        const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
+        setFacilities(res.results || []);
+      } catch {
+        setFacilities([]);
+      }
+    })();
+  }, [ready]);
 
   const loadResults = useCallback(async () => {
     try {
@@ -137,6 +152,7 @@ export default function ResultsVerificationPage() {
       const searching = Boolean(debouncedSearch);
       if (searching) params.search = debouncedSearch;
       if (genderFilter !== 'all') params.gender = genderFilter;
+      if (facilityFilter !== 'all') params.location_clinic = Number(facilityFilter);
       if (processingFilter !== 'all') params.processing_method = processingFilter;
       if (!searching) {
         Object.assign(params, buildDateQuery(dateFilter, serverToday));
@@ -156,7 +172,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, serverToday, handleAuthError]);
+  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, facilityFilter, processingFilter, dateFilter, serverToday, handleAuthError]);
 
   const loadVerifiedResults = useCallback(async () => {
     try {
@@ -177,6 +193,7 @@ export default function ResultsVerificationPage() {
       const searching = Boolean(debouncedSearch);
       if (searching) params.search = debouncedSearch;
       if (genderFilter !== 'all') params.gender = genderFilter;
+      if (facilityFilter !== 'all') params.location_clinic = Number(facilityFilter);
       if (processingFilter !== 'all') params.processing_method = processingFilter;
 
       if (!searching) {
@@ -197,7 +214,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter, handleAuthError]);
+  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, facilityFilter, processingFilter, handleAuthError]);
 
   const loadVerificationCounts = useCallback(async () => {
     const searching = Boolean(debouncedSearch);
@@ -206,6 +223,7 @@ export default function ResultsVerificationPage() {
       priority: priorityFilter !== 'all' ? transformToBackendPriority(priorityFilter) : undefined,
       search: searching ? debouncedSearch : undefined,
       gender: genderFilter !== 'all' ? genderFilter : undefined,
+      location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
       processing_method: processingFilter !== 'all' ? processingFilter : undefined,
       ...(searching ? {} : buildDateQuery(dateFilter, serverToday)),
     } as const;
@@ -217,7 +235,7 @@ export default function ResultsVerificationPage() {
 
     setPendingTotalCount(pendingStats.total || 0);
     setVerifiedTotalCount(verifiedStats.total || 0);
-  }, [statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter]);
+  }, [statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, facilityFilter, processingFilter]);
 
   // Load results from API when page or filters change
   useEffect(() => {
@@ -512,6 +530,17 @@ export default function ResultsVerificationPage() {
                       <SelectItem value="all">All Gender</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                       <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                    <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Facilities</SelectItem>
+                      {facilities.map((facility) => (
+                        <SelectItem key={facility.id} value={String(facility.id)}>
+                          {facility.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select

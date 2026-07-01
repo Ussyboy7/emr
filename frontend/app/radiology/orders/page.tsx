@@ -132,6 +132,8 @@ export default function RadiologyOrdersPage() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [facilityFilter, setFacilityFilter] = useState('all');
+  const [facilities, setFacilities] = useState<Clinic[]>([]);
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
   const [activeTab, setActiveTab] = useState<RadiologyOrdersTab>('all');
@@ -872,6 +874,7 @@ export default function RadiologyOrdersPage() {
         ...(processingFilter !== 'all' ? { processing_method: processingFilter } : {}),
         ...(priorityFilter !== 'all' ? { priority: priorityFilter } : {}),
         ...(genderFilter !== 'all' ? { gender: genderFilter as 'male' | 'female' } : {}),
+        ...(facilityFilter !== 'all' ? { location_clinic: Number(facilityFilter) } : {}),
         ...(sourceTypeFilter !== 'all' ? { source_type: sourceTypeFilter } : {}),
         ...dateQuery,
         ...rangeQuery,
@@ -914,7 +917,19 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery, handleAuthError]);
+  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, facilityFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery, handleAuthError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void (async () => {
+      try {
+        const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
+        setFacilities(res.results || []);
+      } catch {
+        setFacilities([]);
+      }
+    })();
+  }, [ready]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -1241,7 +1256,7 @@ export default function RadiologyOrdersPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, dateRange.from, dateRange.to]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, facilityFilter, processingFilter, sourceTypeFilter, activeTab, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -1518,6 +1533,17 @@ export default function RadiologyOrdersPage() {
                       <SelectItem value="all">All Gender</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                       <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                    <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Facilities</SelectItem>
+                      {facilities.map((facility) => (
+                        <SelectItem key={facility.id} value={String(facility.id)}>
+                          {facility.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select

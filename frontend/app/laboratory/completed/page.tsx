@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { labService, formatPatientGenderLabel } from '@/lib/services';
+import { labService, adminService, formatPatientGenderLabel, type Clinic } from '@/lib/services';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -29,11 +30,9 @@ import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
   User, Stethoscope, FlaskConical, Loader2
 } from 'lucide-react';
-import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 
 export default function CompletedTestsPage() {
   const { ready, handleAuthError } = useLabPageAuth();
-  const { names: opdClinicNames } = useOutpatientClinicTypes();
   const serverToday = useServerToday();
   const searchParams = useSearchParams();
   const urlHydrated = useRef(false);
@@ -44,7 +43,8 @@ export default function CompletedTestsPage() {
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
-  const [clinicFilter, setClinicFilter] = useState('all');
+  const [facilityFilter, setFacilityFilter] = useState('all');
+  const [facilities, setFacilities] = useState<Clinic[]>([]);
   const [genderFilter, setGenderFilter] = useState('all');
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
@@ -74,6 +74,18 @@ export default function CompletedTestsPage() {
     if (urlSearch) setSearchQuery(urlSearch);
     if (urlDate === 'all') setDateFilter('all');
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void (async () => {
+      try {
+        const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
+        setFacilities(res.results || []);
+      } catch {
+        setFacilities([]);
+      }
+    })();
+  }, [ready]);
 
   // Load completed tests function - memoized to prevent infinite loops
   const loadTests = useCallback(async () => {
@@ -116,7 +128,7 @@ export default function CompletedTestsPage() {
       const baseParams = {
         search: debouncedSearchQuery || undefined,
         overall_status: statusFilter !== 'all' ? statusFilter : undefined,
-        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+        location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         processing_method: processingFilter !== 'all' ? processingFilter : undefined,
         date,
@@ -133,7 +145,7 @@ export default function CompletedTestsPage() {
         labService.getVerificationStats({
           status: 'verified',
           overall_status: statusFilter !== 'all' ? statusFilter : undefined,
-          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+          location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
           search: debouncedSearchQuery || undefined,
           processing_method: processingFilter !== 'all' ? processingFilter : undefined,
@@ -163,7 +175,7 @@ export default function CompletedTestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday, handleAuthError]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, facilityFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday, handleAuthError]);
 
   // Load completed tests from API when page changes
   useEffect(() => {
@@ -177,7 +189,7 @@ export default function CompletedTestsPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, processingFilter, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, statusFilter, facilityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -302,13 +314,13 @@ export default function CompletedTestsPage() {
                     <SelectItem value="critical">Critical</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={clinicFilter} onValueChange={setClinicFilter}>
-                  <SelectTrigger className="w-[160px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
+                <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                  <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Clinics</SelectItem>
-                    {opdClinicNames.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
+                    <SelectItem value="all">All Facilities</SelectItem>
+                    {facilities.map((facility) => (
+                      <SelectItem key={facility.id} value={String(facility.id)}>
+                        {facility.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

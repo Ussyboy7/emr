@@ -348,6 +348,8 @@ export default function LabOrdersPage() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [facilityFilter, setFacilityFilter] = useState('all');
+  const [facilities, setFacilities] = useState<Clinic[]>([]);
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
   const [sortBy, setSortBy] = useState<'priority' | 'lab_id' | 'date'>('priority');
@@ -657,7 +659,19 @@ export default function LabOrdersPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, priorityFilter, dateFilter, genderFilter, facilityFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void (async () => {
+      try {
+        const res = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
+        setFacilities(res.results || []);
+      } catch {
+        setFacilities([]);
+      }
+    })();
+  }, [ready]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -709,6 +723,9 @@ export default function LabOrdersPage() {
       if (genderFilter !== 'all') {
         params.gender = genderFilter;
       }
+      if (facilityFilter !== 'all') {
+        params.location_clinic = Number(facilityFilter);
+      }
 
       const workflowTab = labOrdersTabToWorkflowParam(activeTab);
       if (workflowTab) {
@@ -723,6 +740,7 @@ export default function LabOrdersPage() {
           processing_method: processingFilter !== 'all' ? processingFilter : undefined,
           source_type: sourceTypeFilter !== 'all' ? sourceTypeFilter : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
+          location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
           ...(searching
             ? {}
             : {
@@ -781,7 +799,7 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab, handleAuthError]);
+  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, facilityFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab, handleAuthError]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
@@ -2026,6 +2044,17 @@ export default function LabOrdersPage() {
                       <SelectItem value="all">All Gender</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                       <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                    <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Facilities</SelectItem>
+                      {facilities.map((facility) => (
+                        <SelectItem key={facility.id} value={String(facility.id)}>
+                          {facility.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select

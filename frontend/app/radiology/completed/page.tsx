@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { radiologyService, adminService } from '@/lib/services';
+import { radiologyService, adminService, type Clinic } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -32,7 +32,6 @@ import {
   Stethoscope, Download, Loader2, Printer
 } from 'lucide-react';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
-import { useClinic } from "@/hooks/use-clinic";
 import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 
 export default function CompletedReportsPage() {
@@ -47,8 +46,7 @@ export default function CompletedReportsPage() {
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
-  const [clinicFilter, setClinicFilter] = useState('all');
-  const { isMultiClinic } = useClinic();
+  const [facilityFilter, setFacilityFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -58,7 +56,7 @@ export default function CompletedReportsPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ total: 0, normal: 0, abnormal: 0, critical: 0 });
-  const [clinics, setClinics] = useState<any[]>([]);
+  const [facilities, setFacilities] = useState<Clinic[]>([]);
 
   // Dialog states
   const [selectedReport, setSelectedReport] = useState<CompletedRadiologyReport | null>(null);
@@ -99,15 +97,15 @@ export default function CompletedReportsPage() {
     [serverToday],
   );
 
-  // Load clinics function
-  const loadClinics = useCallback(async () => {
+  // Load facilities for filter dropdown
+  const loadFacilities = useCallback(async () => {
     try {
-      const clinicsResult = await adminService.getClinics({ page_size: MAX_LIST_PAGE_SIZE });
-      setClinics(clinicsResult.results);
+      const clinicsResult = await adminService.getClinics({ is_active: true, page_size: MAX_LIST_PAGE_SIZE });
+      setFacilities(clinicsResult.results || []);
     } catch (err: unknown) {
-      console.error('Failed to load clinics:', err);
+      console.error('Failed to load facilities:', err);
       if (handleAuthError(err)) return;
-      toast.error('Failed to load clinics');
+      toast.error('Failed to load facilities');
     }
   }, [handleAuthError]);
 
@@ -120,7 +118,7 @@ export default function CompletedReportsPage() {
         page: currentPage,
         page_size: itemsPerPage,
         search: debouncedSearchQuery.trim() || undefined,
-        clinic: !isMultiClinic && clinicFilter !== 'all' ? clinicFilter : undefined,
+        location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
       };
       if (statusFilter !== 'all') {
@@ -143,7 +141,7 @@ export default function CompletedReportsPage() {
           status: 'verified',
           overall_status: statusFilter !== 'all' ? statusFilter : undefined,
           search: debouncedSearchQuery.trim() || undefined,
-          clinic: !isMultiClinic && clinicFilter !== 'all' ? clinicFilter : undefined,
+          location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
           ...(allTime
             ? {}
@@ -176,7 +174,7 @@ export default function CompletedReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to, buildDateQuery, isMultiClinic, handleAuthError]);
+  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, facilityFilter, genderFilter, dateRange.from, dateRange.to, buildDateQuery, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;
@@ -185,13 +183,13 @@ export default function CompletedReportsPage() {
 
   useEffect(() => {
     if (!ready) return;
-    void loadClinics();
-  }, [ready, loadClinics]);
+    void loadFacilities();
+  }, [ready, loadFacilities]);
 
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, statusFilter, facilityFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -292,17 +290,17 @@ export default function CompletedReportsPage() {
                     <SelectItem value="critical">Critical</SelectItem>
                   </SelectContent>
                 </Select>
-                {!isMultiClinic && (
-                <Select value={clinicFilter} onValueChange={setClinicFilter}>
-                  <SelectTrigger className="w-[160px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
+                <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                  <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Clinics</SelectItem>
-                    {clinics.map(clinic => (
-                      <SelectItem key={clinic.id} value={clinic.name}>{clinic.name}</SelectItem>
+                    <SelectItem value="all">All Facilities</SelectItem>
+                    {facilities.map((facility) => (
+                      <SelectItem key={facility.id} value={String(facility.id)}>
+                        {facility.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                )}
                 <Select value={genderFilter} onValueChange={setGenderFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>

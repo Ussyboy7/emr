@@ -24,6 +24,17 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
+def _parse_location_clinic_id(request):
+    """Parse optional ``location_clinic`` query param (organization.Clinic PK)."""
+    raw = request.query_params.get('location_clinic')
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 from .models import (
     LabTemplate,
     LabPartner,
@@ -251,6 +262,10 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         if source_type in ('internal_emr', 'external_manual'):
             qs = qs.filter(source_type=source_type)
 
+        location_clinic_id = _parse_location_clinic_id(self.request)
+        if location_clinic_id is not None:
+            qs = qs.filter(location_clinic_id=location_clinic_id)
+
         workflow_tab = self.request.query_params.get('workflow_tab')
         if workflow_tab == 'pending':
             qs = qs.filter(tests__status='pending').distinct()
@@ -300,6 +315,9 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         source_type = request.query_params.get('source_type')
         if source_type in ('internal_emr', 'external_manual'):
             base_qs = base_qs.filter(source_type=source_type)
+        location_clinic_id = _parse_location_clinic_id(request)
+        if location_clinic_id is not None:
+            base_qs = base_qs.filter(location_clinic_id=location_clinic_id)
         # Apply DRF's generic filters (search, filterset_fields, ordering).
         base_qs = self.filter_queryset(base_qs)
 
@@ -1258,6 +1276,10 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
         clinic = self.request.query_params.get('clinic')
         if clinic:
             queryset = queryset.filter(order__clinic=clinic)
+
+        location_clinic_id = _parse_location_clinic_id(self.request)
+        if location_clinic_id is not None:
+            queryset = queryset.filter(order__location_clinic_id=location_clinic_id)
 
         # Gender filtering (stored on Patient.gender)
         gender = self.request.query_params.get('gender')
