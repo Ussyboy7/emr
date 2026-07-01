@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -565,13 +565,13 @@ export default function RoomQueuePage() {
                         <DoorOpen className="h-4 w-4" />
                         {room.name}
                       </CardTitle>
-                      <CardDescription className="flex items-center gap-2 mt-1 flex-wrap">
-                        <Stethoscope className="h-3 w-3" />
-                        {room.doctor || 'No doctor in room'}
+                      <div className="text-sm text-muted-foreground flex items-center gap-2 mt-1 flex-wrap">
+                        <Stethoscope className="h-3 w-3 shrink-0" />
+                        <span>{room.doctor || 'No doctor in room'}</span>
                         <Badge variant="outline" className={`text-[10px] ${presenceStatusBadgeClass(room.presenceStatus)}`}>
                           {presenceStatusLabel(room.presenceStatus)}
                         </Badge>
-                      </CardDescription>
+                      </div>
                     </div>
                     <Badge variant="outline" className={getStatusColor(room.status)}>
                       {getStatusLabel(room)}
