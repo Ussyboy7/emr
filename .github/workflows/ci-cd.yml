@@ -19,10 +19,12 @@ concurrency:
 
 permissions:
   contents: read
+  packages: write
 
 env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "20"
+  REGISTRY: ghcr.io
   # Frontend build-time public vars (not secrets)
   NEXT_PUBLIC_API_URL: http://localhost:8001/api
 
@@ -188,22 +190,121 @@ jobs:
           cache-from: type=gha,scope=emr-frontend-stag
           cache-to: type=gha,mode=max,scope=emr-frontend-stag
 
+  publish-images:
+    name: Publish images to GHCR
+    needs: [backend, frontend, docs-check, security-scan, docker-validate]
+    if: |
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_production == true)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image name prefix
+        run: |
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_PREFIX=${{ env.REGISTRY }}/${owner}" >> "${GITHUB_ENV}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.prod
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/emr-backend:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/emr-backend:staging
+          cache-from: type=gha,scope=emr-backend
+          cache-to: type=gha,mode=max,scope=emr-backend
+
+      - name: Build and push staging frontend
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile.stag
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/emr-frontend-stag:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/emr-frontend-stag:staging
+          build-args: |
+            NEXT_PUBLIC_API_URL=/api
+            NEXT_PUBLIC_ENVIRONMENT=staging
+            API_PROXY_TARGET=http://backend:8000
+          cache-from: type=gha,scope=emr-frontend-stag
+          cache-to: type=gha,mode=max,scope=emr-frontend-stag
+
+      - name: Build and push production frontend
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_production == true
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile.prod
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/emr-frontend-prod:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/emr-frontend-prod:production
+          build-args: |
+            NEXT_PUBLIC_API_URL=/api
+            NEXT_PUBLIC_WS_URL=/ws/
+            NEXT_PUBLIC_ENVIRONMENT=production
+            NEXT_PUBLIC_APP_NAME=Medical NPA EMR
+            NEXT_PUBLIC_APP_VERSION=1.0.0
+            NEXT_PUBLIC_SENTRY_DSN=
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
+            NEXT_PUBLIC_ENABLE_ANALYTICS=false
+            NEXT_PUBLIC_ENABLE_ERROR_REPORTING=false
+          cache-from: type=gha,scope=emr-frontend-prod
+          cache-to: type=gha,mode=max,scope=emr-frontend-prod
+
+      - name: Tag backend for production release
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_production == true
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE_PREFIX}/emr-backend:production" \
+            "${IMAGE_PREFIX}/emr-backend:${GITHUB_SHA}"
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+
   # ---------------------------------------------------------------------------
   # CD — self-hosted runners (register on staging / prod servers — see docs)
   # ---------------------------------------------------------------------------
   deploy-staging:
     name: Deploy staging
-    needs: [backend, frontend, docs-check, security-scan, docker-validate]
+    needs: [publish-images]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: [self-hosted, emr-staging]
     environment: staging
     steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Deploy with env-manager
         env:
           SERVER_IP: ""
           DEPLOY_PATH: /srv/emr
+          EMR_USE_REGISTRY: "1"
+          EMR_IMAGE_TAG: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          export EMR_BACKEND_IMAGE="ghcr.io/${owner}/emr-backend"
+          export EMR_FRONTEND_IMAGE="ghcr.io/${owner}/emr-frontend-stag"
           cd "${DEPLOY_PATH}"
           ./scripts/staging/env-manager.sh deploy
 
@@ -215,19 +316,33 @@ jobs:
 
   deploy-production:
     name: Deploy production
-    needs: [backend, frontend, docs-check, security-scan, docker-validate]
+    needs: [publish-images]
     if: |
       github.event_name == 'workflow_dispatch' &&
       inputs.deploy_production == true
     runs-on: [self-hosted, emr-prod]
     environment: production
     steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Deploy with env-manager
         env:
           SERVER_IP: ""
           DEPLOY_PATH: /home/emrprod/emr
+          EMR_USE_REGISTRY: "1"
+          EMR_IMAGE_TAG: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          export EMR_BACKEND_IMAGE="ghcr.io/${owner}/emr-backend"
+          export EMR_FRONTEND_IMAGE="ghcr.io/${owner}/emr-frontend-prod"
           cd "${DEPLOY_PATH}"
           ./scripts/production/env-manager.sh deploy
 

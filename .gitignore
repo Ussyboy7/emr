@@ -29,13 +29,18 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
+/env/
 venv/
 .venv/
 backend/.venv/
 ENV/
 env.bak/
 venv.bak/
+
+# backend/env/*.env are tracked compose env files; registry.env is server-local only
+backend/env/registry.env
+!backend/env/registry.env.example
+!backend/env/registry.prod.env.example
 
 # TypeScript incremental build info
 *.tsbuildinfo

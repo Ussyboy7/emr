@@ -28,7 +28,7 @@ services:
       retries: 5
 
   backend:
-    image: emr-backend:latest
+    image: emr-backend-local:${EMR_IMAGE_TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -63,12 +63,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health/live/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   celery-worker:
-    image: emr-celery-worker:latest
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: emr-backend-local:${EMR_IMAGE_TAG:-latest}
     container_name: emr-celery-worker-local
     env_file:
       - ./backend/env/local.env
@@ -94,10 +97,7 @@ services:
         condition: service_healthy
 
   celery-beat:
-    image: emr-celery-beat:latest
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: emr-backend-local:${EMR_IMAGE_TAG:-latest}
     container_name: emr-celery-beat-local
     env_file:
       - ./backend/env/local.env
@@ -122,7 +122,7 @@ services:
         condition: service_healthy
 
   frontend:
-    image: emr-frontend:latest
+    image: emr-frontend-local:${EMR_IMAGE_TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile.local

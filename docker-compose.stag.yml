@@ -59,6 +59,7 @@ services:
 
   # Backend (Django)
   backend:
+    image: ${EMR_BACKEND_IMAGE:-emr-backend-stag}:${EMR_IMAGE_TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -113,14 +114,7 @@ services:
 
   # Celery Worker
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
-      # Add DNS for build process
-      network: host
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    image: ${EMR_BACKEND_IMAGE:-emr-backend-stag}:${EMR_IMAGE_TAG:-latest}
     container_name: emr-celery-worker-stag
     env_file:
       - ./backend/env/stag.env
@@ -142,14 +136,7 @@ services:
 
   # Celery Beat
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
-      # Add DNS for build process
-      network: host
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    image: ${EMR_BACKEND_IMAGE:-emr-backend-stag}:${EMR_IMAGE_TAG:-latest}
     container_name: emr-celery-beat-stag
     env_file:
       - ./backend/env/stag.env
@@ -170,6 +157,7 @@ services:
 
   # Frontend (Next.js) - Direct access for staging
   frontend:
+    image: ${EMR_FRONTEND_IMAGE:-emr-frontend-stag}:${EMR_IMAGE_TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile.stag

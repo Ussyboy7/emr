@@ -65,6 +65,7 @@ services:
 
   # Backend (Django)
   backend:
+    image: ${EMR_BACKEND_IMAGE:-emr-backend-prod}:${EMR_IMAGE_TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -108,14 +109,7 @@ services:
 
   # Celery Worker
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
-      # Add DNS for build process
-      network: host
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    image: ${EMR_BACKEND_IMAGE:-emr-backend-prod}:${EMR_IMAGE_TAG:-latest}
     container_name: emr-celery-worker-prod
     env_file:
       - ./backend/env/prod.env
@@ -137,14 +131,7 @@ services:
 
   # Celery Beat
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
-      # Add DNS for build process
-      network: host
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    image: ${EMR_BACKEND_IMAGE:-emr-backend-prod}:${EMR_IMAGE_TAG:-latest}
     container_name: emr-celery-beat-prod
     env_file:
       - ./backend/env/prod.env
@@ -165,6 +152,7 @@ services:
 
   # Frontend (Next.js)
   frontend:
+    image: ${EMR_FRONTEND_IMAGE:-emr-frontend-prod}:${EMR_IMAGE_TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod

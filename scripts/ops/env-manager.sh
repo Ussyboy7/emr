@@ -13,6 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/stack-utils.sh"
 # shellcheck source=../lib/ui.sh
 source "${SCRIPT_DIR}/../lib/ui.sh"
+# shellcheck source=../lib/registry-images.sh
+source "${SCRIPT_DIR}/../lib/registry-images.sh"
 
 usage() {
     cat <<'USAGE'
@@ -47,10 +49,11 @@ Monitoring:
   alerts           Summarise active alerts
   diagnostics      Full diagnostics dump
 
-Deployment (stag/prod only):
-  deploy [flags]   Pull + rebuild + health check, with pre-deploy DB snapshot
-                   and automatic rollback on failure.
-                   Flags: --no-backup --no-pull --no-rollback --skip-health
+Deployment (local | stag | prod):
+  deploy [flags]   Rebuild app services (fast by default) + health check.
+                   stag/prod: pre-deploy DB snapshot + rollback on failure.
+                   Flags: --full --services=a,b --no-backup --no-pull
+                   --no-rollback --skip-health
   update           Alias for `deploy`.
 
 Maintenance:
@@ -63,8 +66,10 @@ Emergency:
 
 Examples:
   scripts/ops/env-manager.sh local start
+  scripts/ops/env-manager.sh local deploy
   scripts/ops/env-manager.sh prod status
   scripts/ops/env-manager.sh stag deploy
+  scripts/ops/env-manager.sh prod deploy --full
   scripts/ops/env-manager.sh prod logs backend --follow
 USAGE
 }
@@ -309,41 +314,58 @@ cmd_diagnostics() {
 }
 
 # ---------------------------------------------------------------------------
-# Deployment (stag/prod) — pull + rebuild + health check + rollback
+# Deployment — fast (default) or full stack rebuild; local | stag | prod
 # ---------------------------------------------------------------------------
 
-cmd_deploy() {
-    if [[ "$STACK_ENVIRONMENT" == "local" ]]; then
-        ui_error "Local env is not deployed via this script. Use: scripts/local/env-manager.sh start"
-        return 1
-    fi
+# Set by cmd_deploy; visible to _deploy_* helpers called from the same invocation.
+DEPLOY_MODE="fast"
+DEPLOY_SERVICES=""
+DEPLOY_FORCE_BUILD=false
+DO_BACKUP=true
+DO_PULL=true
+DO_ROLLBACK=true
+DO_HEALTH=true
 
-    local DO_BACKUP=true DO_PULL=true DO_ROLLBACK=true DO_HEALTH=true
+cmd_deploy() {
+    DEPLOY_MODE="fast"
+    DEPLOY_SERVICES=""
+    DEPLOY_FORCE_BUILD=false
+    DO_BACKUP=true
+    DO_PULL=true
+    DO_ROLLBACK=true
+    DO_HEALTH=true
+
+    case "$STACK_ENVIRONMENT" in
+        local)
+            DO_PULL=false
+            DO_BACKUP=false
+            DO_ROLLBACK=false
+            ;;
+        staging)
+            ;;
+        production)
+            ;;
+    esac
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --full)        DEPLOY_MODE="full" ;;
+            --fast)        DEPLOY_MODE="fast" ;;
             --no-backup)   DO_BACKUP=false ;;
             --no-pull)     DO_PULL=false ;;
+            --pull)        DO_PULL=true ;;
             --no-rollback) DO_ROLLBACK=false ;;
             --skip-health) DO_HEALTH=false ;;
+            --build)       DEPLOY_FORCE_BUILD=true ;;
+            --services=*)
+                DEPLOY_SERVICES="${1#--services=}"
+                ;;
+            --services)
+                shift
+                DEPLOY_SERVICES="${1:-}"
+                ;;
             -h|--help)
-                cat <<'DEPLOY_USAGE'
-Usage: env-manager.sh <env> deploy [options]
-
-Environments: stag | prod
-
-Options:
-  --no-backup       Skip pre-deploy DB snapshot (NOT recommended)
-  --no-pull         Skip `git pull`
-  --no-rollback     Don't attempt rollback on failure
-  --skip-health     Don't wait for backend health after deploy
-
-Relevant env vars (override by exporting before running):
-  DEPLOY_PATH       prod default: /home/emrprod/emr, stag default: /srv/emr
-  SERVER_IP         prod default: 172.16.0.32, stag default: 172.16.0.46
-                    Export SERVER_IP= (empty) to skip the host IP sanity check.
-  BACKUP_DIR        prod default: $HOME/emr-predeploy-backups
-                    stag default: $DEPLOY_PATH/backups
-DEPLOY_USAGE
+                _deploy_usage
                 return 0
                 ;;
             *) ui_error "Unknown deploy option: $1"; return 1 ;;
@@ -351,9 +373,11 @@ DEPLOY_USAGE
         shift
     done
 
-    # Canonical per-env deploy defaults (unset-only; do not cross prod vs stag).
-    local PG_CONTAINER DB_USER DB_NAME
+    local PG_CONTAINER="" DB_USER="" DB_NAME=""
     case "$STACK_ENVIRONMENT" in
+        local)
+            DEPLOY_PATH="${DEPLOY_PATH:-$PROJECT_ROOT}"
+            ;;
         production)
             if [[ -z "${DEPLOY_PATH+x}" ]]; then DEPLOY_PATH="/home/emrprod/emr"; fi
             if [[ -z "${SERVER_IP+x}" ]];  then SERVER_IP="172.16.0.32"; fi
@@ -372,20 +396,92 @@ DEPLOY_USAGE
             ;;
     esac
 
-    ui_header "EMR ${STACK_ENVIRONMENT_TITLE} Deployment"
+    ui_header "EMR ${STACK_ENVIRONMENT_TITLE} Deployment (${DEPLOY_MODE})"
 
-    _deploy_check_server
+    if [[ "$STACK_ENVIRONMENT" != "local" ]]; then
+        _deploy_check_server
+    fi
     _deploy_ensure_repo
+    deploy_load_registry_config
+    export EMR_IMAGE_TAG="$(deploy_resolve_image_tag)"
+    if deploy_registry_enabled; then
+        ui_info "Registry deploy — backend: ${EMR_BACKEND_IMAGE:-?}:${EMR_IMAGE_TAG}, frontend: ${EMR_FRONTEND_IMAGE:-?}:${EMR_IMAGE_TAG}"
+    elif [[ "$STACK_ENVIRONMENT" != "local" ]]; then
+        ui_info "Local build deploy (set EMR_USE_REGISTRY=1 in backend/env/registry.env to pull from GHCR)"
+    fi
     _deploy_backup_database || true
     _deploy_pull_latest || { _deploy_rollback; return 1; }
-    _deploy_stop_stack
-    _deploy_build_up      || { _deploy_rollback; return 1; }
-    _deploy_wait_healthy  || { _deploy_rollback; return 1; }
+
+    if [[ "$DEPLOY_MODE" == "full" ]]; then
+        _deploy_stop_stack
+        _deploy_build_up_full || { _deploy_rollback; return 1; }
+    else
+        _deploy_ensure_infra_up
+        _deploy_build_up_fast || { _deploy_rollback; return 1; }
+    fi
+
+    _deploy_wait_healthy || { _deploy_rollback; return 1; }
     _deploy_show_summary
-    ui_success "EMR ${STACK_ENVIRONMENT} deployment complete"
+    ui_success "EMR ${STACK_ENVIRONMENT} ${DEPLOY_MODE} deployment complete"
 }
 
 cmd_update() { cmd_deploy "$@"; }
+
+_deploy_usage() {
+    cat <<'DEPLOY_USAGE'
+Usage: env-manager.sh <env> deploy [options]
+
+Environments: local | stag | prod
+
+Modes:
+  (default)   Fast — rebuild/restart app services; postgres/redis stay up.
+  --full      Full stack — compose down, rebuild all services, compose up.
+
+Options:
+  --services=LIST   Comma-separated services (default: app tier per env)
+  --pull            git pull (local: off by default; use --pull to enable)
+  --no-pull         Skip git pull (stag/prod)
+  --build           Force local image build (ignore registry.env)
+  --no-backup       Skip pre-deploy DB snapshot (stag/prod)
+  --no-rollback     Don't attempt rollback on failure (stag/prod)
+  --skip-health     Don't wait for backend health after deploy
+
+Default app services:
+  local/stag: backend, frontend, celery-worker, celery-beat
+  prod:        backend, frontend, celery-worker, celery-beat, nginx
+
+Relevant env vars (stag/prod):
+  DEPLOY_PATH       prod: /home/emrprod/emr, stag: /srv/emr
+  SERVER_IP         prod: 172.16.0.32, stag: 172.16.0.46 (empty to skip check)
+  BACKUP_DIR        prod: $HOME/emr-predeploy-backups, stag: $DEPLOY_PATH/backups
+  DOCKER_BUILDKIT=1 Enabled automatically during local image builds
+
+Registry (stag/prod): copy backend/env/registry.env.example → backend/env/registry.env
+  EMR_USE_REGISTRY=1 pulls ghcr.io images built by CI (tag = git SHA).
+DEPLOY_USAGE
+}
+
+_deploy_default_app_services() {
+    case "$STACK_ENVIRONMENT" in
+        production) echo "backend frontend celery-worker celery-beat nginx" ;;
+        *)          echo "backend frontend celery-worker celery-beat" ;;
+    esac
+}
+
+_deploy_resolve_services() {
+    local raw="${DEPLOY_SERVICES:-}"
+    if [[ -z "$raw" ]]; then
+        _deploy_default_app_services
+        return 0
+    fi
+    raw="${raw//,/ }"
+    echo "$raw"
+}
+
+_deploy_enable_buildkit() {
+    export DOCKER_BUILDKIT=1
+    export COMPOSE_DOCKER_CLI_BUILD=1
+}
 
 _deploy_check_server() {
     # Skip IP check when SERVER_IP is empty (e.g. export SERVER_IP= before running).
@@ -403,14 +499,17 @@ _deploy_check_server() {
 }
 
 _deploy_ensure_repo() {
+    if [[ "$STACK_ENVIRONMENT" == "local" ]]; then
+        cd "$PROJECT_ROOT"
+        ui_info "Working directory: $(pwd)"
+        return 0
+    fi
     if [[ ! -d "$DEPLOY_PATH" ]]; then
         ui_error "Deployment directory $DEPLOY_PATH does not exist"
         exit 1
     fi
     cd "$DEPLOY_PATH"
     PROJECT_ROOT="$(pwd)"
-    # Re-anchor STACK_* paths at the deploy checkout in case it differs from where
-    # the caller launched the script.
     case "$STACK_ENVIRONMENT" in
         production)
             STACK_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.prod.yml"
@@ -421,12 +520,14 @@ _deploy_ensure_repo() {
             STACK_ENV_FILE="${PROJECT_ROOT}/backend/env/stag.env"
             ;;
     esac
-    # Reload after re-anchoring paths to the deploy checkout.
     stack_load_env_vars
     ui_info "Working directory: $(pwd)"
 }
 
 _deploy_backup_database() {
+    if [[ "$STACK_ENVIRONMENT" == "local" ]]; then
+        return 0
+    fi
     $DO_BACKUP || { ui_warning "Skipping pre-deploy backup (--no-backup)"; return 0; }
     ui_step "Pre-deploy DB snapshot"
     if ! mkdir -p "$BACKUP_DIR" 2>/dev/null; then
@@ -466,13 +567,68 @@ _deploy_pull_latest() {
 }
 
 _deploy_stop_stack() {
-    ui_step "Stopping existing ${STACK_ENVIRONMENT} containers"
+    ui_step "Stopping existing ${STACK_ENVIRONMENT} containers (full deploy)"
     stack_compose down --timeout 30 || true
 }
 
-_deploy_build_up() {
-    ui_step "Rebuilding and starting ${STACK_ENVIRONMENT} stack"
-    docker image prune -f >/dev/null 2>&1 || true
+_deploy_ensure_infra_up() {
+    ui_step "Ensuring data services are up (postgres, redis)"
+    stack_compose up -d postgres redis
+    if [[ "$STACK_ENVIRONMENT" == "production" ]]; then
+        stack_compose up -d backup 2>/dev/null || true
+    fi
+}
+
+_deploy_build_up_fast() {
+    local up_services
+    up_services=$(_deploy_resolve_services)
+
+    if deploy_registry_enabled; then
+        deploy_registry_login
+        ui_step "Fast deploy — pulling backend + frontend (${EMR_IMAGE_TAG})"
+        stack_compose pull backend frontend
+        ui_step "Fast deploy — restarting: ${up_services}"
+        # shellcheck disable=SC2086
+        stack_compose up -d --no-deps $up_services
+        return 0
+    fi
+
+    _deploy_enable_buildkit
+    local build_services="" svc
+    for svc in $up_services; do
+        case "$svc" in
+            backend|frontend)
+                if ! echo " $build_services " | grep -q " ${svc} "; then
+                    build_services="${build_services}${build_services:+ }${svc}"
+                fi
+                ;;
+            celery-worker|celery-beat)
+                if ! echo " $build_services " | grep -q ' backend '; then
+                    build_services="${build_services}${build_services:+ }backend"
+                fi
+                ;;
+        esac
+    done
+    if [[ -n "$build_services" ]]; then
+        ui_step "Fast deploy — building: ${build_services}"
+        # shellcheck disable=SC2086
+        stack_compose build $build_services
+    fi
+    ui_step "Fast deploy — restarting: ${up_services}"
+    # shellcheck disable=SC2086
+    stack_compose up -d --no-deps $up_services
+}
+
+_deploy_build_up_full() {
+    if deploy_registry_enabled; then
+        deploy_registry_login
+        ui_step "Full deploy — pulling images (${EMR_IMAGE_TAG}) and starting stack"
+        stack_compose pull backend frontend
+        stack_compose up -d
+        return 0
+    fi
+    _deploy_enable_buildkit
+    ui_step "Full deploy — rebuilding and starting entire stack"
     stack_compose up -d --build
 }
 
@@ -512,6 +668,15 @@ _deploy_wait_healthy() {
                 return 1
                 ;;
             none|missing)
+                if [[ "$STACK_ENVIRONMENT" == "local" ]]; then
+                    if curl -fsS "$STACK_HEALTH_URL" >/dev/null 2>&1; then
+                        ui_success "Backend health probe OK (${STACK_HEALTH_URL})"
+                        return 0
+                    fi
+                    echo "  attempt ${i}/${attempts}… (no Docker healthcheck; probing HTTP)"
+                    sleep "$interval"
+                    continue
+                fi
                 ui_error "No Docker healthcheck on ${STACK_BACKEND_CONTAINER}. Define one in compose (backend.healthcheck) and redeploy — this script does not probe endpoints directly."
                 return 1
                 ;;
@@ -534,6 +699,10 @@ _deploy_show_summary() {
 }
 
 _deploy_rollback() {
+    if [[ "$STACK_ENVIRONMENT" == "local" ]]; then
+        ui_error "Deployment failed. Local deploy has no automatic rollback — fix and re-run deploy."
+        return 1
+    fi
     $DO_ROLLBACK || { ui_error "Deployment failed and --no-rollback was set. Manual intervention required."; return 1; }
     ui_error "Deployment failed. Rolling back…"
     _deploy_stop_stack

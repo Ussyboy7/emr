@@ -7,12 +7,13 @@ GitHub Actions workflow: [`.github/workflows/ci-cd.yml`](../../.github/workflows
 | Phase | Where it runs | When |
 |-------|---------------|------|
 | **CI** (tests, lint, build, security, Docker) | GitHub `ubuntu-latest` | Every PR and push to `main` |
-| **Deploy staging** | Self-hosted runner on `172.16.0.46` | Push to `main` after CI passes |
+| **Publish images** | GitHub `ubuntu-latest` | Push to `main` (and prod dispatch) after CI passes |
+| **Deploy staging** | Self-hosted runner on `172.16.0.46` | Push to `main` after images published |
 | **Deploy production** | Self-hosted runner on `172.16.0.32` | Manual **workflow_dispatch** only |
 
-Staging deploy uses [`scripts/staging/env-manager.sh deploy`](../../scripts/staging/env-manager.sh) (pre-deploy DB snapshot, rebuild, health wait, rollback on failure).
+Staging and production deploy **pull pre-built images from GHCR** (`EMR_USE_REGISTRY=1`) instead of building on the server. See `backend/env/registry.env.example`.
 
-Production deploy uses [`scripts/production/env-manager.sh deploy`](../../scripts/production/env-manager.sh).
+Deploy uses [`scripts/staging/env-manager.sh deploy`](../../scripts/staging/env-manager.sh) (fast by default; `--full` for entire stack; `--build` to compile on-server). Pre-deploy DB snapshot, health wait, rollback on failure.
 
 Unlike NPA ECM’s pipeline, **tests and lint fail the workflow** — they do not continue on error.
 
@@ -27,6 +28,29 @@ Unlike NPA ECM’s pipeline, **tests and lint fail the workflow** — they do no
 | `docs-check` | `make docs-check` (page + capability catalog sync) |
 | `security-scan` | Bandit (high), `pip-audit`, `npm audit` (critical) |
 | `docker-validate` | `docker compose config` + build backend + staging frontend images |
+| `publish-images` | Push `emr-backend`, `emr-frontend-stag` (on `main`), `emr-frontend-prod` (prod dispatch) to GHCR |
+
+GHCR tags: `:${{ github.sha }}`, `:staging` / `:production` rolling tags.
+
+---
+
+## GHCR images
+
+| Image | Used on |
+|-------|---------|
+| `ghcr.io/<owner>/emr-backend` | Staging + production |
+| `ghcr.io/<owner>/emr-frontend-stag` | Staging |
+| `ghcr.io/<owner>/emr-frontend-prod` | Production |
+
+**Server setup (manual deploys):**
+
+```bash
+cp backend/env/registry.env.example backend/env/registry.env   # staging
+# or registry.prod.env.example → registry.env on production
+docker login ghcr.io   # PAT with read:packages
+```
+
+CI deploy jobs log in with `GITHUB_TOKEN` automatically on self-hosted runners.
 
 Backend test app list: [`scripts/ci/backend-test-apps.sh`](../../scripts/ci/backend-test-apps.sh) (keep in sync with `Makefile` `test-backend`).
 
@@ -40,14 +64,16 @@ Backend test app list: [`scripts/ci/backend-test-apps.sh`](../../scripts/ci/back
 2. Register with labels: `self-hosted`, `emr-staging`.
 3. Ensure repo checkout exists at **`/srv/emr`** with `origin` pointing at GitHub.
 4. Ensure `backend/env/stag.env` exists on the server (not in git).
-5. Runner user must run Docker and access `/srv/emr`.
+5. Copy `backend/env/registry.env.example` → `backend/env/registry.env`.
+6. Runner user must run Docker and access `/srv/emr`.
 
 ### Production (`172.16.0.32`)
 
 1. Register a runner with labels: `self-hosted`, `emr-prod`.
 2. Repo checkout at **`/home/emrprod/emr`**.
 3. Ensure `backend/env/prod.env` exists on the server.
-4. Configure GitHub **Environment** `production` with required reviewers.
+4. Copy `backend/env/registry.prod.env.example` → `backend/env/registry.env`.
+5. Configure GitHub **Environment** `production` with required reviewers.
 
 ### GitHub Environments
 
@@ -64,7 +90,7 @@ In the repo → **Settings → Environments**:
 
 ### Staging (automatic)
 
-Merge or push to `main` → CI runs → on success, `deploy-staging` runs on `emr-staging` runner.
+Merge or push to `main` → CI runs → `publish-images` pushes to GHCR → `deploy-staging` pulls and restarts.
 
 Smoke checks:
 

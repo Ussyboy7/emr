@@ -26,15 +26,31 @@ Each wrapper pins the environment and delegates to `scripts/ops/env-manager.sh`.
 | Logs | `env-manager.sh logs [service] [--follow]` |
 | Dashboard | `env-manager.sh dashboard` |
 
-## Deploy (production)
+## Deploy
+
+**Fast (default)** — rebuild app services; postgres/redis stay up:
 
 ```bash
+./scripts/local/env-manager.sh deploy
+./scripts/staging/env-manager.sh deploy
 ./scripts/production/env-manager.sh deploy
 ```
 
-Flow: pre-deploy DB snapshot → `git pull` → rebuild containers → health check → automatic rollback on failure.
+**Full stack** — after compose/volume/nginx changes or wedged containers:
 
-Flags: `--no-backup`, `--no-pull`, `--no-rollback`, `--skip-health`.
+```bash
+./scripts/<env>/env-manager.sh deploy --full
+```
+
+**Registry (stag/prod)** — pull GHCR images built by CI (recommended). Copy `backend/env/registry.env.example` → `registry.env` on the server; see [CI_CD.md](CI_CD.md).
+
+**On-server build** — omit `registry.env` or use `deploy --build`.
+
+Flow (fast + registry): DB snapshot → `git pull` → `docker compose pull` → restart app tier → health check.
+
+Flow (fast + build): DB snapshot → `git pull` → `docker compose build` → restart → health check.
+
+Flags: `--full`, `--build`, `--services=a,b`, … See [scripts/README.md](../../scripts/README.md).
 
 ## Backups
 
