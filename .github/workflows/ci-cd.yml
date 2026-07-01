@@ -186,7 +186,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=/api
             NEXT_PUBLIC_ENVIRONMENT=staging
-            API_PROXY_TARGET=http://backend_stag:8000
+            API_PROXY_TARGET=http://backend:8000
           cache-from: type=gha,scope=emr-frontend-stag
           cache-to: type=gha,mode=max,scope=emr-frontend-stag
 
@@ -239,7 +239,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=/api
             NEXT_PUBLIC_ENVIRONMENT=staging
-            API_PROXY_TARGET=http://backend_stag:8000
+            API_PROXY_TARGET=http://backend:8000
           cache-from: type=gha,scope=emr-frontend-stag
           cache-to: type=gha,mode=max,scope=emr-frontend-stag
 
