@@ -121,8 +121,13 @@ class ConsultationRoomPresenceTest(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_reassign_to_non_accepting_room_blocked(self):
+        doctor_b = create_test_user(
+            "presence_dr_b",
+            pages=["/consultation", "/consultation/room"],
+            system_role="Medical Doctor",
+        )
         self._check_in(self.doctor, self.room)
-        self._check_in(self.doctor, self.other_room)
+        self._check_in(doctor_b, self.other_room)
         self.client.force_authenticate(user=self.nurse)
         create_resp = self.client.post(
             "/api/v1/consultation/queue/",
@@ -136,6 +141,7 @@ class ConsultationRoomPresenceTest(APITestCase):
         self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
         queue_id = create_resp.data["id"]
 
+        self.client.force_authenticate(user=doctor_b)
         self.client.post(
             f"/api/v1/consultation/rooms/{self.other_room.pk}/set-accepting/",
             {"accepting": False},
@@ -172,8 +178,9 @@ class ConsultationRoomPresenceTest(APITestCase):
     def test_stale_presence_cleared_on_room_read(self):
         self._check_in(self.doctor, self.room)
         occ = ConsultationRoomOccupancy.objects.get(room=self.room, is_active=True)
-        occ.last_seen_at = timezone.now() - timedelta(minutes=ROOM_PRESENCE_STALE_MINUTES + 5)
-        occ.save(update_fields=["last_seen_at"])
+        ConsultationRoomOccupancy.objects.filter(pk=occ.pk).update(
+            last_seen_at=timezone.now() - timedelta(minutes=ROOM_PRESENCE_STALE_MINUTES + 5),
+        )
 
         self.client.force_authenticate(user=self.nurse)
         resp = self.client.get(f"/api/v1/consultation/rooms/{self.room.pk}/")

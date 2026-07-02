@@ -42,7 +42,7 @@ interface AttendanceStatisticsReport {
 export default function AttendanceStatisticsPage() {
   const { ready, handleAuthError } = useMedicalRecordsPageAuth();
   const [report, setReport] = useState<AttendanceStatisticsReport | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [metric, setMetric] = useState<Metric>("attendance_count");
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");

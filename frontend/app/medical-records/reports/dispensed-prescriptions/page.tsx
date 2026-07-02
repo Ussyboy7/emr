@@ -98,7 +98,7 @@ export default function PrescriptionsReport() {
   const [data, setData] = useState<PeriodRow[]>([]);
   const [groupByLabel, setGroupByLabel] = useState("Monthly");
   const [summary, setSummary] = useState<DispensedSummary>(emptySummary);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const fetchReport = async () => {
     const params = buildQuery({ group_by: groupBy });

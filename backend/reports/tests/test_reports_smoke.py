@@ -6,10 +6,12 @@ from common.tests.support import create_test_user
 
 REPORT_ENDPOINTS = [
     "/api/v1/reports/patient-demographics/",
-    "/api/v1/reports/lab-statistics/",
     "/api/v1/reports/top-diagnoses/",
     "/api/v1/reports/pharmacy-performance/",
     "/api/v1/reports/attendance-summary/",
+    "/api/v1/reports/observation-admissions/",
+    "/api/v1/reports/physio-clinical-diagnosis/",
+    "/api/v1/reports/eye-clinical-diagnosis/",
     "/api/v1/reports/visit-statistics/",
     "/api/v1/reports/dispensed-prescriptions/",
     "/api/v1/reports/comprehensive/",

@@ -26,7 +26,6 @@ REQUIRED_PAGES_BY_ROLE_NAME: dict[str, tuple[str, ...]] = {
     "Ophthalmologist": ("/eyecare/analytics",),
     "Medical Records Officer": (
         "/medical-records/reports/new-registrations",
-        "/medical-records/reports/lab-statistics",
         "/medical-records/reports/patient-demographics",
     ),
     "Radiologist": ("/radiology/analytics",),

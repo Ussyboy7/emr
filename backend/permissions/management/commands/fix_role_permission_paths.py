@@ -80,7 +80,6 @@ class Command(BaseCommand):
                     "/medical-records/coding",
                     "/medical-records/diagnosis-review",
                     "/medical-records/reports/new-registrations",
-                    "/medical-records/reports/lab-statistics",
                     "/medical-records/reports/patient-demographics",
                 ):
                     if required not in deduped:

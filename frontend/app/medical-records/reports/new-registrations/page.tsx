@@ -17,7 +17,7 @@ import {
   import { apiFetch } from "@/lib/api-client";
   import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
   import Link from "next/link";
-import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface DailyRow {
@@ -59,7 +59,7 @@ export default function NewRegistrationsReport() {
     years,
   } = useMrReportPeriod("all");
   const [data, setData] = useState<NewRegs | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const fetchReport = async () => {
     setIsLoading(true);
@@ -82,11 +82,7 @@ export default function NewRegistrationsReport() {
     }
   };
 
-  useEffect(() => {
-    if (!ready) return;
-    if (canFetch) fetchReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, startDate, endDate, viewMode]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode]);
 
   // Group daily_data by date for table view
   const dailyTotals = useMemo(() => {

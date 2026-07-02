@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface LabCategoryData {
@@ -69,7 +69,7 @@ export default function LaboratoryAttendanceReport() {
 
   const [data, setData] = useState<LabCategoryData[]>([]);
   const [summary, setSummary] = useState<LabSummary>(emptySummary);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const isAllTime = viewMode === "all";
   const showLifecycleCards = !isAllTime;
@@ -99,11 +99,7 @@ export default function LaboratoryAttendanceReport() {
     }
   };
 
-  useEffect(() => {
-    if (!ready) return;
-    if (canFetch) fetchReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, startDate, endDate, viewMode]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode]);
 
   const hasData = (summary.grand_total ?? 0) > 0;
   const uniquePatients = summary.total_unique_patients_seen ?? summary.grand_total ?? 0;

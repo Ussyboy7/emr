@@ -29,7 +29,7 @@ import type {
   ExtendedConsultationSession,
 } from '@/lib/consultation/room-types';
 import type { RoomPresenceStatus } from '@/lib/consultation/room-presence';
-import { ROOM_PRESENCE_HEARTBEAT_MS } from '@/lib/consultation/room-presence';
+import { isDoctorCheckedIntoRoom, ROOM_PRESENCE_HEARTBEAT_MS, doctorDisplayName } from '@/lib/consultation/room-presence';
 import {
   debugConsultationRoom,
   formatRoomTime as formatTime,
@@ -559,7 +559,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Load room details (check in when opening the room directly)
       let roomData = await roomService.getRoom(numericRoomId);
       const currentDoctorId = currentUser?.id ? Number(currentUser.id) : null;
-      if (currentDoctorId && roomData.current_doctor_id !== currentDoctorId) {
+      if (currentDoctorId && !isDoctorCheckedIntoRoom(roomData, currentDoctorId)) {
         try {
           roomData = await roomService.checkIn(numericRoomId);
         } catch (checkInErr) {
@@ -567,8 +567,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           if (handleAuthError(checkInErr)) return;
         }
       }
-      setPresenceStatus((roomData.presence_status || 'away') as RoomPresenceStatus);
-      setAcceptingPatients(roomData.accepting_patients === true);
+      setPresenceStatus((roomData.my_presence_status || roomData.presence_status || 'away') as RoomPresenceStatus);
+      setAcceptingPatients(roomData.my_accepting_patients ?? roomData.accepting_patients === true);
       
       // Load queue items for this room - single optimized API call
       const queueItems = await fetchAllPaginatedResults((page, pageSize) =>
@@ -601,6 +601,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           .filter((d: number | null): d is number => d !== null && d > 0);
         const avgTime = durations.length > 0 ? Math.round(durations.reduce((a: number, b: number) => a + b, 0) / durations.length) : 0;
 
+        const colleaguesInConsult = (roomData.active_sessions ?? [])
+          .filter((session) => session.doctor_id !== currentDoctorId)
+          .map((session) => ({
+            sessionId: session.id,
+            doctorName: session.doctor_name || 'Doctor',
+            patientName: session.patient_name,
+          }));
+
         const transformedRoom: ConsultationRoom = {
           id: String(roomData.id),
           name: roomData.name,
@@ -608,9 +616,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           status: roomData.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
           currentPatient: validPatients.length > 0 ? validPatients[0].name : undefined,
           startTime: undefined,
-          doctor: roomData.current_doctor_name || undefined,
-          presenceStatus: (roomData.presence_status || 'away') as RoomPresenceStatus,
-          acceptingPatients: roomData.accepting_patients === true,
+          doctor: doctorDisplayName(roomData) || roomData.current_doctor_name || undefined,
+          doctors: roomData.doctors,
+          colleaguesInConsult,
+          presenceStatus: (roomData.my_presence_status || roomData.presence_status || 'away') as RoomPresenceStatus,
+          acceptingPatients: roomData.my_accepting_patients ?? roomData.accepting_patients === true,
           specialtyFocus: roomData.specialty || '',
           totalConsultationsToday: completedCount,
           averageConsultationTime: avgTime,
@@ -625,10 +635,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         await loadPausedSessions();
 
         
-        // Check for active session and restore it
-        const activeSession = (roomData as any).active_session;
-        if (activeSession && activeSession.id) {
-          const restored = await restoreActiveSession(activeSession.id, { silent: true });
+        // Restore this doctor's active session in the room (shared queue — claim on start).
+        const mySession = (roomData.active_sessions ?? []).find(
+          (session) => session.doctor_id === currentDoctorId,
+        ) ?? roomData.active_session;
+        if (mySession?.id) {
+          const restored = await restoreActiveSession(mySession.id, { silent: true });
           if (!restored) {
             console.warn('Failed to restore active session, clearing state');
           }
@@ -648,8 +660,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setIsUpdatingPresence(true);
     try {
       const updated = await roomService.setAccepting(numericRoomId, accepting);
-      setPresenceStatus((updated.presence_status || 'away') as RoomPresenceStatus);
-      setAcceptingPatients(updated.accepting_patients === true);
+      setPresenceStatus((updated.my_presence_status || updated.presence_status || 'away') as RoomPresenceStatus);
+      setAcceptingPatients(updated.my_accepting_patients ?? updated.accepting_patients === true);
       setRoom((prev) =>
         prev
           ? {
@@ -695,8 +707,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     const sendHeartbeat = () => {
       void roomService.heartbeat(numericRoomId).then((updated) => {
-        setPresenceStatus((updated.presence_status || 'away') as RoomPresenceStatus);
-        setAcceptingPatients(updated.accepting_patients === true);
+        setPresenceStatus((updated.my_presence_status || updated.presence_status || 'away') as RoomPresenceStatus);
+        setAcceptingPatients(updated.my_accepting_patients ?? updated.accepting_patients === true);
       }).catch((err) => {
         console.error('Room heartbeat failed:', err);
       });

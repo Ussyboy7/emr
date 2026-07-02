@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { formatDisplayDate } from "@/lib/dates";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import { referralStatusLabel } from "@/lib/referrals/referral-helpers";
 import Link from "next/link";
-import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface BreakdownRow {
@@ -57,7 +57,16 @@ interface ReferralRow {
   facility_type_label?: string;
   specialty?: string;
   facility?: string;
+  is_new?: boolean;
   referred_at?: string;
+}
+
+interface RetainershipRow {
+  sn: number;
+  facility: string;
+  new: number;
+  follow_up: number;
+  total: number;
 }
 
 const emptySummary: ReferralSummary = {
@@ -111,7 +120,8 @@ export default function ReferralTrackingReport() {
   const [statusBreakdown, setStatusBreakdown] = useState<BreakdownRow[]>([]);
   const [facilityBreakdown, setFacilityBreakdown] = useState<BreakdownRow[]>([]);
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [retainership, setRetainership] = useState<RetainershipRow[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   const isAllTime = viewMode === "all";
   const hasData = summary.total > 0;
@@ -129,12 +139,14 @@ export default function ReferralTrackingReport() {
         summary: ReferralSummary;
         status_breakdown?: BreakdownRow[];
         facility_breakdown?: BreakdownRow[];
+        retainership?: RetainershipRow[];
         data: ReferralRow[];
       }>(`/reports/referral-tracking/?${params.toString()}`);
 
       setSummary(normalizeSummary(response.summary));
       setStatusBreakdown(response.status_breakdown ?? []);
       setFacilityBreakdown(response.facility_breakdown ?? []);
+      setRetainership(response.retainership ?? []);
       setReferrals(response.data ?? []);
     } catch (error: unknown) {
       console.error("Error fetching referral report:", error);
@@ -143,17 +155,14 @@ export default function ReferralTrackingReport() {
       setSummary(emptySummary);
       setStatusBreakdown([]);
       setFacilityBreakdown([]);
+      setRetainership([]);
       setReferrals([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (!ready) return;
-    if (canFetch) fetchReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, startDate, endDate, viewMode]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode]);
 
   return (
     <DashboardLayout>
@@ -267,7 +276,7 @@ export default function ReferralTrackingReport() {
                       <p className="text-2xl sm:text-3xl font-bold text-sky-600 dark:text-sky-400">
                         {summary.new_referrals.toLocaleString()}
                       </p>
-                      <p className="text-xs text-muted-foreground mt-1">Draft or submitted to records</p>
+                      <p className="text-xs text-muted-foreground mt-1">First referral to facility for patient</p>
                     </CardContent>
                   </Card>
                   <Card className="border-l-4 border-l-green-500">
@@ -287,6 +296,42 @@ export default function ReferralTrackingReport() {
                 </>
               )}
             </div>
+
+            {retainership.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-cyan-500" />
+                    Retainership hospitals
+                  </CardTitle>
+                  <CardDescription>New vs follow-up by registered facility — {periodLabel}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left p-2">S/N</th>
+                        <th className="text-left p-2">Facility</th>
+                        <th className="text-right p-2">New</th>
+                        <th className="text-right p-2">Follow-up</th>
+                        <th className="text-right p-2">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {retainership.map((row) => (
+                        <tr key={row.sn} className="border-b border-border">
+                          <td className="p-2">{row.sn}</td>
+                          <td className="p-2 font-medium">{row.facility}</td>
+                          <td className="p-2 text-right">{row.new}</td>
+                          <td className="p-2 text-right">{row.follow_up}</td>
+                          <td className="p-2 text-right font-semibold">{row.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>

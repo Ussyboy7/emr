@@ -21,7 +21,15 @@ from .models import (
 )
 from patients.serializers import PatientListSerializer, VitalReadingSerializer
 from patients.photo import patient_photo_url
-from .room_presence import get_active_occupancy
+from .room_presence import get_active_occupancy, get_active_occupancies, get_doctor_occupancy, doctors_on_seat
+
+
+class RoomDoctorPresenceSerializer(serializers.Serializer):
+    doctor_id = serializers.IntegerField()
+    doctor_name = serializers.CharField()
+    presence_status = serializers.CharField()
+    accepting_patients = serializers.BooleanField()
+    active_session = serializers.DictField(allow_null=True)
 
 
 class ConsultationRoomSerializer(serializers.ModelSerializer):
@@ -29,6 +37,12 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
     
     queue_count = serializers.SerializerMethodField()
     active_session = serializers.SerializerMethodField()
+    active_sessions = serializers.SerializerMethodField()
+    doctors = serializers.SerializerMethodField()
+    doctors_on_seat_count = serializers.SerializerMethodField()
+    occupancy_count = serializers.SerializerMethodField()
+    my_presence_status = serializers.SerializerMethodField()
+    my_accepting_patients = serializers.SerializerMethodField()
     clinic_name = serializers.CharField(source='clinic.name', read_only=True, allow_null=True)
     current_doctor_id = serializers.SerializerMethodField()
     current_doctor_name = serializers.SerializerMethodField()
@@ -68,6 +82,12 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
             'updated_at',
             'queue_count',
             'active_session',
+            'active_sessions',
+            'doctors',
+            'doctors_on_seat_count',
+            'occupancy_count',
+            'my_presence_status',
+            'my_accepting_patients',
             'clinic_name',
             'current_doctor_id',
             'current_doctor_name',
@@ -76,7 +96,84 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
         ]
     
     def _active_occupancy(self, obj):
+        request = self.context.get('request')
+        if request and getattr(request.user, 'is_authenticated', False):
+            mine = get_doctor_occupancy(obj, request.user)
+            if mine is not None:
+                return mine
         return get_active_occupancy(obj)
+
+    def _active_sessions_qs(self, obj):
+        prefetched = getattr(obj, '_active_sessions', None)
+        if prefetched is not None:
+            return prefetched
+        return list(
+            obj.sessions.filter(status='active').select_related('patient', 'doctor')
+        )
+
+    def _serialize_active_session(self, session):
+        if not session:
+            return None
+        return {
+            'id': session.id,
+            'session_id': session.session_id,
+            'patient_id': session.patient_id,
+            'patient_name': session.patient.get_full_name(),
+            'doctor_id': session.doctor_id,
+            'doctor_name': session.doctor.get_full_name() if session.doctor else None,
+        }
+
+    @extend_schema_field(RoomDoctorPresenceSerializer(many=True))
+    def get_doctors(self, obj):
+        occupancies = get_active_occupancies(obj)
+        active_sessions = {
+            s.doctor_id: s
+            for s in self._active_sessions_qs(obj)
+            if s.doctor_id is not None
+        }
+        payload = []
+        for occupancy in occupancies:
+            session = active_sessions.get(occupancy.doctor_id)
+            payload.append({
+                'doctor_id': occupancy.doctor_id,
+                'doctor_name': occupancy.doctor.get_full_name(),
+                'presence_status': occupancy.status,
+                'accepting_patients': occupancy.status == ConsultationRoomOccupancy.STATUS_ON_SEAT,
+                'active_session': self._serialize_active_session(session),
+            })
+        return payload
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_doctors_on_seat_count(self, obj):
+        return sum(
+            1
+            for row in get_active_occupancies(obj)
+            if row.status == ConsultationRoomOccupancy.STATUS_ON_SEAT
+        )
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_occupancy_count(self, obj):
+        return len(get_active_occupancies(obj))
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_my_presence_status(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request.user, 'is_authenticated', False):
+            return ConsultationRoomOccupancy.STATUS_AWAY
+        occupancy = get_doctor_occupancy(obj, request.user)
+        if occupancy is None:
+            return ConsultationRoomOccupancy.STATUS_AWAY
+        return occupancy.status
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_my_accepting_patients(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request.user, 'is_authenticated', False):
+            return False
+        occupancy = get_doctor_occupancy(obj, request.user)
+        return bool(
+            occupancy and occupancy.status == ConsultationRoomOccupancy.STATUS_ON_SEAT
+        )
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_current_doctor_id(self, obj):
@@ -92,17 +189,17 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_presence_status(self, obj):
-        occupancy = self._active_occupancy(obj)
-        if not occupancy:
-            return ConsultationRoomOccupancy.STATUS_AWAY
-        return occupancy.status
+        on_seat = doctors_on_seat(obj)
+        if on_seat:
+            return ConsultationRoomOccupancy.STATUS_ON_SEAT
+        occupancies = get_active_occupancies(obj)
+        if occupancies:
+            return occupancies[0].status
+        return ConsultationRoomOccupancy.STATUS_AWAY
 
     @extend_schema_field(OpenApiTypes.BOOL)
     def get_accepting_patients(self, obj):
-        occupancy = self._active_occupancy(obj)
-        return bool(
-            occupancy and occupancy.status == ConsultationRoomOccupancy.STATUS_ON_SEAT
-        )
+        return bool(doctors_on_seat(obj))
     
     @extend_schema_field(OpenApiTypes.INT)
     def get_queue_count(self, obj):
@@ -111,16 +208,13 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
     
     @extend_schema_field(OpenApiTypes.STR)
     def get_active_session(self, obj):
-        """Get active session for this room if any."""
-        active_session = obj.sessions.filter(status='active').first()
-        if active_session:
-            return {
-                'id': active_session.id,
-                'session_id': active_session.session_id,
-                'patient_name': active_session.patient.get_full_name(),
-                'doctor_name': active_session.doctor.get_full_name() if active_session.doctor else None,
-            }
-        return None
+        """First active session in the room (backward compatible)."""
+        active_session = next(iter(self._active_sessions_qs(obj)), None)
+        return self._serialize_active_session(active_session)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_active_sessions(self, obj):
+        return [self._serialize_active_session(s) for s in self._active_sessions_qs(obj)]
 
 
 class ConsultationSessionSerializer(serializers.ModelSerializer):

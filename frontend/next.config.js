@@ -33,6 +33,11 @@ const nextConfig = {
         destination: "/nursing/vitals-history",
         permanent: true,
       },
+      {
+        source: "/medical-records/reports/monthly-mr-return",
+        destination: "/medical-records/reports/comprehensive",
+        permanent: true,
+      },
     ];
   },
   /**

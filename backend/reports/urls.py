@@ -4,7 +4,6 @@ URL configuration for the Reports app.
 from django.urls import path
 from .views import (
     PatientDemographicsReportView,
-    LabStatisticsReportView,
     TopDiagnosesReportView,
     LabPerformanceReportView,
     PharmacyPerformanceReportView,
@@ -20,6 +19,10 @@ from .views import (
     RadiologicalServicesReportView,
     ReferralTrackingReportView,
     DiseasePatternReportView,
+    DiseasePatternComparedReportView,
+    ObservationAdmissionsReportView,
+    PhysioClinicalDiagnosisReportView,
+    EyeClinicalDiagnosisReportView,
     GOPAttendanceReportView,
     WeekendCallDutyReportView,
     EscortLogReportView,
@@ -33,7 +36,6 @@ from .views import (
 
 urlpatterns = [
     path('reports/patient-demographics/', PatientDemographicsReportView.as_view(), name='patient-demographics-report'),
-    path('reports/lab-statistics/', LabStatisticsReportView.as_view(), name='lab-statistics-report'),
     path('reports/top-diagnoses/', TopDiagnosesReportView.as_view(), name='top-diagnoses-report'),
     path('reports/lab-performance/', LabPerformanceReportView.as_view(), name='lab-performance-report'),
     path('reports/pharmacy-performance/', PharmacyPerformanceReportView.as_view(), name='pharmacy-performance-report'),
@@ -49,6 +51,10 @@ urlpatterns = [
     path('reports/radiological-services/', RadiologicalServicesReportView.as_view(), name='radiological-services-report'),
     path('reports/referral-tracking/', ReferralTrackingReportView.as_view(), name='referral-tracking-report'),
     path('reports/disease-pattern/', DiseasePatternReportView.as_view(), name='disease-pattern-report'),
+    path('reports/disease-pattern-compared/', DiseasePatternComparedReportView.as_view(), name='disease-pattern-compared-report'),
+    path('reports/observation-admissions/', ObservationAdmissionsReportView.as_view(), name='observation-admissions-report'),
+    path('reports/physio-clinical-diagnosis/', PhysioClinicalDiagnosisReportView.as_view(), name='physio-clinical-diagnosis-report'),
+    path('reports/eye-clinical-diagnosis/', EyeClinicalDiagnosisReportView.as_view(), name='eye-clinical-diagnosis-report'),
     path('reports/gop-attendance/', GOPAttendanceReportView.as_view(), name='gop-attendance-report'),
     path('reports/weekend-duty/', WeekendCallDutyReportView.as_view(), name='weekend-duty-report'),
     path('reports/escort-log/', EscortLogReportView.as_view(), name='escort-log-report'),

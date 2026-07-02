@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface BreakdownRow {
@@ -111,7 +111,7 @@ export default function PatientDemographicsReport() {
 
   const [report, setReport] = useState<ReturnType<typeof normalizeReport> | null>(null);
   const [cohortMode, setCohortMode] = useState<Demographics["cohort_mode"]>("active_register");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const cohortDescription =
     cohortMode === "registered_in_period"
@@ -142,11 +142,7 @@ export default function PatientDemographicsReport() {
     }
   };
 
-  useEffect(() => {
-    if (!ready) return;
-    if (canFetch) void fetchReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, startDate, endDate, viewMode]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode]);
 
   const summary = report?.summary ?? emptySummary;
   const hasData = (summary.total_patients ?? 0) > 0;

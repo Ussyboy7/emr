@@ -284,12 +284,17 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         created = False
         if order is None:
             try:
+                from common.diagnosis_resolution import resolve_patient_diagnosis_text
+
+                diagnosis_text = resolve_patient_diagnosis_text(visit.patient_id)
+                if not diagnosis_text:
+                    diagnosis_text = "Nursing pool check-in — Physiotherapy"
                 create_kwargs = dict(
                     patient_id=visit.patient_id,
                     visit_id=visit_id,
                     ordered_by=request.user,
                     consultation_session=None,
-                    diagnosis="Nursing pool check-in — Physiotherapy",
+                    diagnosis=diagnosis_text,
                     special_instructions="",
                     priority="normal",
                     status="scheduled",

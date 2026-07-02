@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerDateAnchor } from "@/components/providers/ServerDateProvider";
 import {
   analyticsPeriodLabel,
@@ -60,4 +60,24 @@ export function useMrReportPeriod(defaultViewMode: AnalyticsViewMode = "all") {
     filenameSuffix,
     years,
   };
+}
+
+/**
+ * Fetch when auth is ready and the period is valid.
+ * Uses a ref so callers need not wrap fetchReport in useCallback.
+ */
+export function useMrReportAutoFetch(
+  ready: boolean,
+  canFetch: boolean,
+  fetchReport: () => void | Promise<void>,
+  deps: readonly unknown[]
+) {
+  const fetchRef = useRef(fetchReport);
+  fetchRef.current = fetchReport;
+
+  useEffect(() => {
+    if (!ready || !canFetch) return;
+    void fetchRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, canFetch, ...deps]);
 }

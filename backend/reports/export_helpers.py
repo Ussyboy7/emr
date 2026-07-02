@@ -52,6 +52,8 @@ TABLE_KEYS = (
     "weekly_activity",
     "top_tests",
     "top_procedures",
+    "retainership",
+    "sections",
 )
 
 

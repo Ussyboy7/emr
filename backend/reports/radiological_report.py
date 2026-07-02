@@ -1,108 +1,107 @@
-"""Radiology study volumes by modality for MR radiological services report."""
+"""Radiology study volumes by modality and location for MR radiological services report."""
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 
-from django.db.models import DateField, OuterRef, Q, Subquery
+from django.db.models import DateField, OuterRef, Subquery
 
+from common.order_location import order_location_clinic_name
 from patients.models import Patient
+from radiology.constants import LEGACY_OTHER_MODALITY_LABEL, OTHER_MODALITY_LABEL
 from radiology.models import RadiologyStudy
 
-MODALITY_ROW_DEFS: list[tuple[str, Q]] = [
-    (
-        "X-Ray",
-        Q(modality__icontains="x-ray")
-        | Q(modality__icontains="xray")
-        | Q(procedure__icontains="x-ray"),
-    ),
-    (
-        "ECG",
-        Q(modality__icontains="ecg")
-        | Q(procedure__icontains="ecg")
-        | Q(procedure__icontains="electrocardiogram"),
-    ),
-    (
-        "Ultrasound",
-        Q(modality__icontains="ultrasound") | Q(procedure__icontains="ultrasound"),
-    ),
-    (
-        "CT Scan",
-        Q(modality__icontains="computed tomography")
-        | Q(procedure__icontains="ct scan")
-        | Q(modality__iregex=r"(^|[^a-z])ct([^a-z]|$)")
-        | Q(procedure__iregex=r"(^|[^a-z])ct([^a-z]|$)"),
-    ),
-    (
-        "MRI",
-        Q(modality__icontains="mri")
-        | Q(procedure__icontains="magnetic resonance"),
-    ),
-]
+
+def _study_location(study: RadiologyStudy) -> str:
+    """Resolve clinic/location label — matches radiology order display where possible."""
+    order = study.order
+    if order is None:
+        return "Unspecified"
+    name = order_location_clinic_name(order)
+    if name and name.strip():
+        return name.strip()
+    processing = getattr(order, "processing_clinic", None)
+    if processing is not None and (processing.name or "").strip():
+        return processing.name.strip()
+    legacy = (getattr(order, "clinic", None) or "").strip()
+    if legacy:
+        return legacy
+    return "Unspecified"
 
 
-def _known_modality_q() -> Q:
-    combined = Q()
-    for _, filt in MODALITY_ROW_DEFS:
-        combined |= filt
-    return combined
-
-
-def _study_gender_counts(studies_qs, filt: Q) -> tuple[int, int, int]:
-    qs = studies_qs.filter(filt)
-    male = qs.filter(order__patient__gender="male").count()
-    female = qs.filter(order__patient__gender="female").count()
-    return male, female, qs.count()
+def _study_modality(study: RadiologyStudy) -> str:
+    """Report modality bucket — one row per modality + location, not per procedure."""
+    modality = (study.modality or "").strip()
+    if modality.lower() == LEGACY_OTHER_MODALITY_LABEL.lower():
+        return OTHER_MODALITY_LABEL
+    if modality.lower() == OTHER_MODALITY_LABEL.lower():
+        return OTHER_MODALITY_LABEL
+    if modality:
+        return modality
+    procedure = (study.procedure or "").strip()
+    if procedure.lower() == LEGACY_OTHER_MODALITY_LABEL.lower():
+        return OTHER_MODALITY_LABEL
+    return procedure or "Unspecified"
 
 
 def build_radiological_report(period_start: date, period_end: date) -> dict:
     history_studies = RadiologyStudy.objects.filter(
         order__patient__isnull=False
-    ).select_related("order__patient")
+    ).select_related(
+        "order__patient",
+        "order__location_clinic",
+        "order__processing_clinic",
+        "order__consultation_session__location_clinic",
+        "order__visit__location_clinic",
+    )
     studies = history_studies.filter(
         created_at__date__gte=period_start,
         created_at__date__lte=period_end,
     )
     total = studies.count()
 
+    buckets: dict[tuple[str, str], dict[str, int]] = defaultdict(
+        lambda: {"count": 0, "male": 0, "female": 0}
+    )
+    for study in studies.iterator():
+        modality = _study_modality(study)
+        location = _study_location(study)
+        key = (modality, location)
+        buckets[key]["count"] += 1
+        patient = study.order.patient if study.order else None
+        gender = getattr(patient, "gender", None)
+        if gender == "male":
+            buckets[key]["male"] += 1
+        elif gender == "female":
+            buckets[key]["female"] += 1
+
     categories = []
     total_male = total_female = 0
-    for label, filt in MODALITY_ROW_DEFS:
-        male, female, count = _study_gender_counts(studies, filt)
-        if count > 0:
-            total_male += male
-            total_female += female
-            categories.append(
-                {
-                    "category": label,
-                    "count": count,
-                    "male": male,
-                    "female": female,
-                    "percentage": round((count / total * 100) if total > 0 else 0, 1),
-                }
-            )
-
-    other_male, other_female, other_count = _study_gender_counts(
-        studies, ~_known_modality_q()
-    )
-    if other_count > 0:
-        total_male += other_male
-        total_female += other_female
+    for (modality, location), counts in sorted(
+        buckets.items(),
+        key=lambda item: (-item[1]["count"], item[0][1], item[0][0]),
+    ):
+        count = counts["count"]
+        male = counts["male"]
+        female = counts["female"]
+        total_male += male
+        total_female += female
         categories.append(
             {
-                "category": "Other",
-                "count": other_count,
-                "male": other_male,
-                "female": other_female,
-                "percentage": round((other_count / total * 100) if total > 0 else 0, 1),
+                "modality": modality,
+                "location": location,
+                "category": f"{modality} — {location}",
+                "count": count,
+                "male": male,
+                "female": female,
+                "percentage": round((count / total * 100) if total > 0 else 0, 1),
             }
         )
 
     for sn, row in enumerate(categories, start=1):
         row["sn"] = sn
 
-    patient_ids = set(
-        studies.values_list("order__patient_id", flat=True).distinct()
-    )
+    patient_ids = set(studies.values_list("order__patient_id", flat=True).distinct())
     patient_ids.discard(None)
     total_seen = len(patient_ids)
 

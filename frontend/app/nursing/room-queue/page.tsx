@@ -34,10 +34,14 @@ import {
 } from 'lucide-react';
 import {
   canNursingSendToRoom,
+  doctorDisplayName,
+  doctorsOnSeat,
   presenceStatusBadgeClass,
   presenceStatusLabel,
   ROOM_QUEUE_POLL_MS,
+  type RoomDoctorPresence,
   type RoomPresenceStatus,
+  type RoomQueueDayStats,
 } from '@/lib/consultation/room-presence';
 import {
   buildPresenceOverridePayload,
@@ -70,11 +74,18 @@ interface ConsultationRoom {
   name: string;
   status: 'available' | 'occupied' | 'paused' | 'unavailable';
   doctor?: string;
+  doctors?: RoomDoctorPresence[];
   specialty?: string;
   presenceStatus?: RoomPresenceStatus;
   acceptingPatients?: boolean;
   currentPatient?: QueuedPatient;
+  activeSessions?: Array<{
+    id: number;
+    patient_name: string;
+    doctor_name?: string | null;
+  }>;
   consultationsToday: number;
+  queueStats?: RoomQueueDayStats;
 }
 
 // Patient queue and room data will be loaded from API
@@ -109,7 +120,7 @@ export default function RoomQueuePage() {
         setError(null);
       }
 
-      const [roomsResult, activeSessions, today, queueItems, todayCountByRoom] = await Promise.all([
+      const [roomsResult, activeSessions, today, queueItems, todayCountByRoom, queueStatsByRoom] = await Promise.all([
         fetchAllPaginatedResults((page, page_size) =>
           roomService.getRooms({ page, page_size })
         ),
@@ -123,55 +134,43 @@ export default function RoomQueuePage() {
         getServerToday()
           .then((day) => consultationService.getRoomDaySessionCounts(day))
           .catch(() => ({} as Record<string, number>)),
+        getServerToday()
+          .then((day) => consultationService.getRoomQueueStats(day))
+          .catch(() => ({} as Record<string, RoomQueueDayStats>)),
       ]);
-        
-        // Group sessions by room
-        const sessionsByRoom: Record<string, any[]> = {};
-        activeSessions.forEach((session: any) => {
-          const roomId = String(session.room);
-          if (!sessionsByRoom[roomId]) {
-            sessionsByRoom[roomId] = [];
-          }
-          sessionsByRoom[roomId].push(session);
-        });
-        
-        // Count today's sessions per room (aggregate from backend)
-        const todayCountByRoomResolved = todayCountByRoom;
         
         const transformedRooms: ConsultationRoom[] = roomsResult.map((room: any) => {
           const roomId = String(room.id);
-          const activeSession = sessionsByRoom[roomId]?.[0];
-          const isInConsult = !!activeSession;
+          const roomActiveSessions = (room.active_sessions?.length
+            ? room.active_sessions
+            : activeSessions.filter((session: any) => String(session.room) === roomId)) as any[];
           const canSend = canNursingSendToRoom(room);
           const facilityActive = room.status?.toLowerCase() === 'active' && room.is_active !== false;
+          const onSeatDoctors = doctorsOnSeat(room);
+          const primaryDoctor = onSeatDoctors[0]?.doctor_name || room.current_doctor_name;
           
           return {
             id: roomId,
             name: room.name,
             status: canSend
               ? 'available' as const
-              : isInConsult
+              : roomActiveSessions.length > 0
                 ? 'occupied' as const
                 : facilityActive
                   ? 'paused' as const
                   : 'unavailable' as const,
-            doctor: activeSession?.doctor_name || room.current_doctor_name || undefined,
+            doctor: doctorDisplayName(room) || primaryDoctor || undefined,
+            doctors: room.doctors,
             specialty: room.specialty || '',
             presenceStatus: (room.presence_status || 'away') as RoomPresenceStatus,
             acceptingPatients: room.accepting_patients === true,
-            currentPatient: activeSession ? {
-              id: String(activeSession.patient),
-              name: activeSession.patient_name || '',
-              patientId: String(activeSession.patient),
-              personalNumber: '',
-              waitTime: 0,
-              sentAt: activeSession.started_at,
-              sentBy: 'System',
-              clinic: room.specialty || '',
-              visitType: 'Consultation',
-              roomId: roomId,
-            } : undefined,
+            activeSessions: roomActiveSessions.map((session: any) => ({
+              id: session.id,
+              patient_name: session.patient_name || '',
+              doctor_name: session.doctor_name || null,
+            })),
             consultationsToday: todayCountByRoom[roomId] || 0,
+            queueStats: queueStatsByRoom[roomId],
           };
         });
         setRooms(transformedRooms);
@@ -291,12 +290,28 @@ export default function RoomQueuePage() {
   }, [filteredPatients, rooms]);
 
   // Stats
-  const stats = useMemo(() => ({
-    totalInQueues: patients.length,
-    emergencyCount: patients.filter(p => isEmergencyVisitType(p.visitType)).length,
-    avgWaitTime: patients.length > 0 ? Math.round(patients.reduce((sum, p) => sum + p.waitTime, 0) / patients.length) : 0,
-    roomsWithPatients: new Set(patients.map(p => p.roomId)).size,
-  }), [patients]);
+  const stats = useMemo(() => {
+    const aggregated = rooms.reduce(
+      (acc, room) => {
+        const qs = room.queueStats;
+        if (!qs) return acc;
+        acc.sentToday += qs.sent_today;
+        acc.inConsult += qs.in_consult;
+        acc.completedToday += qs.completed_today;
+        return acc;
+      },
+      { sentToday: 0, inConsult: 0, completedToday: 0 },
+    );
+    return {
+      totalInQueues: patients.length,
+      emergencyCount: patients.filter(p => isEmergencyVisitType(p.visitType)).length,
+      avgWaitTime: patients.length > 0 ? Math.round(patients.reduce((sum, p) => sum + p.waitTime, 0) / patients.length) : 0,
+      roomsWithPatients: rooms.filter((room) => (room.queueStats?.waiting ?? 0) > 0 || (room.activeSessions?.length ?? 0) > 0).length,
+      sentToday: aggregated.sentToday,
+      inConsult: aggregated.inConsult,
+      completedToday: aggregated.completedToday,
+    };
+  }, [patients, rooms]);
 
 
   const openReassignDialog = (patient: QueuedPatient) => {
@@ -491,12 +506,14 @@ export default function RoomQueuePage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
           {[
-            { label: 'Total in Queues', value: stats.totalInQueues, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+            { label: 'Sent today', value: stats.sentToday, icon: ArrowRight, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
+            { label: 'Waiting now', value: stats.totalInQueues, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+            { label: 'In consult', value: stats.inConsult, icon: Stethoscope, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+            { label: 'Completed today', value: stats.completedToday, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
             { label: 'Emergency Cases', value: stats.emergencyCount, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
             { label: 'Avg Wait Time', value: `${stats.avgWaitTime} min`, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-            { label: 'Active Rooms', value: stats.roomsWithPatients, icon: DoorOpen, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
           ].map((stat, i) => (
             <Card key={i}>
               <CardContent className="p-4">
@@ -567,30 +584,56 @@ export default function RoomQueuePage() {
                       </CardTitle>
                       <div className="text-sm text-muted-foreground flex items-center gap-2 mt-1 flex-wrap">
                         <Stethoscope className="h-3 w-3 shrink-0" />
-                        <span>{room.doctor || 'No doctor in room'}</span>
-                        <Badge variant="outline" className={`text-[10px] ${presenceStatusBadgeClass(room.presenceStatus)}`}>
-                          {presenceStatusLabel(room.presenceStatus)}
-                        </Badge>
+                        {room.doctors?.length ? (
+                          room.doctors.map((doc) => (
+                            <Badge
+                              key={doc.doctor_id}
+                              variant="outline"
+                              className={`text-[10px] ${presenceStatusBadgeClass(doc.presence_status)}`}
+                            >
+                              {doc.doctor_name} · {presenceStatusLabel(doc.presence_status)}
+                            </Badge>
+                          ))
+                        ) : (
+                          <>
+                            <span>{room.doctor || 'No doctor in room'}</span>
+                            <Badge variant="outline" className={`text-[10px] ${presenceStatusBadgeClass(room.presenceStatus)}`}>
+                              {presenceStatusLabel(room.presenceStatus)}
+                            </Badge>
+                          </>
+                        )}
                       </div>
                     </div>
                     <Badge variant="outline" className={getStatusColor(room.status)}>
                       {getStatusLabel(room)}
                     </Badge>
                   </div>
-                  {room.currentPatient && (
-                    <div className="mt-2 p-2 rounded bg-amber-500/10 border border-amber-500/20">
-                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">Currently Consulting</p>
-                      <p className="text-sm font-medium">{room.currentPatient.name}</p>
+                  {room.activeSessions && room.activeSessions.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {room.activeSessions.map((session) => (
+                        <div key={session.id} className="p-2 rounded bg-amber-500/10 border border-amber-500/20">
+                          <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">In consult</p>
+                          <p className="text-sm font-medium">{session.patient_name}</p>
+                          {session.doctor_name && (
+                            <p className="text-xs text-muted-foreground">with {session.doctor_name}</p>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between text-sm text-muted-foreground mb-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mb-2">
                     <span className="flex items-center gap-1">
                       <Users className="h-3 w-3" />
-                      {roomPatients.length} waiting
+                      {room.queueStats?.waiting ?? roomPatients.length} waiting
                     </span>
-                    <span>{room.consultationsToday} today</span>
+                    <span>Sent {room.queueStats?.sent_today ?? 0}</span>
+                    <span>Seen {room.queueStats?.in_consult ?? room.activeSessions?.length ?? 0}</span>
+                    <span>Done {room.queueStats?.completed_today ?? room.consultationsToday}</span>
+                    {(room.queueStats?.left_without_consult ?? 0) > 0 && (
+                      <span className="text-amber-600">Left {room.queueStats?.left_without_consult}</span>
+                    )}
                   </div>
 
                   {roomPatients.length === 0 ? (

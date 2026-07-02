@@ -1,7 +1,9 @@
-"""Referral volume and workflow tracking for MR reports."""
+"""Referral volume and retainership hospital pivot for MR reports."""
 from __future__ import annotations
 
 from datetime import date
+
+from django.db.models import Q
 
 from consultation.models import Referral
 
@@ -21,7 +23,6 @@ FACILITY_TYPE_LABELS = {
     "specialist": "Specialist",
 }
 
-# Legacy statuses stored on older rows
 LEGACY_STATUS_MAP = {
     "sent": "submitted_to_records",
     "accepted": "records_review",
@@ -29,15 +30,6 @@ LEGACY_STATUS_MAP = {
     "completed": "closed",
 }
 
-NEW_STATUSES = ("draft", "submitted_to_records", "sent")
-FOLLOW_UP_STATUSES = (
-    "records_review",
-    "returned_for_correction",
-    "approved_for_forms",
-    "accepted",
-    "scheduled",
-)
-COMPLETED_STATUSES = ("closed", "completed")
 CANCELLED_STATUSES = ("cancelled",)
 
 
@@ -57,6 +49,74 @@ def _status_filter_keys(canonical: str) -> tuple[str, ...]:
     return tuple(keys)
 
 
+def _facility_display_name(referral: Referral) -> str:
+    if referral.facility_partner_id and referral.facility_partner:
+        return referral.facility_partner.name
+    return (referral.facility or "").strip() or "Unregistered facility"
+
+
+def _is_new_referral(referral: Referral) -> bool:
+    """First referral for patient + registered facility before this row's date."""
+    if referral.patient_id is None:
+        return True
+    if referral.facility_partner_id:
+        earlier = Referral.objects.filter(
+            patient_id=referral.patient_id,
+            facility_partner_id=referral.facility_partner_id,
+            referred_at__lt=referral.referred_at,
+        ).exclude(status__in=CANCELLED_STATUSES)
+        return not earlier.exists()
+    facility_name = (referral.facility or "").strip().lower()
+    if not facility_name:
+        return True
+    earlier = (
+        Referral.objects.filter(
+            patient_id=referral.patient_id,
+            referred_at__lt=referral.referred_at,
+        )
+        .exclude(status__in=CANCELLED_STATUSES)
+        .filter(Q(facility__iexact=referral.facility) | Q(facility_partner__name__iexact=referral.facility))
+    )
+    return not earlier.exists()
+
+
+def build_retainership_pivot(period_start: date, period_end: date) -> list[dict]:
+    referrals = (
+        Referral.objects.filter(
+            referred_at__date__gte=period_start,
+            referred_at__date__lte=period_end,
+            patient__isnull=False,
+        )
+        .exclude(status__in=CANCELLED_STATUSES)
+        .select_related("patient", "facility_partner")
+        .order_by("referred_at")
+    )
+
+    pivot: dict[str, dict[str, int]] = {}
+    for referral in referrals:
+        name = _facility_display_name(referral)
+        if name not in pivot:
+            pivot[name] = {"new": 0, "follow_up": 0, "total": 0}
+        if _is_new_referral(referral):
+            pivot[name]["new"] += 1
+        else:
+            pivot[name]["follow_up"] += 1
+        pivot[name]["total"] += 1
+
+    rows = []
+    for sn, (facility, counts) in enumerate(sorted(pivot.items(), key=lambda x: (-x[1]["total"], x[0])), start=1):
+        rows.append(
+            {
+                "sn": sn,
+                "facility": facility,
+                "new": counts["new"],
+                "follow_up": counts["follow_up"],
+                "total": counts["total"],
+            }
+        )
+    return rows
+
+
 def build_referral_tracking_report(period_start: date, period_end: date) -> dict:
     referrals = (
         Referral.objects.filter(
@@ -64,7 +124,7 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
             referred_at__date__lte=period_end,
             patient__isnull=False,
         )
-        .select_related("patient")
+        .select_related("patient", "facility_partner")
         .order_by("-referred_at")
     )
 
@@ -72,9 +132,15 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
     distinct_patients = referrals.values("patient").distinct().count()
     active = referrals.exclude(status__in=CANCELLED_STATUSES)
 
-    new_referrals = active.filter(status__in=NEW_STATUSES).count()
-    follow_ups = active.filter(status__in=FOLLOW_UP_STATUSES).count()
-    completed = active.filter(status__in=COMPLETED_STATUSES).count()
+    new_count = 0
+    follow_up_count = 0
+    for referral in active.iterator():
+        if _is_new_referral(referral):
+            new_count += 1
+        else:
+            follow_up_count += 1
+
+    completed = active.filter(status__in=("closed", "completed")).count()
     cancelled = referrals.filter(status__in=CANCELLED_STATUSES).count()
 
     internal = referrals.filter(facility_type="internal").count()
@@ -107,6 +173,8 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
                 }
             )
 
+    retainership = build_retainership_pivot(period_start, period_end)
+
     rows = []
     for referral in referrals[:500]:
         patient = referral.patient
@@ -127,7 +195,8 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
                     referral.facility_type, referral.facility_type
                 ),
                 "specialty": referral.specialty,
-                "facility": referral.facility,
+                "facility": _facility_display_name(referral),
+                "is_new": _is_new_referral(referral),
                 "referred_at": referral.referred_at.isoformat() if referral.referred_at else None,
             }
         )
@@ -135,11 +204,12 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
     return {
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
+        "retainership": retainership,
         "summary": {
             "total_referrals": total,
             "distinct_patients": distinct_patients,
-            "new_referrals": new_referrals,
-            "follow_ups": follow_ups,
+            "new_referrals": new_count,
+            "follow_ups": follow_up_count,
             "completed": completed,
             "cancelled": cancelled,
             "internal": internal,

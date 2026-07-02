@@ -1,5 +1,7 @@
 """
 Doctor presence helpers for consultation rooms.
+
+Rooms support multiple simultaneous doctors up to ``ConsultationRoom.capacity``.
 """
 from __future__ import annotations
 
@@ -47,7 +49,10 @@ def _checkout_occupancy(occupancy: ConsultationRoomOccupancy, *, now=None) -> No
 def expire_occupancy_if_stale(
     occupancy: ConsultationRoomOccupancy | None,
 ) -> ConsultationRoomOccupancy | None:
-    if occupancy is None or not occupancy.is_active:
+    if occupancy is None:
+        return None
+    occupancy.refresh_from_db(fields=['is_active', 'last_seen_at', 'status'])
+    if not occupancy.is_active:
         return None
     cutoff = timezone.now() - timedelta(minutes=ROOM_PRESENCE_STALE_MINUTES)
     if occupancy.last_seen_at and occupancy.last_seen_at >= cutoff:
@@ -56,17 +61,64 @@ def expire_occupancy_if_stale(
     return None
 
 
-def get_active_occupancy(room: ConsultationRoom) -> ConsultationRoomOccupancy | None:
+def _load_active_occupancy_rows(room: ConsultationRoom) -> list[ConsultationRoomOccupancy]:
     active = getattr(room, '_active_occupancies', None)
     if active is not None:
-        occupancy = active[0] if active else None
+        rows = list(active)
     else:
-        occupancy = (
+        rows = list(
             ConsultationRoomOccupancy.objects.filter(room=room, is_active=True)
             .select_related('doctor')
-            .first()
+            .order_by('checked_in_at', 'id')
         )
-    return expire_occupancy_if_stale(occupancy)
+    fresh: list[ConsultationRoomOccupancy] = []
+    for row in rows:
+        kept = expire_occupancy_if_stale(row)
+        if kept is not None:
+            fresh.append(kept)
+    return fresh
+
+
+def get_active_occupancies(room: ConsultationRoom) -> list[ConsultationRoomOccupancy]:
+    """All doctors currently checked into the room."""
+    return _load_active_occupancy_rows(room)
+
+
+def get_active_occupancy(room: ConsultationRoom) -> ConsultationRoomOccupancy | None:
+    """Backward-compatible: first on-seat doctor, else first checked-in doctor."""
+    rows = get_active_occupancies(room)
+    for row in rows:
+        if row.status == ConsultationRoomOccupancy.STATUS_ON_SEAT:
+            return row
+    return rows[0] if rows else None
+
+
+def get_doctor_occupancy(
+    room: ConsultationRoom,
+    doctor,
+) -> ConsultationRoomOccupancy | None:
+    doctor_id = getattr(doctor, 'pk', doctor)
+    for row in get_active_occupancies(room):
+        if row.doctor_id == doctor_id:
+            return row
+    return None
+
+
+def room_occupancy_count(room: ConsultationRoom) -> int:
+    return len(get_active_occupancies(room))
+
+
+def room_has_capacity(room: ConsultationRoom) -> bool:
+    capacity = max(1, int(room.capacity or 1))
+    return room_occupancy_count(room) < capacity
+
+
+def doctors_on_seat(room: ConsultationRoom) -> list[ConsultationRoomOccupancy]:
+    return [
+        row
+        for row in get_active_occupancies(room)
+        if row.status == ConsultationRoomOccupancy.STATUS_ON_SEAT
+    ]
 
 
 def touch_occupancy(occupancy: ConsultationRoomOccupancy) -> None:
@@ -75,8 +127,7 @@ def touch_occupancy(occupancy: ConsultationRoomOccupancy) -> None:
 
 
 def room_accepting_patients(room: ConsultationRoom) -> bool:
-    occupancy = get_active_occupancy(room)
-    return occupancy is not None and occupancy.status == ConsultationRoomOccupancy.STATUS_ON_SEAT
+    return bool(doctors_on_seat(room))
 
 
 def assert_room_operational(room: ConsultationRoom) -> None:
@@ -98,18 +149,11 @@ def assert_room_accepting_patients(room: ConsultationRoom, *, request=None) -> N
                 })
             return
 
-    occupancy = get_active_occupancy(room)
-    if occupancy is None:
+    if not doctors_on_seat(room):
         raise ValidationError({
             'non_field_errors': [
                 f'No doctor is on seat in {room.name}. '
                 'Patients cannot be sent until a doctor checks in.'
-            ]
-        })
-    if occupancy.status != ConsultationRoomOccupancy.STATUS_ON_SEAT:
-        raise ValidationError({
-            'non_field_errors': [
-                f'Doctor in {room.name} is not accepting patients right now.'
             ]
         })
 

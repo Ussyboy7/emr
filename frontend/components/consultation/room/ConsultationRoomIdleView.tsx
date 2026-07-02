@@ -91,7 +91,13 @@ export function ConsultationRoomIdleView({
             {room.name}
           </h1>
           <p className="text-muted-foreground mt-1">
-            {joinDisplayParts(['Consultation Room', room.specialtyFocus, room.doctor])}
+            {joinDisplayParts([
+              'Consultation Room',
+              room.specialtyFocus,
+              room.doctors?.length
+                ? room.doctors.map((d) => d.doctor_name).join(' · ')
+                : room.doctor,
+            ])}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -150,6 +156,33 @@ export function ConsultationRoomIdleView({
           )}
         </CardContent>
       </Card>
+
+      {room.colleaguesInConsult && room.colleaguesInConsult.length > 0 && (
+        <Card className="border-l-4 border-l-amber-500">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Stethoscope className="h-4 w-4 text-amber-600" />
+              Colleagues in this room
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {room.colleaguesInConsult.map((row) => (
+              <div
+                key={row.sessionId}
+                className="flex items-center justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200/60 dark:border-amber-800/60"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{row.patientName}</p>
+                  <p className="text-xs text-muted-foreground">with {row.doctorName}</p>
+                </div>
+                <Badge variant="outline" className="shrink-0 text-amber-700 border-amber-300">
+                  In consult
+                </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="border-l-4 border-l-blue-500">
@@ -421,12 +454,28 @@ export function ConsultationRoomIdleView({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
-              <span className="text-sm text-muted-foreground">Doctor</span>
-              <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                {room.doctor || '—'}
-              </span>
-            </div>
+            {room.doctors?.length ? (
+              <div className="space-y-2">
+                {room.doctors.map((doc) => (
+                  <div
+                    key={doc.doctor_id}
+                    className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg gap-2"
+                  >
+                    <span className="text-sm font-medium truncate">{doc.doctor_name}</span>
+                    <Badge variant="outline" className={`text-[10px] shrink-0 ${presenceStatusBadgeClass(doc.presence_status)}`}>
+                      {presenceStatusLabel(doc.presence_status)}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
+                <span className="text-sm text-muted-foreground">Doctor</span>
+                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                  {room.doctor || '—'}
+                </span>
+              </div>
+            )}
             <div className="flex items-center justify-between p-3 bg-teal-50 dark:bg-teal-900/20 rounded-lg">
               <span className="text-sm text-muted-foreground">Specialty</span>
               <span className="text-sm font-bold text-teal-600 dark:text-teal-400">

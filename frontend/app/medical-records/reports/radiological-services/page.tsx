@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,13 @@ import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface ServiceData {
   sn: number;
+  modality?: string;
+  location?: string;
   category: string;
   count: number;
   male: number;
@@ -77,7 +79,7 @@ export default function RadiologicalServicesReport() {
 
   const [data, setData] = useState<ServiceData[]>([]);
   const [summary, setSummary] = useState<RadiologySummary>(emptySummary);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const isAllTime = viewMode === "all";
   const showLifecycleCards = !isAllTime;
@@ -109,11 +111,7 @@ export default function RadiologicalServicesReport() {
     }
   };
 
-  useEffect(() => {
-    if (!ready) return;
-    if (canFetch) fetchReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, startDate, endDate, viewMode]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode]);
 
   const hasData = (summary.grand_total ?? 0) > 0;
   const uniquePatients = summary.total_unique_patients_seen ?? 0;
@@ -137,7 +135,7 @@ export default function RadiologicalServicesReport() {
               Radiological Services Report
             </h1>
             <p className="text-muted-foreground mt-1">
-              Radiology studies by modality — {periodLabel}
+              Radiology studies by modality and location — {periodLabel}
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
@@ -239,10 +237,12 @@ export default function RadiologicalServicesReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <ScanLine className="h-5 w-5" />
-              Studies by modality
+              Studies by modality and location
             </CardTitle>
             <CardDescription>
-              Study volumes by modality — {periodLabel}. Zero modalities are omitted.
+              One row per modality and location (studies rolled up). Location uses the
+              order&apos;s clinic when set; otherwise processing clinic or legacy clinic text.
+              {periodLabel ? ` — ${periodLabel}` : ""}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -258,6 +258,7 @@ export default function RadiologicalServicesReport() {
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">Modality</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Location</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
@@ -268,7 +269,8 @@ export default function RadiologicalServicesReport() {
                     {data.map((row) => (
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
-                        <td className="p-3 font-medium text-foreground">{row.category}</td>
+                        <td className="p-3 font-medium text-foreground">{row.modality || row.category.split(" — ")[0]}</td>
+                        <td className="p-3 text-foreground">{row.location || row.category.split(" — ")[1] || "—"}</td>
                         <td className="p-3 text-right text-foreground">{row.male.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{row.female.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.count.toLocaleString()}</td>
@@ -276,7 +278,7 @@ export default function RadiologicalServicesReport() {
                       </tr>
                     ))}
                     <tr className="border-t-2 border-border bg-muted/50 font-bold">
-                      <td colSpan={2} className="p-3 text-foreground">Total</td>
+                      <td colSpan={3} className="p-3 text-foreground">Total</td>
                       <td className="p-3 text-right text-foreground">
                         {(summary.total_male ?? 0).toLocaleString()}
                       </td>

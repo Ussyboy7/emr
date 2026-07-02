@@ -47,8 +47,10 @@ import { apiFetch } from '@/lib/api-client';
 import { fetchAllPaginatedResults } from '@/lib/fetch-paginated-results';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import {
+  doctorDisplayName,
   presenceStatusBadgeClass,
   presenceStatusLabel,
+  type RoomDoctorPresence,
   type RoomPresenceStatus,
 } from '@/lib/consultation/room-presence';
 
@@ -90,8 +92,17 @@ interface ConsultationRoom {
     id: number;
     status: "active" | "paused";
     patientName: string;
+    doctorName?: string | null;
     startedAt: string;
   };
+  openSessions?: Array<{
+    id: number;
+    status: "active" | "paused";
+    patientName: string;
+    doctorName?: string | null;
+    startedAt: string;
+  }>;
+  doctors?: RoomDoctorPresence[];
   doctor?: string;
   presenceStatus?: RoomPresenceStatus;
   acceptingPatients?: boolean;
@@ -117,17 +128,23 @@ function sessionRoomIdKey(session: ConsultationSession): string | null {
 function buildOpenSessionsByRoom(
   activeSessions: ConsultationSession[],
   pausedSessions: ConsultationSession[],
-): Map<string, ConsultationSession> {
-  const byRoom = new Map<string, ConsultationSession>();
-  for (const s of pausedSessions) {
-    const rid = sessionRoomIdKey(s);
-    if (rid) byRoom.set(rid, s);
-  }
-  for (const s of activeSessions) {
-    const rid = sessionRoomIdKey(s);
-    if (rid) byRoom.set(rid, s);
-  }
+): Map<string, ConsultationSession[]> {
+  const byRoom = new Map<string, ConsultationSession[]>();
+  const add = (session: ConsultationSession) => {
+    const rid = sessionRoomIdKey(session);
+    if (!rid) return;
+    const list = byRoom.get(rid) ?? [];
+    list.push(session);
+    byRoom.set(rid, list);
+  };
+  for (const s of pausedSessions) add(s);
+  for (const s of activeSessions) add(s);
   return byRoom;
+}
+
+function pickPrimaryOpenSession(sessions?: ConsultationSession[]): ConsultationSession | undefined {
+  if (!sessions?.length) return undefined;
+  return sessions.find((s) => s.status === 'active') ?? sessions[0];
 }
 
 function isRoomOperational(room: { status?: string; is_active?: boolean }): boolean {
@@ -333,8 +350,16 @@ const StartConsultation = () => {
           const todayForRoom = roomTodayMap[roomId];
           const facilityStatus = (room.status?.toLowerCase() || "active") as ConsultationRoom["facilityStatus"];
           const operational = isRoomOperational(room);
-          const openSessionRow = openSessionsByRoom.get(roomId);
+          const openSessionRows = openSessionsByRoom.get(roomId) ?? [];
+          const openSessionRow = pickPrimaryOpenSession(openSessionRows);
           const cardStatus = resolveCardStatus(operational, openSessionRow);
+          const mappedOpenSessions = openSessionRows.map((session) => ({
+            id: session.id,
+            status: session.status === 'paused' ? 'paused' as const : 'active' as const,
+            patientName: session.patient_name || 'Patient',
+            doctorName: session.doctor_name || null,
+            startedAt: session.started_at,
+          }));
 
           return {
             id: roomId,
@@ -342,14 +367,11 @@ const StartConsultation = () => {
             cardStatus,
             facilityStatus,
             openSession: openSessionRow
-              ? {
-                  id: openSessionRow.id,
-                  status: openSessionRow.status === "paused" ? "paused" : "active",
-                  patientName: openSessionRow.patient_name || "Patient",
-                  startedAt: openSessionRow.started_at,
-                }
+              ? mappedOpenSessions.find((s) => s.id === openSessionRow.id) ?? mappedOpenSessions[0]
               : undefined,
-            doctor: room.current_doctor_name || undefined,
+            openSessions: mappedOpenSessions,
+            doctor: doctorDisplayName(room) || room.current_doctor_name || undefined,
+            doctors: room.doctors,
             presenceStatus: (room.presence_status || 'away') as RoomPresenceStatus,
             acceptingPatients: room.accepting_patients === true,
             specialtyFocus: room.specialty || undefined,
@@ -364,7 +386,7 @@ const StartConsultation = () => {
           };
         });
 
-        const roomsWithMappedSession = transformedRooms.filter((r) => r.openSession).length;
+        const roomsWithMappedSession = transformedRooms.filter((r) => (r.openSessions?.length ?? 0) > 0).length;
         const unmatchedOpenSessions = Math.max(0, openConsultations - roomsWithMappedSession);
 
         setOverviewStats({
@@ -958,89 +980,87 @@ const StartConsultation = () => {
               </CardHeader>
               <CardContent className="pt-0 flex-1 flex flex-col">
                 <div className="flex-1 flex flex-col space-y-3">
-                  {/* Doctor / presence */}
+                  {/* Doctors / presence */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className={`w-2 h-2 rounded-full ${
-                      room.presenceStatus === "on_seat"
-                        ? "bg-green-500"
-                        : room.presenceStatus === "not_accepting"
-                          ? "bg-amber-500"
-                          : "bg-gray-400"
-                    }`} />
-                    <div className="text-sm font-medium">
-                      {room.doctor ? (
-                        <span className="text-green-700 dark:text-green-400">{room.doctor}</span>
-                      ) : (
-                        <span className="text-gray-600 dark:text-gray-400">No doctor in room</span>
-                      )}
-                      <Badge
-                        variant="outline"
-                        className={`ml-2 text-[10px] px-1.5 py-0 ${presenceStatusBadgeClass(room.presenceStatus)}`}
-                      >
-                        {presenceStatusLabel(room.presenceStatus)}
-                      </Badge>
-                      {room.specialtyFocus && (
-                        <span className="text-xs text-muted-foreground ml-2">
-                          ({room.specialtyFocus})
-                        </span>
-                      )}
-                    </div>
+                    {room.doctors?.length ? (
+                      room.doctors.map((doc) => (
+                        <Badge
+                          key={doc.doctor_id}
+                          variant="outline"
+                          className={`text-[10px] ${presenceStatusBadgeClass(doc.presence_status)}`}
+                        >
+                          {doc.doctor_name} · {presenceStatusLabel(doc.presence_status)}
+                        </Badge>
+                      ))
+                    ) : (
+                      <>
+                        <div className={`w-2 h-2 rounded-full ${
+                          room.presenceStatus === "on_seat"
+                            ? "bg-green-500"
+                            : room.presenceStatus === "not_accepting"
+                              ? "bg-amber-500"
+                              : "bg-gray-400"
+                        }`} />
+                        <div className="text-sm font-medium">
+                          {room.doctor ? (
+                            <span className="text-green-700 dark:text-green-400">{room.doctor}</span>
+                          ) : (
+                            <span className="text-gray-600 dark:text-gray-400">No doctor in room</span>
+                          )}
+                          <Badge
+                            variant="outline"
+                            className={`ml-2 text-[10px] px-1.5 py-0 ${presenceStatusBadgeClass(room.presenceStatus)}`}
+                          >
+                            {presenceStatusLabel(room.presenceStatus)}
+                          </Badge>
+                        </div>
+                      </>
+                    )}
+                    {room.specialtyFocus && (
+                      <span className="text-xs text-muted-foreground">
+                        ({room.specialtyFocus})
+                      </span>
+                    )}
                   </div>
 
-                  {/* Open session */}
-                  <div
-                    className={`rounded-lg p-3 min-h-[60px] flex flex-col justify-center border ${
-                      room.cardStatus === "unavailable"
-                        ? "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
-                        : room.openSession?.status === "paused"
-                          ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
-                          : room.openSession?.status === "active"
-                            ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
-                            : "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
-                    }`}
-                  >
+                  {/* Open sessions */}
+                  <div className="space-y-2">
+                    {(room.openSessions?.length ? room.openSessions : room.openSession ? [room.openSession] : []).map((session) => (
+                      <div
+                        key={session.id}
+                        className={`rounded-lg p-3 border ${
+                          room.cardStatus === "unavailable"
+                            ? "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
+                            : session.status === "paused"
+                              ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+                              : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                        }`}
+                      >
+                        <p className={`text-xs font-semibold mb-1 ${
+                          session.status === "paused"
+                            ? "text-amber-800 dark:text-amber-300"
+                            : "text-blue-800 dark:text-blue-300"
+                        }`}>
+                          {session.status === "paused" ? "Session paused" : "In consultation"}
+                        </p>
+                        <div className="flex items-center gap-2 text-sm">
+                          <Stethoscope className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">{session.patientName}</span>
+                        </div>
+                        {session.doctorName && (
+                          <p className="text-xs text-muted-foreground mt-1">with {session.doctorName}</p>
+                        )}
+                      </div>
+                    ))}
                     {room.cardStatus === "unavailable" ? (
                       <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
                         Room {room.facilityStatus === "maintenance" ? "under maintenance" : "inactive"}
                       </p>
-                    ) : room.openSession ? (
-                      <>
-                        <p
-                          className={`text-xs font-semibold mb-1 ${
-                            room.openSession.status === "paused"
-                              ? "text-amber-800 dark:text-amber-300"
-                              : "text-blue-800 dark:text-blue-300"
-                          }`}
-                        >
-                          {room.openSession.status === "paused" ? "Session paused" : "In consultation"}
-                        </p>
-                        <div
-                          className={`flex items-center gap-2 text-sm ${
-                            room.openSession.status === "paused"
-                              ? "text-amber-900 dark:text-amber-200"
-                              : "text-blue-900 dark:text-blue-200"
-                          }`}
-                        >
-                          <Stethoscope className="h-4 w-4 flex-shrink-0" />
-                          <span className="truncate">{room.openSession.patientName}</span>
-                        </div>
-                        <div
-                          className={`text-xs mt-1 flex items-center gap-1 ${
-                            room.openSession.status === "paused"
-                              ? "text-amber-600 dark:text-amber-400"
-                              : "text-blue-600 dark:text-blue-400"
-                          }`}
-                        >
-                          <Clock className="h-3 w-3" />
-                          Started:{" "}
-                          {formatDisplayTime(room.openSession.startedAt)}
-                        </div>
-                      </>
-                    ) : (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                    ) : (room.openSessions?.length ?? 0) === 0 && !room.openSession ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 text-center rounded-lg p-3 border bg-gray-50 dark:bg-gray-800/50">
                         No active consultation
                       </p>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Queue Count */}

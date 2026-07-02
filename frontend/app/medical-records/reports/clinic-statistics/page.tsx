@@ -44,7 +44,7 @@ function ClinicStatisticsContent() {
   const { names: clinicNames, loading: clinicsLoading } = useOutpatientClinicTypes();
   const [selectedClinic, setSelectedClinic] = useState("");
   const [report, setReport] = useState<ClinicStatisticsReport | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [metric, setMetric] = useState<Metric>("attendance_count");
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");

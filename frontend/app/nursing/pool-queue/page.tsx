@@ -48,8 +48,11 @@ import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
 import {
   canNursingSendToRoom,
+  doctorDisplayName,
   presenceStatusBadgeClass,
   presenceStatusLabel,
+  type RoomDoctorPresence,
+  type RoomActiveSessionSummary,
 } from '@/lib/consultation/room-presence';
 import {
   buildPresenceOverridePayload,
@@ -124,6 +127,8 @@ interface ConsultationRoom {
   name: string;
   status: 'available' | 'occupied' | 'unavailable';
   doctor?: string;
+  doctors?: RoomDoctorPresence[];
+  activeSessions?: RoomActiveSessionSummary[];
   specialty?: string;
   queueCount: number;
   currentPatient?: string;
@@ -667,7 +672,9 @@ export default function NursingPoolQueuePage() {
             id: String(room.id),
             name: room.name,
             status: canSend ? 'available' as const : facilityActive ? 'occupied' as const : 'unavailable' as const,
-            doctor: room.current_doctor_name || undefined,
+            doctor: doctorDisplayName(room) || room.current_doctor_name || undefined,
+            doctors: room.doctors,
+            activeSessions: room.active_sessions ?? (room.active_session ? [room.active_session] : []),
             specialty: room.specialty || '',
             queueCount: room.queue_count ?? 0,
             currentPatient: room.active_session?.patient_name || undefined,
@@ -1859,21 +1866,38 @@ export default function NursingPoolQueuePage() {
                     }`}
                     onClick={() => canClick && handleRoomPickerSelect(room)}
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
                         <h4 className="font-semibold">{room.name}</h4>
-                        {(() => {
-                          const sub = joinDisplayParts([room.doctor, room.specialty]);
-                          return sub ? (
-                            <p className="text-sm text-muted-foreground">{sub}</p>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">No doctor in room</p>
-                          );
-                        })()}
+                        {room.doctors?.length ? (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {room.doctors.map((doc) => (
+                              <Badge
+                                key={doc.doctor_id}
+                                variant="outline"
+                                className={`text-[10px] ${presenceStatusBadgeClass(doc.presence_status)}`}
+                              >
+                                {doc.doctor_name} · {presenceStatusLabel(doc.presence_status)}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          (() => {
+                            const sub = joinDisplayParts([room.doctor, room.specialty]);
+                            return sub ? (
+                              <p className="text-sm text-muted-foreground">{sub}</p>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">No doctor in room</p>
+                            );
+                          })()
+                        )}
+                        {room.specialty && room.doctors?.length ? (
+                          <p className="text-xs text-muted-foreground mt-1">{room.specialty}</p>
+                        ) : null}
                       </div>
-                      <div className="text-right space-y-1">
+                      <div className="text-right space-y-1 shrink-0">
                         <Badge variant="outline" className={presenceStatusBadgeClass(room.presenceStatus)}>
-                          {presenceStatusLabel(room.presenceStatus)}
+                          {room.acceptingPatients ? 'Accepting' : presenceStatusLabel(room.presenceStatus)}
                         </Badge>
                         {!canSend && (
                           <p className="text-xs text-muted-foreground">
@@ -1881,12 +1905,19 @@ export default function NursingPoolQueuePage() {
                           </p>
                         )}
                         {room.queueCount > 0 && (
-                          <p className="text-xs text-muted-foreground">{room.queueCount} in queue</p>
+                          <p className="text-xs text-muted-foreground">{room.queueCount} waiting</p>
                         )}
                       </div>
                     </div>
-                    {room.currentPatient && (
-                      <p className="text-xs text-muted-foreground mt-2">Current: {room.currentPatient}</p>
+                    {room.activeSessions && room.activeSessions.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {room.activeSessions.map((session) => (
+                          <p key={session.id} className="text-xs text-amber-700 dark:text-amber-400">
+                            In consult: {session.patient_name}
+                            {session.doctor_name ? ` · ${session.doctor_name}` : ''}
+                          </p>
+                        ))}
+                      </div>
                     )}
                   </div>
                 );

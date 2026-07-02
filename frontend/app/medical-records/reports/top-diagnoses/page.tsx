@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
-import { useMrReportPeriod } from "@/hooks/use-mr-report-period";
+import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface TopDiagnosisRow {
@@ -79,7 +79,7 @@ export default function TopDiagnosesReport() {
   const [limit, setLimit] = useState("20");
   const [rows, setRows] = useState<TopDiagnosisRow[]>([]);
   const [summary, setSummary] = useState<TopDiagnosesSummary>(emptySummary);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const isAllTime = viewMode === "all";
   const showRankingMeta = !isAllTime;
@@ -123,11 +123,7 @@ export default function TopDiagnosesReport() {
     }
   };
 
-  useEffect(() => {
-    if (!ready) return;
-    if (canFetch) void fetchReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, startDate, endDate, viewMode, limit]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, limit]);
 
   const hasData = (summary.total_diagnosis_lines ?? 0) > 0;
   const truncated =

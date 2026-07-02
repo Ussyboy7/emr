@@ -1,5 +1,6 @@
 import type { ConsultationSession } from '@/lib/services';
 import type { RoomPresenceStatus } from '@/lib/consultation/room-presence';
+import type { RoomDoctorPresence, RoomActiveSessionSummary } from '@/lib/consultation/room-presence';
 
 export interface ConsultationRoomPatient {
   id: string;
@@ -57,6 +58,12 @@ export interface ConsultationRoomInfo {
   currentPatient?: string;
   startTime?: string;
   doctor?: string;
+  doctors?: RoomDoctorPresence[];
+  colleaguesInConsult?: Array<{
+    sessionId: number;
+    doctorName: string;
+    patientName: string;
+  }>;
   specialtyFocus?: string;
   presenceStatus?: RoomPresenceStatus;
   acceptingPatients?: boolean;

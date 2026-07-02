@@ -1,5 +1,9 @@
 import { apiFetch, buildQueryString } from '../api-client';
-import type { RoomPresenceStatus } from '../consultation/room-presence';
+import type {
+  RoomActiveSessionSummary,
+  RoomDoctorPresence,
+  RoomPresenceStatus,
+} from '../consultation/room-presence';
 
 export interface Room {
   id: number;
@@ -21,13 +25,14 @@ export interface Room {
   current_doctor_name?: string | null;
   presence_status?: RoomPresenceStatus;
   accepting_patients?: boolean;
+  doctors?: RoomDoctorPresence[];
+  doctors_on_seat_count?: number;
+  occupancy_count?: number;
+  my_presence_status?: RoomPresenceStatus;
+  my_accepting_patients?: boolean;
   queue_count?: number;
-  active_session?: {
-    id: number;
-    session_id: string;
-    patient_name: string;
-    doctor_name?: string | null;
-  } | null;
+  active_session?: RoomActiveSessionSummary | null;
+  active_sessions?: RoomActiveSessionSummary[];
 }
 
 export interface RoomFilters {

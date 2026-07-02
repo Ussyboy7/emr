@@ -70,7 +70,7 @@ export default function VisitStatisticsReport() {
   const [data, setData] = useState<VisitStatRow[]>([]);
   const emptySummary: VisitStatSummary = { completed: 0, cancelled: 0, in_progress: 0, scheduled: 0, total: 0, male: 0, female: 0, employee: 0, non_employee: 0, officer: 0, staff: 0, emp_dependent: 0, ret_dependent: 0, nonnpa: 0, retiree: 0 };
   const [summary, setSummary] = useState<VisitStatSummary>(emptySummary);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
 
   const groupBy =

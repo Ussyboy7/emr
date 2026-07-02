@@ -11,6 +11,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
@@ -58,10 +59,19 @@ from .room_presence import (
     assert_room_accepting_patients,
     checkout_other_rooms_for_doctor,
     get_active_occupancy,
+    get_active_occupancies,
+    get_doctor_occupancy,
+    room_has_capacity,
     presence_override_audit_suffix,
     touch_occupancy,
     user_can_override_room_presence,
 )
+from .queue_claim import (
+    assert_doctor_checked_into_room,
+    assert_patient_not_in_other_doctors_session,
+    claim_queue_for_session,
+)
+from .room_queue_stats import build_room_queue_stats
 from .queue_notifications import notify_doctor_in_room
 
 DIAGNOSIS_REVIEW_PAGE = "/medical-records/diagnosis-review"
@@ -118,6 +128,9 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         active_occupancy_qs = ConsultationRoomOccupancy.objects.filter(
             is_active=True,
         ).select_related('doctor')
+        active_session_qs = ConsultationSession.objects.filter(
+            status='active',
+        ).select_related('patient', 'doctor')
         
         return self.scope_queryset(
             ConsultationRoom.objects.all()
@@ -127,6 +140,11 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     'occupancies',
                     queryset=active_occupancy_qs,
                     to_attr='_active_occupancies',
+                ),
+                Prefetch(
+                    'sessions',
+                    queryset=active_session_qs,
+                    to_attr='_active_sessions',
                 ),
             )
         )
@@ -166,6 +184,15 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def _serialize_room(self, room):
         return ConsultationRoomSerializer(room, context=self.get_serializer_context()).data
 
+    @extend_schema(tags=["Consultation"], summary="Queue stats", description="Per-room sent/waiting/in-consult/completed counts for a day.")
+    @action(detail=False, methods=['get'], url_path='queue-stats')
+    def queue_stats(self, request):
+        day = parse_date(request.query_params.get('date') or '') or timezone.localdate()
+        room_ids = list(
+            self.scope_queryset(ConsultationRoom.objects.all()).values_list('id', flat=True)
+        )
+        return Response({'stats': build_room_queue_stats(room_ids, day=day)})
+
     @extend_schema(tags=["Consultation"], summary="Check in to room")
     @action(detail=True, methods=['post'], url_path='check-in')
     def check_in(self, request, pk=None):
@@ -175,23 +202,25 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         with transaction.atomic():
             checkout_other_rooms_for_doctor(user, exclude_room_id=room.id)
-            existing = get_active_occupancy(room)
+            existing = get_doctor_occupancy(room, user)
 
-            if existing and existing.doctor_id != user.id:
-                return Response(
-                    {
-                        'detail': (
-                            f'{room.name} is occupied by '
-                            f'{existing.doctor.get_full_name()}.'
-                        ),
-                    },
-                    status=status.HTTP_409_CONFLICT,
-                )
-
-            if existing and existing.doctor_id == user.id:
+            if existing:
                 existing.status = ConsultationRoomOccupancy.STATUS_ON_SEAT
                 touch_occupancy(existing)
+                existing.save(update_fields=['status'])
             else:
+                if not room_has_capacity(room):
+                    occupancies = get_active_occupancies(room)
+                    names = ', '.join(o.doctor.get_full_name() for o in occupancies[:3])
+                    return Response(
+                        {
+                            'detail': (
+                                f'{room.name} is at capacity ({room.capacity}). '
+                                f'Currently in room: {names}.'
+                            ),
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
                 ConsultationRoomOccupancy.objects.create(
                     room=room,
                     doctor=user,
@@ -208,7 +237,7 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """Doctor leaves the consultation room."""
         room = self.get_object()
         user = request.user
-        occupancy = get_active_occupancy(room)
+        occupancy = get_doctor_occupancy(room, user)
 
         if occupancy is None:
             return Response(self._serialize_room(room))
@@ -217,6 +246,17 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             return Response(
                 {'detail': 'Only the doctor in this room can check out.'},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+
+        has_active_session = ConsultationSession.objects.filter(
+            room=room,
+            doctor=user,
+            status='active',
+        ).exists()
+        if has_active_session:
+            return Response(
+                {'detail': 'End your active consultation before checking out of the room.'},
+                status=status.HTTP_409_CONFLICT,
             )
 
         now = timezone.now()
@@ -237,9 +277,9 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """Toggle whether the doctor in the room accepts new patients."""
         room = self.get_object()
         user = request.user
-        occupancy = get_active_occupancy(room)
+        occupancy = get_doctor_occupancy(room, user)
 
-        if occupancy is None or occupancy.doctor_id != user.id:
+        if occupancy is None:
             return Response(
                 {'detail': 'You must be checked into this room to change availability.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -258,6 +298,7 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             else ConsultationRoomOccupancy.STATUS_NOT_ACCEPTING
         )
         touch_occupancy(occupancy)
+        occupancy.save(update_fields=['status'])
 
         room = self.get_queryset().get(pk=room.pk)
         return Response(self._serialize_room(room))
@@ -268,9 +309,9 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """Refresh last-seen timestamp while the doctor remains in the room."""
         room = self.get_object()
         user = request.user
-        occupancy = get_active_occupancy(room)
+        occupancy = get_doctor_occupancy(room, user)
 
-        if occupancy is None or occupancy.doctor_id != user.id:
+        if occupancy is None:
             return Response(
                 {'detail': 'You are not checked into this room.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -362,6 +403,26 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         existing_session = self._find_existing_active_session(data)
         if existing_session:
+            doctor = data.get('doctor') or self._find_doctor_for_session(data)
+            if (
+                doctor
+                and existing_session.doctor_id
+                and existing_session.doctor_id != getattr(doctor, 'pk', doctor)
+            ):
+                other_name = (
+                    existing_session.doctor.get_full_name()
+                    if existing_session.doctor
+                    else 'another doctor'
+                )
+                return Response(
+                    {
+                        'detail': (
+                            f'This patient is already in consultation with {other_name} '
+                            f'in {existing_session.room.name}.'
+                        ),
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
             existing_session = self._sync_resumed_session_room_to_request(existing_session, data)
             payload = self.get_serializer(existing_session).data
             payload['resumed'] = True
@@ -372,11 +433,25 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         if doctor:
             save_kwargs['doctor'] = doctor
 
+        room = data.get('room')
+        patient = data.get('patient')
+        if room and patient and doctor:
+            try:
+                assert_doctor_checked_into_room(room=room, doctor=doctor)
+                assert_patient_not_in_other_doctors_session(
+                    room=room,
+                    patient=patient,
+                    doctor=doctor,
+                )
+            except DRFValidationError as exc:
+                return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+
         self.auto_set_clinic(serializer)
 
         try:
             with transaction.atomic():
                 session = serializer.save(**save_kwargs)
+                claim_queue_for_session(session)
         except IntegrityError:
             existing_session = self._find_existing_active_session(data)
             if existing_session:

@@ -102,23 +102,6 @@ class PatientDemographicsReportView(views.APIView):
         )
 
 
-@document_api_view(tag="Reports", summary="Laboratory statistics report")
-class LabStatisticsReportView(views.APIView):
-    """Lab order and test volume for the selected period."""
-
-    def get(self, request):
-        from reports.lab_statistics_report import build_lab_statistics_report
-
-        period_start, period_end = _period_bounds_from_request(request)
-        report = build_lab_statistics_report(period_start, period_end)
-        return respond_with_export(
-            request,
-            report,
-            filename_prefix="lab_statistics",
-            title="Lab Statistics",
-        )
-
-
 @document_api_view(tag="Reports", summary="Top diagnoses report")
 class TopDiagnosesReportView(views.APIView):
     """Top ICD-10 diagnoses from completed consultations."""
@@ -272,9 +255,10 @@ class ExportDataView(views.APIView):
 @document_api_view(tag="Reports", summary="Attendance summary report")
 class AttendanceSummaryReportView(views.APIView):
     """Generate attendance summary report by patient category."""
-    
+
     def get(self, request):
-        """Generate attendance summary with optional date filtering."""
+        from reports.attendance_summary_report import build_attendance_summary_report
+
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
@@ -292,162 +276,15 @@ class AttendanceSummaryReportView(views.APIView):
             start_date=period_start,
             end_date=period_end,
         )
-        
-        # Get unique patients per category using a single, consistent cohort.
-        # This ensures summary KPIs and table totals are derived from the same dataset.
-        employee_visits = visits_queryset.filter(patient__category='employee')
-        officers_visits = employee_visits.exclude(
-            patient__employee_type__isnull=True
-        ).exclude(
-            patient__employee_type=''
-        ).filter(
-            patient__employee_type__icontains='officer'
-        )
-        staff_visits = employee_visits.exclude(
-            patient__employee_type__icontains='officer'
-        )
-        dependents_visits = visits_queryset.filter(patient__category='dependent')
-        emp_dep_visits = dependents_visits.exclude(
-            patient__dependent_type__isnull=True
-        ).filter(
-            patient__dependent_type__icontains='employee'
-        )
-        ret_dep_visits = dependents_visits.exclude(
-            patient__dependent_type__isnull=True
-        ).filter(
-            patient__dependent_type__icontains='retiree'
-        )
-        nonnpa_visits = visits_queryset.filter(patient__category='nonnpa')
-        retiree_visits = visits_queryset.filter(patient__category='retiree')
 
-        officers_count = officers_visits.values('patient').distinct().count()
-        officers_male = officers_visits.filter(patient__gender='male').values('patient').distinct().count()
-        officers_female = officers_visits.filter(patient__gender='female').values('patient').distinct().count()
-
-        staff_count = staff_visits.values('patient').distinct().count()
-        staff_male = staff_visits.filter(patient__gender='male').values('patient').distinct().count()
-        staff_female = staff_visits.filter(patient__gender='female').values('patient').distinct().count()
-
-        emp_dep_count = emp_dep_visits.values('patient').distinct().count()
-        emp_dep_male = emp_dep_visits.filter(patient__gender='male').values('patient').distinct().count()
-        emp_dep_female = emp_dep_visits.filter(patient__gender='female').values('patient').distinct().count()
-
-        ret_dep_count = ret_dep_visits.values('patient').distinct().count()
-        ret_dep_male = ret_dep_visits.filter(patient__gender='male').values('patient').distinct().count()
-        ret_dep_female = ret_dep_visits.filter(patient__gender='female').values('patient').distinct().count()
-
-        nonnpa_count = nonnpa_visits.values('patient').distinct().count()
-        nonnpa_male = nonnpa_visits.filter(patient__gender='male').values('patient').distinct().count()
-        nonnpa_female = nonnpa_visits.filter(patient__gender='female').values('patient').distinct().count()
-        
-        retiree_count = retiree_visits.values('patient').distinct().count()
-        retiree_male = retiree_visits.filter(patient__gender='male').values('patient').distinct().count()
-        retiree_female = retiree_visits.filter(patient__gender='female').values('patient').distinct().count()
-        
-        # Calculate totals
-        total_employee = officers_count + staff_count
-        total_non_employee = emp_dep_count + ret_dep_count + nonnpa_count + retiree_count
-        grand_total = total_employee + total_non_employee
-        
-        # Calculate gender totals
-        total_male = officers_male + staff_male + emp_dep_male + ret_dep_male + nonnpa_male + retiree_male
-        total_female = officers_female + staff_female + emp_dep_female + ret_dep_female + nonnpa_female + retiree_female
-        
-        # Restrict lifecycle summary to the same category cohort shown in table totals.
-        cohort_patient_ids = (
-            list(officers_visits.values_list('patient_id', flat=True).distinct()) +
-            list(staff_visits.values_list('patient_id', flat=True).distinct()) +
-            list(emp_dep_visits.values_list('patient_id', flat=True).distinct()) +
-            list(ret_dep_visits.values_list('patient_id', flat=True).distinct()) +
-            list(nonnpa_visits.values_list('patient_id', flat=True).distinct()) +
-            list(retiree_visits.values_list('patient_id', flat=True).distinct())
+        compare = (request.query_params.get('compare') or 'true').strip().lower() != 'false'
+        report = build_attendance_summary_report(
+            period_start,
+            period_end,
+            history_queryset=history_queryset,
+            lifecycle_summary=lifecycle_summary,
+            include_compare=compare,
         )
-        cohort_history_queryset = history_queryset.filter(patient_id__in=cohort_patient_ids)
-        cohort_period_queryset = visits_queryset.filter(patient_id__in=cohort_patient_ids)
-        lifecycle_summary = _build_visit_lifecycle_summary(
-            period_visits_queryset=cohort_period_queryset,
-            history_visits_queryset=cohort_history_queryset,
-            start_date=period_start,
-            end_date=period_end,
-        )
-        
-        # Build response data
-        categories = [
-            {
-                'sn': 1,
-                'category': 'Officers',
-                'employee': officers_count,
-                'non_employee': 0,
-                'male': officers_male,
-                'female': officers_female,
-                'total': officers_count,
-                'percentage': round((officers_count / grand_total * 100) if grand_total > 0 else 0, 1)
-            },
-            {
-                'sn': 2,
-                'category': 'Staff',
-                'employee': staff_count,
-                'non_employee': 0,
-                'male': staff_male,
-                'female': staff_female,
-                'total': staff_count,
-                'percentage': round((staff_count / grand_total * 100) if grand_total > 0 else 0, 1)
-            },
-            {
-                'sn': 3,
-                'category': 'Employee Dependents',
-                'employee': 0,
-                'non_employee': emp_dep_count,
-                'male': emp_dep_male,
-                'female': emp_dep_female,
-                'total': emp_dep_count,
-                'percentage': round((emp_dep_count / grand_total * 100) if grand_total > 0 else 0, 1)
-            },
-            {
-                'sn': 4,
-                'category': 'Retiree Dependents',
-                'employee': 0,
-                'non_employee': ret_dep_count,
-                'male': ret_dep_male,
-                'female': ret_dep_female,
-                'total': ret_dep_count,
-                'percentage': round((ret_dep_count / grand_total * 100) if grand_total > 0 else 0, 1)
-            },
-            {
-                'sn': 5,
-                'category': 'Non-NPA',
-                'employee': 0,
-                'non_employee': nonnpa_count,
-                'male': nonnpa_male,
-                'female': nonnpa_female,
-                'total': nonnpa_count,
-                'percentage': round((nonnpa_count / grand_total * 100) if grand_total > 0 else 0, 1)
-            },
-            {
-                'sn': 6,
-                'category': 'Retirees',
-                'employee': 0,
-                'non_employee': retiree_count,
-                'male': retiree_male,
-                'female': retiree_female,
-                'total': retiree_count,
-                'percentage': round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1)
-            }
-        ]
-        
-        # Filter out categories with 0 counts for cleaner display (optional)
-        # Keep all categories for now to match NPA-EMR format
-        report = {
-            'data': categories,
-            'summary': {
-                'total_employee': total_employee,
-                'total_non_employee': total_non_employee,
-                'total_male': total_male,
-                'total_female': total_female,
-                'grand_total': grand_total,
-                **lifecycle_summary,
-            }
-        }
         return respond_with_export(
             request,
             report,
@@ -630,103 +467,38 @@ class LaboratoryAttendanceReportView(views.APIView):
     """Distinct patients with lab orders in the period, broken down by category."""
 
     def get(self, request):
-        from reports.attendance_statistics import (
-            distinct_patient_gender_counts_for_filter,
-            mr_categorized_patients_q,
-            mr_category_row_filters,
-        )
+        from reports.lab_attendance_report import build_lab_attendance_report
 
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
-
-        history_orders = LabOrder.objects.filter(patient__isnull=False).select_related("patient")
-        lab_orders = history_orders.filter(
-            ordered_at__date__gte=period_start,
-            ordered_at__date__lte=period_end,
-        )
-
-        grand_total = lab_orders.values("patient").distinct().count()
-        data = []
-        total_male = total_female = 0
-        officers_total = staff_total = 0
-        total_non_employee = 0
-
-        for sn, label, filt in mr_category_row_filters():
-            male, female, total = distinct_patient_gender_counts_for_filter(lab_orders, filt)
-            total_male += male
-            total_female += female
-            if sn <= 2:
-                officers_total += total if sn == 1 else 0
-                staff_total += total if sn == 2 else 0
-            else:
-                total_non_employee += total
-            data.append(
-                {
-                    "sn": sn,
-                    "category": label,
-                    "male": male,
-                    "female": female,
-                    "total": total,
-                    "percentage": round((total / grand_total * 100) if grand_total > 0 else 0, 1),
-                }
-            )
-
-        other_male, other_female, other_total = distinct_patient_gender_counts_for_filter(
-            lab_orders, ~mr_categorized_patients_q()
-        )
-        if other_total > 0:
-            total_male += other_male
-            total_female += other_female
-            total_non_employee += other_total
-            data.append(
-                {
-                    "sn": len(data) + 1,
-                    "category": "Other",
-                    "male": other_male,
-                    "female": other_female,
-                    "total": other_total,
-                    "percentage": round((other_total / grand_total * 100) if grand_total > 0 else 0, 1),
-                }
-            )
-
-        total_employee = officers_total + staff_total
-        unique_patient_ids = set(lab_orders.values_list("patient_id", flat=True).distinct())
-
-        first_time_patients = 0
-        returning_patients = 0
-        if period_start and period_end and unique_patient_ids:
-            first_lab_date_subquery = history_orders.filter(
-                patient=OuterRef("pk")
-            ).order_by("ordered_at", "id").values("ordered_at__date")[:1]
-            patients_qs = Patient.objects.filter(id__in=unique_patient_ids).annotate(
-                first_lab_order_date=Subquery(first_lab_date_subquery, output_field=DateField())
-            )
-            first_time_patients = patients_qs.filter(
-                first_lab_order_date__gte=period_start,
-                first_lab_order_date__lte=period_end,
-            ).count()
-            returning_patients = max(patients_qs.count() - first_time_patients, 0)
-
-        report = {
-            "data": data,
-            "summary": {
-                "total_employee": total_employee,
-                "total_non_employee": total_non_employee,
-                "total_male": total_male,
-                "total_female": total_female,
-                "grand_total": grand_total,
-                "first_time_patients": first_time_patients,
-                "returning_patients": returning_patients,
-                "total_unique_patients_seen": grand_total,
-                "total_lab_orders": lab_orders.count(),
-            },
-        }
+        report = build_lab_attendance_report(period_start, period_end)
         return respond_with_export(
             request,
             report,
             filename_prefix="laboratory_attendance",
             title="Laboratory Attendance",
+        )
+
+
+@document_api_view(tag="Reports", summary="Comprehensive report bundle")
+class ComprehensiveReportView(views.APIView):
+    """All MR return sections in one payload and PDF export."""
+
+    def get(self, request):
+        from reports.comprehensive_report_bundle import build_comprehensive_report_bundle
+        from reports.comprehensive_report_pdf import build_comprehensive_report_pdf
+
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
+        report = build_comprehensive_report_bundle(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="comprehensive",
+            title="Comprehensive Report",
+            pdf_builder=build_comprehensive_report_pdf,
         )
 
 
@@ -853,34 +625,6 @@ class ServicesActivitiesReportView(views.APIView):
             report,
             filename_prefix="services_activities",
             title="Services and Activities",
-        )
-
-
-@document_api_view(tag="Reports", summary="Comprehensive clinical report")
-class ComprehensiveReportView(views.APIView):
-    """MR executive summary for the selected period."""
-
-    def get(self, request):
-        from common.report_period import parse_report_period
-        from reports.attendance_statistics import attendable_visits_queryset
-        from reports.comprehensive_report import build_comprehensive_report
-
-        period = parse_report_period(request)
-        period_start, period_end = _period_bounds_from_request(
-            request, default_to_current_year=True
-        )
-        report = build_comprehensive_report(
-            period_start,
-            period_end,
-            all_time=period.all_time,
-            lifecycle_builder=_build_visit_lifecycle_summary,
-            attendable_visits_queryset=attendable_visits_queryset,
-        )
-        return respond_with_export(
-            request,
-            report,
-            filename_prefix="comprehensive",
-            title="Comprehensive Report",
         )
 
 
@@ -1091,6 +835,83 @@ class DiseasePatternReportView(views.APIView):
         )
 
 
+@document_api_view(tag="Reports", summary="Disease pattern compared report")
+class DiseasePatternComparedReportView(views.APIView):
+    """ICD-10 disease pattern across consecutive periods."""
+
+    def get(self, request):
+        from reports.disease_pattern_report import build_disease_pattern_compared_report
+
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
+        try:
+            periods = int(request.query_params.get("periods") or 3)
+        except (TypeError, ValueError):
+            periods = 3
+        periods = max(2, min(periods, 6))
+        report = build_disease_pattern_compared_report(
+            period_start, period_end, periods=periods
+        )
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="disease_pattern_compared",
+            title="Disease Pattern Compared",
+        )
+
+
+@document_api_view(tag="Reports", summary="Observation admissions report")
+class ObservationAdmissionsReportView(views.APIView):
+    """Patients placed on observation — admission events by category."""
+
+    def get(self, request):
+        from reports.observation_admissions import build_observation_admissions_report
+
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_observation_admissions_report(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="observation_admissions",
+            title="Patients Placed on Observation",
+        )
+
+
+@document_api_view(tag="Reports", summary="Physio clinical diagnosis report")
+class PhysioClinicalDiagnosisReportView(views.APIView):
+    """Physiotherapy clinical diagnosis — ICD-10 code frequency from completed sessions."""
+
+    def get(self, request):
+        from reports.physio_clinical_diagnosis import build_physio_clinical_diagnosis_report
+
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_physio_clinical_diagnosis_report(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="physio_clinical_diagnosis",
+            title="Physiotherapy Clinical Diagnosis",
+        )
+
+
+@document_api_view(tag="Reports", summary="Eye clinical diagnosis report")
+class EyeClinicalDiagnosisReportView(views.APIView):
+    """Ophthalmology clinical diagnosis — ICD-10 code frequency from completed sessions."""
+
+    def get(self, request):
+        from reports.eye_clinical_diagnosis import build_eye_clinical_diagnosis_report
+
+        period_start, period_end = _period_bounds_from_request(request)
+        report = build_eye_clinical_diagnosis_report(period_start, period_end)
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="eye_clinical_diagnosis",
+            title="Ophthalmology Clinical Diagnosis",
+        )
+
+
 @document_api_view(tag="Reports", summary="GOP attendance report")
 class GOPAttendanceReportView(views.APIView):
     """Generate GOPD (general outpatient) attendance report."""
@@ -1139,13 +960,7 @@ class GOPAttendanceReportView(views.APIView):
                 patient__category='dependent',
             patient__dependent_type__icontains='retiree'
         )
-        police_visits = visits.filter(
-                patient__category='nonnpa',
-            patient__nonnpa_type__icontains='police'
-        )
-        non_npa_visits = visits.filter(patient__category='nonnpa').exclude(
-            patient__nonnpa_type__icontains='police'
-        )
+        nonnpa_visits = visits.filter(patient__category='nonnpa')
         retiree_visits = visits.filter(patient__category='retiree')
 
         def category_counts(qs):
@@ -1158,23 +973,22 @@ class GOPAttendanceReportView(views.APIView):
         staff_male, staff_female, staff_total = category_counts(staff_visits)
         emp_dep_male, emp_dep_female, emp_dep_total = category_counts(emp_dep_visits)
         ret_dep_male, ret_dep_female, ret_dep_total = category_counts(ret_dep_visits)
-        police_male, police_female, police_total = category_counts(police_visits)
-        non_npa_male, non_npa_female, non_npa_total = category_counts(non_npa_visits)
+        nonnpa_male, nonnpa_female, nonnpa_total = category_counts(nonnpa_visits)
         retiree_male, retiree_female, retiree_total = category_counts(retiree_visits)
 
         grand_total = (
             officers_total + staff_total + emp_dep_total +
-            ret_dep_total + police_total + non_npa_total + retiree_total
+            ret_dep_total + nonnpa_total + retiree_total
         )
         total_employee = officers_total + staff_total
-        total_non_employee = emp_dep_total + ret_dep_total + police_total + non_npa_total + retiree_total
+        total_non_employee = emp_dep_total + ret_dep_total + nonnpa_total + retiree_total
         total_male = (
             officers_male + staff_male + emp_dep_male + ret_dep_male +
-            police_male + non_npa_male + retiree_male
+            nonnpa_male + retiree_male
         )
         total_female = (
             officers_female + staff_female + emp_dep_female + ret_dep_female +
-            police_female + non_npa_female + retiree_female
+            nonnpa_female + retiree_female
         )
 
         categories = [
@@ -1182,9 +996,8 @@ class GOPAttendanceReportView(views.APIView):
             {'sn': 2, 'category': 'Staff', 'male': staff_male, 'female': staff_female, 'total': staff_total},
             {'sn': 3, 'category': 'Employee Dependents', 'male': emp_dep_male, 'female': emp_dep_female, 'total': emp_dep_total},
             {'sn': 4, 'category': 'Retiree Dependents', 'male': ret_dep_male, 'female': ret_dep_female, 'total': ret_dep_total},
-            {'sn': 5, 'category': 'Police', 'male': police_male, 'female': police_female, 'total': police_total},
-            {'sn': 6, 'category': 'Non-NPA', 'male': non_npa_male, 'female': non_npa_female, 'total': non_npa_total},
-            {'sn': 7, 'category': 'Retirees', 'male': retiree_male, 'female': retiree_female, 'total': retiree_total},
+            {'sn': 5, 'category': 'Non NPA', 'male': nonnpa_male, 'female': nonnpa_female, 'total': nonnpa_total},
+            {'sn': 6, 'category': 'Retirees', 'male': retiree_male, 'female': retiree_female, 'total': retiree_total},
         ]
         for row in categories:
             row['percentage'] = round((row['total'] / grand_total * 100) if grand_total > 0 else 0, 1)

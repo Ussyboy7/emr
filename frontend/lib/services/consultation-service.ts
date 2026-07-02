@@ -1,5 +1,6 @@
 import { apiFetch, buildQueryString } from '../api-client';
 import { MAX_LIST_PAGE_SIZE } from '../pagination-constants';
+import type { RoomQueueDayStats } from '../consultation/room-presence';
 
 export interface ConsultationStats {
   today: {
@@ -321,6 +322,19 @@ class ConsultationService {
         `/consultation/sessions/room-day-counts/${query}`
       );
       return res.counts || {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** Per-room queue funnel stats (sent / waiting / in consult / completed). */
+  async getRoomQueueStats(date: string): Promise<Record<string, RoomQueueDayStats>> {
+    try {
+      const query = buildQueryString({ date });
+      const res = await apiFetch<{ stats: Record<string, RoomQueueDayStats> }>(
+        `/consultation/rooms/queue-stats/${query}`
+      );
+      return res.stats || {};
     } catch {
       return {};
     }

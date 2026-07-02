@@ -326,7 +326,9 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         created = False
         if order is None:
             from common.order_location import resolve_order_location_clinic
+            from common.diagnosis_resolution import resolve_patient_diagnosis_text
 
+            diagnosis_text = resolve_patient_diagnosis_text(visit.patient_id)
             create_kwargs = dict(
                 patient_id=visit.patient_id,
                 visit_id=visit_id,
@@ -338,7 +340,7 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 visual_acuity_ou="",
                 refraction_od="",
                 refraction_os="",
-                diagnosis="",
+                diagnosis=diagnosis_text,
                 treatment_plan="",
                 special_instructions="",
                 priority="routine",

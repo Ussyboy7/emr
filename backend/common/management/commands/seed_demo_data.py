@@ -458,7 +458,7 @@ class Command(BaseCommand):
                     '/medical-records', '/medical-records/patients/new', '/medical-records/patients',
                     '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
                     '/medical-records/coding', '/medical-records/diagnosis-review', '/medical-records/patient-records', '/medical-records/referrals', '/medical-records/reports',
-                    '/medical-records/reports/new-registrations', '/medical-records/reports/lab-statistics',
+                    '/medical-records/reports/new-registrations',
                     '/medical-records/reports/patient-demographics',
                     # No other modules
                 ],
