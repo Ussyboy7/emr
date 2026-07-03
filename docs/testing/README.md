@@ -6,7 +6,9 @@ Index for validation, UAT, and go-live. Use your **staging or UAT URL** and **te
 
 | Document | Use when |
 |----------|----------|
-| [UAT_SCENARIOS.md](UAT_SCENARIOS.md) | **Primary UAT** — role-based scenarios |
+| [UAT_BY_DEPARTMENT.md](UAT_BY_DEPARTMENT.md) | **Full UAT** — every department × module with scenario IDs |
+| [checklists/](checklists/README.md) | **Printable one-pagers** — per-department checkbox sheets |
+| [UAT_SCENARIOS.md](UAT_SCENARIOS.md) | **Quick UAT** — shortened role checklist (~2–4 h per role) |
 | [UAT_SIGNOFF.md](UAT_SIGNOFF.md) | **Sign-off form** — environment, defects, go/no-go |
 | [EMR_GO_LIVE_CHECKLIST.md](EMR_GO_LIVE_CHECKLIST.md) | Production launch day and pre-go-live sign-off |
 

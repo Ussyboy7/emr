@@ -31,8 +31,13 @@ Use this form with [UAT_SCENARIOS.md](UAT_SCENARIOS.md). Complete one record per
 | Nursing | | |
 | Consultation | | |
 | Laboratory | | |
-| Pharmacy | | |
-| Administration | | |
+| Pharmacy (+ HOD if applicable) | | |
+| Radiology | | |
+| Physiotherapy | | |
+| Eye clinic | | |
+| Human resources | | |
+| Analytics (delegate) | | |
+| Administration / ICT | | |
 
 Passwords: distribute securely (not in this file or email body).
 
@@ -43,9 +48,11 @@ Passwords: distribute securely (not in this file or email body).
 Each tester:
 
 1. Read their [role user guide](../user/ROLE_MEDICAL_RECORDS.md) (pick the matching `ROLE_*.md`).
-2. Work through their section in [UAT_SCENARIOS.md](UAT_SCENARIOS.md).
+2. Work through their section in [UAT_BY_DEPARTMENT.md](UAT_BY_DEPARTMENT.md) (full) or [UAT_SCENARIOS.md](UAT_SCENARIOS.md) (quick).
 3. Log defects (section 4).
 4. Sign their row in section 5.
+
+**Printable sheets:** [checklists/](checklists/README.md) — one PDF per department for field testing.
 
 **End-to-end path** (clinical lead or delegate): complete the cross-cutting flow in UAT_SCENARIOS once per release.
 
@@ -80,7 +87,12 @@ Use the ticket template in [EMR_SUPPORT_MAINTENANCE.md](../admin/EMR_SUPPORT_MAI
 | Consultation | | | | | |
 | Laboratory | | | | | |
 | Pharmacy | | | | | |
-| Administration | | | | | |
+| Radiology | | | | | |
+| Physiotherapy | | | | | |
+| Eye clinic | | | | | |
+| Human resources | | | | | |
+| Analytics | | | | | |
+| Administration / ICT | | | | | |
 
 ---
 

@@ -50,7 +50,9 @@ Start here. This index lists **maintained** documentation. Generated API docs li
 | Document | Description |
 |----------|-------------|
 | [testing/README.md](testing/README.md) | Testing index |
-| [testing/UAT_SCENARIOS.md](testing/UAT_SCENARIOS.md) | User acceptance scenarios |
+| [testing/UAT_BY_DEPARTMENT.md](testing/UAT_BY_DEPARTMENT.md) | Full UAT — per department, per module |
+| [testing/checklists/](testing/checklists/README.md) | Printable UAT one-pagers per department |
+| [testing/UAT_SCENARIOS.md](testing/UAT_SCENARIOS.md) | Quick UAT role checklist |
 | [testing/UAT_SIGNOFF.md](testing/UAT_SIGNOFF.md) | UAT sign-off and go/no-go record |
 | [testing/EMR_GO_LIVE_CHECKLIST.md](testing/EMR_GO_LIVE_CHECKLIST.md) | Go-live checklist |
 
