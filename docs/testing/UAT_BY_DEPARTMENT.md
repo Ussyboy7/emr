@@ -2,7 +2,7 @@
 
 Comprehensive UAT design aligned with the canonical page catalog (`frontend/lib/page-permissions.ts`), role guides (`docs/user/ROLE_*.md`), and clinical workflows (`docs/workflows/`).
 
-**Use with:** [UAT_SIGNOFF.md](UAT_SIGNOFF.md) for formal sign-off · [UAT_SCENARIOS.md](UAT_SCENARIOS.md) for the shorter role checklist.
+**Use with:** [UAT_SIGNOFF.md](UAT_SIGNOFF.md) for formal sign-off · [UAT_SCENARIOS.md](UAT_SCENARIOS.md) for the shorter role checklist · **[Printable one-pagers](checklists/README.md)** per department.
 
 ---
 

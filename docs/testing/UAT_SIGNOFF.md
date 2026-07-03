@@ -52,6 +52,8 @@ Each tester:
 3. Log defects (section 4).
 4. Sign their row in section 5.
 
+**Printable sheets:** [checklists/](checklists/README.md) — one PDF per department for field testing.
+
 **End-to-end path** (clinical lead or delegate): complete the cross-cutting flow in UAT_SCENARIOS once per release.
 
 ---
