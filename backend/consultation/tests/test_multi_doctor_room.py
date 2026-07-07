@@ -186,3 +186,118 @@ class MultiDoctorRoomTest(APITestCase):
         self.assertGreaterEqual(room_stats["sent_today"], 1)
         self.assertEqual(room_stats["waiting"], 0)
         self.assertGreaterEqual(room_stats["in_consult"], 1)
+
+    def test_sessions_by_visits_returns_open_session_after_queue_claim(self):
+        self._check_in(self.doctor_a, self.room)
+        self.client.force_authenticate(user=self.nurse)
+        self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient_one.pk,
+                "visit": self.visit_one.pk,
+            },
+            format="json",
+        )
+        self.client.force_authenticate(user=self.doctor_a)
+        session_resp = self.client.post(
+            "/api/v1/consultation/sessions/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient_one.pk,
+                "visit": self.visit_one.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(session_resp.status_code, status.HTTP_201_CREATED)
+
+        self.client.force_authenticate(user=self.nurse)
+        by_visits = self.client.get(
+            f"/api/v1/consultation/sessions/by-visits/?visit_ids={self.visit_one.pk}"
+        )
+        self.assertEqual(by_visits.status_code, status.HTTP_200_OK)
+        results = by_visits.data.get("results") or []
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["visit"], self.visit_one.pk)
+        self.assertEqual(results[0]["room_name"], self.room.name)
+        self.assertIn(results[0]["status"], ("active", "paused"))
+
+        queue_by_visits = self.client.get(
+            f"/api/v1/consultation/queue/by-visits/?visit_ids={self.visit_one.pk}"
+        )
+        self.assertEqual(queue_by_visits.status_code, status.HTTP_200_OK)
+        self.assertEqual(queue_by_visits.data.get("results") or [], [])
+
+    def test_nurse_cannot_requeue_patient_already_in_consultation(self):
+        self._check_in(self.doctor_a, self.room)
+        self.client.force_authenticate(user=self.nurse)
+        self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient_one.pk,
+                "visit": self.visit_one.pk,
+            },
+            format="json",
+        )
+        self.client.force_authenticate(user=self.doctor_a)
+        start_resp = self.client.post(
+            "/api/v1/consultation/sessions/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient_one.pk,
+                "visit": self.visit_one.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(start_resp.status_code, status.HTTP_201_CREATED)
+
+        self.client.force_authenticate(user=self.nurse)
+        requeue = self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient_one.pk,
+                "visit": self.visit_one.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(requeue.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(
+            ConsultationQueue.objects.filter(
+                room=self.room,
+                patient=self.patient_one,
+                is_active=True,
+            ).exists()
+        )
+
+    def test_multi_clinic_session_end_marks_clinic_not_whole_visit(self):
+        """GOPD+Physio visit stays in_progress when only GOPD consult ends."""
+        self._check_in(self.doctor_a, self.room)
+        patient, visit = create_test_patient_visit(patient_id="MULTI-LEG-01")
+        visit.clinics = ["GOPD", "Physiotherapy"]
+        visit.status = "in_progress"
+        visit.save()
+
+        self.client.force_authenticate(user=self.nurse)
+        self.client.post(
+            "/api/v1/consultation/queue/",
+            {"room": self.room.pk, "patient": patient.pk, "visit": visit.pk},
+            format="json",
+        )
+        self.client.force_authenticate(user=self.doctor_a)
+        session_resp = self.client.post(
+            "/api/v1/consultation/sessions/",
+            {"room": self.room.pk, "patient": patient.pk, "visit": visit.pk},
+            format="json",
+        )
+        self.assertEqual(session_resp.status_code, status.HTTP_201_CREATED)
+        session_id = session_resp.data["id"]
+
+        end_resp = self.client.post(f"/api/v1/consultation/sessions/{session_id}/end/")
+        self.assertEqual(end_resp.status_code, status.HTTP_200_OK)
+
+        visit.refresh_from_db()
+        self.assertEqual(visit.status, "in_progress")
+        self.assertIn("GOPD", visit.completed_clinics)
+        self.assertNotIn("Physiotherapy", visit.completed_clinics)

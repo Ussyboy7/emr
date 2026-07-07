@@ -126,16 +126,15 @@ def apply_nursing_status_filter(
 ):
     """
     Narrow visits for nursing pool queue (expects queryset already limited, e.g. in_progress + date).
-    nursing_status: pending | vitals_incomplete | ready | sent_to_room | sent_to_physiotherapy | completed
+    nursing_status: pending | vitals_incomplete | ready | sent_to_room | in_consultation | sent_to_physiotherapy | completed
 
     Stages are mutually exclusive (the three nursing cards on the dashboard
     should sum to Today's Visits, modulo 'Completed'):
       - pending:           no vitals AND not in queue/session
       - vitals_incomplete: partial vitals AND not in queue/session
       - ready:             complete vitals AND not in queue/session
-      - sent_to_room:      in active queue
-      - in_consultation:   sent_to_room OR has non-cancelled session
-                           (metric only — see nursing_pool_metrics)
+      - sent_to_room:      in active queue (waiting for doctor)
+      - in_consultation:   in active queue OR active/paused session
       - completed:         visit status completed OR session completed
 
     sent_to_room_basis (only sent_to_room):
@@ -226,6 +225,18 @@ def apply_nursing_status_filter(
             q_items = q_items.filter(queued_at__date__lte=end_date)
         visit_ids = q_items.values('visit_id')
         return queryset.filter(id__in=visit_ids).exclude(status='completed')
+
+    if ns == 'in_consultation':
+        in_queue = Exists(
+            ConsultationQueue.objects.filter(is_active=True, visit_id=OuterRef('pk'))
+        )
+        in_open_session = Exists(
+            ConsultationSession.objects.filter(
+                visit_id=OuterRef('pk'),
+                status__in=['active', 'paused'],
+            )
+        )
+        return queryset.exclude(status='completed').filter(in_queue | in_open_session)
 
     if ns in ('sent_to_physiotherapy', 'sent_to_physio'):
         from physiotherapy.models import PhysioOrder
@@ -988,9 +999,10 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             .values_list('visit_id', flat=True)
         )
         session_visit_ids = set(
-            ConsultationSession.objects.filter(visit_id__in=visit_ids)
-            .exclude(status__in=['cancelled'])
-            .values_list('visit_id', flat=True)
+            ConsultationSession.objects.filter(
+                visit_id__in=visit_ids,
+                status__in=['active', 'paused'],
+            ).values_list('visit_id', flat=True)
         )
         in_consultation_ids = in_queue_ids | session_visit_ids
         in_consultation = sum(1 for vid in visit_ids if vid in in_consultation_ids)

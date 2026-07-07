@@ -41,6 +41,8 @@ from .serializers import (
 
 
 ACTIVE_EYE_ORDER_STATUSES = ("pending", "scheduled", "in_progress")
+EYE_ORDER_LEG_STATUSES = ACTIVE_EYE_ORDER_STATUSES + ("completed",)
+EYE_ORDER_LEG_RANK = {"in_progress": 0, "scheduled": 1, "pending": 2, "completed": 3}
 
 
 @document_viewset(tag="Eyecare", resource="eye orders")
@@ -246,6 +248,18 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         order.status = "completed"
         order.completed_at = timezone.now()
         order.save(update_fields=["status", "completed_at"])
+        if order.visit_id:
+            from patients.models import Visit
+            from patients.nursing_leg_status import (
+                apply_visit_completion_after_leg,
+                mark_visit_clinic_completed,
+            )
+
+            visit = Visit.objects.filter(pk=order.visit_id).first()
+            if visit is not None:
+                mark_visit_clinic_completed(visit, "Eye Clinic")
+                apply_visit_completion_after_leg(visit)
+                visit.save(update_fields=["completed_clinics", "status"])
         return Response(EyeOrderSerializer(order).data)
 
     @extend_schema(tags=["Eyecare"], summary="Checkins for visits")
@@ -270,22 +284,36 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         orders = (
             self.scope_queryset(
-                EyeOrder.objects.filter(visit_id__in=visit_ids, status__in=ACTIVE_EYE_ORDER_STATUSES)
+                EyeOrder.objects.filter(visit_id__in=visit_ids, status__in=EYE_ORDER_LEG_STATUSES)
             )
             .order_by("-ordered_at")
         )
         best: dict[int, EyeOrder] = {}
         for o in orders:
-            if o.visit_id and o.visit_id not in best:
+            if not o.visit_id:
+                continue
+            existing = best.get(o.visit_id)
+            if existing is None:
                 best[o.visit_id] = o
+                continue
+            if EYE_ORDER_LEG_RANK.get(o.status, 9) < EYE_ORDER_LEG_RANK.get(existing.status, 9):
+                best[o.visit_id] = o
+
+        from patients.nursing_leg_status import order_leg_state
 
         out: dict[str, dict] = {}
         for vid in visit_ids:
             o = best.get(vid)
             if o:
-                out[str(vid)] = {"checked_in": True, "order_id": o.id, "status": o.status}
+                leg_state = order_leg_state(o.status)
+                out[str(vid)] = {
+                    "checked_in": leg_state != "pending",
+                    "order_id": o.id,
+                    "status": o.status,
+                    "leg_state": leg_state,
+                }
             else:
-                out[str(vid)] = {"checked_in": False}
+                out[str(vid)] = {"checked_in": False, "leg_state": "pending"}
         return Response({"results": out})
 
     @extend_schema(tags=["Eyecare"], summary="Checkin from visit")

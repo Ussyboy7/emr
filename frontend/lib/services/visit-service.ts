@@ -22,7 +22,7 @@ export interface VisitFilters {
   /** Exclude visits that already have a completed consultation (nursing pool). */
   nursing_pool?: 1 | '1';
   /** Server-side nursing queue segment. */
-  nursing_status?: 'pending' | 'vitals_incomplete' | 'ready' | 'sent_to_room' | 'sent_to_physiotherapy' | 'completed';
+  nursing_status?: 'pending' | 'vitals_incomplete' | 'ready' | 'sent_to_room' | 'in_consultation' | 'sent_to_physiotherapy' | 'completed';
 }
 
 /** Full nursing pool report (trends, legs, aligned vs queue-date room counts). */

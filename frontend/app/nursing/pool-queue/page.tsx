@@ -59,6 +59,16 @@ import {
   userCanOverrideRoomPresence,
   type PresenceOverridePayload,
 } from '@/lib/consultation/queue-override-permissions';
+import {
+  getConsultationLegState,
+  isEyeServiceClinic,
+  isPhysioServiceClinic,
+  legLabel,
+  legNeedsRoutingAction,
+  legShowsRoutedOrDone,
+  normalizeOrderLegState,
+  type VisitLegState,
+} from '@/lib/nursing/visit-leg-status';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 
@@ -78,10 +88,27 @@ const NURSING_STAGE_PRIORITY: Record<string, number> = {
   'Vitals Recorded': 2,
   'Ready for Consultation': 3,
   'Sent to Room': 4,
-  'Sent to Physiotherapy': 5,
-  'Sent to Eye Clinic': 6,
-  'Completed': 7,
+  'In Consultation': 5,
+  'Sent to Physiotherapy': 6,
+  'Sent to Eye Clinic': 7,
+  'Completed': 8,
 };
+
+type NursingStageStatus =
+  | 'Pending'
+  | 'Vitals Recorded'
+  | 'Ready for Consultation'
+  | 'Sent to Room'
+  | 'In Consultation'
+  | 'Sent to Physiotherapy'
+  | 'Sent to Eye Clinic'
+  | 'Completed';
+
+interface VisitSessionSummary {
+  room_name: string;
+  status: string;
+  doctor_name?: string;
+}
 
 // Types
 interface Patient {
@@ -96,8 +123,9 @@ interface Patient {
   visitTime: string;
   visitType: string;
   visitNotes?: string; // Notes / Special Instructions from visit
-  nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' | 'Completed';
+  nursingStatus: NursingStageStatus;
   consultationRoom?: string;
+  consultationDoctorName?: string;
   vitals?: VitalsData;
   age?: number;
   gender?: string;
@@ -191,10 +219,11 @@ export default function NursingPoolQueuePage() {
   /** Silent poll: reuse consultation queue maps (room labels) instead of refetching. */
   const queueRoomCacheRef = useRef<Map<number, string>>(new Map());
   const queueSentAtCacheRef = useRef<Map<number, string>>(new Map());
+  const visitSessionCacheRef = useRef<Map<number, VisitSessionSummary>>(new Map());
   /** Silent poll: skip physio/eye/vitals refetch when this page's visit id set is unchanged. */
   const visitEnrichmentKeyRef = useRef<string>('');
-  const physioEnrichmentCacheRef = useRef<Record<number, { orderId: number; status: string }>>({});
-  const eyeEnrichmentCacheRef = useRef<Record<number, { orderId: number; status: string }>>({});
+  const physioEnrichmentCacheRef = useRef<Record<number, { orderId: number; status: string; legState: VisitLegState }>>({});
+  const eyeEnrichmentCacheRef = useRef<Record<number, { orderId: number; status: string; legState: VisitLegState }>>({});
   const vitalsEnrichmentCacheRef = useRef<Map<number, unknown>>(new Map());
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
@@ -214,8 +243,8 @@ export default function NursingPoolQueuePage() {
   const [markLeftPatient, setMarkLeftPatient] = useState<NursingPatient | null>(null);
   const [markLeftReason, setMarkLeftReason] = useState('Patient left before consultation');
   const [isMarkLeftDialogOpen, setIsMarkLeftDialogOpen] = useState(false);
-  const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
-  const [eyeCheckins, setEyeCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
+  const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string; legState: VisitLegState }>>({});
+  const [eyeCheckins, setEyeCheckins] = useState<Record<number, { orderId: number; status: string; legState: VisitLegState }>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
@@ -275,6 +304,8 @@ export default function NursingPoolQueuePage() {
                 ? ('ready' as const)
                 : statusFilter === 'sent-to-room'
                   ? ('sent_to_room' as const)
+                  : statusFilter === 'in-consultation'
+                    ? ('in_consultation' as const)
                   : statusFilter === 'sent-to-physiotherapy'
                     ? ('sent_to_physiotherapy' as const)
                     : statusFilter === 'completed'
@@ -313,16 +344,19 @@ export default function NursingPoolQueuePage() {
 
             let queueVisitToRoom: Map<number, string>;
             let queueVisitToSentAt: Map<number, string>;
+            let visitSessionByVisitId: Map<number, VisitSessionSummary>;
             if (silent && queueRoomCacheRef.current.size > 0) {
               queueVisitToRoom = new Map(queueRoomCacheRef.current);
               queueVisitToSentAt = new Map(queueSentAtCacheRef.current);
+              visitSessionByVisitId = new Map(visitSessionCacheRef.current);
             } else {
               queueVisitToRoom = new Map();
               queueVisitToSentAt = new Map();
+              visitSessionByVisitId = new Map();
             }
 
-            let physioCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
-            let eyeCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
+            let physioCheckedInByVisitId: Record<number, { orderId: number; status: string; legState: VisitLegState }> = {};
+            let eyeCheckedInByVisitId: Record<number, { orderId: number; status: string; legState: VisitLegState }> = {};
             let vitalsMap = new Map<number, any>();
 
             const reuseEnrichment = silent && visitIdsKey === visitEnrichmentKeyRef.current && visitIdsKey !== '';
@@ -330,6 +364,7 @@ export default function NursingPoolQueuePage() {
               physioCheckedInByVisitId = { ...physioEnrichmentCacheRef.current };
               eyeCheckedInByVisitId = { ...eyeEnrichmentCacheRef.current };
               vitalsMap = new Map(vitalsEnrichmentCacheRef.current as Map<number, any>);
+              visitSessionByVisitId = new Map(visitSessionCacheRef.current);
             } else if (combinedVisitIds.length > 0) {
               const visitIdsParam = combinedVisitIds.join(',');
 
@@ -354,6 +389,26 @@ export default function NursingPoolQueuePage() {
                 })(),
                 (async () => {
                   try {
+                    const sessionResult = await apiFetch<{ results: any[] }>(
+                      `/consultation/sessions/by-visits/?visit_ids=${visitIdsParam}`
+                    );
+                    (sessionResult.results || []).forEach((item: any) => {
+                      if (item.visit == null || !item.room_name) return;
+                      const vid = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit), 10);
+                      if (!Number.isFinite(vid)) return;
+                      visitSessionByVisitId.set(vid, {
+                        room_name: item.room_name,
+                        status: item.status || 'active',
+                        doctor_name: item.doctor_name || undefined,
+                      });
+                    });
+                    visitSessionCacheRef.current = visitSessionByVisitId;
+                  } catch (err) {
+                    console.error('Error fetching consultation sessions:', err);
+                  }
+                })(),
+                (async () => {
+                  try {
                     const vitalsRes = await apiFetch<{ results: Record<string, any> }>(
                       `/vitals/latest-by-visits/?visit_ids=${visitIdsParam}`
                     );
@@ -367,13 +422,17 @@ export default function NursingPoolQueuePage() {
                 })(),
                 (async () => {
                   try {
-                    const physioRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+                    const physioRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string; leg_state?: string }> }>(
                       `/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
                     );
                     Object.entries(physioRes.results || {}).forEach(([visitIdRaw, payload]) => {
                       const visitId = Number(visitIdRaw);
                       if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
-                      physioCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
+                      physioCheckedInByVisitId[visitId] = {
+                        orderId: payload.order_id,
+                        status: payload.status || 'scheduled',
+                        legState: normalizeOrderLegState(payload.leg_state),
+                      };
                     });
                   } catch (err) {
                     debugLog('Physiotherapy check-in enrichment failed:', err);
@@ -381,13 +440,17 @@ export default function NursingPoolQueuePage() {
                 })(),
                 (async () => {
                   try {
-                    const eyeRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+                    const eyeRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string; leg_state?: string }> }>(
                       `/eyecare/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
                     );
                     Object.entries(eyeRes.results || {}).forEach(([visitIdRaw, payload]) => {
                       const visitId = Number(visitIdRaw);
                       if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
-                      eyeCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
+                      eyeCheckedInByVisitId[visitId] = {
+                        orderId: payload.order_id,
+                        status: payload.status || 'scheduled',
+                        legState: normalizeOrderLegState(payload.leg_state),
+                      };
                     });
                   } catch (err) {
                     debugLog('Eyecare check-in enrichment failed:', err);
@@ -404,14 +467,15 @@ export default function NursingPoolQueuePage() {
               physioEnrichmentCacheRef.current = {};
               eyeEnrichmentCacheRef.current = {};
               vitalsEnrichmentCacheRef.current = new Map();
+              visitSessionCacheRef.current = new Map();
             }
 
             // Return enrichment data for the outer scope
-            return { nursingVisits, queueVisitToRoom, queueVisitToSentAt, physioCheckedInByVisitId, eyeCheckedInByVisitId, vitalsMap };
+            return { nursingVisits, queueVisitToRoom, queueVisitToSentAt, visitSessionByVisitId, physioCheckedInByVisitId, eyeCheckedInByVisitId, vitalsMap };
           })(),
         ]);
 
-        const { nursingVisits, queueVisitToRoom, queueVisitToSentAt, physioCheckedInByVisitId, eyeCheckedInByVisitId, vitalsMap } = enrichmentPromise;
+        const { nursingVisits, queueVisitToRoom, queueVisitToSentAt, visitSessionByVisitId, physioCheckedInByVisitId, eyeCheckedInByVisitId, vitalsMap } = enrichmentPromise;
 
         debugLog('Starting transformation of', nursingVisits.length, 'visits to nursing patients');
         const transformedPatients: NursingPatient[] = nursingVisits.map((visit: Visit) => {
@@ -440,28 +504,42 @@ export default function NursingPoolQueuePage() {
           const visitKey = typeof visit.id === 'number' ? visit.id : Number(visit.id);
           const vitalsData = Number.isFinite(visitKey) ? vitalsMap.get(visitKey) : undefined;
 
-          // Determine nursing status based on visit data, vitals, and queue status
-          let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' | 'Completed' = 'Pending';
-          const roomName = Number.isFinite(visitKey) ? queueVisitToRoom.get(visitKey) : undefined;
-          const sentToPhysio = Number.isFinite(visitKey) && Boolean(physioCheckedInByVisitId[visitKey]);
-          const sentToEyeClinic = Number.isFinite(visitKey) && Boolean(eyeCheckedInByVisitId[visitKey]);
+          // Determine nursing status based on visit data, vitals, queue, and session status
+          let nursingStatus: NursingStageStatus = 'Pending';
+          const openSession = Number.isFinite(visitKey) ? visitSessionByVisitId.get(visitKey) : undefined;
+          const queueRoomName = Number.isFinite(visitKey) ? queueVisitToRoom.get(visitKey) : undefined;
+          const roomName = queueRoomName || openSession?.room_name;
           const visitClinics = getVisitServiceClinicsList({ clinic: visit.clinic, clinics: visit.clinics });
-          const hasPhysioClinic = visitClinics.some((c: string) =>
-            clinicMatches(c, 'Physiotherapy', opdClinicNames)
-          );
-          const hasEyeClinic = visitClinics.some((c: string) =>
-            clinicMatches(c, 'Eye Clinic', opdClinicNames)
-          );
+          const completedClinics = (visit.completed_clinics || []) as string[];
+          const physioEnrichment = Number.isFinite(visitKey) ? physioCheckedInByVisitId[visitKey] : undefined;
+          const eyeEnrichment = Number.isFinite(visitKey) ? eyeCheckedInByVisitId[visitKey] : undefined;
+          const hasPhysioClinic = visitClinics.some((c: string) => isPhysioServiceClinic(c, opdClinicNames));
+          const hasEyeClinic = visitClinics.some((c: string) => isEyeServiceClinic(c, opdClinicNames));
+          const physioLegState: VisitLegState = hasPhysioClinic
+            ? (physioEnrichment?.legState ?? 'pending')
+            : 'pending';
+          const eyeLegState: VisitLegState = hasEyeClinic
+            ? (eyeEnrichment?.legState ?? 'pending')
+            : 'pending';
+          const consultationLegState = getConsultationLegState({
+            visitClinics,
+            completedClinics,
+            queueRoomName,
+            openSession,
+            opdClinicNames,
+          });
+          const sentToPhysio = legShowsRoutedOrDone(physioLegState);
+          const sentToEyeClinic = legShowsRoutedOrDone(eyeLegState);
 
           if (visit.status === 'completed') {
-            // Visit is fully closed out — sort to bottom of the queue.
             nursingStatus = 'Completed';
-          } else if (roomName) {
-            // Patient has been sent to a room
+          } else if (consultationLegState === 'in_progress') {
+            nursingStatus = 'In Consultation';
+          } else if (consultationLegState === 'routed') {
             nursingStatus = 'Sent to Room';
-          } else if (sentToEyeClinic && hasEyeClinic) {
+          } else if (hasEyeClinic && (eyeLegState === 'in_progress' || eyeLegState === 'routed')) {
             nursingStatus = 'Sent to Eye Clinic';
-          } else if (sentToPhysio && hasPhysioClinic) {
+          } else if (hasPhysioClinic && (physioLegState === 'in_progress' || physioLegState === 'routed')) {
             nursingStatus = 'Sent to Physiotherapy';
           } else if (vitalsData) {
             // Temp + heart rate required for "ready"; do not treat 0 as missing (truthiness bug).
@@ -501,12 +579,13 @@ export default function NursingPoolQueuePage() {
             personalNumber: '', // Not used for search, keep empty
             clinic: getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
             clinics: visitClinics,
-            completedClinics: (visit.completed_clinics || []) as string[], // Completed clinics
+            completedClinics,
             visitDate: visit.date,
             visitTime: visit.time,
             visitType: visit.visit_type || 'consultation', // Keep lowercase for filtering
             nursingStatus,
-            consultationRoom: roomName, // Store room name if patient is in queue
+            consultationRoom: roomName,
+            consultationDoctorName: openSession?.doctor_name,
             vitals,
             waitTime: waitTime > 0 ? waitTime : 0,
             patientNumericId, // Store normalized numeric patient ID from backend
@@ -517,6 +596,9 @@ export default function NursingPoolQueuePage() {
             sentAt: Number.isFinite(visitKey) ? queueVisitToSentAt.get(visitKey) : undefined,
             sentToPhysio,
             sentToEyeClinic,
+            physioLegState,
+            eyeLegState,
+            consultationLegState,
           };
         });
 
@@ -633,8 +715,9 @@ export default function NursingPoolQueuePage() {
     visitDate: string;
     visitTime: string;
     visitType: string;
-    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' | 'Completed';
+    nursingStatus: NursingStageStatus;
     consultationRoom?: string;
+    consultationDoctorName?: string;
     vitals?: any;
     waitTime: number;
     patientNumericId: number;
@@ -645,6 +728,9 @@ export default function NursingPoolQueuePage() {
     sentAt?: string;
     sentToPhysio?: boolean;
     sentToEyeClinic?: boolean;
+    physioLegState?: VisitLegState;
+    eyeLegState?: VisitLegState;
+    consultationLegState?: VisitLegState;
   }
 
   const [selectedPatient, setSelectedPatient] = useState<NursingPatient | null>(null);
@@ -745,7 +831,11 @@ export default function NursingPoolQueuePage() {
       if (order?.id) {
         setPhysioCheckins(prev => ({
           ...prev,
-          [patient.visitNumericId]: { orderId: Number(order.id), status: String(order.status || 'scheduled') },
+          [patient.visitNumericId]: {
+            orderId: Number(order.id),
+            status: String(order.status || 'scheduled'),
+            legState: 'routed',
+          },
         }));
       }
       toast.success('Checked in to Physiotherapy', {
@@ -769,7 +859,11 @@ export default function NursingPoolQueuePage() {
       if (order?.id) {
         setEyeCheckins(prev => ({
           ...prev,
-          [patient.visitNumericId]: { orderId: Number(order.id), status: String(order.status || 'scheduled') },
+          [patient.visitNumericId]: {
+            orderId: Number(order.id),
+            status: String(order.status || 'scheduled'),
+            legState: 'routed',
+          },
         }));
       }
       toast.success('Sent to Eye Clinic', {
@@ -1101,6 +1195,7 @@ export default function NursingPoolQueuePage() {
       case 'Vitals Recorded': return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
       case 'Ready for Consultation': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
       case 'Sent to Room': return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
+      case 'In Consultation': return 'border-fuchsia-500/50 text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-500/10';
       case 'Sent to Physiotherapy': return 'border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10';
       case 'Sent to Eye Clinic': return 'border-sky-500/50 text-sky-600 dark:text-sky-400 bg-sky-500/10';
       case 'Completed': return 'border-slate-500/50 text-slate-600 dark:text-slate-400 bg-slate-500/10';
@@ -1221,6 +1316,7 @@ export default function NursingPoolQueuePage() {
                     <SelectItem value="vitals-recorded">Vitals Recorded</SelectItem>
                     <SelectItem value="ready-for-consultation">Ready for Consultation</SelectItem>
                     <SelectItem value="sent-to-room">Sent to Room</SelectItem>
+                    <SelectItem value="in-consultation">In Consultation</SelectItem>
                     <SelectItem value="sent-to-physiotherapy">Checked in to Physiotherapy</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
@@ -1307,6 +1403,12 @@ export default function NursingPoolQueuePage() {
                 (isMultiClinic ||
                   (patient.nursingStatus !== 'Sent to Physiotherapy' &&
                     patient.nursingStatus !== 'Sent to Eye Clinic'));
+              const physioLeg = patient.physioLegState ?? 'pending';
+              const eyeLeg = patient.eyeLegState ?? 'pending';
+              const consultLeg = patient.consultationLegState ?? 'pending';
+              const consultLegDone = consultLeg === 'completed';
+              const physioLegDone = physioLeg === 'completed';
+              const eyeLegDone = eyeLeg === 'completed';
 
               return (
               <Card key={patient.id} className={`border-l-4 ${getVisitTypeBorderColor(patient.visitType)} hover:shadow-md transition-shadow`}>
@@ -1323,10 +1425,20 @@ export default function NursingPoolQueuePage() {
                           <div className="flex items-center gap-2 flex-wrap min-w-0">
                             <span className="font-semibold text-foreground truncate">{patient.name}</span>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getVisitTypeBadgeClass(patient.visitType)}`}>{getVisitTypeLabel(patient.visitType)}</Badge>
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}
+                              title={
+                                patient.nursingStatus === 'In Consultation' && patient.consultationDoctorName
+                                  ? `With ${patient.consultationDoctorName}`
+                                  : undefined
+                              }
+                            >
                               {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
                                 ? `Sent to ${patient.consultationRoom}`
-                                : patient.nursingStatus === 'Sent to Physiotherapy'
+                                : patient.nursingStatus === 'In Consultation' && patient.consultationRoom
+                                  ? `In ${patient.consultationRoom}`
+                                  : patient.nursingStatus === 'Sent to Physiotherapy'
                                   ? 'Checked in to Physiotherapy'
                                   : patient.nursingStatus === 'Sent to Eye Clinic'
                                     ? 'Sent to Eye Clinic'
@@ -1339,37 +1451,44 @@ export default function NursingPoolQueuePage() {
                                 <Badge
                                   variant="outline"
                                   className={`text-[9px] px-1.5 py-0 h-4 ${
-                                    patient.sentToEyeClinic
+                                    eyeLegDone || eyeLeg === 'in_progress' || eyeLeg === 'routed'
                                       ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
                                       : 'border-amber-500/40 text-amber-800 dark:text-amber-400 bg-amber-500/10'
                                   }`}
                                 >
-                                  Eye clinic {patient.sentToEyeClinic ? '✓' : 'pending'}
+                                  Eye {eyeLegDone ? '✓ Done' : legLabel(eyeLeg)}
                                 </Badge>
                               )}
                               {hasOtherClinics && (
                                 <Badge
                                   variant="outline"
                                   className={`text-[9px] px-1.5 py-0 h-4 ${
-                                    patient.consultationRoom
+                                    consultLegDone || consultLeg === 'in_progress' || consultLeg === 'routed'
                                       ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
                                       : 'border-amber-500/40 text-amber-800 dark:text-amber-400 bg-amber-500/10'
                                   }`}
                                   title={patient.consultationRoom || undefined}
                                 >
-                                  Consultation {patient.consultationRoom ? `✓ ${patient.consultationRoom}` : 'pending'}
+                                  Consultation{' '}
+                                  {consultLegDone
+                                    ? '✓ Done'
+                                    : consultLeg === 'in_progress' && patient.consultationRoom
+                                      ? `In ${patient.consultationRoom}`
+                                      : consultLeg === 'routed' && patient.consultationRoom
+                                        ? `✓ ${patient.consultationRoom}`
+                                        : legLabel(consultLeg)}
                                 </Badge>
                               )}
                               {hasPhysio && (
                                 <Badge
                                   variant="outline"
                                   className={`text-[9px] px-1.5 py-0 h-4 ${
-                                    patient.sentToPhysio
+                                    physioLegDone || physioLeg === 'in_progress' || physioLeg === 'routed'
                                       ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
                                       : 'border-amber-500/40 text-amber-800 dark:text-amber-400 bg-amber-500/10'
                                   }`}
                                 >
-                                  Physio {patient.sentToPhysio ? '✓' : 'pending'}
+                                  Physio {physioLegDone ? '✓ Done' : legLabel(physioLeg)}
                                 </Badge>
                               )}
                             </div>
@@ -1385,6 +1504,7 @@ export default function NursingPoolQueuePage() {
                             patient.nursingStatus === 'Ready for Consultation' ||
                             patient.nursingStatus === 'Sent to Physiotherapy' ||
                             patient.nursingStatus === 'Sent to Room' ||
+                            patient.nursingStatus === 'In Consultation' ||
                             patient.nursingStatus === 'Sent to Eye Clinic' ||
                             patient.nursingStatus === 'Completed') && (
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewVitals(patient)}>
@@ -1409,11 +1529,7 @@ export default function NursingPoolQueuePage() {
                               return (
                                 <div className="flex items-center gap-1 flex-wrap justify-end">
                                   {hasPhysio && (
-                                    patient.sentToPhysio ? (
-                                      <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                      </div>
-                                    ) : (
+                                    legNeedsRoutingAction(physioLeg) ? (
                                       <Button
                                         size="sm"
                                         onClick={() => handleSendToPhysio(patient)}
@@ -1427,15 +1543,18 @@ export default function NursingPoolQueuePage() {
                                         )}
                                         Physio
                                       </Button>
+                                    ) : (
+                                      <div
+                                        className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10"
+                                        title={physioLegDone ? 'Physiotherapy completed' : 'Checked in to Physiotherapy'}
+                                      >
+                                        <CheckCircle2 className="h-4 w-4" />
+                                      </div>
                                     )
                                   )}
 
                                   {hasEye && (
-                                    patient.sentToEyeClinic ? (
-                                      <div className="h-7 w-7 flex items-center justify-center rounded border border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                      </div>
-                                    ) : (
+                                    legNeedsRoutingAction(eyeLeg) ? (
                                       <Button
                                         size="sm"
                                         onClick={() => handleSendToEyeClinic(patient)}
@@ -1444,14 +1563,28 @@ export default function NursingPoolQueuePage() {
                                         <Eye className="h-3 w-3 mr-1" />
                                         Eye
                                       </Button>
+                                    ) : (
+                                      <div
+                                        className="h-7 w-7 flex items-center justify-center rounded border border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10"
+                                        title={eyeLegDone ? 'Eye clinic completed' : 'Sent to Eye Clinic'}
+                                      >
+                                        <CheckCircle2 className="h-4 w-4" />
+                                      </div>
                                     )
                                   )}
 
                                   {hasOtherClinics && (
-                                    patient.consultationRoom ? (
+                                    consultLegDone ? (
+                                      <div
+                                        className="h-7 w-7 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+                                        title="Consultation completed"
+                                      >
+                                        <CheckCircle2 className="h-4 w-4" />
+                                      </div>
+                                    ) : consultLeg === 'routed' || consultLeg === 'in_progress' ? (
                                       <div
                                         className="h-7 px-2 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 text-xs font-medium max-w-[140px] truncate"
-                                        title={patient.consultationRoom}
+                                        title={patient.consultationRoom || undefined}
                                       >
                                         <CheckCircle2 className="h-3 w-3 mr-1 shrink-0" />
                                         Room
@@ -1473,12 +1606,7 @@ export default function NursingPoolQueuePage() {
                             
                             // Single clinic patient - use original logic
                             if (isOnlyPhysio) {
-                              // Only physiotherapy
-                              return patient.sentToPhysio ? (
-                                <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
-                                  <CheckCircle2 className="h-4 w-4" />
-                                </div>
-                              ) : (
+                              return legNeedsRoutingAction(physioLeg) ? (
                                 (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
                                   <Button
                                     size="sm"
@@ -1494,17 +1622,19 @@ export default function NursingPoolQueuePage() {
                                     Physio
                                   </Button>
                                 )
+                              ) : (
+                                <div
+                                  className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10"
+                                  title={physioLegDone ? 'Physiotherapy completed' : 'Checked in to Physiotherapy'}
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </div>
                               );
                             }
                             
                             // Eye Clinic only patient
                             if (isOnlyEye) {
-                              // Only eye clinic
-                              return patient.sentToEyeClinic ? (
-                                <div className="h-7 w-7 flex items-center justify-center rounded border border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10">
-                                  <CheckCircle2 className="h-4 w-4" />
-                                </div>
-                              ) : (
+                              return legNeedsRoutingAction(eyeLeg) ? (
                                 (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
                                   <Button
                                     size="sm"
@@ -1515,11 +1645,18 @@ export default function NursingPoolQueuePage() {
                                     Eye
                                   </Button>
                                 )
+                              ) : (
+                                <div
+                                  className="h-7 w-7 flex items-center justify-center rounded border border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10"
+                                  title={eyeLegDone ? 'Eye clinic completed' : 'Sent to Eye Clinic'}
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </div>
                               );
                             }
 
                             // General or other single-clinic patient (e.g. GOPD) - send to consultation rooms
-                            if (canRoute) {
+                            if (canRoute && !consultLegDone) {
                               return (
                                 <Button
                                   size="sm"
@@ -1532,10 +1669,33 @@ export default function NursingPoolQueuePage() {
                               );
                             }
 
+                            if (consultLegDone && hasOtherClinics && !isMultiClinic) {
+                              return (
+                                <div
+                                  className="h-7 w-7 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+                                  title="Consultation completed"
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </div>
+                              );
+                            }
+
                             return null;
                           })()}
                           {patient.nursingStatus === 'Sent to Room' && (
                             <div className="h-7 w-7 flex items-center justify-center rounded border border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10">
+                              <CheckCircle2 className="h-4 w-4" />
+                            </div>
+                          )}
+                          {patient.nursingStatus === 'In Consultation' && (
+                            <div
+                              className="h-7 w-7 flex items-center justify-center rounded border border-fuchsia-500/50 text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-500/10"
+                              title={
+                                patient.consultationDoctorName
+                                  ? `With ${patient.consultationDoctorName}`
+                                  : 'In consultation'
+                              }
+                            >
                               <CheckCircle2 className="h-4 w-4" />
                             </div>
                           )}

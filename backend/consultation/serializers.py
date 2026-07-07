@@ -361,6 +361,22 @@ class ConsultationQueueByVisitSerializer(serializers.ModelSerializer):
         fields = ['visit', 'room_name', 'queued_at']
 
 
+class ConsultationSessionByVisitSerializer(serializers.ModelSerializer):
+    """Minimal fields for nursing pool: map visit → open consultation session."""
+
+    room_name = serializers.CharField(source='room.name', read_only=True)
+    doctor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ConsultationSession
+        fields = ['visit', 'room_name', 'status', 'doctor_name', 'started_at']
+
+    def get_doctor_name(self, obj):
+        if not obj.doctor:
+            return ''
+        return obj.doctor.get_full_name() or ''
+
+
 class ReferralFacilitySerializer(serializers.ModelSerializer):
     """Catalog of partner / receiving facilities for referrals."""
 

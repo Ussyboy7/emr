@@ -40,6 +40,7 @@ from .serializers import (
     ConsultationSessionSerializer,
     ConsultationQueueSerializer,
     ConsultationQueueByVisitSerializer,
+    ConsultationSessionByVisitSerializer,
     ReferralSerializer,
     ReferralFacilitySerializer,
     ResponsibilityFormIssuanceSerializer,
@@ -51,6 +52,11 @@ from .serializers import (
 )
 from audit.services import AuditService
 from patients.workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
+from patients.nursing_leg_status import (
+    apply_visit_completion_after_leg,
+    mark_consultation_session_clinic_completed,
+    visit_should_close_after_clinic_completion,
+)
 from common.mixins import ClinicScopedMixin
 from common.openapi import REFERRAL_FORM_PK_PARAMS, document_viewset
 from accounts.utils import resolve_clinic_id
@@ -385,6 +391,37 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         return self.scope_queryset(qs)
 
+    @extend_schema(tags=["Consultation"], summary="By visits", description="Open consultation sessions for a set of visit IDs.")
+    @action(detail=False, methods=['get'], url_path='by-visits')
+    def by_visits(self, request):
+        """
+        Active or paused consultation sessions for a set of visit IDs.
+        Used by nursing pool to show in-consult status after queue claim-on-start.
+        """
+        raw = (request.query_params.get('visit_ids') or '').strip()
+        if not raw:
+            return Response({'results': []})
+        ids = []
+        for part in raw.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                vid = int(part)
+                if vid > 0:
+                    ids.append(vid)
+            except ValueError:
+                continue
+        if not ids:
+            return Response({'results': []})
+        qs = self.scope_queryset(
+            self.get_queryset().filter(
+                visit_id__in=ids,
+                status__in=['active', 'paused'],
+            )
+        )
+        return Response({'results': ConsultationSessionByVisitSerializer(qs, many=True).data})
+
     def create(self, request, *args, **kwargs):
         """
         Start a consultation session.
@@ -606,22 +643,28 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 queue_item.called_at = updated.ended_at
                 queue_item.save(update_fields=["is_active", "called_at"])
 
-            if vref and vref.status != "completed":
+            if vref:
                 old_vs = vref.status
-                vref.status = "completed"
-                vref.save(update_fields=["status"])
-                AuditService.log_activity(
-                    user=self.request.user,
-                    action="update",
-                    object_type="visit",
-                    object_id=str(vref.id),
-                    module="consultation",
-                    object_repr=f"Visit {vref.visit_id}",
-                    description=f"Marked visit {vref.visit_id} as completed after consultation status update",
-                    old_values={"status": old_vs},
-                    new_values={"status": "completed"},
-                    request=self.request,
-                )
+                old_completed = list(vref.completed_clinics or [])
+                mark_consultation_session_clinic_completed(vref, updated)
+                visit_completed = apply_visit_completion_after_leg(vref)
+                vref.save(update_fields=['completed_clinics', 'status'])
+                if old_vs != vref.status or old_completed != list(vref.completed_clinics or []):
+                    AuditService.log_activity(
+                        user=self.request.user,
+                        action="update",
+                        object_type="visit",
+                        object_id=str(vref.id),
+                        module="consultation",
+                        object_repr=f"Visit {vref.visit_id}",
+                        description=f"Updated visit {vref.visit_id} after consultation session PATCH completed",
+                        old_values={"status": old_vs, "completed_clinics": old_completed},
+                        new_values={
+                            "status": vref.status,
+                            "completed_clinics": vref.completed_clinics,
+                        },
+                        request=self.request,
+                    )
 
             AuditService.log_activity(
                 user=self.request.user,
@@ -699,12 +742,14 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             queue_item.called_at = session.ended_at
             queue_item.save(update_fields=['is_active', 'called_at'])
 
-        # Update visit status to 'completed' if visit exists
+        # Mark consultation clinic leg complete; close visit only when all clinics are done.
         if session.visit:
             visit = session.visit
             old_visit_status = visit.status
-            visit.status = 'completed'
-            visit.save()
+            old_completed = list(visit.completed_clinics or [])
+            mark_consultation_session_clinic_completed(visit, session)
+            visit_completed = apply_visit_completion_after_leg(visit)
+            visit.save(update_fields=['completed_clinics', 'status'])
             AuditService.log_activity(
                 user=self.request.user,
                 action='update',
@@ -712,25 +757,32 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 object_id=str(visit.id),
                 module='consultation',
                 object_repr=f'Visit {visit.visit_id}',
-                description=f'Marked visit {visit.visit_id} as completed after consultation session ended',
-                old_values={'status': old_visit_status},
-                new_values={'status': 'completed'},
+                description=(
+                    f'Updated visit {visit.visit_id} after consultation session ended '
+                    f'(completed_clinics={visit.completed_clinics})'
+                ),
+                old_values={'status': old_visit_status, 'completed_clinics': old_completed},
+                new_values={
+                    'status': visit.status,
+                    'completed_clinics': visit.completed_clinics,
+                },
                 request=self.request,
             )
-            fin = finalize_consultation_artifacts_for_visit(visit, session_terminal_status="completed")
-            if fin["sessions_updated"] or fin["queue_items_deactivated"]:
-                AuditService.log_activity(
-                    user=self.request.user,
-                    action='update',
-                    object_type='visit',
-                    object_id=str(visit.id),
-                    module='consultation',
-                    object_repr=f'Visit {visit.visit_id}',
-                    description=f'Closed sibling open sessions/queue after primary session end: {fin}',
-                    old_values={'status': 'completed'},
-                    new_values=fin,
-                    request=self.request,
-                )
+            if visit_completed or visit_should_close_after_clinic_completion(visit):
+                fin = finalize_consultation_artifacts_for_visit(visit, session_terminal_status="completed")
+                if fin["sessions_updated"] or fin["queue_items_deactivated"]:
+                    AuditService.log_activity(
+                        user=self.request.user,
+                        action='update',
+                        object_type='visit',
+                        object_id=str(visit.id),
+                        module='consultation',
+                        object_repr=f'Visit {visit.visit_id}',
+                        description=f'Closed sibling open sessions/queue after visit completion: {fin}',
+                        old_values={'status': visit.status},
+                        new_values=fin,
+                        request=self.request,
+                    )
 
         AuditService.log_activity(
             user=self.request.user,
@@ -1291,6 +1343,52 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         if room is not None:
             assert_room_accepting_patients(room, request=self.request)
+
+        open_session_qs = ConsultationSession.objects.filter(
+            status__in=['active', 'paused'],
+        ).select_related('room', 'doctor')
+        if visit:
+            open_session = open_session_qs.filter(visit=visit).first()
+        elif patient:
+            open_session = open_session_qs.filter(patient=patient).first()
+        else:
+            open_session = None
+        if open_session:
+            from rest_framework.exceptions import ValidationError
+            room_label = open_session.room.name if open_session.room else 'a consultation room'
+            doctor_label = (
+                open_session.doctor.get_full_name()
+                if open_session.doctor
+                else 'a doctor'
+            )
+            raise ValidationError({
+                'non_field_errors': [
+                    f'Patient is already in consultation with {doctor_label} in {room_label}.',
+                ],
+            })
+
+        if visit:
+            from patients.nursing_leg_status import (
+                consultation_leg_state,
+                visit_service_clinics,
+            )
+
+            consult_leg = consultation_leg_state(
+                visit_clinics=visit_service_clinics(visit),
+                completed_clinics=visit.completed_clinics or [],
+                has_active_queue=ConsultationQueue.objects.filter(
+                    visit=visit,
+                    is_active=True,
+                ).exists(),
+                has_open_session=False,
+            )
+            if consult_leg == 'completed':
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({
+                    'non_field_errors': [
+                        'Consultation for this visit is already completed.',
+                    ],
+                })
         
         # Deactivate any existing active queue items for this patient
         ConsultationQueue.objects.filter(
@@ -1404,7 +1502,10 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     logger.error(f'Failed to create eye order: {e}')
             
             # Find all active consultation rooms for NON-physio clinics
-            non_physio_clinics = [c for c in visit_clinics if 'physiotherapy' not in c.lower()]
+            non_physio_clinics = [
+                c for c in visit_clinics
+                if 'physiotherapy' not in c.lower() and 'eye' not in c.lower()
+            ]
             
             if non_physio_clinics:
                 matching_rooms = ConsultationRoom.objects.filter(

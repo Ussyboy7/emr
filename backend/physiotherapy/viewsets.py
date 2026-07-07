@@ -39,6 +39,8 @@ from .serializers import (
 
 
 ACTIVE_ORDER_STATUSES = ("pending", "scheduled", "in_progress")
+ORDER_LEG_STATUSES = ACTIVE_ORDER_STATUSES + ("completed",)
+ORDER_LEG_RANK = {"in_progress": 0, "scheduled": 1, "pending": 2, "completed": 3}
 
 
 @document_viewset(tag="Physiotherapy", resource="physio templates")
@@ -221,22 +223,36 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         orders = (
             self.scope_queryset(
-                PhysioOrder.objects.filter(visit_id__in=visit_ids, status__in=ACTIVE_ORDER_STATUSES)
+                PhysioOrder.objects.filter(visit_id__in=visit_ids, status__in=ORDER_LEG_STATUSES)
             )
             .order_by("-ordered_at")
         )
         best: dict[int, PhysioOrder] = {}
         for o in orders:
-            if o.visit_id and o.visit_id not in best:
+            if not o.visit_id:
+                continue
+            existing = best.get(o.visit_id)
+            if existing is None:
                 best[o.visit_id] = o
+                continue
+            if ORDER_LEG_RANK.get(o.status, 9) < ORDER_LEG_RANK.get(existing.status, 9):
+                best[o.visit_id] = o
+
+        from patients.nursing_leg_status import order_leg_state
 
         out: dict[str, dict] = {}
         for vid in visit_ids:
             o = best.get(vid)
             if o:
-                out[str(vid)] = {"checked_in": True, "order_id": o.id, "status": o.status}
+                leg_state = order_leg_state(o.status)
+                out[str(vid)] = {
+                    "checked_in": leg_state != "pending",
+                    "order_id": o.id,
+                    "status": o.status,
+                    "leg_state": leg_state,
+                }
             else:
-                out[str(vid)] = {"checked_in": False}
+                out[str(vid)] = {"checked_in": False, "leg_state": "pending"}
         return Response({"results": out})
 
     @extend_schema(tags=["Physiotherapy"], summary="Checkin from visit")
@@ -400,12 +416,27 @@ class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         order = session.order
         completed_count = order.sessions.filter(status="completed").count()
         order.sessions_completed = completed_count
+        order_completed_now = False
         if order.status != "completed":
             order.status = "completed"
             order.completed_at = now
             order.save(update_fields=["sessions_completed", "status", "completed_at"])
+            order_completed_now = True
         else:
             order.save(update_fields=["sessions_completed"])
+
+        if order_completed_now and order.visit_id:
+            from patients.models import Visit
+            from patients.nursing_leg_status import (
+                apply_visit_completion_after_leg,
+                mark_visit_clinic_completed,
+            )
+
+            visit = Visit.objects.filter(pk=order.visit_id).first()
+            if visit is not None:
+                mark_visit_clinic_completed(visit, "Physiotherapy")
+                apply_visit_completion_after_leg(visit)
+                visit.save(update_fields=["completed_clinics", "status"])
 
         return Response(PhysioSessionSerializer(session).data)
 
