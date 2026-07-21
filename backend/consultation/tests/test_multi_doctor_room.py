@@ -301,3 +301,10 @@ class MultiDoctorRoomTest(APITestCase):
         self.assertEqual(visit.status, "in_progress")
         self.assertIn("GOPD", visit.completed_clinics)
         self.assertNotIn("Physiotherapy", visit.completed_clinics)
+
+        from physiotherapy.models import PhysioOrder
+
+        self.assertTrue(
+            PhysioOrder.objects.filter(visit=visit, patient=patient).exists(),
+            "Physio order must exist after GOPD consult ends on GOPD+Physio visit",
+        )

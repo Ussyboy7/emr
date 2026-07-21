@@ -646,8 +646,9 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             if vref:
                 old_vs = vref.status
                 old_completed = list(vref.completed_clinics or [])
-                mark_consultation_session_clinic_completed(vref, updated)
-                visit_completed = apply_visit_completion_after_leg(vref)
+                from consultation.session_completion import finalize_consultation_session_for_visit
+
+                finalize_consultation_session_for_visit(updated, user=self.request.user)
                 vref.save(update_fields=['completed_clinics', 'status'])
                 if old_vs != vref.status or old_completed != list(vref.completed_clinics or []):
                     AuditService.log_activity(
@@ -747,8 +748,9 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             visit = session.visit
             old_visit_status = visit.status
             old_completed = list(visit.completed_clinics or [])
-            mark_consultation_session_clinic_completed(visit, session)
-            visit_completed = apply_visit_completion_after_leg(visit)
+            from consultation.session_completion import finalize_consultation_session_for_visit
+
+            visit_completed = finalize_consultation_session_for_visit(session, user=request.user)
             visit.save(update_fields=['completed_clinics', 'status'])
             AuditService.log_activity(
                 user=self.request.user,
@@ -1419,46 +1421,32 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         
         # Save the queue item
         queue_item = serializer.save()
-        
+
+        # Physio leg: create order as soon as patient is sent to a consultation room.
+        if visit:
+            try:
+                from physiotherapy.visit_orders import ensure_physio_order_for_visit, visit_has_physio_clinic
+
+                if visit_has_physio_clinic(visit):
+                    order, created = ensure_physio_order_for_visit(
+                        visit,
+                        ordered_by=self.request.user,
+                        referral_source="consultation_queue",
+                    )
+                    if created and order:
+                        logger.info(
+                            'Created automatic physio order %s for patient %s (visit %s)',
+                            order.id,
+                            patient,
+                            visit.pk,
+                        )
+            except Exception as e:
+                logger.error('Failed to create physio order on queue: %s', e)
+
         # If this visit has multiple clinics, create queue entries for ALL matching clinic rooms
         if visit and hasattr(visit, 'clinics') and visit.clinics and len(visit.clinics) > 1:
-            # Get all clinics for this visit
             visit_clinics = visit.clinics
-            
-            # Check if Physiotherapy is one of the clinics
-            has_physio = any('physiotherapy' in clinic.lower() for clinic in visit_clinics)
-            
-            # Create physiotherapy order if needed
-            if has_physio:
-                try:
-                    from physiotherapy.models import PhysioOrder
-                    
-                    # Check if physio order already exists for this visit
-                    physio_order_exists = PhysioOrder.objects.filter(
-                        patient=patient,
-                        visit=visit,
-                        status__in=['pending', 'scheduled', 'in_progress']
-                    ).exists()
-                    
-                    if not physio_order_exists:
-                        # Create physio order automatically
-                        PhysioOrder.objects.create(
-                            patient=patient,
-                            ordered_by=self.request.user,
-                            visit=visit,  # Link to the visit
-                            consultation_session=None,
-                            diagnosis='Multi-clinic visit',
-                            history_clinical_findings=f'Multi-clinic visit: {", ".join(visit_clinics)}',
-                            special_instructions='Automatically created from multi-clinic visit',
-                            priority='normal',
-                            status='scheduled',
-                            scheduled_at=timezone.now(),
-                            sessions_completed=0,
-                        )
-                        logger.info(f'Created automatic physio order for patient {patient} from multi-clinic visit')
-                except Exception as e:
-                    logger.error(f'Failed to create physio order: {e}')
-            
+
             # Check if Eye Clinic is one of the clinics
             has_eye = any('eye' in clinic.lower() for clinic in visit_clinics)
             

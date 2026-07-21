@@ -300,38 +300,19 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         created = False
         if order is None:
             try:
-                from common.diagnosis_resolution import resolve_patient_diagnosis_text
+                from physiotherapy.visit_orders import ensure_physio_order_for_visit
 
-                diagnosis_text = resolve_patient_diagnosis_text(visit.patient_id)
-                if not diagnosis_text:
-                    diagnosis_text = "Nursing pool check-in — Physiotherapy"
-                create_kwargs = dict(
-                    patient_id=visit.patient_id,
-                    visit_id=visit_id,
+                order, created = ensure_physio_order_for_visit(
+                    visit,
                     ordered_by=request.user,
-                    consultation_session=None,
-                    diagnosis=diagnosis_text,
-                    special_instructions="",
-                    priority="normal",
-                    status="scheduled",
                     referral_source="nursing",
-                    scheduled_at=timezone.now(),
-                    sessions_completed=0,
+                    diagnosis="Nursing pool check-in — Physiotherapy",
                 )
-                if SystemConfig.is_enabled('multi_clinic_enabled'):
-                    # File the order under the patient's visit clinic so any physio
-                    # assigned to that clinic can see it — not under the forwarder's
-                    # active clinic, which may differ (admin context, switching, etc.).
-                    clinic = None
-                    if getattr(visit, 'location_clinic_id', None) is not None:
-                        from organization.models import Clinic
-                        clinic = visit.location_clinic
-                    if clinic is None:
-                        clinic = resolve_clinic(self.request.user)
-                    if clinic is not None:
-                        create_kwargs['location_clinic'] = clinic
-                order = PhysioOrder.objects.create(**create_kwargs)
-                created = True
+                if order is None:
+                    return Response(
+                        {"detail": "This visit is not routed to Physiotherapy."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             except Exception as e:
                 return Response({"detail": f"Failed to create physiotherapy order: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         elif order.status == "pending":
