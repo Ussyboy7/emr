@@ -287,7 +287,7 @@ export default function NursingPoolQueuePage() {
         }
 
         const metricsParams = {
-          status: 'in_progress' as const,
+          // nursing_pool owns status scope (in_progress + completed for dated views).
           nursing_pool: 1 as const,
           date: dateParam,
           start_date: startDate,
@@ -543,6 +543,12 @@ export default function NursingPoolQueuePage() {
             nursingStatus = 'Sent to Eye Clinic';
           } else if (hasPhysioClinic && (physioLegState === 'in_progress' || physioLegState === 'routed')) {
             nursingStatus = 'Sent to Physiotherapy';
+          } else if (consultationLegState === 'completed') {
+            // Consult leg done. Keep Ready only when another specialty leg still needs routing.
+            const specialtyNeedsRouting =
+              (hasPhysioClinic && physioLegState === 'pending') ||
+              (hasEyeClinic && eyeLegState === 'pending');
+            nursingStatus = specialtyNeedsRouting ? 'Ready for Consultation' : 'Completed';
           } else if (vitalsData) {
             // Temp + heart rate required for "ready"; do not treat 0 as missing (truthiness bug).
             const t = vitalsData.temperature;

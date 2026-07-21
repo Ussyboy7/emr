@@ -97,7 +97,7 @@ def annotate_visit_history_flags(queryset):
 
 
 def _exclude_visits_with_completed_consultation(queryset):
-    """Visits that already have a completed consultation session (nursing pool should hide these)."""
+    """Visits that already have a completed consultation session (active-only pool snapshot)."""
     from consultation.models import ConsultationSession
 
     return queryset.filter(
@@ -107,6 +107,34 @@ def _exclude_visits_with_completed_consultation(queryset):
                 status='completed',
             )
         )
+    )
+
+
+def _nursing_pool_has_date_scope(request) -> bool:
+    return bool(
+        request.query_params.get('date')
+        or request.query_params.get('start_date')
+        or request.query_params.get('end_date')
+    )
+
+
+def apply_nursing_pool_visit_status_scope(queryset, request):
+    """
+    nursing_pool=1 visit.status scope.
+
+    Date-scoped (Today / range): show the day's nursing activity — forwarded
+    (in_progress) and completed visits. Completed consultation sessions stay
+    visible so nurses can review who was treated; frontend stages them as
+    Completed / Sent to Room / etc., never Ready again.
+
+    No date (live snapshot): only open nursing work — in_progress visits that
+    do not yet have a completed consultation session.
+    """
+    queryset = queryset.exclude(status='cancelled')
+    if _nursing_pool_has_date_scope(request):
+        return queryset.filter(status__in=['in_progress', 'completed'])
+    return _exclude_visits_with_completed_consultation(
+        queryset.filter(status='in_progress')
     )
 
 
@@ -263,7 +291,7 @@ def apply_nursing_status_filter(
 
 
 def _nursing_pool_base_queryset_for_metrics(view, request):
-    """Shared base queryset: in_progress visits, optional nursing_pool exclusion, date + search + type + clinic."""
+    """Shared base queryset for nursing pool metrics/analytics (matches list nursing_pool scope)."""
     qs = Visit.objects.all().select_related('patient', 'doctor', 'created_by').prefetch_related('vital_readings')
     date = request.query_params.get('date')
     start_date = request.query_params.get('start_date')
@@ -277,18 +305,22 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     elif end_date:
         qs = qs.filter(date__lte=end_date)
 
-    # Pool snapshot (no date filter): only visits currently in nursing workflow.
-    # Date-range reports include all non-cancelled visits for managed-visit style
-    # reporting, unless nursing_pool=1 (active nursing work only).
-    has_date = bool(date or start_date or end_date)
-    if request.query_params.get('nursing_pool') == '1' or request.query_params.get('nursing_status'):
-        qs = qs.filter(status='in_progress')
+    nursing_pool = request.query_params.get('nursing_pool') == '1'
+    nursing_status = (request.query_params.get('nursing_status') or '').strip()
+    has_date = _nursing_pool_has_date_scope(request)
+
+    if nursing_pool:
+        qs = apply_nursing_pool_visit_status_scope(qs, request)
+    elif nursing_status:
+        if nursing_status.lower() == 'completed':
+            qs = qs.filter(status__in=['in_progress', 'completed'])
+        else:
+            qs = qs.filter(status='in_progress')
     elif has_date:
         qs = qs.exclude(status='cancelled')
     else:
         qs = qs.filter(status='in_progress')
-    if request.query_params.get('nursing_pool') == '1':
-        qs = _exclude_visits_with_completed_consultation(qs)
+
     qs = annotate_visit_history_flags(qs)
     qs = view.filter_queryset(qs)
     return qs
@@ -964,7 +996,9 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     """
     serializer_class = VisitSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'status', 'visit_type', 'clinic']
+    # status is applied in get_queryset so nursing_pool can include completed visits
+    # without DjangoFilterBackend's status=in_progress wiping them.
+    filterset_fields = ['patient', 'visit_type', 'clinic']
     search_fields = ['visit_id', 'clinical_notes', 'patient__surname', 'patient__first_name', 'patient__patient_id']
     ordering_fields = ['date', 'time', 'created_at']
     ordering = ['-date', '-time']
@@ -989,19 +1023,20 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         elif end_date:
             queryset = queryset.filter(date__lte=end_date)
 
-        nursing_status = self.request.query_params.get('nursing_status')
+        nursing_status = (self.request.query_params.get('nursing_status') or '').strip()
         nursing_pool = self.request.query_params.get('nursing_pool') == '1'
-
-        if nursing_pool or nursing_status:
-            # Nursing workflow only applies after MR forwards the visit.
-            queryset = queryset.filter(status='in_progress')
+        status_param = (self.request.query_params.get('status') or '').strip()
 
         if nursing_pool:
-            queryset = _exclude_visits_with_completed_consultation(queryset)
-            # The pool queue is for active nursing work; cancelled visits
-            # should never appear here (matches the metrics endpoint which
-            # excludes cancelled for date/range filters).
-            queryset = queryset.exclude(status='cancelled')
+            queryset = apply_nursing_pool_visit_status_scope(queryset, self.request)
+        elif nursing_status:
+            if nursing_status.lower() == 'completed':
+                queryset = queryset.filter(status__in=['in_progress', 'completed'])
+            else:
+                # Nursing workflow only applies after MR forwards the visit.
+                queryset = queryset.filter(status='in_progress')
+        elif status_param:
+            queryset = queryset.filter(status=status_param)
 
         queryset = annotate_visit_history_flags(queryset)
 

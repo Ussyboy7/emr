@@ -19,7 +19,7 @@ export interface VisitFilters {
   ordering?: string;
   page?: number;
   page_size?: number;
-  /** Exclude visits that already have a completed consultation (nursing pool). */
+  /** When set with a date, scopes to nursing day's activity (in_progress + completed). */
   nursing_pool?: 1 | '1';
   /** Server-side nursing queue segment. */
   nursing_status?: 'pending' | 'vitals_incomplete' | 'ready' | 'sent_to_room' | 'in_consultation' | 'sent_to_physiotherapy' | 'completed';

@@ -74,7 +74,7 @@ export interface NursingAnalyticsSummary {
 
 function poolMetricsParams(serverToday: string): Omit<VisitFilters, 'page' | 'page_size' | 'nursing_status'> {
   return {
-    status: 'in_progress',
+    // nursing_pool owns status scope (in_progress + completed for dated views).
     nursing_pool: 1,
     date: serverToday,
   };
