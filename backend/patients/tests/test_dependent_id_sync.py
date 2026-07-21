@@ -121,3 +121,22 @@ class DependentIdSyncTests(TestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("employee_type", res.data)
+
+    def test_employee_to_retiree_syncs_dependent_ids_and_type(self):
+        self.client.force_authenticate(user=self.head)
+        res = self.client.patch(
+            f"/api/v1/patients/{self.staff.pk}/",
+            {"category": "retiree"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.staff.refresh_from_db()
+        self.dep_one.refresh_from_db()
+        self.dep_two.refresh_from_db()
+        self.assertEqual(self.staff.category, "retiree")
+        self.assertEqual(self.staff.patient_id, "R-OLDPN")
+        self.assertEqual(self.dep_one.patient_id, "RD-OLDPN-1")
+        self.assertEqual(self.dep_two.patient_id, "RD-OLDPN-2")
+        self.assertEqual(self.dep_one.dependent_type, "Retiree Dependent")
+        self.assertEqual(self.dep_two.dependent_type, "Retiree Dependent")

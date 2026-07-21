@@ -316,6 +316,14 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         })
 
     def perform_create(self, serializer):
+        # Default admitting_doctor to the authenticated user when the client
+        # didn't supply a valid one. This mirrors the discharge_doctor flow
+        # and prevents "Invalid pk ... object does not exist" errors when the
+        # client sends a stale/placeholder id (e.g. the logged-in user's
+        # cached display id that no longer matches a DB row).
+        if not serializer.validated_data.get('admitting_doctor'):
+            serializer.validated_data['admitting_doctor'] = self.request.user
+
         admission = serializer.save(created_by=self.request.user)
 
         link_nursing_orders_to_admission(admission)

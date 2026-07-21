@@ -1,4 +1,4 @@
-import { todayApiDateString, toApiDateFromInstant } from "@/lib/dates";
+import { todayApiDateString } from "@/lib/dates";
 import { apiFetch, buildQueryString } from '../api-client';
 import { MAX_LIST_PAGE_SIZE } from '../pagination-constants';
 import { visitService, type VisitFilters } from './visit-service';
@@ -135,12 +135,16 @@ class NursingService {
    */
   async getRoomQueueCount(serverToday: string): Promise<number> {
     try {
-      const res = await apiFetch<{ results: Array<{ queued_at?: string }>; count?: number }>(
-        `/consultation/queue/?is_active=true&page_size=${MAX_LIST_PAGE_SIZE}`,
+      const query = buildQueryString({
+        is_active: true,
+        date: serverToday,
+        page_size: MAX_LIST_PAGE_SIZE,
+      });
+      const res = await apiFetch<{ results: unknown[]; count?: number }>(
+        `/consultation/queue/${query}`,
       );
-      const rows = res.results ?? [];
-      const todayRows = rows.filter((row) => toApiDateFromInstant(row.queued_at) === serverToday);
-      return todayRows.length;
+      if (typeof res.count === 'number') return res.count;
+      return (res.results ?? []).length;
     } catch (error) {
       logError('Error getting room queue count:', error);
       return 0;

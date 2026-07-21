@@ -67,6 +67,7 @@ from .permissions import (
     can_manage_patient_lifecycle,
     is_system_admin_user,
     can_delete_patient,
+    can_edit_personal_number,
     can_merge_patient,
     can_unmerge_patient,
     requires_lifecycle_category_change,
@@ -275,12 +276,13 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     elif end_date:
         qs = qs.filter(date__lte=end_date)
 
-    # Pool snapshot (no date filter): only visits currently in nursing workflow
-    # (status='in_progress' only). Date-range reports AND single-day `date=`
-    # filters include all non-cancelled visits so the dashboard reflects
-    # "all activities of the day" (managed-visit style).
+    # Pool snapshot (no date filter): only visits currently in nursing workflow.
+    # Date-range reports include all non-cancelled visits for managed-visit style
+    # reporting, unless nursing_pool=1 (active nursing work only).
     has_date = bool(date or start_date or end_date)
-    if has_date:
+    if request.query_params.get('nursing_pool') == '1' or request.query_params.get('nursing_status'):
+        qs = qs.filter(status='in_progress')
+    elif has_date:
         qs = qs.exclude(status='cancelled')
     else:
         qs = qs.filter(status='in_progress')
@@ -422,11 +424,20 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             raise PermissionDenied(
                 "Only system administrators or department heads/deputies can convert employees to retiree."
             )
+        if 'personal_number' in serializer.validated_data:
+            new_pn = (serializer.validated_data.get('personal_number') or '').strip()
+            old_pn = (old_instance.personal_number or '').strip()
+            if new_pn != old_pn and not can_edit_personal_number(self.request.user):
+                raise PermissionDenied(
+                    'Only system administrators can change personal number.'
+                )
+
         old_values = {
             'surname': old_instance.surname,
             'first_name': old_instance.first_name,
             'category': old_instance.category,
             'patient_id': old_instance.patient_id,
+            'personal_number': old_instance.personal_number,
             'is_active': old_instance.is_active,
         }
 
@@ -441,20 +452,50 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             if id_changed:
                 patient.save()  # Save the new patient ID
 
+        dependents_updated = 0
+        if (
+            category_changed
+            and old_instance.category == 'employee'
+            and patient.category == 'retiree'
+        ):
+            from .dependent_ids import sync_dependents_with_principal
+            dependents_updated = sync_dependents_with_principal(patient)
+
         personal_number_changed = (
             'personal_number' in serializer.validated_data
             and (serializer.validated_data['personal_number'] or '').strip()
             != (old_instance.personal_number or '').strip()
         )
+        dependents_updated_pn = 0
         if personal_number_changed and patient.category in ('employee', 'retiree'):
+            if patient.regenerate_patient_id():
+                patient.save(update_fields=['patient_id'])
             from .dependent_ids import sync_dependent_patient_ids
-            sync_dependent_patient_ids(patient)
+            dependents_updated_pn = sync_dependent_patient_ids(patient)
+
+        audit_description = (
+            f'Updated patient: {patient.get_full_name()} ({patient.patient_id})'
+        )
+        if dependents_updated:
+            audit_description += (
+                f' — {dependents_updated} dependent(s) synced for retiree conversion'
+            )
+        if personal_number_changed:
+            audit_description += (
+                f' — personal number corrected'
+                + (
+                    f' ({dependents_updated_pn} dependent ID(s) synced)'
+                    if dependents_updated_pn
+                    else ''
+                )
+            )
 
         new_values = {
             'surname': patient.surname,
             'first_name': patient.first_name,
             'category': patient.category,
             'patient_id': patient.patient_id,
+            'personal_number': patient.personal_number,
             'is_active': patient.is_active,
         }
         AuditService.log_patient_action(
@@ -462,7 +503,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             action='update',
             patient=patient,
             module='medical_records',
-            description=f'Updated patient: {patient.get_full_name()} ({patient.patient_id})',
+            description=audit_description,
             old_values=old_values,
             new_values=new_values,
             request=self.request,
@@ -930,7 +971,14 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         elif end_date:
             queryset = queryset.filter(date__lte=end_date)
 
-        if self.request.query_params.get('nursing_pool') == '1':
+        nursing_status = self.request.query_params.get('nursing_status')
+        nursing_pool = self.request.query_params.get('nursing_pool') == '1'
+
+        if nursing_pool or nursing_status:
+            # Nursing workflow only applies after MR forwards the visit.
+            queryset = queryset.filter(status='in_progress')
+
+        if nursing_pool:
             queryset = _exclude_visits_with_completed_consultation(queryset)
             # The pool queue is for active nursing work; cancelled visits
             # should never appear here (matches the metrics endpoint which
@@ -939,7 +987,6 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         queryset = annotate_visit_history_flags(queryset)
 
-        nursing_status = self.request.query_params.get('nursing_status')
         if nursing_status:
             queryset = apply_nursing_status_filter(queryset, nursing_status, self.request)
 

@@ -46,7 +46,7 @@ describe('nursingService', () => {
   });
 
   describe('getRoomQueueCount', () => {
-    it('fetches active consultation queue and counts today rows', async () => {
+    it('fetches active consultation queue rows for today', async () => {
       mockApiFetch.mockResolvedValue({
         results: [{ queued_at: '2025-01-15T10:00:00Z' }, { queued_at: '2025-01-15T11:00:00Z' }],
         count: 2,
@@ -56,6 +56,7 @@ describe('nursingService', () => {
       expect(count).toBe(2);
       const url = mockApiFetch.mock.calls[0][0] as string;
       expect(url).toContain('/consultation/queue/');
+      expect(url).toContain('date=2025-01-15');
     });
 
     it('returns 0 on error', async () => {

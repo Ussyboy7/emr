@@ -29,6 +29,33 @@ def dependents_for_principal(principal: Patient):
     ).order_by("created_at", "id")
 
 
+def default_dependent_type_for_principal(principal: Patient) -> str:
+    if principal.category == "retiree":
+        return "Retiree Dependent"
+    return "Employee Dependent"
+
+
+def sync_dependents_with_principal(principal: Patient, *, update_dependent_type: bool = True) -> int:
+    """
+    Align dependents with their principal: refresh dependent_type (ED/RD label)
+    and reassign patient_id prefixes/sequences via sync_dependent_patient_ids.
+    """
+    if principal.category not in ("employee", "retiree"):
+        return 0
+
+    deps = list(dependents_for_principal(principal))
+    if not deps:
+        return 0
+
+    if update_dependent_type:
+        target_type = default_dependent_type_for_principal(principal)
+        Patient.objects.filter(pk__in=[dep.pk for dep in deps]).exclude(
+            dependent_type=target_type
+        ).update(dependent_type=target_type)
+
+    return sync_dependent_patient_ids(principal)
+
+
 def planned_dependent_patient_ids(principal: Patient) -> list[tuple[Patient, str]]:
     """Return (dependent, target_patient_id) pairs in canonical order."""
     deps = list(dependents_for_principal(principal))

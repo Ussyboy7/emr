@@ -96,3 +96,55 @@ class VisitNursingNotificationTests(TestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(Notification.objects.filter(user=self.nurse).count(), before)
+
+    def test_scheduled_visit_excluded_from_nursing_pool_list(self):
+        scheduled = Visit.objects.create(
+            patient=self.patient,
+            date=date.today(),
+            time=time(8, 0),
+            status="scheduled",
+            visit_type="consultation",
+            clinic="GOPD",
+        )
+        in_progress = Visit.objects.create(
+            patient=self.patient,
+            date=date.today(),
+            time=time(9, 0),
+            status="in_progress",
+            visit_type="consultation",
+            clinic="GOPD",
+        )
+
+        res = self.client.get(
+            f"/api/v1/visits/?date={date.today().isoformat()}&nursing_pool=1",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in res.data["results"]}
+        self.assertNotIn(scheduled.id, ids)
+        self.assertIn(in_progress.id, ids)
+
+    def test_scheduled_visit_excluded_from_nursing_pool_list(self):
+        scheduled = Visit.objects.create(
+            patient=self.patient,
+            date=date.today(),
+            time=time(8, 0),
+            status="scheduled",
+            visit_type="consultation",
+            clinic="GOPD",
+        )
+        in_progress = Visit.objects.create(
+            patient=self.patient,
+            date=date.today(),
+            time=time(9, 0),
+            status="in_progress",
+            visit_type="consultation",
+            clinic="GOPD",
+        )
+
+        res = self.client.get(
+            f"/api/v1/visits/?date={date.today().isoformat()}&nursing_pool=1",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in res.data["results"]}
+        self.assertNotIn(scheduled.id, ids)
+        self.assertIn(in_progress.id, ids)

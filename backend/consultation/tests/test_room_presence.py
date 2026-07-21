@@ -101,6 +101,23 @@ class ConsultationRoomPresenceTest(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
+    def test_queue_create_blocked_for_scheduled_visit(self):
+        self._check_in(self.doctor, self.room)
+        self.visit.status = "scheduled"
+        self.visit.save(update_fields=["status"])
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient.pk,
+                "visit": self.visit.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("visit", resp.data)
+
     def test_queue_create_blocked_when_not_accepting(self):
         self._check_in(self.doctor, self.room)
         self.client.post(

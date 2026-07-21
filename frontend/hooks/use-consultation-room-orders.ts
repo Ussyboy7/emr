@@ -1234,7 +1234,10 @@ export function useConsultationRoomOrders({
             visit: numericVisitId,
             ward: Number(selectedWard.id),
             admission_type: 'observation',
-            admitting_doctor: orderedByUserId,
+            admitting_doctor:
+              typeof orderedByUserId === 'number' && orderedByUserId > 0
+                ? orderedByUserId
+                : undefined,
             admission_diagnosis: `${primaryDx.code} - ${primaryDx.description}`,
             presenting_complaint: order.presentingComplaint || '',
             admission_instructions: order.instructions || '',

@@ -46,6 +46,7 @@ export interface LocalPatient {
   email?: string;
   address?: string;
   location?: string;
+  dependentsCount?: number;
 }
 
 interface MergePatientDialogProps {
@@ -181,9 +182,17 @@ export function MergePatientDialog({
     try {
       const result = await patientService.mergePatient(loser.numericId, winner.id, reason.trim());
       const counts = Object.entries(result.counters || {}).filter(([, v]) => (v as number) > 0);
+      const depsRepointed = result.counters?.dependents_repointed ?? 0;
+      const depsSynced = result.counters?.dependents_synced ?? 0;
+      const depNote =
+        depsRepointed > 0 || depsSynced > 0
+          ? ` ${depsRepointed} dependent(s) re-parented${
+              depsSynced > 0 ? `, ${depsSynced} ID(s) synced` : ''
+            }.`
+          : '';
       toast.success(
-        `Merged ${result.loser_old_patient_id} → ${result.winner_patient_id}. ` +
-          (counts.length ? `Re-pointed ${counts.length} clinical group(s).` : ""),
+        `Merged ${result.loser_old_patient_id} → ${result.winner_patient_id}.${depNote}` +
+          (counts.length ? ` Re-pointed ${counts.length} clinical group(s).` : ''),
       );
       onSuccess?.(result.winner_id);
       onOpenChange(false);
@@ -212,6 +221,17 @@ export function MergePatientDialog({
             will be re-pointed to the chosen winner.
           </DialogDescription>
         </DialogHeader>
+
+        {(loser.dependentsCount ?? 0) > 0 && (
+          <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <p>
+              This patient has {loser.dependentsCount} linked dependent
+              {loser.dependentsCount === 1 ? '' : 's'}. They will be re-parented
+              to the winner and dependent patient IDs will be re-synced.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-4">
           {/* Winner search */}

@@ -72,3 +72,38 @@ class NormalizePrincipalPatientIdsTests(TestCase):
         out = StringIO()
         call_command("normalize_principal_patient_ids", "--dry-run", stdout=out)
         self.assertIn("R-8944", out.getvalue())
+
+    def test_normalize_personal_number_patient_id_mismatch(self):
+        """Production case: PN updated but principal patient_id left stale."""
+        employee = Patient.objects.create(
+            patient_id="E-OLDPN",
+            category="employee",
+            employee_type="Officer",
+            surname="Mismatch",
+            first_name="Principal",
+            gender="male",
+            date_of_birth=date(1970, 6, 1),
+            personal_number="NEWPN",
+        )
+        dependent = Patient.objects.create(
+            patient_id="ED-OLDPN-1",
+            category="dependent",
+            dependent_type="Employee Dependent",
+            surname="Mismatch",
+            first_name="Child",
+            gender="female",
+            date_of_birth=date(2000, 1, 1),
+            principal_staff=employee,
+        )
+
+        self.assertEqual(
+            principal_normalization_plan(employee),
+            ("NEWPN", "E-NEWPN"),
+        )
+        self.assertTrue(normalize_principal_patient(employee))
+
+        employee.refresh_from_db()
+        dependent.refresh_from_db()
+        self.assertEqual(employee.patient_id, "E-NEWPN")
+        self.assertEqual(employee.personal_number, "NEWPN")
+        self.assertEqual(dependent.patient_id, "ED-NEWPN-1")

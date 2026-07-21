@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { Label } from "@/components/ui/label";
@@ -123,9 +123,12 @@ export function NursingOrderModal({
   descriptionExtra?: React.ReactNode;
   onSubmitCompleteNow?: (payload: NursingOrderSubmitInput) => Promise<void>;
 }) {
-  const procedureTypeOptions = allowedTypes?.length
-    ? allowedTypes
-    : (["Injection", "Dressing", "Observation Admission"] as const);
+  const procedureTypeOptions = useMemo(() =>
+    allowedTypes?.length
+      ? allowedTypes
+      : (["Injection", "Dressing", "Observation Admission"] as const),
+    [allowedTypes],
+  );
   const [generics, setGenerics] = useState<GenericResult[]>([]);
   const [loadingMedications, setLoadingMedications] = useState(false);
   const [medicationSearch, setMedicationSearch] = useState("");

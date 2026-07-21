@@ -8,7 +8,14 @@ function hasCap(user: User | null | undefined, id: string): boolean {
 
 /** Patient delete / merge admin actions. */
 export function isSystemAdminUser(user?: User | null): boolean {
-  return hasCap(user ?? null, "patient_delete") || hasCap(user ?? null, "patient_merge");
+  if (!user) return false;
+  if (user.isSuperuser) return true;
+  return hasCap(user, "patient_delete") || hasCap(user, "patient_merge");
+}
+
+/** Correct principal personal number (regenerates patient + dependent IDs). */
+export function canEditPersonalNumber(user?: User | null): boolean {
+  return isSystemAdminUser(user);
 }
 
 export function canDeletePatient(user?: User | null): boolean {

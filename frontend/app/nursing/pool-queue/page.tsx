@@ -287,6 +287,8 @@ export default function NursingPoolQueuePage() {
         }
 
         const metricsParams = {
+          status: 'in_progress' as const,
+          nursing_pool: 1 as const,
           date: dateParam,
           start_date: startDate,
           end_date: endDate,

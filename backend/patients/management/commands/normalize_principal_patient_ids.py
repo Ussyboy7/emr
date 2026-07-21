@@ -11,7 +11,9 @@ from patients.principal_ids import (
 class Command(BaseCommand):
     help = (
         "Normalize employee/retiree principal records to canonical patient_id "
-        "format (E-{pn}, R-{pn}) and strip redundant prefixes from personal_number."
+        "format (E-{pn}, R-{pn}), align personal_number, and re-sync dependent IDs. "
+        "Fixes production mismatches where personal_number was updated without "
+        "regenerating patient_id. Use --dry-run first."
     )
 
     def add_arguments(self, parser):

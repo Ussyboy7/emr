@@ -120,23 +120,20 @@ export default function RoomQueuePage() {
         setError(null);
       }
 
-      const [roomsResult, activeSessions, today, queueItems, todayCountByRoom, queueStatsByRoom] = await Promise.all([
+      const today = await getServerToday().catch(() => formatLocalYmd(new Date()));
+
+      const [roomsResult, activeSessions, queueItems, todayCountByRoom, queueStatsByRoom] = await Promise.all([
         fetchAllPaginatedResults((page, page_size) =>
           roomService.getRooms({ page, page_size })
         ),
         fetchAllPaginatedResults((page, page_size) =>
           consultationService.getSessions({ status: 'active', page, page_size })
         ),
-        getServerToday().catch(() => formatLocalYmd(new Date())),
         fetchAllPaginatedResults((page, page_size) =>
-          consultationService.getQueue({ is_active: true, page, page_size })
+          consultationService.getQueue({ is_active: true, date: today, page, page_size })
         ),
-        getServerToday()
-          .then((day) => consultationService.getRoomDaySessionCounts(day))
-          .catch(() => ({} as Record<string, number>)),
-        getServerToday()
-          .then((day) => consultationService.getRoomQueueStats(day))
-          .catch(() => ({} as Record<string, RoomQueueDayStats>)),
+        consultationService.getRoomDaySessionCounts(today).catch(() => ({} as Record<string, number>)),
+        consultationService.getRoomQueueStats(today).catch(() => ({} as Record<string, RoomQueueDayStats>)),
       ]);
         
         const transformedRooms: ConsultationRoom[] = roomsResult.map((room: any) => {

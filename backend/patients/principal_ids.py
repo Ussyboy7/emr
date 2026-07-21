@@ -100,7 +100,7 @@ def normalize_principal_patient(patient: Patient) -> bool:
 
     from django.db import transaction
 
-    from patients.dependent_ids import sync_dependent_patient_ids
+    from patients.dependent_ids import sync_dependents_with_principal
 
     with transaction.atomic():
         update_fields: list[str] = []
@@ -117,6 +117,6 @@ def normalize_principal_patient(patient: Patient) -> bool:
             patient.patient_id = canonical_id
             patient.save(update_fields=["patient_id"])
 
-        sync_dependent_patient_ids(patient)
+        sync_dependents_with_principal(patient)
 
     return True

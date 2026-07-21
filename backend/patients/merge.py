@@ -248,6 +248,13 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
             repointed_rows["__self_fks__"] = dep_rows
         counters["dependents_repointed"] = deps_repointed
 
+        dependents_synced = 0
+        if winner.category in ("employee", "retiree"):
+            from patients.dependent_ids import sync_dependents_with_principal
+
+            winner.refresh_from_db()
+            dependents_synced = sync_dependents_with_principal(winner)
+
         # 5) Copy empty fields from loser to winner.
         copied = []
         for f in PATIENT_COPY_FIELDS:
@@ -296,7 +303,7 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
         "loser_id": loser.id,
         "loser_old_patient_id": old_patient_id,
         "loser_new_patient_id": loser.patient_id,
-        "counters": counters,
+        "counters": {**counters, "dependents_synced": dependents_synced},
         "merge_audit_id": audit.id,
         "repointed_rows": repointed_rows,
     }
@@ -391,6 +398,12 @@ def unmerge_patients(audit_id: int, user) -> dict:
                 "updated_at",
             ]
         )
+
+        from patients.dependent_ids import sync_dependents_with_principal
+
+        for principal in (winner, loser):
+            if principal.category in ("employee", "retiree"):
+                sync_dependents_with_principal(principal)
 
         # 5) Write an un-merge audit row (winner/loser swapped roles).
         unmerge_audit = PatientMerge.objects.create(

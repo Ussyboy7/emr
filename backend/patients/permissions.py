@@ -53,6 +53,11 @@ def can_unmerge_patient(user) -> bool:
     return user_has_capability(user, "patient_unmerge")
 
 
+def can_edit_personal_number(user) -> bool:
+    """Correct principal personal_number (regenerates patient_id + dependent IDs)."""
+    return is_system_admin_user(user)
+
+
 def requires_lifecycle_category_change(old_category: str, new_category: str) -> bool:
     """PATCH category changes that must use lifecycle permissions."""
     return old_category == "employee" and new_category == "retiree"

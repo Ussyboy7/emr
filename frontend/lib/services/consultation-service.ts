@@ -421,6 +421,7 @@ class ConsultationService {
     room?: number;
     patient?: number;
     is_active?: boolean;
+    date?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: ConsultationQueueItem[]; count: number }> {

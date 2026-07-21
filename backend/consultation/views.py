@@ -1368,6 +1368,14 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             })
 
         if visit:
+            if visit.status != 'in_progress':
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({
+                    'visit': [
+                        'Visit must be sent to nursing (in progress) before adding to consultation queue.',
+                    ],
+                })
+
             from patients.nursing_leg_status import (
                 consultation_leg_state,
                 visit_service_clinics,

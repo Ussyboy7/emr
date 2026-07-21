@@ -35,7 +35,7 @@ import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth
 import { formatPatientCategoryLabel, getPatientCategoryBorderClass } from '@/lib/medical-records/patient-category';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { canManagePatientLifecycle, isSystemAdminUser } from '@/lib/patient-permissions';
+import { canManagePatientLifecycle, isSystemAdminUser, canEditPersonalNumber } from '@/lib/patient-permissions';
 import { medicalHistoryFormFromRecord } from '@/lib/clinical-overview-utils';
 import { 
   Search, Filter, Users, Phone, Eye, 
@@ -259,6 +259,10 @@ function PatientsListPageContent() {
   const [photoRemoved, setPhotoRemoved] = useState(false);
 
   const isAdminUser = useMemo(() => isSystemAdminUser(currentUser), [currentUser]);
+  const canEditPersonalNumberField = useMemo(
+    () => canEditPersonalNumber(currentUser),
+    [currentUser],
+  );
   const canManagePatientLifecycleActions = useMemo(
     () => canManagePatientLifecycle(currentUser),
     [currentUser],
@@ -506,7 +510,15 @@ function PatientsListPageContent() {
         category: 'retiree'
       });
 
-      toast.success(`Patient ${patientToConvert.name} has been converted to retiree status`);
+      toast.success(
+        `Patient ${patientToConvert.name} converted to retiree status${
+          (patientToConvert.dependentsCount ?? 0) > 0
+            ? ` (${patientToConvert.dependentsCount} dependent${
+                patientToConvert.dependentsCount === 1 ? '' : 's'
+              } updated)`
+            : ''
+        }`,
+      );
 
       // Close modal and refresh data
       setIsRetireeConversionOpen(false);
@@ -872,8 +884,8 @@ function PatientsListPageContent() {
         occupation: editForm.occupation.trim(),
       };
 
-      // Send personal_number: always for admin users, otherwise only for Employee/Retiree.
-      if (isAdminUser || (cat !== 'Dependent' && cat !== 'NonNPA')) {
+      // Personal number: only system admins may PATCH changes (backend enforces).
+      if (canEditPersonalNumberField) {
         updateData.personal_number = editForm.personalNumber.trim();
       }
 
@@ -1437,14 +1449,39 @@ function PatientsListPageContent() {
                             </SelectContent>
                           </Select>
                         </div>
-                        {((selectedPatient.category !== "NonNPA" && selectedPatient.category !== "Dependent") || isAdminUser) && (
+                        {((selectedPatient.category === 'Employee' || selectedPatient.category === 'Retiree') ||
+                          (isAdminUser &&
+                            selectedPatient.category !== 'Employee' &&
+                            selectedPatient.category !== 'Retiree')) && (
                             <div className="space-y-2">
-                              <Label>Personal number {selectedPatient.category !== "NonNPA" && selectedPatient.category !== "Dependent" ? '*' : ''}</Label>
+                              <Label>
+                                Personal number{' '}
+                                {(selectedPatient.category === 'Employee' ||
+                                  selectedPatient.category === 'Retiree') &&
+                                  '*'}
+                              </Label>
                               <Input
                                 value={editForm.personalNumber}
-                                onChange={(e) => setEditForm((prev) => ({ ...prev, personalNumber: e.target.value }))}
+                                onChange={(e) =>
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    personalNumber: e.target.value,
+                                  }))
+                                }
+                                readOnly={!canEditPersonalNumberField}
+                                className={!canEditPersonalNumberField ? 'bg-muted' : undefined}
                                 placeholder="e.g. A2962 (NPA personal number)"
                               />
+                              {canEditPersonalNumberField ? (
+                                <p className="text-xs text-amber-700 dark:text-amber-300">
+                                  Changing personal number updates the principal patient ID and
+                                  re-syncs linked dependent IDs (ED-/RD-).
+                                </p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  Only system administrators can change personal number.
+                                </p>
+                              )}
                             </div>
                           )}
                         {selectedPatient.category === "Dependent" && (
@@ -2208,8 +2245,14 @@ function PatientsListPageContent() {
                     <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 space-y-1">
                       <li>• Patient category changes from "Employee" to "Retiree"</li>
                       <li>• Patient ID will be updated (E-XXX → R-XXX format)</li>
+                      {(patientToConvert.dependentsCount ?? 0) > 0 && (
+                        <li>
+                          • {patientToConvert.dependentsCount} linked dependent
+                          {patientToConvert.dependentsCount === 1 ? '' : 's'} will be re-labelled
+                          as retiree dependents and patient IDs updated (ED-… → RD-…)
+                        </li>
+                      )}
                       <li>• All existing medical records and history are preserved</li>
-                      <li>• Employee dependents become retiree dependents</li>
                     </ul>
                   </div>
                   <p className="text-sm text-muted-foreground">
@@ -2267,6 +2310,12 @@ function PatientsListPageContent() {
                       <li>• A new personal number will be assigned</li>
                       <li>• Patient ID will update (E-old# → E-new#)</li>
                       <li>• Linked dependents keep the same records; their patient IDs update to match the new personal number</li>
+                      {(patientToPromote.dependentsCount ?? 0) > 0 && (
+                        <li>
+                          • {patientToPromote.dependentsCount} linked dependent
+                          {patientToPromote.dependentsCount === 1 ? '' : 's'} will have patient IDs updated
+                        </li>
+                      )}
                       <li>• All existing medical records and history are preserved</li>
                     </ul>
                   </div>
