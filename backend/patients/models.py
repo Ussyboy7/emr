@@ -474,6 +474,13 @@ class Patient(models.Model):
                     raise ValueError(
                         f"Unable to generate unique patient_id for {self.category}"
                     )
+        else:
+            from patients.principal_ids import align_principal_patient_id
+
+            aligned_fields = align_principal_patient_id(self)
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and aligned_fields:
+                kwargs["update_fields"] = list(set(update_fields) | set(aligned_fields))
 
         super().save(*args, **kwargs)
 

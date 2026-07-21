@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 
+from django.core.exceptions import ValidationError
+
 from patients.models import Patient
 
 TEMP_PREFIX = "__NORM-"
+SKIP_ALIGN_PATIENT_ID_PREFIXES = (TEMP_PREFIX, "__RENORM-", "MERGED")
 
 MALFORMED_RETIREE_ID_RE = re.compile(r"^R-R-(.+)$", re.IGNORECASE)
 MALFORMED_EMPLOYEE_ID_RE = re.compile(r"^E-E-(.+)$", re.IGNORECASE)
@@ -54,6 +57,60 @@ def canonical_principal_patient_id(category: str, personal_number: str) -> str:
     raise ValueError(f"Unsupported category for principal patient_id: {category}")
 
 
+def _should_skip_principal_id_align(patient: Patient) -> bool:
+    pid = (patient.patient_id or "").strip()
+    if not pid:
+        return False
+    return any(pid.startswith(prefix) for prefix in SKIP_ALIGN_PATIENT_ID_PREFIXES)
+
+
+def validate_principal_patient_id_available(patient: Patient, canonical_id: str) -> None:
+    """Raise ValidationError when another row already owns this patient_id."""
+    qs = Patient.objects.filter(patient_id=canonical_id)
+    if patient.pk:
+        qs = qs.exclude(pk=patient.pk)
+    if qs.exists():
+        raise ValidationError(
+            {
+                "patient_id": (
+                    f"Patient ID {canonical_id} is already assigned to another patient. "
+                    "Merge duplicate records before changing the personal number."
+                )
+            }
+        )
+
+
+def align_principal_patient_id(patient: Patient) -> list[str]:
+    """
+    Ensure employee/retiree patient_id and personal_number match E-/R-{pn} format.
+
+    Returns the model field names modified on the in-memory instance.
+    """
+    if patient.category not in ("employee", "retiree") or patient.merged_into_id:
+        return []
+    if _should_skip_principal_id_align(patient):
+        return []
+
+    canonical_pn = canonical_personal_number(patient)
+    if not canonical_pn:
+        return []
+
+    canonical_id = canonical_principal_patient_id(patient.category, canonical_pn)
+    changed: list[str] = []
+
+    current_pn = (patient.personal_number or "").strip().upper()
+    if current_pn != canonical_pn:
+        patient.personal_number = canonical_pn
+        changed.append("personal_number")
+
+    if patient.patient_id != canonical_id:
+        validate_principal_patient_id_available(patient, canonical_id)
+        patient.patient_id = canonical_id
+        changed.append("patient_id")
+
+    return changed
+
+
 def principal_normalization_plan(patient: Patient) -> tuple[str, str] | None:
     """Return (canonical_personal_number, canonical_patient_id) or None if already canonical."""
     if patient.category not in ("employee", "retiree") or patient.merged_into_id:
@@ -89,33 +146,23 @@ def normalize_principal_patient(patient: Patient) -> bool:
 
     canonical_pn, canonical_id = plan
 
-    if (
-        Patient.objects.filter(patient_id=canonical_id)
-        .exclude(pk=patient.pk)
-        .exists()
-    ):
-        raise ValueError(
-            f"Cannot set patient_id={canonical_id}: another patient already uses it."
-        )
+    validate_principal_patient_id_available(patient, canonical_id)
 
     from django.db import transaction
 
     from patients.dependent_ids import sync_dependents_with_principal
 
     with transaction.atomic():
-        update_fields: list[str] = []
-        if (patient.personal_number or "").strip().upper() != canonical_pn:
-            patient.personal_number = canonical_pn
-            update_fields.append("personal_number")
-        if update_fields:
-            patient.save(update_fields=update_fields)
-
         if patient.patient_id != canonical_id:
             temp_id = f"{TEMP_PREFIX}{patient.pk}__"
             patient.patient_id = temp_id
             patient.save(update_fields=["patient_id"])
+            patient.personal_number = canonical_pn
             patient.patient_id = canonical_id
-            patient.save(update_fields=["patient_id"])
+            patient.save(update_fields=["personal_number", "patient_id"])
+        elif (patient.personal_number or "").strip().upper() != canonical_pn:
+            patient.personal_number = canonical_pn
+            patient.save(update_fields=["personal_number"])
 
         sync_dependents_with_principal(patient)
 

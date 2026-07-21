@@ -14,6 +14,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view
 from common.openapi import document_viewset
 from django.shortcuts import get_object_or_404
 from django.db.models import OuterRef, Subquery, Exists, Q, Count, Max
+from django.db import transaction
 from django.utils import timezone
 from datetime import date, timedelta
 
@@ -413,6 +414,9 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     
     def perform_update(self, serializer):
         """Update patient and log audit."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+
         old_instance = self.get_object()
         new_category = serializer.validated_data.get("category")
         if (
@@ -444,34 +448,39 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         # Check if category is changing and regenerate patient ID if needed
         category_changed = 'category' in serializer.validated_data and serializer.validated_data['category'] != old_instance.category
 
-        patient = serializer.save(updated_by=self.request.user)
-
-        # Regenerate patient ID if category changed
-        if category_changed:
-            id_changed = patient.regenerate_patient_id()
-            if id_changed:
-                patient.save()  # Save the new patient ID
-
-        dependents_updated = 0
-        if (
-            category_changed
-            and old_instance.category == 'employee'
-            and patient.category == 'retiree'
-        ):
-            from .dependent_ids import sync_dependents_with_principal
-            dependents_updated = sync_dependents_with_principal(patient)
-
         personal_number_changed = (
             'personal_number' in serializer.validated_data
             and (serializer.validated_data['personal_number'] or '').strip()
             != (old_instance.personal_number or '').strip()
         )
+
+        dependents_updated = 0
         dependents_updated_pn = 0
-        if personal_number_changed and patient.category in ('employee', 'retiree'):
-            if patient.regenerate_patient_id():
-                patient.save(update_fields=['patient_id'])
-            from .dependent_ids import sync_dependent_patient_ids
-            dependents_updated_pn = sync_dependent_patient_ids(patient)
+
+        try:
+            with transaction.atomic():
+                patient = serializer.save(updated_by=self.request.user)
+
+                if (
+                    category_changed
+                    and old_instance.category == 'employee'
+                    and patient.category == 'retiree'
+                ):
+                    from .dependent_ids import sync_dependents_with_principal
+
+                    dependents_updated = sync_dependents_with_principal(patient)
+
+                if personal_number_changed and patient.category in ('employee', 'retiree'):
+                    from .dependent_ids import sync_dependent_patient_ids
+
+                    dependents_updated_pn = sync_dependent_patient_ids(patient)
+        except DjangoValidationError as e:
+            if hasattr(e, "message_dict"):
+                raw = e.message_dict.get("patient_id", e.messages)
+                message = raw[0] if isinstance(raw, list) else str(raw)
+            else:
+                message = str(e)
+            raise DRFValidationError({"detail": message}) from e
 
         audit_description = (
             f'Updated patient: {patient.get_full_name()} ({patient.patient_id})'
@@ -657,15 +666,24 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'patient_id': patient.patient_id,
         }
 
-        patient.employee_type = 'Officer'
-        patient.personal_number = new_personal_number
-        patient.updated_by = request.user
-        patient.regenerate_patient_id()
-        patient.save()
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        from .dependent_ids import sync_dependents_with_principal
 
-        from .dependent_ids import sync_dependent_patient_ids
-
-        dependents_updated = sync_dependent_patient_ids(patient)
+        try:
+            with transaction.atomic():
+                patient.employee_type = 'Officer'
+                patient.personal_number = new_personal_number
+                patient.updated_by = request.user
+                patient.save()
+                dependents_updated = sync_dependents_with_principal(patient)
+        except DjangoValidationError as e:
+            if hasattr(e, "message_dict"):
+                raw = e.message_dict.get("patient_id", e.messages)
+                message = raw[0] if isinstance(raw, list) else str(raw)
+            else:
+                message = str(e)
+            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
 
         AuditService.log_patient_action(
             user=request.user,
