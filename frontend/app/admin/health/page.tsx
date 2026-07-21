@@ -20,7 +20,10 @@ import {
   HardDrive,
   Loader2,
   Server,
+  Download,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api-client";
 
 type HealthStatus = "healthy" | "warning" | "error" | "unknown";
 
@@ -47,6 +50,8 @@ type BackupStatus = {
   hoursAgo?: number;
   filename?: string;
   directory?: string;
+  sizeBytes?: number;
+  sizeDisplay?: string;
 };
 
 const POLL_INTERVAL_MS = 30_000;
@@ -135,8 +140,9 @@ function SectionHeading({ title, description }: { title: string; description?: s
 }
 
 export default function SystemHealthPage() {
-  const { ready, handleAuthError } = useAdminPageAuth();
+  const { ready, handleAuthError, currentUser } = useAdminPageAuth();
   const [loading, setLoading] = useState(true);
+  const [downloadingBackup, setDownloadingBackup] = useState(false);
   const [lastUpdated, setLastUpdated] = useState("");
   const [systemHealth, setSystemHealth] = useState<SystemHealthItem[]>([]);
   const [backupStatus, setBackupStatus] = useState<BackupStatus>({ status: "unknown" });
@@ -150,6 +156,7 @@ export default function SystemHealthPage() {
   });
   const [metricSources, setMetricSources] = useState<Record<string, string>>({});
   const isMountedRef = useRef(true);
+  const canDownloadBackup = Boolean(currentUser?.isSuperuser);
 
   const loadData = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setLoading(true);
@@ -193,6 +200,41 @@ export default function SystemHealthPage() {
       }
     }
   }, [handleAuthError]);
+
+  const downloadLatestBackup = useCallback(async () => {
+    if (!canDownloadBackup || downloadingBackup) return;
+    setDownloadingBackup(true);
+    try {
+      const blob = await apiFetch<Blob>("/common/backups/latest/download/", {
+        responseType: "blob",
+      });
+      const filename = backupStatus.filename || "emr-backup.dump";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(
+        backupStatus.sizeDisplay
+          ? `Downloading ${filename} (${backupStatus.sizeDisplay})`
+          : `Downloading ${filename}`,
+      );
+    } catch (err: unknown) {
+      if (handleAuthError(err)) return;
+      toast.error(err instanceof Error ? err.message : "Failed to download backup");
+    } finally {
+      if (isMountedRef.current) setDownloadingBackup(false);
+    }
+  }, [
+    canDownloadBackup,
+    downloadingBackup,
+    backupStatus.filename,
+    backupStatus.sizeDisplay,
+    handleAuthError,
+  ]);
 
   useEffect(() => {
     if (!ready) return;
@@ -547,7 +589,32 @@ export default function SystemHealthPage() {
                         }
                       />
                       <DetailRow label="File" value={backupStatus.filename} />
+                      <DetailRow label="Size" value={backupStatus.sizeDisplay} />
                       <DetailRow label="Directory" value={backupStatus.directory} />
+                      {canDownloadBackup && backupStatus.filename && (
+                        <div className="pt-3">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="w-full sm:w-auto"
+                            disabled={downloadingBackup}
+                            onClick={downloadLatestBackup}
+                          >
+                            {downloadingBackup ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4 mr-2" />
+                            )}
+                            {backupStatus.sizeDisplay
+                              ? `Download latest (${backupStatus.sizeDisplay})`
+                              : "Download latest"}
+                          </Button>
+                          <p className="text-[11px] text-muted-foreground mt-2">
+                            Super admin only. Dump files contain full production data.
+                          </p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </section>

@@ -352,10 +352,12 @@ class SystemMetricsView(views.APIView):
             # Backup status — real file-system check.
             backup_status = cache.get('last_backup_status', None)
             normalized_backup_status = self._normalize_cached_backup_status(backup_status)
-            if normalized_backup_status:
+            if normalized_backup_status and 'sizeBytes' in normalized_backup_status:
                 metrics['backupStatus'] = normalized_backup_status
             else:
-                detected = self._detect_backup_status()
+                from .backups import detect_backup_status
+
+                detected = detect_backup_status()
                 metrics['backupStatus'] = detected
                 # Keep a short-lived cached snapshot so repeated dashboard
                 # polls do not hammer disk scans when no sidecar cache exists.
@@ -374,66 +376,6 @@ class SystemMetricsView(views.APIView):
             return Response(metrics)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
-
-    def _detect_backup_status(self):
-        """
-        Inspect likely backup locations and accept both SQL dumps and the JSON
-        backups created by this repository's `backup_data` command.
-        """
-        repo_root = Path(settings.BASE_DIR).resolve().parent
-        candidate_dirs = []
-
-        configured_dir = getattr(settings, 'BACKUP_DIR', None)
-        if configured_dir:
-            candidate_dirs.append(Path(configured_dir))
-
-        candidate_dirs.extend([
-            Path('/backups'),
-            repo_root / 'backups',
-            Path.cwd() / 'backups',
-            Path.home() / 'emr_backups',
-            Path.home() / 'emr-predeploy-backups',
-        ])
-
-        seen = set()
-        unique_dirs = []
-        for path in candidate_dirs:
-            resolved = str(path.resolve()) if path.exists() else str(path)
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            unique_dirs.append(path)
-
-        backup_suffixes = {'.sql', '.json', '.dump', '.bak', '.gz'}
-
-        for backup_dir in unique_dirs:
-            if not backup_dir.exists() or not backup_dir.is_dir():
-                continue
-
-            try:
-                backup_files = self._find_backup_files(backup_dir, backup_suffixes)
-                if not backup_files:
-                    continue
-
-                latest_backup = max(backup_files, key=lambda path: path.stat().st_mtime)
-                last_backup = datetime.fromtimestamp(
-                    latest_backup.stat().st_mtime,
-                    tz=dt_timezone.utc,
-                )
-                hours_ago = (timezone.now() - last_backup).total_seconds() / 3600
-
-                return {
-                    'status': 'healthy' if hours_ago < 25 else 'warning',
-                    'lastBackup': last_backup.isoformat(),
-                    'hoursAgo': round(hours_ago, 1),
-                    'filename': latest_backup.name,
-                    'directory': str(backup_dir),
-                    'message': 'Backup file detected',
-                }
-            except Exception as exc:
-                return {'status': 'error', 'message': str(exc)}
-
-        return {'status': 'unknown', 'message': 'No backup files found'}
 
     def _normalize_cached_backup_status(self, cached_status):
         """
@@ -463,28 +405,54 @@ class SystemMetricsView(views.APIView):
 
         return None
 
-    def _find_backup_files(self, backup_dir: Path, backup_suffixes: set[str]):
-        """
-        Accept both flat file layouts (`/backups/*.json`) and dated snapshot
-        directories (`$HOME/emr_backups/20260428/...`).
-        """
-        candidates = []
 
-        for path in backup_dir.iterdir():
-            if path.is_file() and path.suffix.lower() in backup_suffixes:
-                candidates.append(path)
-                continue
+@document_api_view(tag="Common", summary="Download latest EMR backup dump")
+class BackupLatestDownloadView(views.APIView):
+    """
+    Stream the newest backup file under allowed backup directories.
 
-            # Common operational layout: one timestamped directory per run.
-            if path.is_dir():
-                try:
-                    for nested in path.iterdir():
-                        if nested.is_file() and nested.suffix.lower() in backup_suffixes:
-                            candidates.append(nested)
-                except OSError:
-                    continue
+    Superuser only — dumps contain full production data.
+    """
 
-        return candidates
+    authentication_classes = [JWTAuthenticationWithActivity, JWTCookieAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not getattr(request.user, 'is_superuser', False):
+            return Response(
+                {'detail': 'Only system administrators can download backups.'},
+                status=403,
+            )
+
+        from .backups import resolve_latest_backup
+
+        path = resolve_latest_backup()
+        if path is None or not path.is_file():
+            return Response({'detail': 'No backup file found.'}, status=404)
+
+        try:
+            from audit.services import AuditService
+
+            AuditService.log_activity(
+                user=request.user,
+                action='download',
+                object_type='backup',
+                object_id=path.name,
+                module='administration',
+                object_repr=path.name,
+                description=f'Downloaded backup file {path.name}',
+                request=request,
+            )
+        except Exception:
+            pass
+
+        response = FileResponse(
+            open(path, 'rb'),
+            as_attachment=True,
+            filename=path.name,
+        )
+        response['Content-Type'] = 'application/octet-stream'
+        return response
 
 
 @document_api_view(tag="Dashboard", summary="Operational dashboard aggregates")

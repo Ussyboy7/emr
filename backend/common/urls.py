@@ -10,6 +10,7 @@ from .views import (
     HealthCheckView,
     ServerTimeView,
     SystemMetricsView,
+    BackupLatestDownloadView,
     OperationalDashboardView,
     AdminDashboardStatsView,
     LiveDashboardView,
@@ -20,6 +21,11 @@ urlpatterns = [
     path('health/', HealthCheckView.as_view(), name='health-check'),
     path('common/server-time/', ServerTimeView.as_view(), name='server-time'),
     path('common/metrics/', SystemMetricsView.as_view(), name='system-metrics'),
+    path(
+        'common/backups/latest/download/',
+        BackupLatestDownloadView.as_view(),
+        name='backup-latest-download',
+    ),
     # Lightweight payload for the admin dashboard auto-poll (online
     # users count + live system health). Designed to be cheap enough
     # to call every 30 s without dragging in users/roles/audit fetches.

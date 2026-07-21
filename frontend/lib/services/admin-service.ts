@@ -706,6 +706,13 @@ class AdminService {
     return apiFetch('/common/metrics/');
   }
 
+  /** Superuser-only: download the newest dump under allowed backup directories. */
+  async downloadLatestBackup(): Promise<Blob> {
+    return apiFetch<Blob>('/common/backups/latest/download/', {
+      responseType: 'blob',
+    });
+  }
+
   async getOnlineUsers(): Promise<{
     users: Array<{
       id: number;
