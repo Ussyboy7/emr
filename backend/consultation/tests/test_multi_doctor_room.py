@@ -47,6 +47,14 @@ class MultiDoctorRoomTest(APITestCase):
         )
         self.assertEqual(len(resp_b.data.get("doctors") or []), 2)
 
+    def test_default_capacity_allows_multiple_doctors(self):
+        room = ConsultationRoom.objects.create(name="Default Cap", room_number="DEF1")
+        self.assertGreaterEqual(room.capacity, 2)
+        resp_a = self._check_in(self.doctor_a, room)
+        resp_b = self._check_in(self.doctor_b, room)
+        self.assertEqual(resp_a.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp_b.status_code, status.HTTP_200_OK)
+
     def test_third_doctor_blocked_when_room_at_capacity(self):
         self._check_in(self.doctor_a, self.room)
         self._check_in(self.doctor_b, self.room)

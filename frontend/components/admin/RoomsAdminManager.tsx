@@ -163,7 +163,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       location: clinicLabel,
       floor: api.floor || '',
       specialty: api.specialty || '',
-      capacity: api.capacity ?? 1,
+      capacity: api.capacity ?? 8,
       status: s === 'active' ? 'Active' : s === 'inactive' ? 'Inactive' : 'Maintenance',
       assignedDoctor: '',
       description: '',
@@ -184,7 +184,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
         room_number: formData.room_number?.trim() || '',
         floor: formData.floor?.trim() || '',
         specialty: formData.specialty?.trim() || '',
-        capacity: formData.capacity ?? 1,
+        capacity: formData.capacity ?? 8,
         status: (formData.status || 'Active').toLowerCase(),
         description: formData.description?.trim() || '',
         clinic: formData.location ? Number(formData.location) : activeClinicId ?? undefined,
@@ -237,7 +237,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
   };
 
   const openCreate = () => {
-    setFormData({ status: 'Active', type: 'Consultation', capacity: 1 });
+    setFormData({ status: 'Active', type: 'Consultation', capacity: 8 });
     setFormErrors({});
     setIsCreateDialogOpen(true);
   };
@@ -457,7 +457,7 @@ function RoomForm({ formData, setFormData, formErrors, clinicOptions, opdClinicN
       </div>
       <div>
         <Label>Capacity</Label>
-        <Input type="number" min={1} value={formData.capacity ?? 1} onChange={e => update('capacity', parseInt(e.target.value) || 1)} />
+        <Input type="number" min={1} value={formData.capacity ?? 8} onChange={e => update('capacity', parseInt(e.target.value) || 8)} />
       </div>
       <div>
         <Label>Status</Label>

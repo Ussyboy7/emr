@@ -565,6 +565,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         } catch (checkInErr) {
           console.error('Room check-in failed:', checkInErr);
           if (handleAuthError(checkInErr)) return;
+          toast.error(
+            checkInErr instanceof Error
+              ? checkInErr.message
+              : 'Failed to enter consultation room',
+          );
         }
       }
       setPresenceStatus((roomData.my_presence_status || roomData.presence_status || 'away') as RoomPresenceStatus);

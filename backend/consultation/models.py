@@ -43,7 +43,8 @@ class ConsultationRoom(models.Model):
         db_index=True,
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
-    capacity = models.IntegerField(default=1)
+    # Shared consulting rooms routinely host multiple doctors at once.
+    capacity = models.IntegerField(default=8)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -104,10 +105,11 @@ class ConsultationRoomOccupancy(models.Model):
         db_table = 'consultation_room_occupancies'
         ordering = ['-checked_in_at']
         constraints = [
+            # One active occupancy row per doctor per room (multi-doctor rooms allowed).
             models.UniqueConstraint(
-                fields=['room'],
+                fields=['room', 'doctor'],
                 condition=models.Q(is_active=True),
-                name='uniq_active_room_occupancy',
+                name='uniq_active_room_doctor_occupancy',
             ),
         ]
         indexes = [

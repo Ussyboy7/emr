@@ -660,7 +660,7 @@ const StartConsultation = () => {
 
     } catch (error) {
       console.error("Error starting consultation:", error);
-      toast.error("Failed to start consultation");
+      toast.error(error instanceof Error ? error.message : "Failed to start consultation");
       setIsLoading(false);
     }
   };
@@ -675,7 +675,7 @@ const StartConsultation = () => {
       router.push(`/consultation/room/${selectedRoom}`);
     } catch (error) {
       console.error("Error checking into room:", error);
-      toast.error("Failed to enter consultation room");
+      toast.error(error instanceof Error ? error.message : "Failed to enter consultation room");
       setIsLoading(false);
     }
   };
