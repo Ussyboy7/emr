@@ -1157,6 +1157,63 @@ class MedicalCertificate(models.Model):
         super().save(*args, **kwargs)
 
 
+class PatientRecordsNote(models.Model):
+    """
+    Append-only administrative notes for Medical Records officers.
+    Not clinical consultation/nursing notes — folder refs, ID discrepancies, etc.
+    """
+
+    SOURCE_CHOICES = [
+        ("registration", "Registration"),
+        ("manual", "Manual"),
+    ]
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="records_notes",
+    )
+    note = models.CharField(max_length=800)
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default="manual",
+        db_index=True,
+    )
+    recorded_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="patient_records_notes",
+    )
+    recorded_by_name_snapshot = models.CharField(max_length=200, blank=True)
+    recorded_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "patient_records_notes"
+        ordering = ["-recorded_at", "-id"]
+        indexes = [
+            models.Index(fields=["patient", "-recorded_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Records note #{self.pk} for patient {self.patient_id}"
+
+    def save(self, *args, **kwargs):
+        self.note = (self.note or "").strip()[:800]
+        if self.recorded_by_id and not self.recorded_by_name_snapshot:
+            try:
+                self.recorded_by_name_snapshot = (
+                    self.recorded_by.get_full_name()
+                    or getattr(self.recorded_by, "username", "")
+                    or ""
+                )
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
+
+
 class PatientMerge(models.Model):
     """
     Audit row for a patient merge event.

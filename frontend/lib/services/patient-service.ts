@@ -74,6 +74,16 @@ export function sanitizePatientForRendering(patient: Record<string, unknown>): R
   };
 }
 
+export interface PatientRecordsNote {
+  id: number;
+  patient: number;
+  note: string;
+  source: 'registration' | 'manual' | string;
+  recorded_by: number | null;
+  recorded_by_name_snapshot: string;
+  recorded_at: string;
+}
+
 export interface Patient {
   id: number;
   patient_id: string;
@@ -472,6 +482,19 @@ class PatientService {
     return apiFetch<any>(`/patients/${patientId}/update_history/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    });
+  }
+
+  /** List Medical Records administrative notes for a patient. */
+  async getRecordsNotes(patientId: number): Promise<PatientRecordsNote[]> {
+    return apiFetch<PatientRecordsNote[]>(`/patients/${patientId}/records-notes/`);
+  }
+
+  /** Append a Medical Records administrative note. */
+  async addRecordsNote(patientId: number, note: string): Promise<PatientRecordsNote> {
+    return apiFetch<PatientRecordsNote>(`/patients/${patientId}/records-notes/`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
     });
   }
 

@@ -33,6 +33,7 @@ from .models import (
     MedicalCertificate,
     AnnualCheckup,
     AnnualCheckupProgrammeSettings,
+    PatientRecordsNote,
 )
 from .serializers import (
     PatientSerializer,
@@ -46,6 +47,7 @@ from .serializers import (
     AnnualCheckupCreateSerializer,
     AnnualCheckupProgrammeSerializer,
     AnnualCheckupOrderInvestigationsSerializer,
+    PatientRecordsNoteSerializer,
 )
 from .annual_checkup_services import (
     create_annual_checkup_for_visit,
@@ -910,6 +912,51 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             'counters': {k: v for k, v in r.__dict__.items() if k.endswith('_repointed') or k.endswith('_merged')},
         } for r in rows]
         return Response(data)
+
+    @extend_schema(
+        tags=["Patients"],
+        summary="Records notes",
+        description="List or append Medical Records administrative notes for a patient.",
+    )
+    @action(detail=True, methods=['get', 'post'], url_path='records-notes')
+    def records_notes(self, request, pk=None):
+        patient = self.get_object()
+        if request.method == 'GET':
+            notes = patient.records_notes.select_related('recorded_by').all()
+            return Response(PatientRecordsNoteSerializer(notes, many=True).data)
+
+        note_text = (request.data.get('note') or '').strip()
+        if not note_text:
+            return Response({'detail': 'Note is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(note_text) > 800:
+            return Response(
+                {'detail': 'Note must be 800 characters or fewer.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+        try:
+            name = user.get_full_name() or getattr(user, 'username', '') or ''
+        except Exception:
+            name = str(user)
+
+        note = PatientRecordsNote.objects.create(
+            patient=patient,
+            note=note_text[:800],
+            source='manual',
+            recorded_by=user if getattr(user, 'is_authenticated', False) else None,
+            recorded_by_name_snapshot=name,
+        )
+        AuditService.log_patient_action(
+            user=user,
+            action='update',
+            patient=patient,
+            module='medical_records',
+            description=f'Added records note for {patient.get_full_name()} ({patient.patient_id})',
+            new_values={'records_note_id': note.id},
+            request=request,
+        )
+        return Response(PatientRecordsNoteSerializer(note).data, status=status.HTTP_201_CREATED)
 
     @extend_schema(tags=["Patients"], summary="Unmerge", description="Reverse a previous merge. Admin-only emergency undo.")
     @action(detail=True, methods=['post'], url_path='unmerge')

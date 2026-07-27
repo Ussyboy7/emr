@@ -31,6 +31,7 @@ interface TimelineTabProps {
   imagingResults: any[];
   prescriptions: any[];
   vitalSigns: any[];
+  onVisitClick?: (visit: any) => void;
 }
 
 interface TimelineEvent {
@@ -51,6 +52,7 @@ export function TimelineTab({
   imagingResults,
   prescriptions,
   vitalSigns,
+  onVisitClick,
 }: TimelineTabProps) {
   const timelineEvents = useMemo(() => {
     const events: TimelineEvent[] = [];
@@ -258,8 +260,9 @@ export function TimelineTab({
                 {/* Timeline line */}
                 <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-border" />
 
-                {events.map((event, index) => {
+                {events.map((event) => {
                   const Icon = event.icon;
+                  const isVisitClickable = event.type === 'visit' && !!onVisitClick && !!event.metadata;
                   return (
                     <div key={event.id} className="relative">
                       {/* Timeline dot */}
@@ -268,7 +271,28 @@ export function TimelineTab({
                       </div>
 
                       {/* Event card */}
-                      <Card className="ml-8 hover:shadow-md transition-shadow">
+                      <Card
+                        className={`ml-8 hover:shadow-md transition-shadow${
+                          isVisitClickable ? ' cursor-pointer hover:bg-muted/40' : ''
+                        }`}
+                        onClick={
+                          isVisitClickable
+                            ? () => onVisitClick(event.metadata)
+                            : undefined
+                        }
+                        role={isVisitClickable ? 'button' : undefined}
+                        tabIndex={isVisitClickable ? 0 : undefined}
+                        onKeyDown={
+                          isVisitClickable
+                            ? (e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  onVisitClick(event.metadata);
+                                }
+                              }
+                            : undefined
+                        }
+                      >
                         <CardContent className="p-4">
                           <div className="flex items-start justify-between gap-4">
                             <div className="flex-1 space-y-1">

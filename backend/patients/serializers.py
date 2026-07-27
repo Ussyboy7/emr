@@ -5,7 +5,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from .photo import patient_photo_url
-from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate, AnnualCheckup
+from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate, AnnualCheckup, PatientRecordsNote
 
 
 def _patient_photo_url(obj) -> str | None:
@@ -20,6 +20,13 @@ class PatientSerializer(serializers.ModelSerializer):
     age_display = serializers.CharField(read_only=True)
     photo = serializers.ImageField(required=False, allow_null=True)
     clear_photo = serializers.BooleanField(required=False, write_only=True, default=False)
+    records_note = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        max_length=800,
+        help_text="Optional Medical Records note captured at registration.",
+    )
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
 
@@ -55,7 +62,7 @@ class PatientSerializer(serializers.ModelSerializer):
             'blood_group', 'genotype', 'allergies',
             'nok_surname', 'nok_first_name', 'nok_middle_name', 'nok_relationship', 'nok_address', 'nok_phone',
             'created_at', 'updated_at', 'created_by_name', 'updated_by_name', 'is_active',
-            'clear_photo',
+            'clear_photo', 'records_note',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'updated_at', 'age']
     
@@ -92,15 +99,34 @@ class PatientSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop('clear_photo', None)
+        records_note = (validated_data.pop('records_note', None) or '').strip()
         location_str = validated_data.get('location')
         if location_str and validated_data.get('location_clinic') is None:
             clinic = self._resolve_location_clinic(location_str)
             if clinic:
                 validated_data['location_clinic'] = clinic
-        return super().create(validated_data)
+        patient = super().create(validated_data)
+        if records_note:
+            request = self.context.get('request')
+            user = getattr(request, 'user', None) if request else None
+            name = ''
+            if user and getattr(user, 'is_authenticated', False):
+                try:
+                    name = user.get_full_name() or getattr(user, 'username', '') or ''
+                except Exception:
+                    name = str(user)
+            PatientRecordsNote.objects.create(
+                patient=patient,
+                note=records_note[:800],
+                source='registration',
+                recorded_by=user if user and getattr(user, 'is_authenticated', False) else None,
+                recorded_by_name_snapshot=name,
+            )
+        return patient
 
     def update(self, instance, validated_data):
         clear_photo = validated_data.pop('clear_photo', False)
+        validated_data.pop('records_note', None)
         new_photo = validated_data.get('photo')
         if new_photo:
             clear_photo = False
@@ -756,3 +782,27 @@ class AnnualCheckupOrderInvestigationsSerializer(serializers.Serializer):
         default="routine",
         required=False,
     )
+
+
+class PatientRecordsNoteSerializer(serializers.ModelSerializer):
+    """Append-only Medical Records administrative notes."""
+
+    class Meta:
+        model = PatientRecordsNote
+        fields = [
+            "id",
+            "patient",
+            "note",
+            "source",
+            "recorded_by",
+            "recorded_by_name_snapshot",
+            "recorded_at",
+        ]
+        read_only_fields = [
+            "id",
+            "patient",
+            "source",
+            "recorded_by",
+            "recorded_by_name_snapshot",
+            "recorded_at",
+        ]

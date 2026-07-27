@@ -11,6 +11,7 @@ from .models import (
     AnnualCheckupComponentDefinition,
     AnnualCheckupExemption,
     AnnualCheckupProgrammeSettings,
+    PatientRecordsNote,
 )
 
 
@@ -123,4 +124,18 @@ class MedicalHistoryAdmin(admin.ModelAdmin):
     list_display = ['patient', 'updated_at', 'updated_by']
     search_fields = ['patient__surname', 'patient__first_name']
     readonly_fields = ['updated_at']
+
+
+@admin.register(PatientRecordsNote)
+class PatientRecordsNoteAdmin(admin.ModelAdmin):
+    list_display = ['id', 'patient', 'source', 'recorded_by_name_snapshot', 'recorded_at']
+    list_filter = ['source', 'recorded_at']
+    search_fields = [
+        'note',
+        'patient__surname',
+        'patient__first_name',
+        'patient__patient_id',
+        'recorded_by_name_snapshot',
+    ]
+    readonly_fields = ['recorded_at', 'recorded_by', 'recorded_by_name_snapshot', 'source']
 

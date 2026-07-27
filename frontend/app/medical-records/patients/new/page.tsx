@@ -78,6 +78,8 @@ export default function NewPatientPage() {
 
   // Track if NOK auto-population has occurred to prevent it being overwritten
   const [nokAutoPopulated, setNokAutoPopulated] = useState(false);
+  const [allergyDraft, setAllergyDraft] = useState('');
+  const [recordsNote, setRecordsNote] = useState('');
 
   const [formData, setFormData] = useState({
     // Personal Details
@@ -614,6 +616,11 @@ export default function NewPatientPage() {
         // Location removed for dependents - not needed
       }
 
+      const trimmedRecordsNote = recordsNote.trim();
+      if (trimmedRecordsNote) {
+        payload.records_note = trimmedRecordsNote.slice(0, 800);
+      }
+
       // Handle photo upload if provided
       let createdPatient: any;
       if (photoFile) {
@@ -914,7 +921,7 @@ export default function NewPatientPage() {
                             <Upload className="h-4 w-4 mr-2" />
                             Choose File
                           </Button>
-                          <p className="text-xs text-muted-foreground mt-1">JPG, PNG. Max 2MB</p>
+                          <p className="text-xs text-muted-foreground mt-1">JPG, PNG, or WebP. Max 5MB</p>
                         </div>
                       </div>
                     </div>
@@ -971,13 +978,12 @@ export default function NewPatientPage() {
                       </div>
                       <div className="space-y-2">
                         <Label>Marital Status</Label>
-                        <Select value={formData.maritalStatus} onValueChange={(v) => handleInputChange('maritalStatus', v)}>
+                        <Select value={formData.maritalStatus || undefined} onValueChange={(v) => handleInputChange('maritalStatus', v)}>
                           <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="single">Single</SelectItem>
-                            <SelectItem value="married">Married</SelectItem>
-                            <SelectItem value="divorced">Divorced</SelectItem>
-                            <SelectItem value="widowed">Widowed</SelectItem>
+                            {MARITAL_STATUSES.map((status) => (
+                              <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -986,23 +992,32 @@ export default function NewPatientPage() {
                     <div className="grid gap-4 sm:grid-cols-3">
                       <div className="space-y-2">
                         <Label>Religion</Label>
-                        <Select value={formData.religion} onValueChange={(v) => handleInputChange('religion', v)}>
+                        <Select value={formData.religion || undefined} onValueChange={(v) => handleInputChange('religion', v)}>
                           <SelectTrigger><SelectValue placeholder="Select religion" /></SelectTrigger>
                           <SelectContent>
                             {RELIGIONS.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
-                      {(patientCategory === 'dependent' || patientCategory === 'retiree') && (
-                        <div className="space-y-2">
-                          <Label>Occupation</Label>
-                          <Input 
-                            value={formData.occupation} 
-                            onChange={(e) => handleInputChange('occupation', e.target.value)} 
-                            placeholder="Enter occupation" 
-                          />
-                        </div>
-                      )}
+                      <div className="space-y-2">
+                        <Label>Tribe</Label>
+                        <Select value={formData.tribe || undefined} onValueChange={(v) => handleInputChange('tribe', v)}>
+                          <SelectTrigger><SelectValue placeholder="Select tribe" /></SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            {NIGERIAN_TRIBES.map((tribe) => (
+                              <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Occupation</Label>
+                        <Input
+                          value={formData.occupation}
+                          onChange={(e) => handleInputChange('occupation', e.target.value)}
+                          placeholder="e.g. Senior Engineer - NPA"
+                        />
+                      </div>
                     </div>
 
                     <div className="flex justify-end pt-4">
@@ -1184,19 +1199,6 @@ export default function NewPatientPage() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label>Tribe</Label>
-                        <Select value={formData.tribe} onValueChange={(v) => handleInputChange('tribe', v)}>
-                          <SelectTrigger><SelectValue placeholder="Select tribe" /></SelectTrigger>
-                          <SelectContent className="max-h-[200px]">
-                            {NIGERIAN_TRIBES.map((tribe) => (
-                              <SelectItem key={tribe} value={tribe}>
-                                {tribe}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
                         <Label>Local Government Area</Label>
                         <Select value={formData.lga} onValueChange={(v) => handleInputChange('lga', v)} disabled={!formData.stateOfOrigin || availableLGAs.length === 0}>
                           <SelectTrigger><SelectValue placeholder={formData.stateOfOrigin ? "Select LGA" : "Select state first"} /></SelectTrigger>
@@ -1275,24 +1277,46 @@ export default function NewPatientPage() {
                       
                       {/* Allergies */}
                       <div className="space-y-3 mb-4">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm">Allergies</Label>
+                        <Label className="text-sm">Allergies</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={allergyDraft}
+                            onChange={(e) => setAllergyDraft(e.target.value)}
+                            placeholder="e.g. Penicillin"
+                            className="h-8 text-sm"
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return;
+                              e.preventDefault();
+                              const value = allergyDraft.trim();
+                              if (!value) return;
+                              setMedicalHistory((prev) => ({
+                                ...prev,
+                                allergies: prev.allergies.includes(value)
+                                  ? prev.allergies
+                                  : [...prev.allergies, value],
+                              }));
+                              setAllergyDraft('');
+                            }}
+                          />
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
+                            className="shrink-0"
                             onClick={() => {
-                              const newAllergy = prompt('Enter allergy name:');
-                              if (newAllergy && newAllergy.trim()) {
-                                setMedicalHistory(prev => ({
-                                  ...prev,
-                                  allergies: [...prev.allergies, newAllergy.trim()],
-                                }));
-                              }
+                              const value = allergyDraft.trim();
+                              if (!value) return;
+                              setMedicalHistory((prev) => ({
+                                ...prev,
+                                allergies: prev.allergies.includes(value)
+                                  ? prev.allergies
+                                  : [...prev.allergies, value],
+                              }));
+                              setAllergyDraft('');
                             }}
                           >
                             <Plus className="h-3 w-3 mr-1" />
-                            Add Allergy
+                            Add
                           </Button>
                         </div>
                         {medicalHistory.allergies.length === 0 ? (
@@ -1746,6 +1770,30 @@ export default function NewPatientPage() {
                           <Textarea value={formData.nokAddress} onChange={(e) => handleInputChange('nokAddress', e.target.value)} placeholder="Address" rows={2} />
                         </div>
                       </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-2">
+                      <h4 className="font-medium flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-slate-500" />
+                        Records note
+                        <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                      </h4>
+                      <p className="text-xs text-muted-foreground">
+                        For Medical Records officers — folder refs, ID discrepancies, principal link notes.
+                        Saved with your name and today&apos;s date; viewable on the patient profile.
+                      </p>
+                      <Textarea
+                        value={recordsNote}
+                        onChange={(e) => setRecordsNote(e.target.value.slice(0, 800))}
+                        placeholder="e.g. Marriage certificate sighted; copy filed in BT-2026-441."
+                        rows={3}
+                        maxLength={800}
+                      />
+                      <p className="text-[11px] text-muted-foreground text-right">
+                        {recordsNote.length}/800
+                      </p>
                     </div>
 
                     <div className="flex justify-between pt-4">

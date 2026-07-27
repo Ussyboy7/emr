@@ -6,30 +6,24 @@ import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { patientService, type Patient as ApiPatient } from '@/lib/services';
 import { resolvePatientNumericId, resolvePatientRecord } from '@/lib/utils/patient-id';
-import {
-  PATIENT_TITLE_OPTIONS,
-  normalizePatientTitleValue,
-  MARITAL_STATUSES,
-  RELIGIONS,
-  NIGERIAN_TRIBES,
-  NOK_RELATIONSHIPS,
-  NPA_DIVISIONS,
-  NON_NPA_TYPES,
-  DEPENDENT_TYPES,
-  NIGERIA_STATES_AND_LGAS,
-} from '@/lib/constants/patient';
+import { normalizePatientTitleValue } from '@/lib/constants/patient';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth';
 import { formatPatientCategoryLabel, getPatientCategoryBorderClass } from '@/lib/medical-records/patient-category';
@@ -38,15 +32,16 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { canManagePatientLifecycle, isSystemAdminUser, canEditPersonalNumber } from '@/lib/patient-permissions';
 import { medicalHistoryFormFromRecord } from '@/lib/clinical-overview-utils';
 import { 
-  Search, Filter, Users, Phone, Eye, 
-  UserPlus, Calendar, FileText, Edit, X, Loader2,
-  Activity, UserCheck, AlertTriangle, Camera, Upload, Trash2, Plus,
-  GitMerge
+  Search, Filter, Users, 
+  UserPlus, Calendar, FileText, Edit, Loader2, X,
+  Activity, UserCheck, AlertTriangle, Trash2, MoreHorizontal,
+  GitMerge, Eye
 } from 'lucide-react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { PatientOverviewModal } from '@/components/shared/PatientOverviewModal';
 import { PrincipalDependentsModal } from '@/components/shared/PrincipalDependentsModal';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { EditPatientDialog } from '@/components/medical-records/EditPatientDialog';
 import { useWorkLocationOptions } from '@/hooks/use-work-location-options';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedFiltersButton } from '@/components/shared/AdvancedFiltersButton';
@@ -1110,50 +1105,68 @@ function PatientsListPageContent() {
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditModal(patient)} title="Edit Patient">
                                 <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                               </Button>
-                              {isAdminUser && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => openDeletePatient(patient)}
-                                  title="Delete Patient"
-                                >
-                                  <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
-                                </Button>
-                              )}
-                              {isAdminUser && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => openMergeDialog(patient)}
-                                  title="Merge with another patient (admin)"
-                                >
-                                  <GitMerge className="h-4 w-4 text-muted-foreground hover:text-amber-500" />
-                                </Button>
-                              )}
-                              {patient.category === 'Employee' && (
-                                <>
-                                  {canManagePatientLifecycleActions && (
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRetireeConversion(patient)} title="Convert to Retiree">
-                                      <UserCheck className="h-4 w-4 text-muted-foreground hover:text-orange-500" />
-                                    </Button>
-                                  )}
-                                  {canManagePatientLifecycleActions && patient.employeeType === 'Staff' && (
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openPromoteDialog(patient)} title="Promote to Officer">
-                                      <Activity className="h-4 w-4 text-muted-foreground hover:text-purple-500" />
-                                    </Button>
-                                  )}
-                                </>
-                              )}
-                              {canManagePatientLifecycleActions && patient.category === 'Retiree' && (
-                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openCsrConversion(patient)} title="Convert to CSR">
-                                  <UserPlus className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
-                                </Button>
-                              )}
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => router.push(`/medical-records/visits/new?patient=${patient.id}`)} title="Create Visit">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => router.push(`/medical-records/visits/new?patient=${patient.id}`)}
+                                title="Create Visit"
+                              >
                                 <Calendar className="h-4 w-4 text-muted-foreground hover:text-teal-500" />
                               </Button>
+                              {(isAdminUser ||
+                                (canManagePatientLifecycleActions &&
+                                  (patient.category === 'Employee' || patient.category === 'Retiree'))) && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="More actions">
+                                      <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-52">
+                                    {patient.category === 'Employee' && canManagePatientLifecycleActions && (
+                                      <DropdownMenuItem onClick={() => openRetireeConversion(patient)}>
+                                        <UserCheck className="h-4 w-4 mr-2" />
+                                        Convert to Retiree
+                                      </DropdownMenuItem>
+                                    )}
+                                    {patient.category === 'Employee' &&
+                                      canManagePatientLifecycleActions &&
+                                      patient.employeeType === 'Staff' && (
+                                        <DropdownMenuItem onClick={() => openPromoteDialog(patient)}>
+                                          <Activity className="h-4 w-4 mr-2" />
+                                          Promote to Officer
+                                        </DropdownMenuItem>
+                                      )}
+                                    {canManagePatientLifecycleActions && patient.category === 'Retiree' && (
+                                      <DropdownMenuItem onClick={() => openCsrConversion(patient)}>
+                                        <UserPlus className="h-4 w-4 mr-2" />
+                                        Convert to CSR
+                                      </DropdownMenuItem>
+                                    )}
+                                    {isAdminUser && (
+                                      <>
+                                        {(canManagePatientLifecycleActions &&
+                                          (patient.category === 'Employee' ||
+                                            patient.category === 'Retiree')) && (
+                                          <DropdownMenuSeparator />
+                                        )}
+                                        <DropdownMenuItem onClick={() => openMergeDialog(patient)}>
+                                          <GitMerge className="h-4 w-4 mr-2" />
+                                          Merge patient
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          className="text-red-600 focus:text-red-600"
+                                          onClick={() => openDeletePatient(patient)}
+                                        >
+                                          <Trash2 className="h-4 w-4 mr-2" />
+                                          Delete patient
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
                             </div>
                           </div>
                           
@@ -1348,880 +1361,24 @@ function PatientsListPageContent() {
           }}
         />
 
-        {/* Edit Patient Modal */}
-        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Edit className="h-5 w-5 text-blue-500" />
-                Edit Patient
-              </DialogTitle>
-              <DialogDescription>Update patient registration information</DialogDescription>
-            </DialogHeader>
-            {selectedPatient && (
-              <div className="space-y-4 py-4" key={`edit-${selectedPatient.id}`}>
-                {editFormLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    <span className="ml-3 text-muted-foreground">Loading patient data...</span>
-                  </div>
-                ) : (
-                  <>
-                    {/* Patient ID (Read-only) */}
-                    <div className="p-3 rounded-lg bg-muted/50">
-                      <p className="text-xs text-muted-foreground">Patient ID (Cannot be changed)</p>
-                      <p className="font-medium">{selectedPatient.id}</p>
-                    </div>
-
-                    {/* Photo Upload */}
-                    <div className="space-y-2">
-                      <Label>Patient Photo</Label>
-                      <div className="flex items-center gap-4">
-                        <div className="w-20 h-20 rounded-lg border-2 border-dashed border-border bg-muted/30 flex items-center justify-center overflow-hidden">
-                          {photoPreview ? (
-                            photoPreview.startsWith('data:') ? (
-                              <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
-                            ) : (
-                              <PatientAvatar
-                                name={selectedPatient?.name ?? ''}
-                                photoUrl={photoPreview}
-                                size="lg"
-                                className="w-full h-full rounded-lg"
-                              />
-                            )
-                          ) : (
-                            <Camera className="h-6 w-6 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div className="flex-1 space-y-2">
-                          <div className="flex gap-2">
-                            <input 
-                              type="file" 
-                              id="edit-photo-upload" 
-                              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" 
-                              onChange={handlePhotoSelect} 
-                              className="hidden" 
-                            />
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              type="button"
-                              onClick={() => document.getElementById('edit-photo-upload')?.click()}
-                            >
-                              <Upload className="h-4 w-4 mr-2" />
-                              {photoPreview ? 'Change Photo' : 'Upload Photo'}
-                            </Button>
-                            {photoPreview && (
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                type="button"
-                                onClick={handleRemovePhoto}
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Remove
-                              </Button>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground">JPG, PNG. Max 5MB</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    {/* Personal Information — same core fields as Register Patient */}
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-semibold text-foreground">Personal Information</h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Gender *</Label>
-                          <Select
-                            value={editForm.gender}
-                            onValueChange={(v) => setEditForm((prev) => ({ ...prev, gender: v as "male" | "female" }))}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select gender" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="male">Male</SelectItem>
-                              <SelectItem value="female">Female</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {((selectedPatient.category === 'Employee' || selectedPatient.category === 'Retiree') ||
-                          (isAdminUser &&
-                            selectedPatient.category !== 'Employee' &&
-                            selectedPatient.category !== 'Retiree')) && (
-                            <div className="space-y-2">
-                              <Label>
-                                Personal number{' '}
-                                {(selectedPatient.category === 'Employee' ||
-                                  selectedPatient.category === 'Retiree') &&
-                                  '*'}
-                              </Label>
-                              <Input
-                                value={editForm.personalNumber}
-                                onChange={(e) =>
-                                  setEditForm((prev) => ({
-                                    ...prev,
-                                    personalNumber: e.target.value,
-                                  }))
-                                }
-                                readOnly={!canEditPersonalNumberField}
-                                className={!canEditPersonalNumberField ? 'bg-muted' : undefined}
-                                placeholder="e.g. A2962 (NPA personal number)"
-                              />
-                              {canEditPersonalNumberField ? (
-                                <p className="text-xs text-amber-700 dark:text-amber-300">
-                                  Changing personal number updates the principal patient ID and
-                                  re-syncs linked dependent IDs (ED-/RD-).
-                                </p>
-                              ) : (
-                                <p className="text-xs text-muted-foreground">
-                                  Only system administrators can change personal number.
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        {selectedPatient.category === "Dependent" && (
-                          <>
-                            <div className="space-y-2">
-                              <Label>Dependent Type</Label>
-                              <Select value={editForm.dependentType || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, dependentType: v === 'not-specified' ? '' : v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="not-specified">Unspecified</SelectItem>
-                                  {DEPENDENT_TYPES.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Principal personal number</Label>
-                              <Input
-                                value={editPrincipalInfo?.personalNumber || ""}
-                                readOnly
-                                className="bg-muted"
-                                placeholder=""
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                {editPrincipalInfo?.fullName
-                                  ? `Linked to ${editPrincipalInfo.fullName}. Dependent IDs (ED-/RD-) follow the principal; changing the link is not supported in this form—register a new dependent under the correct principal if needed.`
-                                  : "Principal record not loaded or not linked."}
-                              </p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-4 gap-4">
-                        <div className="space-y-2">
-                          <Label>Title</Label>
-                          <Select value={editForm.title || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, title: v === 'none' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">None</SelectItem>
-                              {PATIENT_TITLE_OPTIONS.map(({ value, label }) => (
-                                <SelectItem key={value} value={value}>
-                                  {label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>First Name *</Label>
-                          <Input value={editForm.firstName} onChange={(e) => setEditForm(prev => ({ ...prev, firstName: e.target.value }))} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Middle Name</Label>
-                          <Input value={editForm.middleName} onChange={(e) => setEditForm(prev => ({ ...prev, middleName: e.target.value }))} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Surname *</Label>
-                          <Input value={editForm.lastName} onChange={(e) => setEditForm(prev => ({ ...prev, lastName: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Date of Birth</Label>
-                          <Input type="date" value={editForm.dateOfBirth} onChange={(e) => setEditForm(prev => ({ ...prev, dateOfBirth: e.target.value }))} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Marital Status</Label>
-                          <Select value={editForm.maritalStatus || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, maritalStatus: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {MARITAL_STATUSES.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                          <Label>Religion</Label>
-                          <Select value={editForm.religion || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, religion: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {RELIGIONS.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Tribe</Label>
-                          <Select value={editForm.tribe || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, tribe: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {NIGERIAN_TRIBES.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Occupation</Label>
-                          <Input
-                            value={editForm.occupation}
-                            onChange={(e) => setEditForm((prev) => ({ ...prev, occupation: e.target.value }))}
-                            placeholder="e.g. Senior Engineer - NPA"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    {/* Contact Information */}
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-semibold text-foreground">Contact Information</h3>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Phone *</Label>
-                          <Input value={editForm.phone} onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))} placeholder="+234..." />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Email</Label>
-                          <Input type="email" value={editForm.email} onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))} placeholder="email@example.com" />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Residential Address</Label>
-                        <Input value={editForm.residentialAddress} onChange={(e) => setEditForm(prev => ({ ...prev, residentialAddress: e.target.value }))} placeholder="Street address" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Permanent Address</Label>
-                        <Input value={editForm.permanentAddress} onChange={(e) => setEditForm(prev => ({ ...prev, permanentAddress: e.target.value }))} placeholder="Permanent address (if different)" />
-                      </div>
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                          <Label>LGA</Label>
-                          <Select value={editForm.lga || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, lga: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select LGA" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {NIGERIA_STATES_AND_LGAS
-                                .find(s => s.name === (editForm.stateOfOrigin || editForm.stateOfResidence))
-                                ?.lgas.map(lga => <SelectItem key={lga} value={lga}>{lga}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>State of Residence</Label>
-                          <Select value={editForm.stateOfResidence || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfResidence: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {NIGERIA_STATES_AND_LGAS.map(s => <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>State of Origin</Label>
-                          <Select value={editForm.stateOfOrigin || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfOrigin: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {NIGERIA_STATES_AND_LGAS.map(s => <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    {/* Medical Information */}
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-semibold text-foreground">Medical Information</h3>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Blood Group</Label>
-                          <Select value={editForm.bloodGroup || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, bloodGroup: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(bg => <SelectItem key={bg} value={bg}>{bg}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Genotype</Label>
-                          <Select value={editForm.genotype || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, genotype: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {['AA', 'AS', 'SS', 'AC', 'SC'].map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    {/* Medical History */}
-                    <div className="space-y-6">
-                      <h3 className="text-sm font-semibold text-foreground">Medical History</h3>
-                      
-                      {/* Allergies */}
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-medium">Allergies</Label>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const newAllergy = prompt('Enter allergy name:');
-                              if (newAllergy && newAllergy.trim()) {
-                                setMedicalHistory(prev => ({
-                                  ...prev,
-                                  allergies: [...prev.allergies, newAllergy.trim()],
-                                }));
-                              }
-                            }}
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            Add Allergy
-                          </Button>
-                        </div>
-                        {medicalHistory.allergies.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">No allergies recorded</p>
-                        ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {medicalHistory.allergies.map((allergy, index) => (
-                              <Badge key={index} className="bg-red-600 text-white hover:bg-red-700 pr-1">
-                                <AlertTriangle className="h-3 w-3 mr-1" />
-                                {allergy}
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setMedicalHistory(prev => ({
-                                      ...prev,
-                                      allergies: prev.allergies.filter((_, i) => i !== index),
-                                    }));
-                                  }}
-                                  className="h-4 w-4 p-0 ml-1 hover:bg-red-800"
-                                >
-                                  <X className="h-3 w-3" />
-                                </Button>
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Chronic Conditions */}
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-medium">Chronic Conditions</Label>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setMedicalHistory(prev => ({
-                                ...prev,
-                                diagnoses: [...prev.diagnoses, { name: '', code: '', status: 'Active', diagnosedDate: '' }],
-                              }));
-                            }}
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            Add Condition
-                          </Button>
-                        </div>
-                        {medicalHistory.diagnoses.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">No chronic conditions recorded</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {medicalHistory.diagnoses.map((diagnosis, index) => (
-                              <div key={index} className="p-3 border rounded-lg space-y-2">
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-muted-foreground">Condition #{index + 1}</span>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setMedicalHistory(prev => ({
-                                        ...prev,
-                                        diagnoses: prev.diagnoses.filter((_, i) => i !== index),
-                                      }));
-                                    }}
-                                    className="h-6 w-6 p-0"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">ICD-10 Code</Label>
-                                    <Input
-                                      value={diagnosis.code || ''}
-                                      onChange={(e) => {
-                                        const updated = [...medicalHistory.diagnoses];
-                                        updated[index].code = e.target.value;
-                                        setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
-                                      }}
-                                      placeholder="e.g., I10"
-                                      className="h-8 text-xs"
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Status</Label>
-                                    <Select
-                                      value={diagnosis.status}
-                                      onValueChange={(value) => {
-                                        const updated = [...medicalHistory.diagnoses];
-                                        updated[index].status = value;
-                                        setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
-                                      }}
-                                    >
-                                      <SelectTrigger className="h-8 text-xs">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="Active">Active</SelectItem>
-                                        <SelectItem value="Resolved">Resolved</SelectItem>
-                                        <SelectItem value="Controlled">Controlled</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs">Condition Name</Label>
-                                  <Input
-                                    value={diagnosis.name}
-                                    onChange={(e) => {
-                                      const updated = [...medicalHistory.diagnoses];
-                                      updated[index].name = e.target.value;
-                                      setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
-                                    }}
-                                    placeholder="e.g., Essential Hypertension"
-                                    className="h-8 text-xs"
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs">Diagnosed Date</Label>
-                                  <Input
-                                    type="date"
-                                    value={diagnosis.diagnosedDate || ''}
-                                    onChange={(e) => {
-                                      const updated = [...medicalHistory.diagnoses];
-                                      updated[index].diagnosedDate = e.target.value;
-                                      setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
-                                    }}
-                                    className="h-8 text-xs"
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <Separator />
-
-                      {/* Surgical History */}
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-medium">Surgical History</Label>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setMedicalHistory(prev => ({
-                                ...prev,
-                                surgicalHistory: [...prev.surgicalHistory, { procedure: '', date: '', hospital: '' }],
-                              }));
-                            }}
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            Add Surgery
-                          </Button>
-                        </div>
-                        {medicalHistory.surgicalHistory.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">No surgical history recorded</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {medicalHistory.surgicalHistory.map((surgery, index) => (
-                              <div key={index} className="p-3 border rounded-lg space-y-2">
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-muted-foreground">Surgery #{index + 1}</span>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setMedicalHistory(prev => ({
-                                        ...prev,
-                                        surgicalHistory: prev.surgicalHistory.filter((_, i) => i !== index),
-                                      }));
-                                    }}
-                                    className="h-6 w-6 p-0"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2">
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Procedure</Label>
-                                    <Input
-                                      value={surgery.procedure}
-                                      onChange={(e) => {
-                                        const updated = [...medicalHistory.surgicalHistory];
-                                        updated[index].procedure = e.target.value;
-                                        setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
-                                      }}
-                                      placeholder="e.g., Appendectomy"
-                                      className="h-8 text-xs"
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Date</Label>
-                                    <Input
-                                      type="date"
-                                      value={surgery.date}
-                                      onChange={(e) => {
-                                        const updated = [...medicalHistory.surgicalHistory];
-                                        updated[index].date = e.target.value;
-                                        setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
-                                      }}
-                                      className="h-8 text-xs"
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Hospital</Label>
-                                    <Input
-                                      value={surgery.hospital}
-                                      onChange={(e) => {
-                                        const updated = [...medicalHistory.surgicalHistory];
-                                        updated[index].hospital = e.target.value;
-                                        setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
-                                      }}
-                                      placeholder="Hospital name"
-                                      className="h-8 text-xs"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Family History */}
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-medium">Family History</Label>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setMedicalHistory(prev => ({
-                                ...prev,
-                                familyHistory: [...prev.familyHistory, { relation: '', condition: '' }],
-                              }));
-                            }}
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            Add Family Member
-                          </Button>
-                        </div>
-                        {medicalHistory.familyHistory.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">No family history recorded</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {medicalHistory.familyHistory.map((family, index) => (
-                              <div key={index} className="p-3 border rounded-lg space-y-2">
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-muted-foreground">Family Member #{index + 1}</span>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setMedicalHistory(prev => ({
-                                        ...prev,
-                                        familyHistory: prev.familyHistory.filter((_, i) => i !== index),
-                                      }));
-                                    }}
-                                    className="h-6 w-6 p-0"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Relation</Label>
-                                    <Select
-                                      value={family.relation}
-                                      onValueChange={(value) => {
-                                        const updated = [...medicalHistory.familyHistory];
-                                        updated[index].relation = value;
-                                        setMedicalHistory(prev => ({ ...prev, familyHistory: updated }));
-                                      }}
-                                    >
-                                      <SelectTrigger className="h-8 text-xs">
-                                        <SelectValue placeholder="Select relation" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="Father">Father</SelectItem>
-                                        <SelectItem value="Mother">Mother</SelectItem>
-                                        <SelectItem value="Sibling">Sibling</SelectItem>
-                                        <SelectItem value="Grandfather">Grandfather</SelectItem>
-                                        <SelectItem value="Grandmother">Grandmother</SelectItem>
-                                        <SelectItem value="Uncle">Uncle</SelectItem>
-                                        <SelectItem value="Aunt">Aunt</SelectItem>
-                                        <SelectItem value="Other">Other</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Condition</Label>
-                                    <Input
-                                      value={family.condition}
-                                      onChange={(e) => {
-                                        const updated = [...medicalHistory.familyHistory];
-                                        updated[index].condition = e.target.value;
-                                        setMedicalHistory(prev => ({ ...prev, familyHistory: updated }));
-                                      }}
-                                      placeholder="e.g., Hypertension, Type 2 Diabetes"
-                                      className="h-8 text-xs"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Social History */}
-                      <div className="space-y-3">
-                        <Label className="text-sm font-medium">Social History</Label>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Smoking</Label>
-                            <Select
-                              value={medicalHistory.socialHistory.smoking}
-                              onValueChange={(value) => {
-                                setMedicalHistory(prev => ({
-                                  ...prev,
-                                  socialHistory: { ...prev.socialHistory, smoking: value },
-                                }));
-                              }}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Select" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Never">Never</SelectItem>
-                                <SelectItem value="Former">Former</SelectItem>
-                                <SelectItem value="Current">Current</SelectItem>
-                                <SelectItem value="Occasional">Occasional</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Alcohol</Label>
-                            <Select
-                              value={medicalHistory.socialHistory.alcohol}
-                              onValueChange={(value) => {
-                                setMedicalHistory(prev => ({
-                                  ...prev,
-                                  socialHistory: { ...prev.socialHistory, alcohol: value },
-                                }));
-                              }}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Select" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Never">Never</SelectItem>
-                                <SelectItem value="Occasional">Occasional (social)</SelectItem>
-                                <SelectItem value="Regular">Regular</SelectItem>
-                                <SelectItem value="Heavy">Heavy</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1 sm:col-span-2">
-                            <Label className="text-xs">Exercise</Label>
-                            <Input
-                              value={medicalHistory.socialHistory.exercise}
-                              onChange={(e) => {
-                                setMedicalHistory(prev => ({
-                                  ...prev,
-                                  socialHistory: { ...prev.socialHistory, exercise: e.target.value },
-                                }));
-                              }}
-                              placeholder="e.g., 2-3 times per week"
-                              className="h-8 text-xs"
-                            />
-                          </div>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Occupation is set under Personal Information above (same as registration).
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Work Info — same as registration (employee only, not retiree) */}
-                    {selectedPatient.category === 'Employee' && (
-                      <>
-                        <Separator />
-                        <div className="space-y-4">
-                          <h3 className="text-sm font-semibold text-foreground">Work Information</h3>
-                          <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                              <Label>Employee Type</Label>
-                              <Select value={editForm.employeeType || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, employeeType: v === 'not-specified' ? '' : v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="not-specified">Unspecified</SelectItem>
-                                  <SelectItem value="Officer">Officer</SelectItem>
-                                  <SelectItem value="Staff">Staff</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Division</Label>
-                              <Select value={editForm.division || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, division: v === 'not-specified' ? '' : v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select division" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="not-specified">Unspecified</SelectItem>
-                                  {NPA_DIVISIONS.map(div => <SelectItem key={div} value={div}>{div}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Location</Label>
-                              <Select value={editForm.location || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v === 'not-specified' ? '' : v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="not-specified">Unspecified</SelectItem>
-                                  {locationOptions.filter((l) => l.value !== "all").map((l) => (
-                                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        </div>
-                      </>
-                    )}
-
-                    {/* Non-NPA: type + location */}
-                    {selectedPatient.category === 'NonNPA' && (
-                      <>
-                        <Separator />
-                        <div className="space-y-4">
-                          <h3 className="text-sm font-semibold text-foreground">Non-NPA Details</h3>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Type</Label>
-                              <Select value={editForm.nonnpaType || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, nonnpaType: v === 'not-specified' ? '' : v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="not-specified">Unspecified</SelectItem>
-                                  {NON_NPA_TYPES.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Location</Label>
-                              <Select value={editForm.location || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v === 'not-specified' ? '' : v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="not-specified">Unspecified</SelectItem>
-                                  {locationOptions.filter((l) => l.value !== "all").map((l) => (
-                                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        </div>
-                      </>
-                    )}
-
-                    <Separator />
-
-                    {/* Next of Kin */}
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-semibold text-foreground">Next of Kin</h3>
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                          <Label>Surname</Label>
-                          <Input value={editForm.nokSurname} onChange={(e) => setEditForm(prev => ({ ...prev, nokSurname: e.target.value }))} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>First Name</Label>
-                          <Input value={editForm.nokFirstName} onChange={(e) => setEditForm(prev => ({ ...prev, nokFirstName: e.target.value }))} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Middle Name</Label>
-                          <Input value={editForm.nokMiddleName} onChange={(e) => setEditForm(prev => ({ ...prev, nokMiddleName: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Relationship</Label>
-                          <Select value={editForm.nokRelationship || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, nokRelationship: v === 'not-specified' ? '' : v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {NOK_RELATIONSHIPS.map(rel => <SelectItem key={rel} value={rel}>{rel}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Phone</Label>
-                          <Input value={editForm.nokPhone} onChange={(e) => setEditForm(prev => ({ ...prev, nokPhone: e.target.value }))} placeholder="+234..." />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Address</Label>
-                        <Input value={editForm.nokAddress} onChange={(e) => setEditForm(prev => ({ ...prev, nokAddress: e.target.value }))} placeholder="Next of kin address" />
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
-              <Button onClick={handleSaveEdit} disabled={isSubmitting || editFormLoading}>
-                {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Edit className="h-4 w-4 mr-2" />}
-                Save Changes
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <EditPatientDialog
+          open={isEditModalOpen}
+          onOpenChange={setIsEditModalOpen}
+          selectedPatient={selectedPatient}
+          editForm={editForm}
+          setEditForm={setEditForm}
+          editFormLoading={editFormLoading}
+          medicalHistory={medicalHistory}
+          setMedicalHistory={setMedicalHistory}
+          editPrincipalInfo={editPrincipalInfo}
+          photoPreview={photoPreview}
+          onPhotoSelect={handlePhotoSelect}
+          onRemovePhoto={handleRemovePhoto}
+          canEditPersonalNumberField={canEditPersonalNumberField}
+          locationOptions={locationOptions}
+          isSubmitting={isSubmitting}
+          onSave={() => void handleSaveEdit()}
+        />
 
         {/* Retiree Conversion Confirmation Dialog */}
         <AlertDialog open={isRetireeConversionOpen} onOpenChange={setIsRetireeConversionOpen}>

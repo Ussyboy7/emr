@@ -19,6 +19,7 @@ import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
 import { MergeHistoryTab } from '@/components/patient-overview/MergeHistoryTab';
+import { PatientRecordsNotesSection } from '@/components/medical-records/PatientRecordsNotesSection';
 import {
   getVisitServiceClinicsDisplay,
 } from '@/lib/utils/clinic-utils';
@@ -26,7 +27,7 @@ import { resolvePatientRecord } from '@/lib/utils/patient-id';
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 import { mapClinicalOverviewToPatientHistory } from '@/lib/clinical-overview-utils';
 import {
-  User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
+  User, Phone, AlertCircle, Activity,
   AlertTriangle, Loader2, Mail, MapPin, Droplets,
   ClipboardList, Clock, Users, UserPlus, GitMerge
 } from 'lucide-react';
@@ -779,23 +780,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
             <TabsContent value="overview" className="flex-1 overflow-y-auto px-6 py-4 space-y-6 mt-0">
               {patientDetail ? (
                 <>
-                  <div className="grid gap-4 md:grid-cols-4">
-                    {[
-                      { icon: Calendar, value: visits.length, label: 'Total Visits', color: 'text-blue-500' },
-                      { icon: Pill, value: patientDetail.currentMedications.length, label: 'Active Meds', color: 'text-violet-500' },
-                      { icon: TestTube, value: labResults.length, label: 'Lab Tests', color: 'text-amber-500' },
-                      { icon: Users, value: canManageDependents ? dependents.length : 0, label: 'Dependents', color: 'text-emerald-500' },
-                    ].map((stat, i) => (
-                      <Card key={i}>
-                        <CardContent className="p-4 text-center">
-                          <stat.icon className={`h-6 w-6 ${stat.color} mx-auto mb-2`} />
-                          <p className="text-2xl font-bold">{stat.value}</p>
-                          <p className="text-xs text-muted-foreground">{stat.label}</p>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-
                   <div className="grid gap-6 xl:grid-cols-[1.35fr_0.95fr]">
                     <div className="space-y-6">
                       <Card>
@@ -935,41 +919,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                         </CardContent>
                       </Card>
 
-                      <Card>
-                        <CardHeader className="flex flex-row items-center justify-between">
-                          <CardTitle className="flex items-center gap-2">
-                            <Calendar className="h-5 w-5 text-blue-500" />Recent Visits
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          {visits.slice(0, 3).map((visit) => (
-                            <div
-                              key={visit.id}
-                              onClick={() => handleViewVisit(visit)}
-                              className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-all cursor-pointer"
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className={`w-2 h-2 rounded-full ${
-                                  visit.type === 'Emergency' ? 'bg-rose-500' :
-                                  visit.type === 'OPD' ? 'bg-emerald-500' :
-                                  'bg-blue-500'
-                                }`} />
-                                <div>
-                                  <p className="font-medium">{visit.type}</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {visit.date} {visit.doctor && visit.doctor !== 'Unknown' && `• ${visit.doctor}`} {visit.clinic && visit.clinic !== 'Unknown' && `• ${visit.clinic}`}
-                                  </p>
-                                </div>
-                              </div>
-                              <Badge variant="outline">{visit.type}</Badge>
-                            </div>
-                          ))}
-                          {visits.length === 0 && (
-                            <p className="text-sm text-muted-foreground text-center py-4">No visits recorded</p>
-                          )}
-                        </CardContent>
-                      </Card>
-
                       <div className="grid md:grid-cols-2 gap-6">
                         <Card>
                           <CardHeader>
@@ -1101,6 +1050,10 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                           </div>
                         </CardContent>
                       </Card>
+
+                      {patientDetail.numericId ? (
+                        <PatientRecordsNotesSection patientNumericId={patientDetail.numericId} />
+                      ) : null}
                     </div>
                   </div>
                 </>
@@ -1129,6 +1082,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 imagingResults={imagingResults}
                 prescriptions={prescriptions}
                 vitalSigns={vitalSigns}
+                onVisitClick={handleViewVisit}
               />
             </TabsContent>
 

@@ -63,6 +63,7 @@ RELATED_TO_PATIENT = [
     "radiology.RadiologyOrder",
     "radiology.RadiologyReport",
     "appointments.Appointment",
+    "patients.PatientRecordsNote",
 ]
 
 # Maps related-model app_label.ModelName → field name on PatientMerge audit.
@@ -181,8 +182,6 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
             model = _import_model(qualified)
             model_name = model.__name__
             audit_field = RELATED_AUDIT_FIELD.get(model_name)
-            if not audit_field:
-                continue
             rows = list(
                 model.objects.filter(patient_id=loser)
                 .exclude(patient_id=winner)  # safety
@@ -191,7 +190,8 @@ def merge_patients(winner_id: int, loser_id: int, user, reason: str) -> dict:
             if rows:
                 model.objects.filter(pk__in=rows).update(patient_id=winner)
                 repointed_rows[model_name] = rows
-            counters[audit_field] = counters.get(audit_field, 0) + len(rows)
+            if audit_field:
+                counters[audit_field] = counters.get(audit_field, 0) + len(rows)
 
         # 3) Handle OneToOne (MedicalHistory).
         mh_audit_repointed = 0
