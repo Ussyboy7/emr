@@ -85,7 +85,6 @@ const baseArgs = {
   onReferralCreated: vi.fn(),
   medicalNotesAssessment: '',
   loadPatientOverview: vi.fn(),
-  orderedByUserId: 1,
 };
 
 describe('useConsultationRoomOrders', () => {

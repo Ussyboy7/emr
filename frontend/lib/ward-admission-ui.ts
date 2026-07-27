@@ -13,26 +13,6 @@ export function isEscalatedCondition(condition: string | null | undefined): bool
   return /needs doctor review/i.test(condition || '');
 }
 
-export function resolveDefaultWardDetailsTab(
-  admission: PatientAdmission,
-  role: 'nurse' | 'doctor' = 'nurse',
-): WardDetailsTab {
-  if (admission.status === 'pending_discharge' || admission.status === 'discharged') {
-    return 'overview';
-  }
-  if (role === 'nurse' && isEscalatedCondition(admission.current_condition)) {
-    return 'nursing';
-  }
-  return 'overview';
-}
-
-export function resolveDefaultDoctorDetailsTab(admission: PatientAdmission): WardDoctorDetailsTab {
-  if (isEscalatedCondition(admission.current_condition)) {
-    return 'overview';
-  }
-  return resolveDefaultWardDetailsTab(admission, 'doctor') === 'orders' ? 'orders' : 'overview';
-}
-
 const isInstructionOrderType = (orderType: string) => {
   const t = String(orderType || '').toLowerCase();
   return t === 'ward instruction' || t === 'observation admission';

@@ -4,6 +4,7 @@ Serializers for the Wards app.
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from common.serializer_fields import OptionalUserPrimaryKeyField
 from patients.photo import patient_photo_url
 from .models import (
     Ward,
@@ -138,6 +139,7 @@ class AdmissionEscortSerializer(serializers.ModelSerializer):
 class PatientAdmissionSerializer(serializers.ModelSerializer):
     """Serializer for PatientAdmission model."""
 
+    admitting_doctor = OptionalUserPrimaryKeyField()
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_photo = serializers.SerializerMethodField()
     ward_name = serializers.CharField(source='ward.name', read_only=True)

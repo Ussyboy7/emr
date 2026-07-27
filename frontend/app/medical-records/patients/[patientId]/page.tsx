@@ -1218,6 +1218,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       admission={admissionForOrders}
                       allowAddOrders={userCanAddWardDoctorOrders(currentUser)}
                       allowEditCancelOrders={userCanEditCancelWardOrders(currentUser)}
+                      historyDisplay="collapsed"
                       currentUserId={
                         currentUser?.id != null ? Number(currentUser.id) : undefined
                       }

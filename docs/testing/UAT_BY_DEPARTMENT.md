@@ -257,13 +257,19 @@ Test **at least three** report types plus one export:
 
 ### 6.6 Module: Ward Care (`/nursing/wards`)
 
+Workspace tabs: **Care · Tasks · Timeline**.
+
 | ID | Scenario | Steps | Expected |
 |----|----------|-------|----------|
 | UAT-NRS-WARD-01 | Admission list | Open ward care | Admitted patients listed |
-| UAT-NRS-WARD-02 | Observation chart | Record observation/vitals for **TD-05** | Chart entry saved |
-| UAT-NRS-WARD-03 | Execute doctor order | Perform ward order (injection/dressing) with `ward_order_perform` | Order status complete |
-| UAT-NRS-WARD-04 | Handover notes | Add handover note | Visible in handover timeline |
-| UAT-NRS-WARD-05 | Bed assignment | View/update bed if policy allows | Bed status correct |
+| UAT-NRS-WARD-02 | Care tab | Open **TD-05** → Care | Clinical snapshot, latest handover, observation form |
+| UAT-NRS-WARD-03 | Record observation | Save vitals/observation on Care | Entry appears under Timeline vitals (when present) |
+| UAT-NRS-WARD-04 | Tasks — active only | Open Tasks | Only pending/active orders; no Active/History sub-tabs |
+| UAT-NRS-WARD-05 | Administer order | Administer pending injection/dressing (`ward_order_perform`) | Order leaves Tasks; status complete |
+| UAT-NRS-WARD-06 | Timeline handover | Add handover note on Timeline | Note on handover & nursing log |
+| UAT-NRS-WARD-07 | Timeline completed | After administer, open Timeline | Completed order in compact “Completed orders” list |
+| UAT-NRS-WARD-08 | Bed actions | Assign/change/remove bed from header | Bed status correct |
+| UAT-NRS-WARD-09 | Discharge complete | Run nurse complete-discharge wizard when doctor-ordered | Admission closed per SOP |
 
 ### 6.7 Module: Ward Stock (`/nursing/inventory`)
 
@@ -330,21 +336,34 @@ Test **at least three** report types plus one export:
 
 ### 7.5 Module: Ward Rounds (`/consultation/wards`)
 
+Workspace tabs: **Round · Orders · Timeline**.
+
 | ID | Scenario | Steps | Expected |
 |----|----------|-------|----------|
 | UAT-CON-WARD-01 | Patient list | Open ward rounds | Admitted patients listed |
-| UAT-CON-WARD-02 | Create ward order | Add doctor order with `ward_order_create` | Order visible in nursing ward care |
-| UAT-CON-WARD-03 | Edit/cancel order | Amend pending order with `ward_order_edit` | Status updates |
-| UAT-CON-WARD-04 | Admission instructions | Add admission/handoff note | Nursing handoff order created |
+| UAT-CON-WARD-02 | Round tab | Open **TD-05** → Round | Snapshot, handover, vitals, assessment/plan note form |
+| UAT-CON-WARD-03 | Assessment note | Save round note | Visible on Timeline |
+| UAT-CON-WARD-04 | Create ward order | Orders → Add injection/med (`ward_order_create`) | Active on list; nursing Tasks shows it |
+| UAT-CON-WARD-05 | Edit/cancel order | Amend/cancel pending order (`ward_order_edit`) | Status updates |
+| UAT-CON-WARD-06 | Completed expander | Use “Show completed (N)” | Compact history rows (not full task cards) |
+| UAT-CON-WARD-07 | Admit / discharge | Admission handoff and/or discharge wizard | Nurse can complete next steps |
+| UAT-CON-WARD-08 | RBAC | Nurse attempts doctor-only order create | Denied without `ward_order_create` |
 
-### 7.6 Module: Referrals (`/consultation/referrals`)
+### 7.6 Module: Medical certificates (consultation room / patient record)
+
+| ID | Scenario | Steps | Expected |
+|----|----------|-------|----------|
+| UAT-CON-CERT-01 | Issue certificate | Issue fitness or illness/sick-leave certificate for patient | Certificate number saved; printable |
+| UAT-CON-CERT-02 | History | Open patient record certificates | Issued certificate listed |
+
+### 7.7 Module: Referrals (`/consultation/referrals`)
 
 | ID | Scenario | Steps | Expected |
 |----|----------|-------|----------|
 | UAT-CON-REF-01 | Create referral | Generate referral for external facility | PDF/form generated |
 | UAT-CON-REF-02 | Records visibility | Switch to Medical Records referrals | Same referral ID |
 
-### 7.7 Module: Consultation Analytics (`/consultation/analytics`)
+### 7.8 Module: Consultation Analytics (`/consultation/analytics`)
 
 | ID | Scenario | Steps | Expected |
 |----|----------|-------|----------|
@@ -739,10 +758,10 @@ Run **once per release** with clinical lead + delegates. Reference: [VISIT_LIFEC
 
 | Step | Department | Action |
 |------|------------|--------|
-| 1 | Consultation | UAT-CON-WARD-04 — admission handoff for **TD-05** |
-| 2 | Nursing | UAT-NRS-WARD-01–05 — ward care, observations, execute orders |
-| 3 | Consultation | UAT-CON-WARD-02 — ward round doctor order |
-| 4 | Nursing | UAT-NRS-WARD-03 — perform order |
+| 1 | Consultation | UAT-CON-WARD-07 — admission handoff for **TD-05** |
+| 2 | Nursing | UAT-NRS-WARD-01–08 — Care / Tasks / Timeline, observations, administer |
+| 3 | Consultation | UAT-CON-WARD-04 — ward round doctor order |
+| 4 | Nursing | UAT-NRS-WARD-05 — perform order; UAT-NRS-WARD-07 timeline completed |
 | 5 | Medical Records | UAT-MR-RPT-06 — escort/ward report if applicable |
 
 ### 16.4 E2E-04 — Ancillary services path

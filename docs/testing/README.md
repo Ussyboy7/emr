@@ -6,6 +6,7 @@ Index for validation, UAT, and go-live. Use your **staging or UAT URL** and **te
 
 | Document | Use when |
 |----------|----------|
+| [NPA_EMR_UAT_By_Module.docx](NPA_EMR_UAT_By_Module.docx) | **Word UAT pack** — printable by-module scenarios + sign-off |
 | [UAT_BY_DEPARTMENT.md](UAT_BY_DEPARTMENT.md) | **Full UAT** — every department × module with scenario IDs |
 | [checklists/](checklists/README.md) | **Printable one-pagers** — per-department checkbox sheets |
 | [UAT_SCENARIOS.md](UAT_SCENARIOS.md) | **Quick UAT** — shortened role checklist (~2–4 h per role) |

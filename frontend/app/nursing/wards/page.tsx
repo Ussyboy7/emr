@@ -20,9 +20,8 @@ import { resolvePatientPhoto } from '@/lib/patient-photo';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Building2, Users, Search, Eye, CheckCircle, AlertTriangle,
-  Bed as BedIcon, Loader2, Thermometer,
-  PhoneCall, Send, MapPin, Download, FileText,
-  FileCheck, Bell,
+  Bed as BedIcon, Loader2,
+  PhoneCall, Send, MapPin,
 } from 'lucide-react';
 import { adminService, type User as StaffUser } from '@/lib/services/admin-service';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -53,7 +52,6 @@ import {
 import { WardAdmissionDocumentsMenu } from '@/components/ward/WardAdmissionDocumentsMenu';
 import {
   type WardDetailsTab,
-  resolveDefaultWardDetailsTab,
   buildNurseObservationNotePayload,
   isObservationAdmission,
   isEscalatedCondition,
@@ -171,6 +169,7 @@ export default function WardCarePage() {
     belongings_collected: false,
     documents_given: false,
   });
+  const [completeDischargeStep, setCompleteDischargeStep] = useState<1 | 2>(1);
   const [nurseDirectory, setNurseDirectory] = useState<StaffUser[]>([]);
   const [nurseDirectoryLoading, setNurseDirectoryLoading] = useState(false);
 
@@ -352,7 +351,7 @@ export default function WardCarePage() {
     tab?: WardDetailsTab,
   ) => {
     setSelectedAdmission(admission);
-    setDetailsTab(tab ?? resolveDefaultWardDetailsTab(admission, 'nurse'));
+    setDetailsTab(tab ?? 'overview');
     setObservationData(emptyWardObservationForm());
     setShowAdmissionDetails(true);
   };
@@ -554,6 +553,7 @@ export default function WardCarePage() {
       belongings_collected: false,
       documents_given: false,
     });
+    setCompleteDischargeStep(1);
   };
 
   const handleCompleteDischarge = async () => {
@@ -1310,6 +1310,11 @@ export default function WardCarePage() {
                         <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadgeClass(selectedAdmission.status)}`}>
                           {formatStatus(selectedAdmission.status)}
                         </Badge>
+                        {formatAdmissionTypeLabel(selectedAdmission.admission_type) && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 font-normal">
+                            {formatAdmissionTypeLabel(selectedAdmission.admission_type)}
+                          </Badge>
+                        )}
                         {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getConditionBadgeClass(selectedAdmission.current_condition)}`}>
                             ⚠️ {selectedAdmission.current_condition}
@@ -1321,150 +1326,97 @@ export default function WardCarePage() {
                         <span>·</span>
                         <span>{selectedAdmission.ward_name}</span>
                         {selectedAdmission.bed_number && (<><span>·</span><span>Bed {selectedAdmission.bed_number}</span></>)}
+                        <span>·</span>
+                        <span>
+                          {selectedAdmission.length_of_stay === 0
+                            ? 'Same day'
+                            : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}
+                        </span>
                         {selectedAdmission.admitting_doctor_name && (<><span>·</span><span>Dr {selectedAdmission.admitting_doctor_name}</span></>)}
+                        <span>·</span>
+                        <span>
+                          Nurse: {getPatientAssignments(selectedAdmission.id).length > 0
+                            ? getPatientAssignments(selectedAdmission.id).map((a) => a.nurse_name).join(', ')
+                            : 'Unassigned'}
+                        </span>
                       </DialogDescription>
                     </div>
                   </div>
-                  <WardAdmissionDocumentsMenu
-                    admission={selectedAdmission}
-                    isDownloadingSummary={isDownloadingSummary}
-                    isDownloadingSlip={isDownloadingSlip}
-                    isDownloadingReferralLetter={isDownloadingReferralLetter}
-                    isDownloadingResponsibility={isDownloadingResponsibility}
-                    onDownloadSummary={() => void handleDownloadSummary(selectedAdmission)}
-                    onDownloadSlip={() => void handleDownloadSlip(selectedAdmission)}
-                    onDownloadReferralLetter={() => void handleDownloadReferralLetter(selectedAdmission)}
-                    onDownloadResponsibility={(formType) => void handleDownloadResponsibilityForm(selectedAdmission, formType)}
-                    getResponsibilityFormVariant={getResponsibilityFormVariant}
-                  />
+                  <div className="flex items-center gap-2">
+                    {selectedAdmission.status === 'admitted' && (
+                      <>
+                        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => handleAssignBed(selectedAdmission)}>
+                          <BedIcon className="h-3.5 w-3.5 mr-1" />
+                          {selectedAdmission.bed_number ? 'Change bed' : 'Assign bed'}
+                        </Button>
+                        {selectedAdmission.bed_number && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => requestRemoveFromBed(selectedAdmission)}
+                          >
+                            Remove bed
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    <WardAdmissionDocumentsMenu
+                      admission={selectedAdmission}
+                      isDownloadingSummary={isDownloadingSummary}
+                      isDownloadingSlip={isDownloadingSlip}
+                      isDownloadingReferralLetter={isDownloadingReferralLetter}
+                      isDownloadingResponsibility={isDownloadingResponsibility}
+                      onDownloadSummary={() => void handleDownloadSummary(selectedAdmission)}
+                      onDownloadSlip={() => void handleDownloadSlip(selectedAdmission)}
+                      onDownloadReferralLetter={() => void handleDownloadReferralLetter(selectedAdmission)}
+                      onDownloadResponsibility={(formType) => void handleDownloadResponsibilityForm(selectedAdmission, formType)}
+                      getResponsibilityFormVariant={getResponsibilityFormVariant}
+                    />
+                  </div>
                 </div>
               </DialogHeader>
 
               <Tabs value={detailsTab} onValueChange={(v) => setDetailsTab(v as WardDetailsTab)} className="w-full flex-1 min-h-0 flex flex-col">
                 <div className="px-5 pt-3">
                   <TabsList className="grid w-full grid-cols-3 h-9">
-                    <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-                    <TabsTrigger value="orders" className="text-xs">Orders</TabsTrigger>
-                    <TabsTrigger value="nursing" className="text-xs">Nursing</TabsTrigger>
+                    <TabsTrigger value="overview" className="text-xs">Care</TabsTrigger>
+                    <TabsTrigger value="orders" className="text-xs">Tasks</TabsTrigger>
+                    <TabsTrigger value="nursing" className="text-xs">Timeline</TabsTrigger>
                   </TabsList>
                 </div>
 
                 <TabsContent value="overview" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
-                  {selectedAdmission.current_condition && (
-                    <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm ${
-                      isEscalatedCondition(selectedAdmission.current_condition)
-                        ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700'
-                        : 'bg-muted/40 border-border'
-                    }`}>
-                      <Thermometer className="h-4 w-4 shrink-0 mt-0.5 text-teal-600" />
+                  {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-600" />
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">Current condition</p>
-                        <p className="font-medium">{selectedAdmission.current_condition}</p>
+                        <p className="text-xs font-semibold text-orange-800 dark:text-orange-200">Needs doctor review</p>
+                        <p className="text-orange-700 dark:text-orange-300">{selectedAdmission.current_condition}</p>
                       </div>
                     </div>
                   )}
 
-                  <section className="space-y-3">
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Clinical</h3>
-                    <div className="space-y-2 text-sm">
-                      <div>
-                        <span className="text-muted-foreground text-xs">Diagnosis · </span>
-                        <span>{selectedAdmission.admission_diagnosis || '—'}</span>
-                      </div>
+                  <section className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-xs font-semibold">Clinical snapshot</h3>
+                      {selectedAdmission.current_condition && !isEscalatedCondition(selectedAdmission.current_condition) && (
+                        <Badge variant="outline" className={getConditionBadgeClass(selectedAdmission.current_condition)}>
+                          {selectedAdmission.current_condition}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="space-y-1.5 text-sm">
+                      <p><span className="text-muted-foreground">Diagnosis · </span>{selectedAdmission.admission_diagnosis || '—'}</p>
                       {selectedAdmission.presenting_complaint && (
-                        <div>
-                          <span className="text-muted-foreground text-xs">Complaint · </span>
-                          <span>{selectedAdmission.presenting_complaint}</span>
-                        </div>
+                        <p><span className="text-muted-foreground">Complaint · </span>{selectedAdmission.presenting_complaint}</p>
                       )}
                       {selectedAdmission.admission_instructions?.trim() && (
-                        <div>
-                          <span className="text-muted-foreground text-xs">Instructions · </span>
-                          <span className="whitespace-pre-wrap">{selectedAdmission.admission_instructions}</span>
-                        </div>
+                        <p><span className="text-muted-foreground">Instructions · </span><span className="whitespace-pre-wrap">{selectedAdmission.admission_instructions}</span></p>
                       )}
                     </div>
                   </section>
 
-                  <section className="border-t pt-4 space-y-2">
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stay</h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-sm">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Ward</p>
-                        <p className="font-medium">{selectedAdmission.ward_name}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Type</p>
-                        <p className="font-medium capitalize">{selectedAdmission.admission_type?.replace(/_/g, ' ') || '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Bed</p>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {selectedAdmission.bed_number
-                            ? <p className="font-medium">Bed {selectedAdmission.bed_number}</p>
-                            : <p className="font-medium text-amber-600 dark:text-amber-400">Unassigned</p>}
-                          {selectedAdmission.status === 'admitted' && (
-                            <>
-                              <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => handleAssignBed(selectedAdmission)}>
-                                <BedIcon className="h-3 w-3 mr-1" />
-                                {selectedAdmission.bed_number ? 'Change' : 'Assign'}
-                              </Button>
-                              {selectedAdmission.bed_number && (
-                                <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => requestRemoveFromBed(selectedAdmission)}>
-                                  Remove
-                                </Button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Admitted</p>
-                        <p className="font-medium">{formatDisplayDateMedium(selectedAdmission.admission_date)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Length of stay</p>
-                        <p className="font-medium">
-                          {selectedAdmission.length_of_stay === 0
-                            ? 'Same day'
-                            : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}
-                        </p>
-                      </div>
-                      {selectedAdmission.location_clinic_name && (
-                        <div>
-                          <p className="text-xs text-muted-foreground">Location</p>
-                          <p className="font-medium">{selectedAdmission.location_clinic_name}</p>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  <section className="border-t pt-4">
-                    <p className="text-xs text-muted-foreground">
-                      Care team:{' '}
-                      {getPatientAssignments(selectedAdmission.id).length > 0
-                        ? getPatientAssignments(selectedAdmission.id).map((a) => a.nurse_name).join(', ')
-                        : 'No nurse assigned (head nurse manages assignments)'}
-                    </p>
-                  </section>
-                </TabsContent>
-
-                <TabsContent value="orders" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2">
-                  <WardDoctorOrdersSection
-                    admission={selectedAdmission}
-                    allowAddOrders={false}
-                    allowEditCancelOrders={false}
-                    allowPerformOrders={
-                      !!currentUser?.isSuperuser ||
-                      userCanPerformWardOrders(currentUser)
-                    }
-                    showRoutingInfo={false}
-                    excludeHandoffFromList
-                    currentUserId={currentUser?.id != null ? Number(currentUser.id) : undefined}
-                  />
-                </TabsContent>
-
-                <TabsContent value="nursing" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
                   <WardLatestHandoverCard
                     key={`handover-${notesRefreshKey}`}
                     admissionNotes={selectedAdmission.admission_notes}
@@ -1479,12 +1431,25 @@ export default function WardCarePage() {
                       isSaving={isSavingObservation}
                     />
                   )}
+                </TabsContent>
 
-                  <WardVitalsHistory
+                <TabsContent value="orders" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2">
+                  <WardDoctorOrdersSection
                     admission={selectedAdmission}
-                    refreshKey={chartRefreshKey}
+                    allowAddOrders={false}
+                    allowEditCancelOrders={false}
+                    allowPerformOrders={
+                      !!currentUser?.isSuperuser ||
+                      userCanPerformWardOrders(currentUser)
+                    }
+                    showRoutingInfo={false}
+                    historyDisplay="hidden"
+                    excludeHandoffFromList
+                    currentUserId={currentUser?.id != null ? Number(currentUser.id) : undefined}
                   />
+                </TabsContent>
 
+                <TabsContent value="nursing" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
                   <WardHandoverNotesSection
                     key={notesRefreshKey}
                     admissionNotes={selectedAdmission.admission_notes}
@@ -1492,13 +1457,22 @@ export default function WardCarePage() {
                     onAddNote={handleSaveHandoverNote}
                     isSaving={isSavingHandover}
                   />
+
+                  <WardVitalsHistory
+                    admission={selectedAdmission}
+                    refreshKey={chartRefreshKey}
+                  />
+
+                  <WardDoctorOrdersSection
+                    admission={selectedAdmission}
+                    allowAddOrders={false}
+                    allowEditCancelOrders={false}
+                    showRoutingInfo={false}
+                    historyDisplay="history-only"
+                    excludeHandoffFromList
+                  />
                 </TabsContent>
               </Tabs>
-              <DialogFooter className="px-5 py-3 border-t shrink-0">
-                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setShowAdmissionDetails(false)}>
-                  Close
-                </Button>
-              </DialogFooter>
             </DialogContent>
           </Dialog>
         )}
@@ -1555,6 +1529,14 @@ export default function WardCarePage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="px-5 py-4 overflow-y-auto flex-1 min-h-0 space-y-4">
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-2">
+                  <span>
+                    Step {completeDischargeStep} of 2
+                    {completeDischargeStep === 1 ? ' · Exit details' : ' · Final checklist'}
+                  </span>
+                </div>
+                {completeDischargeStep === 1 && (
+                  <>
                 {/* Doctor-set context */}
                 {(selectedAdmission.discharge_diagnosis || selectedAdmission.discharge_summary) && (
                   <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-sm">
@@ -1743,8 +1725,11 @@ export default function WardCarePage() {
                     </p>
                   </div>
                 )}
+                  </>
+                )}
 
                 {/* Checklist */}
+                {completeDischargeStep === 2 && (
                 <div className="rounded-md border bg-green-50/30 dark:bg-green-950/20 p-3 space-y-2">
                   <p className="text-xs font-medium text-green-700 dark:text-green-300">
                     Confirm before sign-out
@@ -1789,15 +1774,34 @@ export default function WardCarePage() {
                     </p>
                   )}
                 </div>
+                )}
               </div>
               <DialogFooter className="px-5 py-4 border-t shrink-0 gap-2 sm:justify-end flex-col-reverse sm:flex-row">
                 <Button variant="outline" onClick={() => setShowCompleteDischargeDialog(false)} disabled={isCompletingDischarge}>
                   Cancel
                 </Button>
+                {completeDischargeStep === 1 ? (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (!exitForm.nurse_exit_summary.trim()) {
+                        toast.error('Exit observation summary is required before continuing');
+                        return;
+                      }
+                      setCompleteDischargeStep(2);
+                    }}
+                  >
+                    Next: Checklist
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" onClick={() => setCompleteDischargeStep(1)} disabled={isCompletingDischarge}>
+                    Back
+                  </Button>
+                )}
                 <Button
                   className="bg-green-600 hover:bg-green-700 text-white"
                   onClick={handleCompleteDischarge}
-                  disabled={isCompletingDischarge || !exitForm.nurse_exit_summary.trim() || !exitChecklist.physically_left}
+                  disabled={isCompletingDischarge || completeDischargeStep === 1 || !exitForm.nurse_exit_summary.trim() || !exitChecklist.physically_left}
                 >
                   {isCompletingDischarge
                     ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />

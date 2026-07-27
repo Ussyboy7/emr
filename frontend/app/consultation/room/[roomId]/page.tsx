@@ -424,7 +424,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     onReferralCreated: bumpReferralHistory,
     medicalNotesAssessment: medicalNotes.assessment,
     loadPatientOverview,
-    orderedByUserId: currentUser?.id ? Number(currentUser.id) : undefined,
   });
   ordersRef.current = orders;
 

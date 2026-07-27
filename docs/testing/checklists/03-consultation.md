@@ -50,14 +50,25 @@ Guide: [ROLE_CONSULTATION.md](../../user/ROLE_CONSULTATION.md) · **Depends on:*
 | ☐ | UAT-CON-HIST-01 | Search TD-02 consultations | | |
 | ☐ | UAT-CON-HIST-02 | Session detail matches orders | | |
 
-## Ward Rounds — `/consultation/wards`
+## Ward Rounds — `/consultation/wards` (Round · Orders · Timeline)
 
 | ☐ | ID | Scenario | P/F/N/A | Notes |
 |---|-----|----------|---------|-------|
 | ☐ | UAT-CON-WARD-01 | Admitted patients listed | | |
-| ☐ | UAT-CON-WARD-02 | Create ward doctor order | | |
-| ☐ | UAT-CON-WARD-03 | Edit/cancel pending order | | |
-| ☐ | UAT-CON-WARD-04 | Admission handoff (TD-05) | | |
+| ☐ | UAT-CON-WARD-02 | Round tab — snapshot / note form | | |
+| ☐ | UAT-CON-WARD-03 | Save assessment/plan note | | |
+| ☐ | UAT-CON-WARD-04 | Create ward doctor order | | |
+| ☐ | UAT-CON-WARD-05 | Edit/cancel pending order | | |
+| ☐ | UAT-CON-WARD-06 | Show completed (N) expander | | |
+| ☐ | UAT-CON-WARD-07 | Admit / discharge wizard path | | |
+| ☐ | UAT-CON-WARD-08 | Nurse cannot create doctor-only order | | |
+
+## Medical certificates — consultation room / patient record
+
+| ☐ | ID | Scenario | P/F/N/A | Notes |
+|---|-----|----------|---------|-------|
+| ☐ | UAT-CON-CERT-01 | Issue fitness/illness certificate | | |
+| ☐ | UAT-CON-CERT-02 | Certificate listed on patient record | | |
 
 ## Referrals — `/consultation/referrals`
 

@@ -52,7 +52,7 @@ export function WardHandoverNotesSection({
             Handover &amp; nursing log
           </h3>
           <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-            For the next nurse — handover and nursing notes only. Vitals notes stay on each vitals row above.
+            For the next nurse — IV status, family updates, pending tasks, overnight events.
           </p>
         </div>
         {canAdd && (

@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { MODAL_SIZES } from '@/components/ui/modal-sizes';
+import { MODAL_SIZES, modalNoOverflow } from '@/components/ui/modal-sizes';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -292,6 +292,8 @@ function wardOrderRowToProcedure(
   });
 }
 
+type HistoryDisplay = 'tabs' | 'collapsed' | 'hidden' | 'history-only';
+
 export function WardDoctorOrdersSection({
   admission,
   allowAddOrders,
@@ -300,6 +302,7 @@ export function WardDoctorOrdersSection({
   currentUserId,
   showRoutingInfo = true,
   excludeHandoffFromList = true,
+  historyDisplay = 'tabs',
 }: {
   admission: PatientAdmission;
   allowAddOrders: boolean;
@@ -312,11 +315,21 @@ export function WardDoctorOrdersSection({
   showRoutingInfo?: boolean;
   /** Pull admission handoff instructions out of the task list */
   excludeHandoffFromList?: boolean;
+  /**
+   * How completed/cancelled orders appear:
+   * - tabs: Active | History sub-tabs
+   * - collapsed: active list + expandable completed section
+   * - hidden: active orders only (e.g. nurse Tasks)
+   * - history-only: completed/cancelled only (e.g. nurse Timeline)
+   */
+  historyDisplay?: HistoryDisplay;
 }) {
   const [orders, setOrders] = useState<WardNursingOrderRow[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [listFilter, setListFilter] = useState<ListFilter>('active');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [addStep, setAddStep] = useState<1 | 2>(1);
   const [submitting, setSubmitting] = useState(false);
   const [orderKind, setOrderKind] = useState<OrderKind>(DEFAULT_WARD_ORDER_KIND);
   const [priority, setPriority] = useState<string>('medium');
@@ -455,12 +468,14 @@ export function WardDoctorOrdersSection({
   }), [taskOrders]);
 
   useEffect(() => {
+    if (historyDisplay !== 'tabs') return;
     if (listFilter === 'history' && counts.history === 0) {
       setListFilter('active');
     }
-  }, [listFilter, counts.history]);
+  }, [historyDisplay, listFilter, counts.history]);
 
   const resetAddForm = () => {
+    setAddStep(1);
     setOrderKind(DEFAULT_WARD_ORDER_KIND);
     setPriority('medium');
     setInstructionText('');
@@ -859,6 +874,37 @@ export function WardDoctorOrdersSection({
     setPerformOpen(true);
   };
 
+  const renderCompactHistoryRow = (o: WardNursingOrderRow) => {
+    const meta = kindMeta(o.order_type);
+    const KindIcon = meta.icon;
+    const parsed = parseDescription(o.order_type, o.description);
+    const orderedAt = new Date(o.ordered_at);
+    const rel = relativeTime(o.ordered_at);
+    const status = String(o.status || '').replace('_', ' ');
+
+    return (
+      <div key={o.id} className="flex items-start gap-2.5 py-2.5">
+        <div className={`rounded-full p-1.5 shrink-0 ${meta.tint}`}>
+          <KindIcon className="h-3.5 w-3.5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-sm font-medium text-foreground">{meta.label}</span>
+            <span className="text-xs capitalize text-muted-foreground">{status}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{o.order_id}</span>
+          </div>
+          {parsed.primary ? (
+            <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{parsed.primary}</p>
+          ) : null}
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {o.ordered_by_name || '—'} · {formatDisplayDateTime(orderedAt)}
+            {rel ? ` · ${rel}` : ''}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
   const renderOrderRow = (o: WardNursingOrderRow) => {
     const meta = kindMeta(o.order_type);
     const KindIcon = meta.icon;
@@ -985,21 +1031,35 @@ export function WardDoctorOrdersSection({
   };
 
   const observationAdmission = isObservationAdmission(admission);
-  const showOrderTabs = counts.active > 0 || counts.history > 0;
+  const hasAnyTaskOrders = counts.active > 0 || counts.history > 0;
+  const isMedicationWorkflow = orderKind === 'medication' || orderKind === 'injection';
+  const canAdvanceMedicationStep = selectedMedKeys.length > 0;
 
   const canAddOrders = allowAddOrders && admission.status === 'admitted';
-  const showOrdersToolbar = canAddOrders || showOrderTabs || allowPerformOrders;
+  const showOrdersToolbar =
+    historyDisplay !== 'history-only' &&
+    (canAddOrders || (showRoutingInfo && hasAnyTaskOrders));
 
   const activeEmptyMessage =
-    counts.history > 0 ? (
+    historyDisplay === 'tabs' && counts.history > 0 ? (
       <>
         No active orders. See <strong>History</strong> for completed items.
       </>
+    ) : historyDisplay === 'collapsed' && counts.history > 0 ? (
+      'No active orders. Completed items are below.'
     ) : (
       'No active orders for this admission.'
     );
 
-  const ListBody = ({ emptyMsg, filter }: { emptyMsg: React.ReactNode; filter: ListFilter }) => {
+  const ListBody = ({
+    emptyMsg,
+    filter,
+    compact = false,
+  }: {
+    emptyMsg: React.ReactNode;
+    filter: ListFilter;
+    compact?: boolean;
+  }) => {
     const rows =
       filter === 'active'
         ? taskOrders.filter((o) => isActiveStatus(o.status))
@@ -1020,12 +1080,45 @@ export function WardDoctorOrdersSection({
         </p>
       );
     }
+    if (compact) {
+      return (
+        <div className="rounded-md border bg-muted/10 px-3 divide-y divide-border/60">
+          {rows.map(renderCompactHistoryRow)}
+        </div>
+      );
+    }
     return (
       <div className="space-y-3">
         {rows.map(renderOrderRow)}
       </div>
     );
   };
+
+  const renderActiveList = () => {
+    if (hasAnyTaskOrders || !observationAdmission) {
+      return <ListBody emptyMsg={activeEmptyMessage} filter="active" />;
+    }
+    if (ordersLoading) {
+      return (
+        <p className="text-xs text-muted-foreground flex items-center gap-2 py-1">
+          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+          Checking for doctor orders…
+        </p>
+      );
+    }
+    return (
+      <div className="rounded-md border border-dashed border-border/80 bg-muted/20 px-4 py-5 text-center">
+        <p className="text-sm text-muted-foreground">
+          Observation admission — clinical handoff details are on the patient overview tab.
+          {canAddOrders ? ' Add follow-up orders when needed.' : ''}
+        </p>
+      </div>
+    );
+  };
+
+  if (historyDisplay === 'history-only' && !ordersLoading && counts.history === 0) {
+    return null;
+  }
 
   return (
     <div className="space-y-3">
@@ -1041,14 +1134,10 @@ export function WardDoctorOrdersSection({
                 <span className="font-medium text-foreground">Ward Care</span> (also on the Procedures queue).
               </span>
             </p>
-          ) : allowPerformOrders ? (
-            <p className="text-xs text-muted-foreground leading-snug">
-              Complete injections and dressings here. Orders also appear in the Procedures queue.
-            </p>
-          ) : showOrderTabs ? (
-            <p className="text-xs text-muted-foreground">Doctor orders for this admission</p>
-          ) : (
+          ) : canAddOrders ? (
             <p className="text-xs text-muted-foreground">Add follow-up orders for this stay.</p>
+          ) : (
+            <span />
           )}
           {canAddOrders && (
             <Button type="button" size="sm" onClick={() => setAddOpen(true)} className="shrink-0">
@@ -1059,58 +1148,68 @@ export function WardDoctorOrdersSection({
         </div>
       )}
 
-      {showOrderTabs ? (
-        <>
-          <Tabs value={listFilter} onValueChange={(v) => setListFilter(v as ListFilter)} className="w-full">
-            <TabsList className={`grid w-full h-9 ${counts.history > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-              <TabsTrigger value="active" className="text-xs">
-                Active
-                <TabCount n={counts.active} tone="active" />
-              </TabsTrigger>
-              {counts.history > 0 && (
-                <TabsTrigger value="history" className="text-xs gap-1">
-                  <History className="h-3 w-3 hidden sm:inline" />
-                  History
-                  <TabCount n={counts.history} tone="history" />
-                </TabsTrigger>
-              )}
-            </TabsList>
-            <TabsContent value="active" className="mt-3 space-y-0">
-              <ListBody emptyMsg={activeEmptyMessage} filter="active" />
-            </TabsContent>
+      {historyDisplay === 'history-only' ? (
+        <section className="space-y-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Completed orders
+          </h3>
+          <ListBody emptyMsg="No completed orders yet." filter="history" compact />
+        </section>
+      ) : historyDisplay === 'tabs' && hasAnyTaskOrders ? (
+        <Tabs value={listFilter} onValueChange={(v) => setListFilter(v as ListFilter)} className="w-full">
+          <TabsList className={`grid w-full h-9 ${counts.history > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <TabsTrigger value="active" className="text-xs">
+              Active
+              <TabCount n={counts.active} tone="active" />
+            </TabsTrigger>
             {counts.history > 0 && (
-              <TabsContent value="history" className="mt-3">
-                <ListBody emptyMsg="No history yet." filter="history" />
-              </TabsContent>
+              <TabsTrigger value="history" className="text-xs gap-1">
+                <History className="h-3 w-3 hidden sm:inline" />
+                History
+                <TabCount n={counts.history} tone="history" />
+              </TabsTrigger>
             )}
-          </Tabs>
-        </>
-      ) : ordersLoading && !observationAdmission ? (
-        <p className="text-xs text-muted-foreground flex items-center gap-2 py-1">
-          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-          Checking for doctor orders…
-        </p>
-      ) : observationAdmission ? (
-        <div className="rounded-md border border-dashed border-border/80 bg-muted/20 px-4 py-5 text-center">
-          <p className="text-sm text-muted-foreground">
-            Observation admission — clinical handoff details are on the patient overview tab.
-            {canAddOrders ? ' Add follow-up orders when needed.' : ''}
-          </p>
-        </div>
+          </TabsList>
+          <TabsContent value="active" className="mt-3 space-y-0">
+            <ListBody emptyMsg={activeEmptyMessage} filter="active" />
+          </TabsContent>
+          {counts.history > 0 && (
+            <TabsContent value="history" className="mt-3">
+              <ListBody emptyMsg="No history yet." filter="history" />
+            </TabsContent>
+          )}
+        </Tabs>
       ) : (
-        <div className="rounded-md border border-dashed border-border/80 bg-muted/20 px-4 py-5 text-center">
-          <p className="text-sm text-muted-foreground">{activeEmptyMessage}</p>
-        </div>
+        <>
+          {renderActiveList()}
+          {historyDisplay === 'collapsed' && counts.history > 0 && (
+            <div className="space-y-2 pt-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs text-muted-foreground"
+                onClick={() => setHistoryOpen((v) => !v)}
+              >
+                <History className="h-3.5 w-3.5 mr-1.5" />
+                {historyOpen ? 'Hide' : 'Show'} completed ({counts.history})
+              </Button>
+              {historyOpen && <ListBody emptyMsg="No history yet." filter="history" compact />}
+            </div>
+          )}
+        </>
       )}
 
       <Dialog
         open={addOpen}
         onOpenChange={(open) => {
           setAddOpen(open);
-          if (open) resetAddForm();
+          if (open) {
+            resetAddForm();
+          }
         }}
       >
-        <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
+        <DialogContent className={`${modalNoOverflow('md')} max-h-[92vh] flex flex-col gap-0 p-0`}>
           <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-1">
             <DialogTitle className="flex items-center gap-2 text-lg">
               <Plus className="h-5 w-5 text-blue-500 shrink-0" />
@@ -1135,6 +1234,21 @@ export function WardDoctorOrdersSection({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 px-5 py-4 overflow-y-auto flex-1 min-h-0">
+            {isMedicationWorkflow && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-2">
+                <span>
+                  Step {addStep} of 2
+                  {addStep === 1
+                    ? ' · Select medications'
+                    : ' · Configure dosing and instructions'}
+                </span>
+                {addStep === 2 && (
+                  <Button type="button" variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setAddStep(1)}>
+                    Back to selection
+                  </Button>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_8.5rem] gap-3">
               <div className="space-y-2">
                 <Label>Order type</Label>
@@ -1143,6 +1257,7 @@ export function WardDoctorOrdersSection({
                   onValueChange={(v) => {
                     const next = v as OrderKind;
                     setOrderKind(next);
+                    setAddStep(1);
                     if (next !== 'medication' && next !== 'injection') {
                       setSelectedMedKeys([]);
                       setMedConfigs(new Map());
@@ -1225,6 +1340,7 @@ export function WardDoctorOrdersSection({
                     </>
                   )}
                 </div>
+                {addStep === 1 && (
                 <div className="space-y-2">
                   <Label>
                     Search and Select {orderKind === 'injection' ? 'Injectables' : 'Medications'} *
@@ -1297,6 +1413,7 @@ export function WardDoctorOrdersSection({
                     )}
                   </div>
                 </div>
+                )}
 
                 {selectedMedKeys.length > 0 && (
                   <div className="rounded-md border bg-emerald-500/5 dark:bg-emerald-500/10 p-3 space-y-2">
@@ -1339,7 +1456,7 @@ export function WardDoctorOrdersSection({
                   </div>
                 )}
 
-                {selectedMedKeys.length > 0 && (
+                {selectedMedKeys.length > 0 && addStep === 2 && (
                   <div className="space-y-3">
                     <div className="flex items-baseline justify-between">
                       <h4 className="text-sm font-semibold">
@@ -1532,7 +1649,25 @@ export function WardDoctorOrdersSection({
             <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleSubmitOrder} disabled={submitting}>
+            {isMedicationWorkflow && addStep === 1 ? (
+              <Button
+                type="button"
+                onClick={() => setAddStep(2)}
+                disabled={!canAdvanceMedicationStep}
+              >
+                Next: Configure
+              </Button>
+            ) : null}
+            {isMedicationWorkflow && addStep === 2 ? (
+              <Button type="button" variant="outline" onClick={() => setAddStep(1)} disabled={submitting}>
+                Back
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              onClick={handleSubmitOrder}
+              disabled={submitting || (isMedicationWorkflow && addStep === 1)}
+            >
               {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
               {(orderKind === 'medication' || orderKind === 'injection') && selectedMedKeys.length > 1
                 ? `Create ${selectedMedKeys.length} orders`

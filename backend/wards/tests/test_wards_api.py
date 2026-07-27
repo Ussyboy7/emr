@@ -370,6 +370,15 @@ class AdmissionCreateTests(WardsSetupMixin, APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["created_by"], self.user.pk)
 
+    def test_create_admission_ignores_invalid_admitting_doctor_pk(self):
+        resp = self.client.post(
+            ADMISSIONS_URL,
+            self._admission_payload(admitting_doctor=99999),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["admitting_doctor"], self.user.pk)
+
     def test_create_admission_missing_required_fields_returns_400(self):
         resp = self.client.post(
             ADMISSIONS_URL, {"admission_notes": "incomplete"}, format="json"

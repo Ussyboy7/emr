@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from common.serializer_fields import OptionalUserPrimaryKeyField
 from patients.photo import patient_photo_url
 from .handoff import is_informational_handoff_order
 from .admission_orders import resolve_active_admission
@@ -16,6 +17,7 @@ from .models import NursingOrder, Procedure
 class NursingOrderSerializer(serializers.ModelSerializer):
     """Serializer for NursingOrder model."""
     
+    ordered_by = OptionalUserPrimaryKeyField()
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     patient_gender = serializers.CharField(source='patient.gender', read_only=True)

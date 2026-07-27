@@ -53,15 +53,19 @@ Guide: [ROLE_NURSING.md](../../user/ROLE_NURSING.md) · **Depends on:** TD-01 vi
 | ☐ | UAT-NRS-PROC-02 | Complete procedure order | | |
 | ☐ | UAT-NRS-PROC-03 | History shows completion | | |
 
-## Ward Care — `/nursing/wards`
+## Ward Care — `/nursing/wards` (Care · Tasks · Timeline)
 
 | ☐ | ID | Scenario | P/F/N/A | Notes |
 |---|-----|----------|---------|-------|
 | ☐ | UAT-NRS-WARD-01 | Admitted patients listed | | |
-| ☐ | UAT-NRS-WARD-02 | Observation chart (TD-05) | | |
-| ☐ | UAT-NRS-WARD-03 | Perform ward doctor order | | |
-| ☐ | UAT-NRS-WARD-04 | Handover note saved | | |
-| ☐ | UAT-NRS-WARD-05 | Bed assignment | | |
+| ☐ | UAT-NRS-WARD-02 | Care tab — snapshot + observation form | | |
+| ☐ | UAT-NRS-WARD-03 | Save observation (TD-05) | | |
+| ☐ | UAT-NRS-WARD-04 | Tasks shows active only (no Active/History tabs) | | |
+| ☐ | UAT-NRS-WARD-05 | Administer pending ward order | | |
+| ☐ | UAT-NRS-WARD-06 | Timeline — handover note | | |
+| ☐ | UAT-NRS-WARD-07 | Timeline — compact completed orders | | |
+| ☐ | UAT-NRS-WARD-08 | Bed assign/change/remove | | |
+| ☐ | UAT-NRS-WARD-09 | Complete discharge wizard (if ordered) | | |
 
 ## Ward Stock — `/nursing/inventory`
 

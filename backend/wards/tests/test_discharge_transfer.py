@@ -12,6 +12,7 @@ class WardDischargeTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.doctor = create_test_user("ward_dr", pages=["/consultation/wards", "/nursing/wards"], system_role="Medical Doctor")
+        cls.nurse = create_test_user("ward_nurse", pages=["/nursing/wards"], system_role="Nursing Officer")
         cls.patient, cls.visit = create_test_patient_visit(patient_id="WARD-DC-01")
         cls.ward = Ward.objects.create(name="General Male", ward_code="GM1", ward_type="general", total_beds=10)
 
@@ -50,6 +51,37 @@ class WardDischargeTest(APITestCase):
             "discharge_diagnosis": "X",
         }, format="json")
         self.assertIn(resp.status_code, [status.HTTP_400_BAD_REQUEST, status.HTTP_409_CONFLICT])
+
+    def test_nurse_cannot_initiate_discharge(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.post(f"/api/v1/admissions/{self.admission.pk}/initiate_discharge/", {
+            "discharge_diagnosis": "Resolved pneumonia",
+            "discharge_type": "regular",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_doctor_cannot_confirm_pending_discharge_step_two(self):
+        self.client.post(f"/api/v1/admissions/{self.admission.pk}/initiate_discharge/", {
+            "discharge_diagnosis": "Resolved pneumonia",
+            "discharge_type": "regular",
+        }, format="json")
+        resp = self.client.post(f"/api/v1/admissions/{self.admission.pk}/discharge/", {
+            "nurse_exit_summary": "Patient stable at handoff.",
+            "discharged_with": "family",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_nurse_can_confirm_pending_discharge_step_two(self):
+        self.client.post(f"/api/v1/admissions/{self.admission.pk}/initiate_discharge/", {
+            "discharge_diagnosis": "Resolved pneumonia",
+            "discharge_type": "regular",
+        }, format="json")
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.post(f"/api/v1/admissions/{self.admission.pk}/discharge/", {
+            "nurse_exit_summary": "Patient stable at handoff.",
+            "discharged_with": "family",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
 
 class WardTransferTest(APITestCase):

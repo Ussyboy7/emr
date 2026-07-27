@@ -20,15 +20,15 @@ import { useWardAdmissionDateParams } from '@/hooks/use-ward-admission-date-para
 import { WARD_ACTIVE_STATUS_IN } from '@/lib/ward/ward-admission-list-params';
 import { ProgressNotesTimeline } from '@/components/ward/ProgressNotesTimeline';
 import { WardAdmissionDocumentsMenu } from '@/components/ward/WardAdmissionDocumentsMenu';
+import { WardLatestHandoverCard } from '@/components/ward/WardLatestHandoverCard';
+import { WardVitalsHistory } from '@/components/ward/WardVitalsHistory';
 import {
   type WardDoctorDetailsTab,
-  resolveDefaultDoctorDetailsTab,
   isEscalatedCondition,
 } from '@/lib/ward-admission-ui';
 import {
   Users, Search, Eye, AlertTriangle, CheckCircle,
-  Bed, Loader2, FileText, User,
-  Send, Download, FileCheck,
+  Bed, Loader2, FileText, Send,
 } from 'lucide-react';
 import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/components/referrals/FacilityPartnerSelect';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -43,6 +43,7 @@ import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
 import { useServerToday } from '@/hooks/use-server-today';
+import { MODAL_SIZES, modalNoOverflow } from '@/components/ui/modal-sizes';
 
 const formatAdmissionTypeLabel = (type?: string | null): string | null => {
   if (!type) return null;
@@ -106,6 +107,12 @@ export default function WardRoundsPage() {
     discharge_notes: '',
     follow_up_instructions: '',
   });
+  const [dischargeErrors, setDischargeErrors] = useState<{
+    discharge_diagnosis?: string;
+    referral_facility?: string;
+    referral_specialty?: string;
+    referral_reason?: string;
+  }>({});
 
   // Optional external-care referral block, expanded when discharge_type
   // is "transfer" or the doctor explicitly enables it.
@@ -125,6 +132,7 @@ export default function WardRoundsPage() {
     notes: '',
   });
   const [isSubmittingDischarge, setIsSubmittingDischarge] = useState(false);
+  const [dischargeStep, setDischargeStep] = useState<1 | 2>(1);
 
   // Edit / cancel for the linked external referral, separate from the
   // initiate-discharge state pieces so opening one dialog doesn't clobber
@@ -167,6 +175,8 @@ export default function WardRoundsPage() {
       contact_phone: '',
       notes: '',
     });
+    setDischargeErrors({});
+    setDischargeStep(1);
   };
 
   const buildDateParams = useWardAdmissionDateParams({
@@ -280,7 +290,7 @@ export default function WardRoundsPage() {
     initialTab?: WardDoctorDetailsTab,
   ) => {
     setSelectedAdmission(admission);
-    setDetailsTab(initialTab ?? resolveDefaultDoctorDetailsTab(admission));
+    setDetailsTab(initialTab ?? 'overview');
     setShowAdmissionDetails(true);
   };
 
@@ -376,25 +386,25 @@ export default function WardRoundsPage() {
 
   const handleInitiateDischarge = async () => {
     if (!selectedAdmission) return;
+    const errors: typeof dischargeErrors = {};
     if (!dischargeData.discharge_diagnosis.trim()) {
-      toast.error('Discharge diagnosis is required');
-      return;
+      errors.discharge_diagnosis = 'Discharge diagnosis is required.';
     }
-    // If the discharge is a transfer and the doctor expanded the referral
-    // block, validate the referral fields up front for a tighter UX.
     if (referralEnabled) {
       if (!referralFacility.facility.trim()) {
-        toast.error('Please pick or type the receiving facility');
-        return;
+        errors.referral_facility = 'Receiving facility is required.';
       }
       if (!referralForm.specialty.trim()) {
-        toast.error('Referral specialty is required');
-        return;
+        errors.referral_specialty = 'Referral specialty is required.';
       }
       if (!referralForm.reason.trim()) {
-        toast.error('Referral reason is required');
-        return;
+        errors.referral_reason = 'Referral reason is required.';
       }
+    }
+    setDischargeErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error('Please correct the highlighted fields.');
+      return;
     }
     setIsSubmittingDischarge(true);
     try {
@@ -844,7 +854,11 @@ export default function WardRoundsPage() {
                                     size="sm"
                                     variant="outline"
                                     className="h-7 px-2 text-xs border-amber-500/50 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
-                                    onClick={() => { setSelectedAdmission(admission); setShowDischargeDialog(true); }}
+                                    onClick={() => {
+                                      resetDischargeForm();
+                                      setSelectedAdmission(admission);
+                                      setShowDischargeDialog(true);
+                                    }}
                                     title="Initiate Discharge"
                                   >
                                     <CheckCircle className="h-3 w-3 mr-1" />Discharge
@@ -917,7 +931,7 @@ export default function WardRoundsPage() {
         {/* Admission Details Dialog */}
         {selectedAdmission && (
           <Dialog open={showAdmissionDetails} onOpenChange={setShowAdmissionDetails}>
-            <DialogContent className="w-[95vw] sm:max-w-[920px] lg:max-w-[1000px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
+            <DialogContent className={`${modalNoOverflow('xl')} max-h-[92vh] flex flex-col gap-0 p-0`}>
               <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -933,6 +947,11 @@ export default function WardRoundsPage() {
                         <Badge variant="outline" className={`${getStatusBadgeClass(selectedAdmission.status)} font-normal text-[10px]`}>
                           {formatStatus(selectedAdmission.status)}
                         </Badge>
+                        {formatAdmissionTypeLabel(selectedAdmission.admission_type) && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 font-normal">
+                            {formatAdmissionTypeLabel(selectedAdmission.admission_type)}
+                          </Badge>
+                        )}
                       </DialogTitle>
                       <DialogDescription asChild>
                         <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm mt-1">
@@ -940,9 +959,21 @@ export default function WardRoundsPage() {
                           <span>·</span>
                           <span>{selectedAdmission.ward_name}</span>
                           {selectedAdmission.bed_number && (<><span>·</span><span>Bed {selectedAdmission.bed_number}</span></>)}
+                          <span>·</span>
+                          <span>
+                            {selectedAdmission.length_of_stay === 0
+                              ? 'Same day'
+                              : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}
+                          </span>
                           {selectedAdmission.admitting_doctor_name && (
                             <><span>·</span><span>Dr {selectedAdmission.admitting_doctor_name}</span></>
                           )}
+                          <span>·</span>
+                          <span>
+                            Nurse: {getPatientAssignments(selectedAdmission.id).length > 0
+                              ? getPatientAssignments(selectedAdmission.id).map((a) => a.nurse_name).join(', ')
+                              : 'Unassigned'}
+                          </span>
                           {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
                             <>
                               <span>·</span>
@@ -971,75 +1002,69 @@ export default function WardRoundsPage() {
               </DialogHeader>
               <Tabs value={detailsTab} onValueChange={(v) => setDetailsTab(v as WardDoctorDetailsTab)} className="flex-1 min-h-0 flex flex-col">
                 <TabsList className="mx-5 mt-3 grid grid-cols-3 h-9 shrink-0">
-                  <TabsTrigger value="overview" className="text-xs">Ward Rounds</TabsTrigger>
+                  <TabsTrigger value="overview" className="text-xs">Round</TabsTrigger>
                   <TabsTrigger value="orders" className="text-xs">Orders</TabsTrigger>
                   <TabsTrigger value="notes" className="text-xs">
                     <FileText className="h-3 w-3 mr-1 hidden sm:inline" />
-                    Notes
+                    Timeline
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="overview" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
-                  {/* Nurse escalation alert — shown at top so doctor sees it immediately */}
-                  {selectedAdmission.current_condition && (
-                    <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm ${
-                      isEscalatedCondition(selectedAdmission.current_condition)
-                        ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400'
-                        : 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400'
-                    }`}>
-                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-600" />
                       <div>
-                        <p className="font-medium text-xs uppercase tracking-wide mb-0.5">Nurse Report — Current Condition</p>
+                        <p className="font-semibold text-xs">Nurse escalation</p>
                         <p>{selectedAdmission.current_condition}</p>
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-muted-foreground text-xs">Admission Date</Label>
-                      <p className="font-medium text-sm">
-                        {formatDisplayDateMedium(selectedAdmission.admission_date)}
-                      </p>
+
+                  <section className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-xs font-semibold">Clinical snapshot</h3>
+                      {selectedAdmission.current_condition && !isEscalatedCondition(selectedAdmission.current_condition) && (
+                        <Badge variant="outline" className={getConditionBadgeClass(selectedAdmission.current_condition)}>
+                          {selectedAdmission.current_condition}
+                        </Badge>
+                      )}
                     </div>
-                    <div>
-                      <Label className="text-muted-foreground text-xs">Length of Stay</Label>
-                      <p className="font-medium text-sm">
-                        {selectedAdmission.length_of_stay === 0
-                          ? 'Same day'
-                          : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}
-                      </p>
+                    <div className="space-y-1.5 text-sm">
+                      <p><span className="text-muted-foreground">Diagnosis · </span>{selectedAdmission.admission_diagnosis || '—'}</p>
+                      {selectedAdmission.presenting_complaint && (
+                        <p><span className="text-muted-foreground">Complaint · </span>{selectedAdmission.presenting_complaint}</p>
+                      )}
+                      {selectedAdmission.admission_instructions?.trim() && (
+                        <p><span className="text-muted-foreground">Instructions · </span><span className="whitespace-pre-wrap">{selectedAdmission.admission_instructions}</span></p>
+                      )}
                     </div>
-                    {selectedAdmission.admitting_doctor_name && (
-                      <div>
-                        <Label className="text-muted-foreground text-xs">Admitting Doctor</Label>
-                        <p className="font-medium text-sm">{selectedAdmission.admitting_doctor_name}</p>
+                  </section>
+
+                  <WardLatestHandoverCard admissionNotes={selectedAdmission.admission_notes} />
+
+                  <WardVitalsHistory admission={selectedAdmission} />
+
+                  {selectedAdmission.status === 'admitted' && (
+                    <section className="rounded-lg border bg-card p-3 space-y-2">
+                      <Label className="text-sm font-medium">Assessment and plan</Label>
+                      <Textarea
+                        value={progressNote}
+                        onChange={(e) => setProgressNote(e.target.value)}
+                        placeholder="Clinical findings, progress and plan…"
+                        rows={4}
+                        className="resize-y"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          onClick={handleSaveProgressNote}
+                          disabled={isSavingNote || !progressNote.trim()}
+                        >
+                          {isSavingNote ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+                          Save note
+                        </Button>
                       </div>
-                    )}
-                    <div>
-                      <Label className="text-muted-foreground text-xs">Status</Label>
-                      <Badge variant="outline" className={`text-xs mt-0.5 ${getStatusBadgeClass(selectedAdmission.status)}`}>
-                        {formatStatus(selectedAdmission.status)}
-                      </Badge>
-                    </div>
-                    <div>
-                      <Label className="text-muted-foreground text-xs">Location</Label>
-                      <p className="font-medium text-sm mt-0.5">{selectedAdmission.location_clinic_name || '—'}</p>
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-muted-foreground text-xs">Admission Diagnosis</Label>
-                    <p className="text-sm bg-muted p-3 rounded mt-1">{selectedAdmission.admission_diagnosis}</p>
-                  </div>
-                  {selectedAdmission.presenting_complaint && (
-                    <div>
-                      <Label className="text-muted-foreground text-xs">Presenting Complaint</Label>
-                      <p className="text-sm bg-muted p-3 rounded mt-1">{selectedAdmission.presenting_complaint}</p>
-                    </div>
-                  )}
-                  {selectedAdmission.admission_instructions?.trim() && (
-                    <div>
-                      <Label className="text-muted-foreground text-xs">Admission Instructions</Label>
-                      <p className="text-sm bg-muted p-3 rounded mt-1 whitespace-pre-wrap">{selectedAdmission.admission_instructions}</p>
-                    </div>
+                    </section>
                   )}
 
                   {/* Discharge plan — surfaces what the doctor configured in the
@@ -1225,49 +1250,17 @@ export default function WardRoundsPage() {
                     admission={selectedAdmission}
                     allowAddOrders={userCanAddWardDoctorOrders(currentUser)}
                     allowEditCancelOrders={userCanEditCancelWardOrders(currentUser)}
+                    historyDisplay="collapsed"
                     excludeHandoffFromList
                     currentUserId={currentUser?.id != null ? Number(currentUser.id) : undefined}
                   />
                 </TabsContent>
 
                 <TabsContent value="notes" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
-                  {/* Write new note — only while the patient is still
-                      admitted. Once discharged the note feed is read-only. */}
-                  {selectedAdmission.status === 'admitted' && (
-                    <section className="rounded-lg border bg-card p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-sm font-medium">Write progress note</Label>
-                        <span className="text-[11px] text-muted-foreground">
-                          Stamped with your name & timestamp
-                        </span>
-                      </div>
-                      <Textarea
-                        value={progressNote}
-                        onChange={(e) => setProgressNote(e.target.value)}
-                        placeholder="Daily ward round note — patient progress, clinical findings, plan..."
-                        rows={4}
-                        className="resize-y"
-                      />
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          onClick={handleSaveProgressNote}
-                          disabled={isSavingNote || !progressNote.trim()}
-                        >
-                          {isSavingNote ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-                          Save note
-                        </Button>
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Existing notes — render as a timeline of cards rather
-                      than a single text dump. The timeline component owns
-                      parsing of the prepended note format. */}
                   {selectedAdmission.admission_notes ? (
                     <section>
                       <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-                        Notes & handoff history
+                        Clinical timeline
                       </h3>
                       <ProgressNotesTimeline
                         notes={selectedAdmission.admission_notes}
@@ -1275,25 +1268,13 @@ export default function WardRoundsPage() {
                       />
                     </section>
                   ) : (
-                    !selectedAdmission.current_condition && (
-                      <div className="rounded-lg border border-dashed p-6 text-center">
-                        <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                        <p className="text-sm text-muted-foreground">No progress notes recorded yet.</p>
-                        {selectedAdmission.status === 'admitted' && (
-                          <p className="text-xs text-muted-foreground/70 mt-1">
-                            Use the box above to write the first ward round note.
-                          </p>
-                        )}
-                      </div>
-                    )
+                    <div className="rounded-lg border border-dashed p-6 text-center">
+                      <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                      <p className="text-sm text-muted-foreground">No timeline entries yet.</p>
+                    </div>
                   )}
                 </TabsContent>
               </Tabs>
-              <DialogFooter className="px-5 py-3 border-t shrink-0">
-                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setShowAdmissionDetails(false)}>
-                  Close
-                </Button>
-              </DialogFooter>
             </DialogContent>
           </Dialog>
         )}
@@ -1304,11 +1285,11 @@ export default function WardRoundsPage() {
             setShowDischargeDialog(open);
             if (!open) resetDischargeForm();
           }}>
-            <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
+            <DialogContent className={`${modalNoOverflow('md')} max-h-[92vh] flex flex-col gap-0 p-0`}>
               <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-1">
                 <DialogTitle className="flex items-center gap-2 text-lg">
                   <CheckCircle className="h-5 w-5 text-amber-500" />
-                  Initiate Discharge — Step 1 of 2
+                  Initiate Discharge
                 </DialogTitle>
                 <DialogDescription asChild>
                   <div className="text-muted-foreground text-sm space-y-1">
@@ -1326,6 +1307,14 @@ export default function WardRoundsPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 px-5 py-4 overflow-y-auto flex-1 min-h-0">
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-2">
+                  <span>
+                    Step {dischargeStep} of 2
+                    {dischargeStep === 1 ? ' · Clinical discharge details' : ' · Referral & review'}
+                  </span>
+                </div>
+                {dischargeStep === 1 && (
+                  <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Discharge Type</Label>
@@ -1351,9 +1340,17 @@ export default function WardRoundsPage() {
                     <Label>Discharge Diagnosis <span className="text-red-500">*</span></Label>
                     <Input
                       value={dischargeData.discharge_diagnosis}
-                      onChange={(e) => setDischargeData({ ...dischargeData, discharge_diagnosis: e.target.value })}
+                      onChange={(e) => {
+                        setDischargeData({ ...dischargeData, discharge_diagnosis: e.target.value });
+                        if (dischargeErrors.discharge_diagnosis) {
+                          setDischargeErrors((prev) => ({ ...prev, discharge_diagnosis: undefined }));
+                        }
+                      }}
                       placeholder="Final diagnosis"
                     />
+                    {dischargeErrors.discharge_diagnosis && (
+                      <p className="text-xs text-red-600">{dischargeErrors.discharge_diagnosis}</p>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1374,8 +1371,12 @@ export default function WardRoundsPage() {
                     rows={2}
                   />
                 </div>
+                  </>
+                )}
 
                 {/* External-care referral toggle */}
+                {dischargeStep === 2 && (
+                  <>
                 <div className="rounded-md border bg-muted/30 px-3 py-3 space-y-2">
                   <label className="flex items-start gap-2 cursor-pointer select-none">
                     <input
@@ -1402,19 +1403,35 @@ export default function WardRoundsPage() {
 
                     <FacilityPartnerSelect
                       value={referralFacility}
-                      onChange={setReferralFacility}
+                      onChange={(next) => {
+                        setReferralFacility(next);
+                        if (dischargeErrors.referral_facility) {
+                          setDischargeErrors((prev) => ({ ...prev, referral_facility: undefined }));
+                        }
+                      }}
                       disabled={isSubmittingDischarge}
                     />
+                    {dischargeErrors.referral_facility && (
+                      <p className="text-xs text-red-600">{dischargeErrors.referral_facility}</p>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs">Specialty / Department <span className="text-red-500">*</span></Label>
                         <Input
                           value={referralForm.specialty}
-                          onChange={(e) => setReferralForm({ ...referralForm, specialty: e.target.value })}
+                          onChange={(e) => {
+                            setReferralForm({ ...referralForm, specialty: e.target.value });
+                            if (dischargeErrors.referral_specialty) {
+                              setDischargeErrors((prev) => ({ ...prev, referral_specialty: undefined }));
+                            }
+                          }}
                           placeholder="e.g. Cardiology"
                           disabled={isSubmittingDischarge}
                         />
+                        {dischargeErrors.referral_specialty && (
+                          <p className="text-xs text-red-600">{dischargeErrors.referral_specialty}</p>
+                        )}
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Urgency</Label>
@@ -1436,11 +1453,19 @@ export default function WardRoundsPage() {
                       <Label className="text-xs">Reason for referral <span className="text-red-500">*</span></Label>
                       <Textarea
                         value={referralForm.reason}
-                        onChange={(e) => setReferralForm({ ...referralForm, reason: e.target.value })}
+                        onChange={(e) => {
+                          setReferralForm({ ...referralForm, reason: e.target.value });
+                          if (dischargeErrors.referral_reason) {
+                            setDischargeErrors((prev) => ({ ...prev, referral_reason: undefined }));
+                          }
+                        }}
                         placeholder="Why are you referring this patient?"
                         rows={2}
                         disabled={isSubmittingDischarge}
                       />
+                      {dischargeErrors.referral_reason && (
+                        <p className="text-xs text-red-600">{dischargeErrors.referral_reason}</p>
+                      )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -1480,10 +1505,31 @@ export default function WardRoundsPage() {
                     </p>
                   </div>
                 )}
+                  </>
+                )}
               </div>
               <DialogFooter className="px-5 py-4 border-t shrink-0 gap-2 sm:justify-end flex-col-reverse sm:flex-row">
                 <Button variant="outline" onClick={() => setShowDischargeDialog(false)} disabled={isSubmittingDischarge}>Cancel</Button>
-                <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleInitiateDischarge} disabled={isSubmittingDischarge}>
+                {dischargeStep === 1 ? (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (!dischargeData.discharge_diagnosis.trim()) {
+                        setDischargeErrors((prev) => ({ ...prev, discharge_diagnosis: 'Discharge diagnosis is required.' }));
+                        return;
+                      }
+                      setDischargeErrors((prev) => ({ ...prev, discharge_diagnosis: undefined }));
+                      setDischargeStep(2);
+                    }}
+                  >
+                    Next: Referral & Review
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" onClick={() => setDischargeStep(1)} disabled={isSubmittingDischarge}>
+                    Back
+                  </Button>
+                )}
+                <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleInitiateDischarge} disabled={isSubmittingDischarge || dischargeStep === 1}>
                   {isSubmittingDischarge ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
                   {referralEnabled ? 'Initiate Discharge & Refer' : 'Initiate Discharge'}
                 </Button>
@@ -1499,7 +1545,7 @@ export default function WardRoundsPage() {
           open={editReferralOpen}
           onOpenChange={(open) => { setEditReferralOpen(open); if (!open) setIsSavingReferralEdit(false); }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[90vh] flex flex-col p-0">
+          <DialogContent className={`${modalNoOverflow('md')} flex flex-col p-0`}>
             <DialogHeader className="px-5 pt-5 pb-3 border-b border-border shrink-0">
               <DialogTitle className="flex items-center gap-2 text-lg">
                 <Send className="h-5 w-5 text-cyan-600" />
@@ -1600,7 +1646,7 @@ export default function WardRoundsPage() {
           open={cancelReferralOpen}
           onOpenChange={(open) => { setCancelReferralOpen(open); if (!open) setIsCancellingReferral(false); }}
         >
-          <DialogContent className="w-[95vw] sm:max-w-[480px]">
+          <DialogContent className={MODAL_SIZES.xs}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-lg">
                 <AlertTriangle className="h-5 w-5 text-red-600" />

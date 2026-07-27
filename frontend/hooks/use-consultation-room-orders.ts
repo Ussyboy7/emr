@@ -76,7 +76,6 @@ export type UseConsultationRoomOrdersArgs = {
   onReferralCreated?: () => void;
   medicalNotesAssessment?: string;
   loadPatientOverview?: (patientId: number) => void;
-  orderedByUserId?: number;
 };
 
 
@@ -88,7 +87,6 @@ export function useConsultationRoomOrders({
   onReferralCreated,
   medicalNotesAssessment = "",
   loadPatientOverview,
-  orderedByUserId,
 }: UseConsultationRoomOrdersArgs) {
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [icd10Codes, setIcd10Codes] = useState<ICD10Code[]>([]);
@@ -1234,10 +1232,6 @@ export function useConsultationRoomOrders({
             visit: numericVisitId,
             ward: Number(selectedWard.id),
             admission_type: 'observation',
-            admitting_doctor:
-              typeof orderedByUserId === 'number' && orderedByUserId > 0
-                ? orderedByUserId
-                : undefined,
             admission_diagnosis: `${primaryDx.code} - ${primaryDx.description}`,
             presenting_complaint: order.presentingComplaint || '',
             admission_instructions: order.instructions || '',
@@ -1261,7 +1255,6 @@ export function useConsultationRoomOrders({
             patient: numericPatientId,
             visit: numericVisitId,
             consultation_session: sessionId,
-            ordered_by: orderedByUserId,
             order_type: order.type,
             description,
             frequency: order.type === 'Injection' ? 'As ordered' : '',

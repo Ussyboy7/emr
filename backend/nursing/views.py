@@ -17,11 +17,11 @@ from common.mixins import ClinicScopedMixin
 from common.openapi import document_viewset
 from accounts.utils import resolve_clinic_id
 from organization.models import SystemConfig
+from permissions.ward_action_permissions import ensure_doctor_action, ensure_nurse_action
 from .models import NursingOrder, Procedure
 from .serializers import NursingOrderSerializer, ProcedureSerializer
 from .admission_orders import filter_orders_for_admission
 from audit.services import AuditService
-
 
 @extend_schema_view(
     list=extend_schema(summary="List nursing orders", tags=["Nursing"]),
@@ -46,6 +46,32 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ]
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
+    WARD_ORDER_TYPES = {
+        'ward instruction',
+        'observation admission',
+        'medication',
+        'injection',
+        'iv infusion',
+        'dressing',
+    }
+
+    def _is_ward_order_type(self, order_type):
+        normalized = (order_type or '').strip().lower()
+        return normalized in self.WARD_ORDER_TYPES
+
+    def _assert_can_create_order(self, order_type):
+        if self._is_ward_order_type(order_type):
+            ensure_doctor_action(self.request.user, "Only doctors can create or edit ward doctor orders.")
+
+    def _assert_can_update_order(self, instance: NursingOrder, payload: dict):
+        current_type = getattr(instance, 'order_type', '')
+        incoming_type = payload.get('order_type', current_type)
+        if self._is_ward_order_type(incoming_type):
+            next_status = (payload.get('status') or '').strip().lower()
+            if next_status == 'completed' and self._is_ward_order_type(current_type):
+                ensure_nurse_action(self.request.user, "Only nurses can perform or complete ward tasks.")
+                return
+            ensure_doctor_action(self.request.user, "Only doctors can create or edit ward doctor orders.")
     
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -178,8 +204,12 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         })
 
     def perform_create(self, serializer):
+        self._assert_can_create_order(serializer.validated_data.get('order_type'))
         self.auto_set_clinic(serializer)
-        order = serializer.save(created_by=self.request.user)
+        save_kwargs = {'created_by': self.request.user}
+        if not serializer.validated_data.get('ordered_by'):
+            save_kwargs['ordered_by'] = self.request.user
+        order = serializer.save(**save_kwargs)
         normalized_order_type = (order.order_type or '').strip().lower()
         handoff_suffix = ''
         if normalized_order_type == 'observation admission' and order.consultation_session_id:
@@ -223,6 +253,16 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         except Exception:
             # Notifications must never break order creation
             pass
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._assert_can_update_order(instance, request.data or {})
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._assert_can_update_order(instance, request.data or {})
+        return super().partial_update(request, *args, **kwargs)
 
 
 @document_viewset(tag="Nursing", resource="nursing procedures")
@@ -343,6 +383,7 @@ class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return Response(self.get_serializer(procedure).data)
     
     def perform_create(self, serializer):
+        ensure_nurse_action(self.request.user, "Only nurses can perform or complete ward tasks.")
         procedure = serializer.save(performed_by=self.request.user)
         
         # Log audit

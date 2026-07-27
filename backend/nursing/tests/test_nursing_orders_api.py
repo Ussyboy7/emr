@@ -161,6 +161,11 @@ class NursingOrderCreateTests(NursingOrderAPITestCase):
         self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
         self.assertNotEqual(r1.data["order_id"], r2.data["order_id"])
 
+    def test_nurse_cannot_create_ward_doctor_order(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.post(BASE_URL, self.valid_payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
 
 class NursingOrderListTests(NursingOrderAPITestCase):
     """GET /api/v1/nursing/orders/"""

@@ -42,8 +42,8 @@ from common.openapi import document_viewset
 from organization.models import SystemConfig
 from audit.services import AuditService
 from nursing.admission_orders import link_nursing_orders_to_admission
+from permissions.ward_action_permissions import ensure_doctor_action, ensure_nurse_action
 from .bed_ops import assign_admission_bed, clear_admission_bed, sync_bed_occupancy_after_admission_create
-
 
 @document_viewset(tag="Wards", resource="wards")
 class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
@@ -316,6 +316,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         })
 
     def perform_create(self, serializer):
+        ensure_doctor_action(self.request.user)
         # Default admitting_doctor to the authenticated user when the client
         # didn't supply a valid one. This mirrors the discharge_doctor flow
         # and prevents "Invalid pk ... object does not exist" errors when the
@@ -357,6 +358,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         ``AdmissionEscort``) when the doctor flags this discharge as a
         transfer to an external facility.
         """
+        ensure_doctor_action(request.user)
         admission = self.get_object()
 
         if admission.status != 'admitted':
@@ -507,6 +509,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             * The stub :class:`AdmissionEscort` row is deleted (it was
               created speculatively; nothing nurse-side depends on it yet).
         """
+        ensure_doctor_action(request.user)
         admission = self.get_object()
 
         if admission.status != 'pending_discharge':
@@ -582,6 +585,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         row's facility snapshot is kept in sync so the nurse's queue
         always shows the current destination.
         """
+        ensure_doctor_action(request.user)
         admission = self.get_object()
 
         if admission.status != 'pending_discharge':
@@ -740,6 +744,10 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         """
         admission = self.get_object()
         data = request.data
+        if admission.status == 'pending_discharge':
+            ensure_nurse_action(request.user)
+        else:
+            ensure_doctor_action(request.user)
 
         # Step 2 (nurse) requires the exit summary so we always have a
         # nursing record of the patient's condition at handoff.
@@ -1066,6 +1074,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def assign_bed(self, request, pk=None):
         """Assign or change a bed for an admitted patient."""
+        ensure_nurse_action(request.user)
         admission = self.get_object()
         bed_id = request.data.get('bed_id')
 
@@ -1106,6 +1115,7 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def transfer(self, request, pk=None):
         """Transfer patient to another ward (active stay continues in destination ward)."""
+        ensure_doctor_action(request.user)
         admission = self.get_object()
         transfer_data = request.data
 
@@ -1190,6 +1200,7 @@ class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
+        ensure_nurse_action(self.request.user)
         assignment = serializer.save(assigned_by=self.request.user)
 
         # Log audit
@@ -1213,6 +1224,7 @@ class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         """Mark assignment as completed."""
+        ensure_nurse_action(request.user)
         assignment = self.get_object()
         notes = request.data.get('notes', '')
 
@@ -1295,6 +1307,7 @@ class AdmissionObservationVitalViewSet(ClinicScopedMixin, viewsets.ModelViewSet)
         )
 
     def perform_create(self, serializer):
+        ensure_nurse_action(self.request.user)
         instance = serializer.save(recorded_by=self.request.user)
         try:
             from .observation_vitals_sync import sync_observation_vital_to_patient_vitals
@@ -1345,12 +1358,14 @@ class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return self.scope_queryset(qs)
 
     def perform_create(self, serializer):
+        ensure_nurse_action(self.request.user)
         serializer.save(created_by=self.request.user)
 
     @extend_schema(tags=["Wards"], summary="Confirm arrival", description="Nurse calls/visits the receiving facility and records handover.")
     @action(detail=True, methods=['post'])
     def confirm_arrival(self, request, pk=None):
         """Nurse calls/visits the receiving facility and records handover."""
+        ensure_nurse_action(request.user)
         escort = self.get_object()
         if escort.arrival_confirmed_at:
             return Response(
@@ -1446,4 +1461,5 @@ class AdmissionTreatmentRowViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
+        ensure_nurse_action(self.request.user)
         serializer.save(recorded_by=self.request.user)
