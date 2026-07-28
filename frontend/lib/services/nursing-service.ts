@@ -333,6 +333,23 @@ class NursingService {
     const path = query ? `/nursing/procedures/history-stats/${query}` : '/nursing/procedures/history-stats/';
     return apiFetch(path);
   }
+
+  async createNursingOrder(payload: Record<string, unknown>): Promise<unknown> {
+    return apiFetch('/nursing/orders/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateNursingOrder(
+    orderId: number | string,
+    payload: Record<string, unknown>,
+  ): Promise<unknown> {
+    return apiFetch(`/nursing/orders/${orderId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
 }
 
 export const nursingService = new NursingService();

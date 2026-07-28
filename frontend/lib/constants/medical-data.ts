@@ -40,6 +40,21 @@ export const INJECTION_ROUTES = [
   'Intradermal (ID)'
 ] as const;
 
+/** Default route for new injection / nursing procedure medication rows. */
+export const DEFAULT_INJECTION_ROUTE = INJECTION_ROUTES[0];
+
+/**
+ * Routes commonly offered when configuring ward medication / injection orders
+ * (oral + injectable + topical). Subset of ADMINISTRATION_ROUTES.
+ */
+export const WARD_MEDICATION_ROUTES = [
+  'Oral',
+  'Intramuscular (IM)',
+  'Intravenous (IV)',
+  'Subcutaneous (SC)',
+  'Topical',
+] as const;
+
 // ==========================================
 // WOUND CARE DATA
 // ==========================================

@@ -3,7 +3,6 @@
 import { useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -23,10 +22,16 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
+import { MedicationGenericPicker } from '@/components/pharmacy/MedicationGenericPicker';
+import {
+  MedicationSelectionConfigList,
+  type MedicationSelectionConfig,
+} from '@/components/pharmacy/MedicationSelectionConfigList';
 import { FacilityPartnerSelect } from '@/components/referrals/FacilityPartnerSelect';
 import { PrescriptionOrderModal } from '@/components/consultation/orders/PrescriptionOrderModal';
 import { PrescriptionRefillDialog } from '@/components/consultation/orders/PrescriptionRefillDialog';
 import { Icd10DiagnosisMultiPicker } from '@/components/medical/Icd10DiagnosisMultiPicker';
+import { TemplateCatalogMultiSelect } from '@/components/medical/TemplateCatalogMultiSelect';
 import { validateOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
 import {
   DUPLICATE_VISIT_DIAGNOSIS_MESSAGE,
@@ -36,6 +41,12 @@ import {
 import { prescriptionModalCopy } from '@/lib/consultation/prescription-refill';
 import { debugConsultationRoom } from '@/lib/consultation/room-helpers';
 import { getNursingOrderIcon } from '@/lib/consultation/room-nursing-helpers';
+import {
+  type GenericMedicationLike,
+  DEFAULT_INJECTION_ROUTE,
+  PROCEDURE_DOSE_UNITS,
+  formatGenericMedicationLabel,
+} from '@/lib/pharmacy/generic-medication';
 import {
   ADMINISTRATION_ROUTES,
   INJECTION_ROUTES,
@@ -172,10 +183,8 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   icd10Codes,
   icd10SearchResults,
   injectionConfigs,
-  injectionMedicationDropdownRef,
   injectionMedicationResults,
   injectionMedicationSearch,
-  injectionRoutes,
   injectionSelectedIds,
   isSearchingICD10,
   labTemplateDropdownContainerRef,
@@ -262,6 +271,48 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   toggleRadiologyTemplateSelection,
   wards,
 } = workspace;
+
+  const selectedInjectionGenerics = useMemo(() => {
+    const map = new Map<string, GenericMedicationLike>();
+    injectionMedicationResults.forEach((med: any) => {
+      const id = med?.id != null ? String(med.id) : '';
+      if (!id || !injectionSelectedIds.has(id)) return;
+      map.set(`g:${id}`, med as GenericMedicationLike);
+    });
+    return map;
+  }, [injectionMedicationResults, injectionSelectedIds]);
+
+  const toggleInjectionMedication = (med: GenericMedicationLike, selected: boolean) => {
+    const id = med?.id != null ? String(med.id) : '';
+    if (!id) return;
+    setInjectionSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    if (selected && !injectionConfigs.has(id)) {
+      setInjectionConfigs((prev) => {
+        const next = new Map(prev);
+        next.set(id, {
+          dose: '',
+          doseUnit: 'vial',
+          frequency: 'Once daily (OD)',
+          durationDays: '',
+          route: DEFAULT_INJECTION_ROUTE,
+          instructions: '',
+        });
+        return next;
+      });
+    }
+    if (!selected) {
+      setInjectionConfigs((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
 
   return (
     <>
@@ -465,109 +516,45 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Search and Select Tests *</Label>
-              <div className="relative" ref={labTemplateDropdownContainerRef} data-lab-template-dropdown>
-                <Input
-                  placeholder="Search by name, code, or sample type (try “Other”)…"
-                  value={labTemplateSearch}
-                  onChange={(e) => {
-                    const searchValue = e.target.value;
-                    setLabTemplateSearch(searchValue);
-                    // Only show dropdown if user has typed something
-                    if (searchValue.trim()) {
-                      setShowLabTemplateDropdown(true);
-                    } else {
-                      setShowLabTemplateDropdown(false);
-                    }
-                  }}
-                  onFocus={() => {
-                    // Only show dropdown if there's search text
-                    if (labTemplateSearch.trim()) {
-                      setShowLabTemplateDropdown(true);
-                    }
-                  }}
-                />
-                {showLabTemplateDropdown && labTemplateSearch.trim() && (
-                  <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto" data-lab-template-dropdown>
-                    {loadingLabTemplates ? (
-                      <div className="p-4 text-center text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                        Loading tests...
-                      </div>
-                    ) : filteredLabTemplates.length === 0 ? (
-                      <div className="p-4 text-center text-sm text-muted-foreground">
-                        No tests found. Try a different search term.
-                      </div>
-                    ) : (
-                      filteredLabTemplates.map((template) => {
-                        const isSelected = selectedLabTemplates.has(template.id);
-                        const isOtherRow = (template.code || '').toUpperCase() === LAB_OTHER_TEMPLATE_CODE;
-                        return (
-                          <div
-                            key={template.id}
-                            onClick={() => toggleLabTemplateSelection(template)}
-                            className={`p-3 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-3 ${
-                              isSelected ? 'bg-amber-50 dark:bg-amber-900/20' : ''
-                            }`}
-                          >
-                            <Checkbox checked={isSelected} onCheckedChange={() => toggleLabTemplateSelection(template)} />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
-                                {template.name}
-                                {isOtherRow && (
-                                  <Badge variant="outline" className="text-[10px] border-amber-500/60 text-amber-800 dark:text-amber-200">
-                                    Describe in clinical indication
-                                  </Badge>
-                                )}
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                {template.code} • {template.sample_type}
-                              </div>
-                              {template.description && (
-                                <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                                  {template.description}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
+            <TemplateCatalogMultiSelect
+              label="Search and Select Tests *"
+              placeholder="Search by name, code, or sample type (try “Other”)…"
+              searchValue={labTemplateSearch}
+              onSearchChange={(searchValue) => {
+                setLabTemplateSearch(searchValue);
+                setShowLabTemplateDropdown(!!searchValue.trim());
+              }}
+              showDropdown={showLabTemplateDropdown}
+              onSearchFocus={() => {
+                if (labTemplateSearch.trim()) setShowLabTemplateDropdown(true);
+              }}
+              dropdownRef={labTemplateDropdownContainerRef}
+              loading={loadingLabTemplates}
+              loadingText="Loading tests..."
+              emptyText="No tests found. Try a different search term."
+              items={filteredLabTemplates}
+              selectedIds={selectedLabTemplates}
+              selectedDetails={selectedLabTemplateDetails}
+              pinnedTemplate={otherLabPinnedTemplate}
+              onToggle={toggleLabTemplateSelection}
+              onClearAll={() => setSelectedLabTemplates(new Set())}
+              selectedLabel="Selected Tests"
+              isOtherTemplate={(template) =>
+                (template.code || '').toUpperCase() === LAB_OTHER_TEMPLATE_CODE
+              }
+              renderMeta={(template) => (
+                <>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {template.code} • {template.sample_type}
                   </div>
-                )}
-              </div>
-              {selectedLabTemplates.size > 0 && (
-                <div className="mt-2 space-y-2">
-                  <div className="text-sm font-medium">Selected Tests ({selectedLabTemplates.size}):</div>
-                  <div className="flex flex-wrap gap-2">
-                    {Array.from(selectedLabTemplates).map((id) => {
-                      const template =
-                        selectedLabTemplateDetails.get(id) ||
-                        (otherLabPinnedTemplate?.id === id ? otherLabPinnedTemplate : undefined);
-                      if (!template) return null;
-                      return (
-                        <Badge key={template.id} variant="secondary" className="flex items-center gap-1">
-                          {template.name}
-                          <X
-                            className="h-3 w-3 cursor-pointer"
-                            onClick={() => toggleLabTemplateSelection(template)}
-                          />
-                        </Badge>
-                      );
-                    })}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedLabTemplates(new Set())}
-                    className="text-xs"
-                  >
-                    Clear All
-                  </Button>
-                </div>
+                  {template.description && (
+                    <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                      {template.description}
+                    </div>
+                  )}
+                </>
               )}
-            </div>
+            />
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -755,267 +742,56 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
             {/* Injection-specific fields */}
             {newNursingOrder.type === 'Injection' && (
               <>
-                <div className="space-y-2">
-                  <Label>Search and Select Medications *</Label>
-                  <div className="relative" ref={injectionMedicationDropdownRef}>
-                    <Input
-                      placeholder="Search generics by name, active ingredient, category..."
-                      value={injectionMedicationSearch}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setInjectionMedicationSearch(v);
-                        if (v.trim()) setShowInjectionMedicationDropdown(true);
-                        else setShowInjectionMedicationDropdown(false);
-                      }}
-                      onFocus={() => { if (injectionMedicationSearch.trim()) setShowInjectionMedicationDropdown(true); }}
-                    />
-                    {showInjectionMedicationDropdown && injectionMedicationSearch.trim() && (
-                      <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
-                        {loadingInjectionMedications ? (
-                          <div className="p-4 text-center text-sm text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                            Loading medications...
-                          </div>
-                        ) : injectionMedicationResults.length === 0 ? (
-                          <div className="p-4 text-center text-sm text-muted-foreground">
-                            No generics found for "{injectionMedicationSearch}"
-                          </div>
-                        ) : (
-                          injectionMedicationResults.map((med) => {
-                            const id = med.id?.toString();
-                            if (!id) return null;
-                            const name = med?.name || "";
-                            const strength = (med?.strength || "").toString().trim();
-                            const dosageForm = (med?.dosage_form || "").toString().trim();
-                            const label = strength && dosageForm
-                              ? `${name} (${strength}, ${dosageForm})`
-                              : strength
-                                ? `${name} (${strength})`
-                                : dosageForm
-                                  ? `${name} (${dosageForm})`
-                                  : name;
-                            const subline = [med.active_ingredient, med.category]
-                              .map((v) => (v || "").trim())
-                              .filter((v) => v.length > 0)
-                              .join(" • ");
-                            const checked = injectionSelectedIds.has(id);
-                            return (
-                              <div
-                                key={id}
-                                className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-3"
-                                onClick={() => {
-                                  setInjectionSelectedIds((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(id)) next.delete(id);
-                                    else next.add(id);
-                                    return next;
-                                  });
-                                  if (!injectionConfigs.has(id)) {
-                                    setInjectionConfigs((prev) => {
-                                      const next = new Map(prev);
-                                      next.set(id, { dose: "", doseUnit: "vial", frequency: "Once daily (OD)", durationDays: "", route: "Intramuscular (IM)", instructions: "" });
-                                      return next;
-                                    });
-                                  }
-                                }}
-                              >
-                                <Checkbox checked={checked} className="mt-1" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-sm">{label}</div>
-                                  {subline ? (
-                                    <div className="text-xs text-muted-foreground mt-1">{subline}</div>
-                                  ) : null}
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {injectionSelectedIds.size > 0 && (
-                    <div className="mt-2 space-y-2">
-                      <div className="text-sm font-medium">Selected Medications ({injectionSelectedIds.size}):</div>
-                      <div className="flex flex-wrap gap-2">
-                        {injectionMedicationResults.filter((m) => injectionSelectedIds.has(m.id.toString())).map((med) => {
-                          const id = med.id.toString();
-                          const name = med.name || "";
-                          const strength = (med.strength || "").toString().trim();
-                          const dosageForm = (med.dosage_form || "").toString().trim();
-                          const label = strength && dosageForm
-                            ? `${name} (${strength}, ${dosageForm})`
-                            : strength
-                              ? `${name} (${strength})`
-                              : dosageForm
-                                ? `${name} (${dosageForm})`
-                                : name;
-                          return (
-                            <Badge key={id} variant="secondary" className="flex items-center gap-1">
-                              {label}
-                              <X className="h-3 w-3 cursor-pointer" onClick={() => {
-                                setInjectionSelectedIds((prev) => {
-                                  const next = new Set(prev);
-                                  next.delete(id);
-                                  return next;
-                                });
-                                setInjectionConfigs((prev) => {
-                                  const next = new Map(prev);
-                                  next.delete(id);
-                                  return next;
-                                });
-                              }} />
-                            </Badge>
-                          );
-                        })}
-                      </div>
-                      <Button variant="ghost" size="sm" className="text-xs" onClick={() => {
-                        setInjectionSelectedIds(new Set());
-                        setInjectionConfigs(new Map());
-                      }}>
-                        Clear All
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                <MedicationGenericPicker
+                  active={showAddNursingOrder}
+                  label="Search and Select Medications *"
+                  placeholder="Search generics by name, active ingredient, category..."
+                  selectedKeys={Array.from(injectionSelectedIds).map((id) => `g:${id}`)}
+                  selectedGenerics={selectedInjectionGenerics}
+                  onToggle={toggleInjectionMedication}
+                  onClearAll={() => {
+                    setInjectionSelectedIds(new Set());
+                    setInjectionConfigs(new Map());
+                  }}
+                  selectionStyle="checkbox"
+                  selectedLabel="Selected medications"
+                />
 
                 {injectionSelectedIds.size > 0 && (
-                  <div className="space-y-4 border-t pt-4 mt-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-sm font-semibold">Configure Prescriptions</Label>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Set dose, frequency, duration, route, and instructions for each selected medication
-                        </p>
-                      </div>
-                      <Badge variant="outline" className="text-xs">{injectionSelectedIds.size} medication{injectionSelectedIds.size > 1 ? 's' : ''} selected</Badge>
-                    </div>
-
-                    {injectionMedicationResults.filter((m) => injectionSelectedIds.has(m.id.toString())).map((med) => {
-                      const id = med.id.toString();
-                      const name = med.name || "";
-                      const strength = (med.strength || "").toString().trim();
-                      const dosageForm = (med.dosage_form || "").toString().trim();
-                      const label = strength && dosageForm
-                        ? `${name} (${strength}, ${dosageForm})`
-                        : strength
-                          ? `${name} (${strength})`
-                          : dosageForm
-                            ? `${name} (${dosageForm})`
-                            : name;
-                      const subline = med.active_ingredient || "";
-                      const cfg = injectionConfigs.get(id) || { dose: "", doseUnit: "vial", frequency: "Once daily (OD)", durationDays: "", route: "Intramuscular (IM)", instructions: "" };
-                      const updateCfg = (partial: Partial<typeof cfg>) => {
-                        setInjectionConfigs((prev) => {
-                          const next = new Map(prev);
-                          next.set(id, { ...cfg, ...partial });
-                          return next;
-                        });
-                      };
-                      return (
-                        <div key={id} className="rounded-lg border border-l-4 border-l-cyan-500 p-4">
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <div className="font-medium text-sm">{label}</div>
-                              {subline ? (
-                                <div className="text-xs text-muted-foreground">{subline}</div>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                              <div className="space-y-1 md:col-span-4">
-                                <Label className="text-xs">Dose per administration</Label>
-                                <Input
-                                  type="text"
-                                  inputMode="decimal"
-                                  min={0.1}
-                                  step={0.1}
-                                  placeholder="e.g., 1, 5"
-                                  className="h-8 text-xs"
-                                  value={cfg.dose}
-                                  onChange={(e) => updateCfg({ dose: e.target.value })}
-                                />
-                              </div>
-                              <div className="space-y-1 md:col-span-3">
-                                <Label className="text-xs">Dose unit <span className="text-red-500">*</span></Label>
-                                <Select value={cfg.doseUnit} onValueChange={(v) => updateCfg({ doseUnit: v })}>
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {["vial", "ampoule", "ml", "mg", "tablet", "capsule", "drop", "patch", "puff", "tube", "bottle", "sachet"].map((u) => (
-                                      <SelectItem key={u} value={u}>{u}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1 md:col-span-5">
-                                <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
-                                <Select value={cfg.frequency} onValueChange={(v) => updateCfg({ frequency: v })}>
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
-                                    <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
-                                    <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
-                                    <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
-                                    <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
-                                    <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
-                                    <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
-                                    <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
-                                    <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
-                                    <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <Label className="text-xs">Duration (days)</Label>
-                                <Input
-                                  type="number"
-                                  min={1}
-                                  placeholder="e.g., 7"
-                                  className="h-8 text-xs"
-                                  value={cfg.durationDays === "" ? "" : String(cfg.durationDays)}
-                                  onChange={(e) => {
-                                    const value = e.target.value;
-                                    updateCfg({ durationDays: value === "" ? "" : parseInt(value, 10) || "" });
-                                  }}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Route</Label>
-                                <Select value={cfg.route} onValueChange={(v) => updateCfg({ route: v })}>
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {injectionRoutes.map((r) => (
-                                      <SelectItem key={r} value={r}>{r}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">Instructions</Label>
-                              <Textarea
-                                placeholder="e.g., Administer slowly; monitor for adverse reactions"
-                                className="min-h-[72px] text-xs resize-y"
-                                value={cfg.instructions}
-                                onChange={(e) => updateCfg({ instructions: e.target.value })}
-                                rows={3}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <MedicationSelectionConfigList
+                    selectedIds={Array.from(injectionSelectedIds)}
+                    getMedication={(id) => selectedInjectionGenerics.get(`g:${id}`)}
+                    configs={injectionConfigs as Map<string, MedicationSelectionConfig>}
+                    onUpdateConfig={(id, patch) => {
+                      setInjectionConfigs((prev) => {
+                        const next = new Map(prev);
+                        const current = (next.get(id) || {
+                          dose: '',
+                          doseUnit: 'vial',
+                          frequency: 'Once daily (OD)',
+                          durationDays: '',
+                          route: DEFAULT_INJECTION_ROUTE,
+                          instructions: '',
+                        }) as MedicationSelectionConfig;
+                        next.set(id, { ...current, ...patch });
+                        return next;
+                      });
+                    }}
+                    onRemove={(id) => {
+                      setInjectionSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(id);
+                        return next;
+                      });
+                      setInjectionConfigs((prev) => {
+                        const next = new Map(prev);
+                        next.delete(id);
+                        return next;
+                      });
+                    }}
+                    doseUnitOptions={PROCEDURE_DOSE_UNITS}
+                    routeOptions={INJECTION_ROUTES}
+                  />
                 )}
               </>
             )}
@@ -1158,113 +934,48 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
           
           <div className="space-y-4 py-2">
             {/* Radiology Template Selection */}
-            <div className="space-y-2">
-              <Label>Search and Select Imaging Studies *</Label>
-              <div className="relative" ref={radiologyTemplateDropdownContainerRef} data-radiology-template-dropdown>
-                <Input
-                  placeholder="Search imaging studies by name, code, or modality (try “Other”)…"
-                  value={radiologyTemplateSearch}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setRadiologyTemplateSearch(v);
-                    if (v.trim()) setShowRadiologyTemplateDropdown(true);
-                    else setShowRadiologyTemplateDropdown(false);
-                  }}
-                  onFocus={() => {
-                    if (radiologyTemplateSearch.trim()) setShowRadiologyTemplateDropdown(true);
-                  }}
-                />
-                {showRadiologyTemplateDropdown && radiologyTemplateSearch.trim() && (
-                  <div className="absolute top-full left-0 right-0 z-50 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
-                    {loadingRadiologyTemplates ? (
-                      <div className="p-4 text-center text-muted-foreground">
-                        <Loader2 className="h-4 w-4 mx-auto mb-2 animate-spin" />
-                        <p className="text-xs">Loading templates...</p>
-                      </div>
-                    ) : roomRadiologyDropdownList.length === 0 ? (
-                      <div className="p-4 text-center text-muted-foreground">
-                        <p className="text-xs">{radiologyTemplatesError || 'No templates match. Try another search.'}</p>
-                      </div>
-                    ) : (
-                      <div className="p-2">
-                        <div className="space-y-1">
-                          {roomRadiologyDropdownList
-                            .filter((template: any) => !selectedRadiologyTemplates.has(template.id))
-                            .map((template: any) => {
-                              const isOtherRow = (template.code || '').toUpperCase() === RAD_OTHER_TEMPLATE_CODE;
-                              return (
-                              <div
-                                key={template.id}
-                                className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
-                                onClick={() => toggleRadiologyTemplateSelection(template)}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-medium text-sm truncate">{template.name}</span>
-                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{template.code}</Badge>
-                                    {isOtherRow && (
-                                      <Badge variant="outline" className="text-[10px] border-indigo-500/60 text-indigo-800 dark:text-indigo-200">
-                                        Describe in clinical indication
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                                    <span>{template.category}</span>
-                                    <span>•</span>
-                                    <span>{template.body_part || 'N/A'}</span>
-                                    {template.radiation_exposure === 'high' && (
-                                      <>
-                                        <span>•</span>
-                                        <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">High Rad</Badge>
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                            })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Selected Radiology Templates */}
-              {selectedRadiologyTemplates.size > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Selected Studies ({selectedRadiologyTemplates.size})</p>
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
-                    {Array.from(selectedRadiologyTemplates).map(templateId => {
-                      const template =
-                        selectedRadiologyTemplateDetails.get(templateId) ||
-                        (otherRadiologyPinnedTemplate?.id === templateId ? otherRadiologyPinnedTemplate : undefined);
-                      return template ? (
-                        <div key={templateId} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{template.name}</div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Badge variant="outline" className="text-[10px]">{template.code}</Badge>
-                              <span>{template.category}</span>
-                              <span>•</span>
-                              <span>{template.body_part}</span>
-                            </div>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                            onClick={() => toggleRadiologyTemplateSelection(template)}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      ) : null;
-                    })}
-                  </div>
+            <TemplateCatalogMultiSelect
+              label="Search and Select Imaging Studies *"
+              placeholder="Search imaging studies by name, code, or modality (try “Other”)…"
+              searchValue={radiologyTemplateSearch}
+              onSearchChange={(value) => {
+                setRadiologyTemplateSearch(value);
+                setShowRadiologyTemplateDropdown(!!value.trim());
+              }}
+              showDropdown={showRadiologyTemplateDropdown}
+              onSearchFocus={() => {
+                if (radiologyTemplateSearch.trim()) setShowRadiologyTemplateDropdown(true);
+              }}
+              dropdownRef={radiologyTemplateDropdownContainerRef}
+              loading={loadingRadiologyTemplates}
+              loadingText="Loading templates..."
+              emptyText={radiologyTemplatesError || 'No templates match. Try another search.'}
+              items={roomRadiologyDropdownList}
+              selectedIds={selectedRadiologyTemplates}
+              selectedDetails={selectedRadiologyTemplateDetails}
+              pinnedTemplate={otherRadiologyPinnedTemplate}
+              onToggle={toggleRadiologyTemplateSelection}
+              onClearAll={() => setSelectedRadiologyTemplates(new Set())}
+              selectedLabel="Selected Studies"
+              isOtherTemplate={(template) =>
+                (template.code || '').toUpperCase() === RAD_OTHER_TEMPLATE_CODE
+              }
+              renderMeta={(template) => (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                    {template.code}
+                  </Badge>
+                  <span>{template.category}</span>
+                  <span>•</span>
+                  <span>{template.body_part || 'N/A'}</span>
+                  {template.radiation_exposure === 'high' && (
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">
+                      High Rad
+                    </Badge>
+                  )}
                 </div>
               )}
-            </div>
+            />
 
             {/* Priority and LMP */}
             <div className="grid grid-cols-2 gap-4">

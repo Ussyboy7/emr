@@ -21,8 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from 'next/navigation';
-import { apiFetch } from '@/lib/api-client';
-import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService } from '@/lib/services';
+import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService, nursingService } from '@/lib/services';
 import type { Diagnosis, ICD10Code } from '@/lib/services/consultation-service';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
@@ -970,20 +969,17 @@ export default function ConsultationHistoryPage() {
       description = `IV Infusion: ${payload.medication}${payload.dosage ? ` — ${payload.dosage}` : ""}. ${payload.instructions}`;
     }
 
-    await apiFetch("/nursing/orders/", {
-      method: "POST",
-      body: JSON.stringify({
-        patient: patientId,
-        visit: selectedConsultation.visitId,
-        consultation_session: sessionId,
-        ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
-        order_type: orderTypeForApi,
-        description,
-        frequency: payload.type === "Injection" ? "As ordered" : "",
-        duration: "",
-        status: "pending",
-        priority: priorityMap[payload.priority] || "medium",
-      }),
+    await nursingService.createNursingOrder({
+      patient: patientId,
+      visit: selectedConsultation.visitId,
+      consultation_session: sessionId,
+      ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
+      order_type: orderTypeForApi,
+      description,
+      frequency: payload.type === "Injection" ? "As ordered" : "",
+      duration: "",
+      status: "pending",
+      priority: priorityMap[payload.priority] || "medium",
     });
 
     toast.success("Nursing order added");
@@ -1068,7 +1064,7 @@ export default function ConsultationHistoryPage() {
 
       // Delete diagnoses that were removed from the form
       for (const [id, diagnosis] of existingById) {
-        await apiFetch(`/consultation/diagnoses/${id}/`, { method: 'DELETE' });
+        await consultationService.deleteDiagnosis(id);
       }
 
       // Update local state
@@ -1125,12 +1121,9 @@ export default function ConsultationHistoryPage() {
       }
       
       // Update session status to completed
-      await apiFetch(`/consultation/sessions/${sessionId}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status: 'completed',
-          ended_at: new Date().toISOString(),
-        }),
+      await consultationService.updateSession(sessionId, {
+        status: 'completed',
+        ended_at: new Date().toISOString(),
       });
       
       try {

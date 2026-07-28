@@ -416,6 +416,7 @@ class BackupLatestDownloadView(views.APIView):
 
     authentication_classes = [JWTAuthenticationWithActivity, JWTCookieAuthentication]
     permission_classes = [IsAuthenticated]
+    page_access_exempt = True
 
     def get(self, request):
         if not getattr(request.user, 'is_superuser', False):

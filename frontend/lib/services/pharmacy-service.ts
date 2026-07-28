@@ -295,7 +295,7 @@ class PharmacyService {
     date_preset?: 'all' | 'today' | 'week' | 'month' | string;
   }): Promise<{ results: Prescription[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: Prescription[]; count: number }>(`/v1/pharmacy/prescriptions/${query}`);
+    return apiFetch<{ results: Prescription[]; count: number }>(`/pharmacy/prescriptions/${query}`);
   }
 
   /** Full-queue counts (same filters as the list; not limited to one page). */
@@ -312,7 +312,7 @@ class PharmacyService {
     total: number;
   }> {
     const query = buildQueryString(params || {});
-    const url = query ? `/v1/pharmacy/prescriptions/queue-stats/${query}` : '/v1/pharmacy/prescriptions/queue-stats/';
+    const url = query ? `/pharmacy/prescriptions/queue-stats/${query}` : '/pharmacy/prescriptions/queue-stats/';
     return apiFetch(url);
   }
 
@@ -320,7 +320,7 @@ class PharmacyService {
    * Get a single prescription
    */
   async getPrescription(prescriptionId: number): Promise<Prescription> {
-    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/`);
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/`);
   }
 
   async getPrescriptionDispenseContext(prescriptionId: number): Promise<{
@@ -340,21 +340,21 @@ class PharmacyService {
       }>;
     }>;
   }> {
-    return apiFetch(`/v1/pharmacy/prescriptions/${prescriptionId}/dispense-context/`);
+    return apiFetch(`/pharmacy/prescriptions/${prescriptionId}/dispense-context/`);
   }
 
   /**
    * Create a prescription
    */
   async createPrescription(data: Partial<Prescription>): Promise<Prescription> {
-    return apiFetch<Prescription>('/v1/pharmacy/prescriptions/', {
+    return apiFetch<Prescription>('/pharmacy/prescriptions/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
   async updatePrescription(prescriptionId: number, data: Partial<Prescription>): Promise<Prescription> {
-    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/`, {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -365,7 +365,7 @@ class PharmacyService {
   }
 
   async cancelPrescription(prescriptionId: number | string, reason?: string): Promise<Prescription> {
-    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/cancel/`, {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/cancel/`, {
       method: 'POST',
       body: JSON.stringify({ reason: reason || '' }),
     });
@@ -400,7 +400,7 @@ class PharmacyService {
         body.inventory_id = batchOrInventoryId;
       }
     }
-    return apiFetch<Dispense>(`/v1/pharmacy/prescriptions/${prescriptionId}/dispense/`, {
+    return apiFetch<Dispense>(`/pharmacy/prescriptions/${prescriptionId}/dispense/`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -413,7 +413,7 @@ class PharmacyService {
     reason: string,
     notes: string
   ): Promise<Prescription> {
-    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/substitute-item/`, {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/substitute-item/`, {
       method: 'POST',
       body: JSON.stringify({
         item_id: itemId,
@@ -428,7 +428,7 @@ class PharmacyService {
     prescriptionId: string | number,
     itemId: string | number,
   ): Promise<Prescription> {
-    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/split-combo-item/`, {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/split-combo-item/`, {
       method: 'POST',
       body: JSON.stringify({
         item_id: itemId,
@@ -437,13 +437,13 @@ class PharmacyService {
   }
 
   async markPrescriptionAsCompleted(prescriptionId: string | number): Promise<Prescription> {
-    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/complete_dispensing/`, {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/complete_dispensing/`, {
       method: 'POST'
     });
   }
 
   async recalculatePrescriptionStatus(prescriptionId: string | number): Promise<Prescription> {
-    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/recalculate_status/`, {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/recalculate_status/`, {
       method: 'POST'
     });
   }
@@ -460,7 +460,7 @@ class PharmacyService {
     generic?: number;
   }): Promise<{ results: Medication[]; count: number }> {
     const query = buildQueryString({ ...(params || {}), __ts: Date.now() } as any);
-    const res = await apiFetch<{ results: Medication[]; count: number }>(`/v1/pharmacy/medications/${query}`);
+    const res = await apiFetch<{ results: Medication[]; count: number }>(`/pharmacy/medications/${query}`);
     return {
       ...res,
       results: (res.results || []).map((m) => normalizeMedication(m)),
@@ -471,7 +471,7 @@ class PharmacyService {
   async resolveMedication(search: string): Promise<Medication | null> {
     try {
       const query = buildQueryString({ search: search.trim() });
-      const res = await apiFetch<Medication>(`/v1/pharmacy/medications/resolve/${query}`);
+      const res = await apiFetch<Medication>(`/pharmacy/medications/resolve/${query}`);
       return normalizeMedication(res);
     } catch {
       return null;
@@ -479,7 +479,7 @@ class PharmacyService {
   }
 
   async getMedication(id: number): Promise<Medication> {
-    const res = await apiFetch<Medication>(`/v1/pharmacy/medications/${id}/?__ts=${Date.now()}`);
+    const res = await apiFetch<Medication>(`/pharmacy/medications/${id}/?__ts=${Date.now()}`);
     return normalizeMedication(res);
   }
 
@@ -513,7 +513,7 @@ class PharmacyService {
         }
       >;
       count: number;
-    }>(`/v1/pharmacy/medications/store-stock-summary/${query}`);
+    }>(`/pharmacy/medications/store-stock-summary/${query}`);
     return {
       ...res,
       results: (res.results || []).map((m) => normalizeMedication(m as Medication)),
@@ -529,7 +529,7 @@ class PharmacyService {
     total_units: string | number;
   }> {
     const query = buildQueryString({ ...(params || {}), __ts: Date.now() } as any);
-    return apiFetch(`/v1/pharmacy/medications/store-stock-stats/${query}`);
+    return apiFetch(`/pharmacy/medications/store-stock-stats/${query}`);
   }
 
   /**
@@ -542,7 +542,7 @@ class PharmacyService {
     is_active?: boolean;
   }): Promise<{ results: GenericMedication[]; count: number }> {
     const query = buildQueryString(params || {});
-    const res = await apiFetch<{ results: GenericMedication[]; count: number }>(`/v1/pharmacy/generics/${query}`);
+    const res = await apiFetch<{ results: GenericMedication[]; count: number }>(`/pharmacy/generics/${query}`);
     return res;
   }
 
@@ -598,7 +598,7 @@ class PharmacyService {
     min_stock_level?: number;
     is_active?: boolean;
   }): Promise<Medication> {
-    const res = await apiFetch<Medication>('/v1/pharmacy/medications/', {
+    const res = await apiFetch<Medication>('/pharmacy/medications/', {
       method: 'POST',
       body: JSON.stringify({
         name: data.name,
@@ -623,7 +623,7 @@ class PharmacyService {
    * Update a medication
    */
   async updateMedication(id: number, data: Partial<Medication>): Promise<Medication> {
-    const res = await apiFetch<Medication>(`/v1/pharmacy/medications/${id}/`, {
+    const res = await apiFetch<Medication>(`/pharmacy/medications/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -646,7 +646,7 @@ class PharmacyService {
     const query = buildQueryString(params || {});
     // Use the correct inventory endpoint
     const res = await apiFetch<{ results: MedicationInventory[]; count: number } | MedicationInventory[]>(
-      `/v1/pharmacy/inventory/${query}`
+      `/pharmacy/inventory/${query}`
     );
     const rawList = Array.isArray(res) ? res : res?.results || [];
     const normalized = {
@@ -689,8 +689,8 @@ class PharmacyService {
       stock_status: params.stock_status || undefined,
     });
     const path = query
-      ? `/v1/pharmacy/inventory/list-stats/${query}`
-      : '/v1/pharmacy/inventory/list-stats/';
+      ? `/pharmacy/inventory/list-stats/${query}`
+      : '/pharmacy/inventory/list-stats/';
     return apiFetch(path);
   }
 
@@ -711,7 +711,7 @@ class PharmacyService {
     // Backend expects `medication_id` for writes (serializer keeps `medication` read-only).
     const payload = { ...data, medication_id: data.medication } as any;
     delete (payload as any).medication;
-    return apiFetch<MedicationInventory>('/v1/pharmacy/inventory/', {
+    return apiFetch<MedicationInventory>('/pharmacy/inventory/', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -721,7 +721,7 @@ class PharmacyService {
    * Update inventory item
    */
   async updateInventoryItem(id: number, data: Partial<MedicationInventory>): Promise<MedicationInventory> {
-    return apiFetch<MedicationInventory>(`/v1/pharmacy/inventory/${id}/`, {
+    return apiFetch<MedicationInventory>(`/pharmacy/inventory/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -732,7 +732,7 @@ class PharmacyService {
    */
   async getBatchAdjustmentHistory(inventoryId: number): Promise<BatchAdjustmentHistory[]> {
     return apiFetch<BatchAdjustmentHistory[]>(
-      `/v1/pharmacy/inventory/${inventoryId}/adjustment_history/`
+      `/pharmacy/inventory/${inventoryId}/adjustment_history/`
     );
   }
 
@@ -748,7 +748,7 @@ class PharmacyService {
     }
   ): Promise<BatchAdjustmentHistory> {
     return apiFetch<BatchAdjustmentHistory>(
-      `/v1/pharmacy/inventory/${inventoryId}/record_adjustment/`,
+      `/pharmacy/inventory/${inventoryId}/record_adjustment/`,
       {
         method: 'POST',
         body: JSON.stringify(data),
@@ -764,7 +764,7 @@ class PharmacyService {
     form: Record<string, string>;
     category: Record<string, string>;
   }> {
-    return apiFetch<any>('/v1/pharmacy/medications/choices/');
+    return apiFetch<any>('/pharmacy/medications/choices/');
   }
 
   /**
@@ -777,7 +777,7 @@ class PharmacyService {
   }): Promise<{ results: MedicationInventory[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: MedicationInventory[]; count: number }>(
-      `/v1/pharmacy/inventory-alerts/${query}`
+      `/pharmacy/inventory-alerts/${query}`
     );
   }
 
@@ -790,7 +790,7 @@ class PharmacyService {
     expired_count: number;
     total_alerts: number;
   }> {
-    return apiFetch<any>('/v1/pharmacy/inventory-alerts/summary/');
+    return apiFetch<any>('/pharmacy/inventory-alerts/summary/');
   }
 
   /**
@@ -806,7 +806,7 @@ class PharmacyService {
     date_preset?: string;
   }): Promise<{ results: Dispense[]; count: number }> {
     const query = buildQueryString(params || {});
-    const url = query ? `/v1/pharmacy/history/${query}` : '/v1/pharmacy/history/';
+    const url = query ? `/pharmacy/history/${query}` : '/pharmacy/history/';
     return await apiFetch<{ results: Dispense[]; count: number }>(url);
   }
 
@@ -823,8 +823,8 @@ class PharmacyService {
   }> {
     const query = buildQueryString(params || {});
     const url = query
-      ? `/v1/pharmacy/history/summary-stats/${query}`
-      : '/v1/pharmacy/history/summary-stats/';
+      ? `/pharmacy/history/summary-stats/${query}`
+      : '/pharmacy/history/summary-stats/';
     return apiFetch(url);
   }
 
@@ -903,7 +903,7 @@ class PharmacyService {
     lowStock: number;
     totalInventory: number;
   }> {
-    return apiFetch('/v1/pharmacy/prescriptions/home-stats/');
+    return apiFetch('/pharmacy/prescriptions/home-stats/');
   }
 
   /**
@@ -921,7 +921,7 @@ class PharmacyService {
     [key: string]: string | number | undefined;
   }): Promise<{ results: StockRequest[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: StockRequest[]; count: number }>(`/v1/pharmacy/stock-requests/${query}`);
+    return apiFetch<{ results: StockRequest[]; count: number }>(`/pharmacy/stock-requests/${query}`);
   }
 
   async getStockRequestListStats(params?: {
@@ -941,8 +941,8 @@ class PharmacyService {
   }> {
     const query = buildQueryString(params || {});
     const path = query
-      ? `/v1/pharmacy/stock-requests/list-stats/?${query.slice(1)}`
-      : '/v1/pharmacy/stock-requests/list-stats/';
+      ? `/pharmacy/stock-requests/list-stats/?${query.slice(1)}`
+      : '/pharmacy/stock-requests/list-stats/';
     return apiFetch(path);
   }
 
@@ -954,7 +954,7 @@ class PharmacyService {
       notes?: string;
     }>;
   }): Promise<StockRequest> {
-    return apiFetch<StockRequest>('/v1/pharmacy/stock-requests/', {
+    return apiFetch<StockRequest>('/pharmacy/stock-requests/', {
       method: 'POST',
       body: JSON.stringify({
         from_location: PHARMACY_LOCATIONS.STORE,
@@ -977,7 +977,7 @@ class PharmacyService {
       notes?: string;
     }>;
   }): Promise<StockRequest> {
-    return apiFetch<StockRequest>('/v1/pharmacy/stock-requests/', {
+    return apiFetch<StockRequest>('/pharmacy/stock-requests/', {
       method: 'POST',
       body: JSON.stringify({
         from_location: PHARMACY_LOCATIONS.STORE,
@@ -993,14 +993,14 @@ class PharmacyService {
   }
 
   async approveStockRequest(id: number): Promise<StockRequest> {
-    return apiFetch<StockRequest>(`/v1/pharmacy/stock-requests/${id}/approve/`, {
+    return apiFetch<StockRequest>(`/pharmacy/stock-requests/${id}/approve/`, {
       method: 'POST',
     });
   }
 
   async rejectStockRequest(id: number): Promise<StockRequest> {
     // Fallback to PATCH if custom action is not found
-    return apiFetch<StockRequest>(`/v1/pharmacy/stock-requests/${id}/`, {
+    return apiFetch<StockRequest>(`/pharmacy/stock-requests/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'rejected' })
     });
@@ -1008,7 +1008,7 @@ class PharmacyService {
 
   async cancelStockRequest(id: number): Promise<StockRequest> {
     // Fallback to PATCH if custom action is not found
-    return apiFetch<StockRequest>(`/v1/pharmacy/stock-requests/${id}/`, {
+    return apiFetch<StockRequest>(`/pharmacy/stock-requests/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'cancelled' })
     });
@@ -1016,7 +1016,7 @@ class PharmacyService {
 
   async updateStockRequestItems(id: number, items: Array<{ id: number; quantity: number }>): Promise<{ message: string; request: StockRequest }> {
     const res = await apiFetch<{ message?: string; request?: StockRequest }>(
-      `/v1/pharmacy/stock-requests/${id}/update_items/`,
+      `/pharmacy/stock-requests/${id}/update_items/`,
       { method: 'POST', body: JSON.stringify({ items }) }
     );
     return {
@@ -1026,13 +1026,13 @@ class PharmacyService {
   }
 
   async fulfillStockRequest(id: number): Promise<{ request: StockRequest; issue: StockIssue }> {
-    return apiFetch<{ request: StockRequest; issue: StockIssue }>(`/v1/pharmacy/stock-requests/${id}/fulfill/`, {
+    return apiFetch<{ request: StockRequest; issue: StockIssue }>(`/pharmacy/stock-requests/${id}/fulfill/`, {
       method: 'POST',
     });
   }
 
   async confirmStockRequest(id: number, confirmedNotes?: string): Promise<{ message: string; request: StockRequest }> {
-    return apiFetch<{ message: string; request: StockRequest }>(`/v1/pharmacy/stock-requests/${id}/confirm_receipt/`, {
+    return apiFetch<{ message: string; request: StockRequest }>(`/pharmacy/stock-requests/${id}/confirm_receipt/`, {
       method: 'POST',
       body: JSON.stringify({ confirmed_notes: confirmedNotes || '' }),
     });
@@ -1042,7 +1042,7 @@ class PharmacyService {
     notes?: string;
     items: Array<{ medication: number; quantity: number; notes?: string }>;
   }): Promise<StockRequest> {
-    return apiFetch<StockRequest>('/v1/pharmacy/stock-requests/', {
+    return apiFetch<StockRequest>('/pharmacy/stock-requests/', {
       method: 'POST',
       body: JSON.stringify({
         from_location: PHARMACY_LOCATIONS.STORE,
@@ -1061,7 +1061,7 @@ class PharmacyService {
     notes?: string;
     items: Array<{ medication: number; quantity: number; notes?: string }>;
   }): Promise<StockRequest> {
-    return apiFetch<StockRequest>('/v1/pharmacy/stock-requests/', {
+    return apiFetch<StockRequest>('/pharmacy/stock-requests/', {
       method: 'POST',
       body: JSON.stringify({
         from_location: PHARMACY_LOCATIONS.HOD_STORE,
@@ -1084,7 +1084,7 @@ class PharmacyService {
   }): Promise<{ results: HodStockIssue[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: HodStockIssue[]; count: number }>(
-      `/v1/pharmacy/hod-stock-issues/${query}`
+      `/pharmacy/hod-stock-issues/${query}`
     );
   }
 
@@ -1094,8 +1094,8 @@ class PharmacyService {
   }): Promise<{ total: number; today: number; total_quantity: string }> {
     const query = buildQueryString(params || {});
     const path = query
-      ? `/v1/pharmacy/hod-stock-issues/summary-stats/?${query.slice(1)}`
-      : '/v1/pharmacy/hod-stock-issues/summary-stats/';
+      ? `/pharmacy/hod-stock-issues/summary-stats/?${query.slice(1)}`
+      : '/pharmacy/hod-stock-issues/summary-stats/';
     return apiFetch(path);
   }
 
@@ -1109,7 +1109,7 @@ class PharmacyService {
     reason?: string;
     notes?: string;
   }): Promise<HodStockIssue> {
-    return apiFetch<HodStockIssue>('/v1/pharmacy/hod-stock-issues/', {
+    return apiFetch<HodStockIssue>('/pharmacy/hod-stock-issues/', {
       method: 'POST',
       body: JSON.stringify({
         medication: data.medication,
@@ -1133,7 +1133,7 @@ class PharmacyService {
     page_size?: number;
   }): Promise<{ results: StockIssue[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: StockIssue[]; count: number }>(`/v1/pharmacy/stock-issues/${query}`);
+    return apiFetch<{ results: StockIssue[]; count: number }>(`/pharmacy/stock-issues/${query}`);
   }
 
   /**
@@ -1151,7 +1151,7 @@ class PharmacyService {
       // Add a timestamp to bust cache if needed
       __ts: Date.now()
     });
-    return apiFetch<{ results: GenericMedication[]; count: number }>(`/v1/pharmacy/generics/${query}`);
+    return apiFetch<{ results: GenericMedication[]; count: number }>(`/pharmacy/generics/${query}`);
   }
 
   /**
@@ -1167,7 +1167,7 @@ class PharmacyService {
       ...params,
       __ts: Date.now()
     });
-    return apiFetch<{ results: GenericMedication[]; count: number }>(`/v1/pharmacy/generics/for_prescription/${query}`);
+    return apiFetch<{ results: GenericMedication[]; count: number }>(`/pharmacy/generics/for_prescription/${query}`);
   }
 
   async createGeneric(data: {
@@ -1180,21 +1180,21 @@ class PharmacyService {
     route?: string;
     atc_code?: string;
   }): Promise<GenericMedication> {
-    return apiFetch<GenericMedication>('/v1/pharmacy/generics/', {
+    return apiFetch<GenericMedication>('/pharmacy/generics/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
   async updateGeneric(id: number, data: Partial<GenericMedication>): Promise<GenericMedication> {
-    return apiFetch<GenericMedication>(`/v1/pharmacy/generics/${id}/`, {
+    return apiFetch<GenericMedication>(`/pharmacy/generics/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
   async deleteGeneric(id: number): Promise<void> {
-    await apiFetch<void>(`/v1/pharmacy/generics/${id}/`, {
+    await apiFetch<void>(`/pharmacy/generics/${id}/`, {
       method: 'DELETE',
     });
   }
@@ -1241,7 +1241,7 @@ class PharmacyService {
    */
   async getSubstitutes(medicationId: number): Promise<SubstituteOption[]> {
     // Get the medication first
-    const medication = await apiFetch<Medication>(`/v1/pharmacy/medications/${medicationId}/`);
+    const medication = await apiFetch<Medication>(`/pharmacy/medications/${medicationId}/`);
     
     // Search for medications with same generic name or similar
     const substitutes = await this.getMedications({ 
@@ -1271,7 +1271,7 @@ class PharmacyService {
     try {
       // Get medications linked to this generic that have inventory in dispensary
       const response = await apiFetch<{ results: Medication[] }>(
-        `/v1/pharmacy/medications/?generic=${genericId}&page_size=100`
+        `/pharmacy/medications/?generic=${genericId}&page_size=100`
       );
       
       // Filter for medications that have stock in dispensary
@@ -1312,7 +1312,7 @@ class PharmacyService {
   // Get prescription details with generic information
   async getPrescriptionWithGenerics(prescriptionId: number): Promise<any> {
     try {
-      return await apiFetch<any>(`/v1/pharmacy/prescriptions/${prescriptionId}/`);
+      return await apiFetch<any>(`/pharmacy/prescriptions/${prescriptionId}/`);
     } catch (error) {
       logError('Error fetching prescription with generics:', error);
       throw error;
@@ -1322,7 +1322,7 @@ class PharmacyService {
   // Update prescription item to select specific brand
   async selectBrandForPrescriptionItem(prescriptionItemId: number, medicationId: number): Promise<any> {
     try {
-      return await apiFetch<any>(`/v1/pharmacy/prescription-items/${prescriptionItemId}/`, {
+      return await apiFetch<any>(`/pharmacy/prescription-items/${prescriptionItemId}/`, {
         method: 'PATCH',
         body: JSON.stringify({
           medication: medicationId
@@ -1359,7 +1359,7 @@ class PharmacyService {
       if (medicationIds.length) body.medication_ids = medicationIds;
 
       const response = await apiFetch<{ interactions: DrugInteraction[] }>(
-        '/v1/pharmacy/prescriptions/check_interactions/',
+        '/pharmacy/prescriptions/check_interactions/',
         {
           method: 'POST',
           body: JSON.stringify(body),

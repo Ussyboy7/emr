@@ -428,6 +428,7 @@ class SecuritySettingsView(APIView):
     """Org-wide security session policy (readable by all authenticated users)."""
 
     permission_classes = [IsAuthenticated]
+    page_access_exempt = True
 
     @extend_schema(
         responses={200: SecuritySettingsSerializer},

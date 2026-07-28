@@ -1,5 +1,5 @@
 "use client";
-import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, formatDisplayTime, todayApiDateString, toApiDateFromInstant } from "@/lib/dates";
+import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, todayApiDateString } from "@/lib/dates";
 import { MAX_LIST_PAGE_SIZE, DEFAULT_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -20,12 +20,16 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
 import { MergeHistoryTab } from '@/components/patient-overview/MergeHistoryTab';
 import { PatientRecordsNotesSection } from '@/components/medical-records/PatientRecordsNotesSection';
-import {
-  getVisitServiceClinicsDisplay,
-} from '@/lib/utils/clinic-utils';
-import { resolvePatientRecord } from '@/lib/utils/patient-id';
-import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 import { mapClinicalOverviewToPatientHistory } from '@/lib/clinical-overview-utils';
+import { resolvePatientRecord } from '@/lib/utils/patient-id';
+import {
+  mapHistoryConsultationsForOverviewDisplay,
+  mapHistoryImagingForOverviewDisplay,
+  mapHistoryLabResultsForOverviewDisplay,
+  mapHistoryPrescriptionsForOverviewDisplay,
+  mapHistoryVitalsForOverviewDisplay,
+  mapHistoryVisitsForOverviewDisplay,
+} from '@/lib/patient-overview-display';
 import {
   User, Phone, AlertCircle, Activity,
   AlertTriangle, Loader2, Mail, MapPin, Droplets,
@@ -324,218 +328,18 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         setDependentsLoading(false);
       }
 
-      // Process visits
-      {
-        const transformedVisits = visitsList.map((visit: any) => ({
-          id: visit.id.toString(),
-          numericId: visit.id,
-          visitId: visit.visit_id || visit.id.toString(),
-          patientId: visit.patient?.toString() || numericId.toString(),
-          date: visit.date || toApiDateFromInstant(visit.created_at) || '',
-          time: formatDisplayTime(visit.created_at),
-          type: visit.visit_type || 'OPD',
-          department: visit.department || '',
-          doctor: visit.doctor_name || 'Unknown',
-          diagnosis: visit.diagnosis || '',
-          status: visit.status || 'completed',
-          clinic: visit.clinic?.name || '',
-          notes: visit.clinical_notes || '',
-          source: 'visit' // Mark as regular visit
-        }));
+      setVisits(mapHistoryVisitsForOverviewDisplay(mapped, numericId));
 
-        // Combine with consultation sessions for unified display
-        let combinedVisits = [...transformedVisits];
-
-        if (consultationsList.length) {
-          const getSessionDateParts = (session: any) => {
-            const rawDate = session.started_at || '';
-            if (!rawDate) return { date: '', time: '' };
-            const parsed = new Date(rawDate);
-            if (Number.isNaN(parsed.getTime())) return { date: '', time: '' };
-            return {
-              date: formatDisplayDate(rawDate),
-              time: formatDisplayTime(rawDate),
-            };
-          };
-
-          const transformedSessions = consultationsList.map((session: any) => ({
-            ...getSessionDateParts(session),
-            id: `session-${session.id}`,
-            numericId: session.id,
-            visitId: session.session_id || session.id.toString(),
-            patientId: numericId.toString(),
-            type: 'Consultation',
-            department: 'Consultation',
-            doctor: session.doctor?.name || session.doctor_name || 'Unknown',
-            diagnosis: session.assessment || '',
-            status: session.status || 'completed',
-            clinic: getVisitServiceClinicsDisplay({ clinic: session.clinic_name, clinics: session.visit_clinics }),
-            notes: session.notes || '',
-            source: 'consultation' // Mark as consultation session
-          }));
-
-          combinedVisits = [...transformedVisits, ...transformedSessions];
-          // Sort by date (newest first)
-          combinedVisits.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
-        }
-
-        setVisits(combinedVisits);
-      }
-
-      // Process vitals
-      if (Array.isArray(vitalsList)) {
-        const transformedVitals = vitalsList.map((vital: any) => ({
-          id: vital.id.toString(),
-          date: formatDisplayDate(vital.recorded_at),
-          time: formatDisplayTime(vital.recorded_at),
-          bp: vital.blood_pressure_systolic && vital.blood_pressure_diastolic 
-            ? `${vital.blood_pressure_systolic}/${vital.blood_pressure_diastolic}`
-            : '-',
-          pulse: vital.heart_rate?.toString() || '-',
-          temp: vital.temperature?.toString() || '-',
-          spo2: vital.oxygen_saturation?.toString() || '-',
-          weight: vital.weight?.toString() || '-',
-          height: vital.height?.toString() || '-',
-          bmi: vital.bmi?.toString() || '-',
-          painScale: vital.pain_scale != null && vital.pain_scale !== '' ? String(vital.pain_scale) : '',
-          bloodSugar:
-            vital.blood_sugar != null && vital.blood_sugar !== '' ? String(vital.blood_sugar) : '',
-          randomBloodSugar:
-            vital.random_blood_sugar != null && vital.random_blood_sugar !== ''
-              ? String(vital.random_blood_sugar)
-              : '',
-          notes: vital.notes || '',
-          recordedBy:
-            vital.recorded_by_name ||
-            (vital.recorded_by != null ? String(vital.recorded_by) : '') ||
-            'Unknown',
-        }));
-        setVitalSigns(transformedVitals);
-      }
-
-      // Process lab results
-      if (labTestsList.length) {
-        const transformedLabResults = labTestsList.map((test: any) => {
-            const results = test.results || {};
-            const nr = test.template_normal_range || test.normal_range;
-            const orderedRows = buildOrderedLabResultViewRows(results as Record<string, any>, nr);
-            const formattedResults =
-              orderedRows
-                .map((r) => {
-                  const range = r.normalRange?.trim() || '';
-                  return `${r.parameter}: ${r.value}${r.unit ? ` ${r.unit}` : ''}${range ? ` (${range})` : ''}`;
-                })
-                .join(', ') || 'Pending';
-
-            const overallStatus = test.overall_status;
-            let healthStatus = test.status === 'verified' ? 'Completed' : 'Pending';
-            if (overallStatus) {
-              const s = String(overallStatus).toLowerCase();
-              if (s === 'normal') healthStatus = 'Normal';
-              else if (s === 'abnormal') healthStatus = 'Abnormal';
-              else if (s === 'critical') healthStatus = 'Critical';
-              else healthStatus = 'Completed';
-            }
-
-            const workflowStatus =
-              test.status === 'verified' ? 'Verified' :
-              test.status === 'results_ready' ? 'Results Ready' :
-              'Pending';
-
-            const orderDetails = test.order_details || {};
-            return {
-              id: String(test.id),
-              test: test.name || test.code || 'Unknown Test',
-              category: test.sample_type || 'General',
-              date: formatDisplayDate(test.verified_at || orderDetails.ordered_at || test.created_at),
-              result: formattedResults,
-              unit: '',
-              range: '',
-            status: workflowStatus,
-            overallStatus: healthStatus,
-              orderedBy: orderDetails.doctor_name || 'Unknown',
-              verifiedBy: test.processed_by_name || test.verified_by_name || 'Pending',
-              notes: test.notes || '',
-              _raw: test,
-            };
-          });
-        setLabResults(transformedLabResults);
-      }
-
-      // Consultation sessions are now processed within visits above
-      if (consultationsList.length) {
-        const getSessionDate = (session: any) => {
-          const rawDate = session.started_at || '';
-          if (!rawDate) return '';
-          const parsed = new Date(rawDate);
-          if (Number.isNaN(parsed.getTime())) return '';
-          return formatDisplayDate(rawDate) === '—' ? '' : formatDisplayDate(rawDate);
-        };
-        // Sessions are already combined with visits above, just store separately if needed elsewhere
-        const transformedSessions = consultationsList.map((session: any) => ({
-          id: session.id?.toString() || String(session.id),
-          date: getSessionDate(session),
-          doctor: session.doctor?.name || session.doctor_name || 'Unknown',
-          clinic: getVisitServiceClinicsDisplay({ clinic: session.clinic_name, clinics: session.visit_clinics }),
-          room: session.room?.name || '',
-          status: session.status || 'completed',
-          notes: session.notes || '',
-          diagnoses: session.diagnoses || [],
-        }));
-        setConsultationSessions(transformedSessions);
-      }
-
+      setVitalSigns(mapHistoryVitalsForOverviewDisplay(vitalsList));
+      setLabResults(mapHistoryLabResultsForOverviewDisplay(labTestsList));
+      setConsultationSessions(mapHistoryConsultationsForOverviewDisplay(consultationsList));
       setPhysioOrders(physioOrdersList);
-
       setEyeOrders(eyeOrdersList);
-
       setWardAdmissions(wardAdmissionsList);
-
       setMedicalCertificates(certificatesList);
       setClinicalDocuments(clinicalDocumentsList || []);
-
-      setImagingResults(
-        imagingOrdersList.map((item: any) => {
-          const study = item.study_details || {};
-          return {
-            id: String(item.id),
-            studyId: item.order_id ? `${item.order_id}-${study.id ?? item.id}` : `IMG-${item.id}`,
-            type: study.modality || study.procedure || 'Unknown',
-            description: study.body_part || study.procedure || '',
-            date: formatDisplayDate(study.verified_at || study.reported_at || study.created_at || item.created_at),
-            status: study.status || 'pending',
-            orderedBy: item.order_details?.doctor_name || 'Unknown',
-            result: study.report || study.findings || 'Pending',
-            report: study.report || '',
-            _rawOrder: item,
-            _rawStudy: study,
-          };
-        }),
-      );
-
-      // Process prescriptions
-      if (prescriptionsList.length) {
-        const transformedPrescriptions = prescriptionsList.map((rx: any) => ({
-          id: rx.id.toString(),
-          prescriptionId: rx.prescription_id || `RX-${rx.id}`,
-          date: formatDisplayDate(rx.prescribed_at),
-          doctor: rx.doctor_name || 'Unknown',
-          status: rx.status || 'pending',
-          diagnosis: rx.diagnosis || '',
-          notes: rx.notes || '',
-          medications: (rx.medications || []).map((med: any) => ({
-            name: med.medication_name || '',
-            dosage: med.dosage || '',
-            frequency: med.frequency || '',
-            duration: med.duration || '',
-            quantity: med.quantity || 0,
-            unit: med.unit || '',
-            instructions: med.instructions || '',
-            isDispensed: med.is_dispensed || false,
-          })),
-        }));
-        setPrescriptions(transformedPrescriptions);
-      }
+      setImagingResults(mapHistoryImagingForOverviewDisplay(imagingOrdersList));
+      setPrescriptions(mapHistoryPrescriptionsForOverviewDisplay(prescriptionsList));
 
       // Process history
       let allergies: string[] = [];

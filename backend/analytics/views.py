@@ -2,12 +2,12 @@
 Analytics views for the main clinical dashboard.
 """
 from rest_framework import views
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from common.analytics_export import maybe_export_analytics
 from common.module_analytics import parse_analytics_dates
 from common.openapi import JSON_OBJECT_RESPONSE, document_api_view
+from permissions.drf_permissions import AuthenticatedWithPageAccess
 
 from .clinical_dashboard import build_clinical_dashboard
 
@@ -16,7 +16,7 @@ from .clinical_dashboard import build_clinical_dashboard
 class ClinicalDashboardAnalyticsView(views.APIView):
     """Comprehensive clinical dashboard analytics for the selected period."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = AuthenticatedWithPageAccess
 
     def get(self, request):
         parsed = parse_analytics_dates(request)

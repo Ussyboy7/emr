@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { formatDisplayDate } from '@/lib/dates';
 import { usePatientHistory, type PatientHistoryData } from '@/hooks/usePatientHistory';
+import { StandardPagination } from '@/components/shared/StandardPagination';
 import { printMedicalCertificatePdf } from '@/lib/medical-records/medicalCertificatePdf';
 import { PatientHistoryReferralViewDialog } from '@/components/patient-history/PatientHistoryReferralViewDialog';
 import { AddClinicalDocumentDialog } from '@/components/medical-records/AddClinicalDocumentDialog';
@@ -63,34 +64,6 @@ const purposeLabel: Record<string, string> = {
   travel: 'Travel medical',
   employment: 'Employment medical',
 };
-
-// --- Pagination ---
-
-function Pagination({ page, totalPages, setPage }: { page: number; totalPages: number; setPage: (p: number) => void }) {
-  if (totalPages <= 1) return null;
-  const pages = Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-    if (totalPages <= 5) return i + 1;
-    const half = Math.floor(5 / 2);
-    if (page <= half) return i + 1;
-    if (page >= totalPages - half) return totalPages - 4 + i;
-    return page - half + i;
-  });
-  return (
-    <div className="flex items-center gap-2">
-      <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>
-        <ChevronLeft className="h-4 w-4" /> Previous
-      </Button>
-      {pages.map(p => (
-        <Button key={p} variant={page === p ? 'default' : 'outline'} size="sm" className="w-8 h-8 p-0" onClick={() => setPage(p)}>
-          {p}
-        </Button>
-      ))}
-      <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(page + 1)}>
-        Next <ChevronRight className="h-4 w-4" />
-      </Button>
-    </div>
-  );
-}
 
 // --- Props ---
 
@@ -192,7 +165,7 @@ export function PatientHistoryTabs({
 
   // --- Pagination ---
   const [consultationsPage, setConsultationsPage] = useState(1);
-  const consultationsPerPage = 10;
+  const [consultationsPerPage, setConsultationsPerPage] = useState(10);
   const totalConsultationPages = Math.ceil(data.consultations.length / consultationsPerPage);
   const paginatedConsultations = data.consultations.slice(
     (consultationsPage - 1) * consultationsPerPage,
@@ -500,12 +473,14 @@ export function PatientHistoryTabs({
                     </tbody>
                   </table>
                 </div>
-                <div className="flex items-center justify-between mt-3">
-                  <p className="text-sm text-muted-foreground">
-                    Showing {(consultationsPage - 1) * consultationsPerPage + 1}–{Math.min(data.consultations.length, consultationsPage * consultationsPerPage)} of {data.consultations.length}
-                  </p>
-                  <Pagination page={consultationsPage} totalPages={totalConsultationPages} setPage={setConsultationsPage} />
-                </div>
+                <StandardPagination
+                  currentPage={consultationsPage}
+                  totalItems={data.consultations.length}
+                  itemsPerPage={consultationsPerPage}
+                  onPageChange={setConsultationsPage}
+                  onItemsPerPageChange={setConsultationsPerPage}
+                  itemName="consultations"
+                />
               </>
             )}
           </TabsContent>

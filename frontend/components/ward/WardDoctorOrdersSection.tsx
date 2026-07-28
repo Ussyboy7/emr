@@ -1,8 +1,8 @@
 'use client';
-import { CATALOG_SEARCH_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
+import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 
 import { formatDisplayDateTime } from '@/lib/dates';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -38,6 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiFetch } from '@/lib/api-client';
 import type { PatientAdmission } from '@/lib/services/ward-service';
 import { pharmacyService } from '@/lib/services/pharmacy-service';
+import { nursingService } from '@/lib/services/nursing-service';
 import { toast } from 'sonner';
 import {
   ClipboardList,
@@ -51,7 +52,6 @@ import {
   Syringe,
   Bandage,
   Info,
-  Check,
 } from 'lucide-react';
 import { ConsultationOrderListCard } from '@/components/consultation/room/ConsultationOrderListCard';
 import { PerformNursingProcedureDialog } from '@/components/nursing/PerformNursingProcedureDialog';
@@ -65,64 +65,31 @@ import {
   normalizePrescriptionDoseUnit,
   PRESCRIPTION_DOSE_UNITS,
 } from '@/lib/pharmacy/infer-dose-unit';
+import { MedicationGenericPicker } from '@/components/pharmacy/MedicationGenericPicker';
+import {
+  MedicationSelectionConfigList,
+  type MedicationSelectionConfig,
+} from '@/components/pharmacy/MedicationSelectionConfigList';
+import {
+  type GenericMedicationLike,
+  WARD_MEDICATION_ROUTES,
+  formatGenericMedicationLabel,
+  genericMedicationKey,
+  defaultMedicationConfigForGeneric,
+} from '@/lib/pharmacy/generic-medication';
 
-/** Shape returned by `/v1/pharmacy/generics/for_prescription/`. */
-type GenericLike = {
-  id: number | string;
-  name?: string;
-  active_ingredient?: string;
-  category?: string;
-  form?: string;
-  dosage_form?: string;
-  strength?: string;
-  route?: string;
-  unit?: string;
+/** Ward med config — generic + dosing fields. */
+type MedConfig = {
+  generic: GenericMedicationLike;
+  dosage: string;
+  unit: string;
+  frequency: string;
+  durationDays: string;
+  route: string;
+  instructions: string;
 };
 
-function parseDoseNumber(dose?: string): string {
-  if (!dose) return '1';
-  const m = String(dose).trim().match(/^([\d.]+)/);
-  return m ? m[1] : '1';
-}
-
-const formatGenericLabel = (g: GenericLike): string => {
-  const name = g.name?.trim() || '';
-  const strength = (g.strength || '').trim();
-  const form = (g.dosage_form || g.form || '').trim();
-  if (strength && form) return `${name} (${strength}, ${form})`;
-  if (strength) return `${name} (${strength})`;
-  if (form) return `${name} (${form})`;
-  return name;
-};
-
-/** Maps a free-text generic route ("oral", "Intravenous (IV)", …) onto the
- *  fixed Select options used by the ward order form. Falls back to whatever
- *  the user previously had so an unrecognised value never silently disappears.
- */
-const mapGenericRouteToOption = (route: string | undefined, fallback: string): string => {
-  const r = (route || '').trim().toLowerCase();
-  if (!r) return fallback;
-  if (r.includes('iv') || r.includes('intraven')) return 'Intravenous (IV)';
-  if (r.includes('im') || r.includes('intramus')) return 'Intramuscular (IM)';
-  if (r.includes('sc') || r.includes('subcut')) return 'Subcutaneous (SC)';
-  if (r.includes('topic') || r.includes('skin')) return 'Topical';
-  if (r.includes('oral')) return 'Oral';
-  return fallback;
-};
-
-const FREQUENCY_OPTIONS = [
-  'Once daily (OD)',
-  'Twice daily (BD)',
-  'Three times daily (TDS)',
-  'Four times daily (QDS)',
-  'Every 6 hours (Q6H)',
-  'Every 8 hours (Q8H)',
-  'Every 12 hours (Q12H)',
-  'At bedtime (Nocte)',
-  'As needed (PRN)',
-  'STAT (Single dose)',
-  'Weekly',
-] as const;
+const formatGenericLabel = formatGenericMedicationLabel;
 
 // Mirrors the consultation Add-Nursing-Order dialog so the ward and the consult
 // room speak the same language about wound care.
@@ -148,16 +115,6 @@ const WOUND_LOCATIONS = [
   'Perineal Region',
   'Multiple Sites',
 ] as const;
-
-type MedConfig = {
-  generic: GenericLike;
-  dosage: string;
-  unit: string;
-  frequency: string;
-  durationDays: string;
-  route: string;
-  instructions: string;
-};
 
 export interface WardNursingOrderRow {
   id: number;
@@ -352,18 +309,35 @@ export function WardDoctorOrdersSection({
   // Multi-select medication picker (same data source + UX as the consultation
   // prescription modal). The doctor can pick several generics, configure each,
   // and submit them as a batch — one nursing order per medication.
-  const [medSearch, setMedSearch] = useState('');
-  const [medGenerics, setMedGenerics] = useState<GenericLike[]>([]);
-  const [medSearchLoading, setMedSearchLoading] = useState(false);
-  const [showMedDropdown, setShowMedDropdown] = useState(false);
   const [selectedMedKeys, setSelectedMedKeys] = useState<string[]>([]);
   const [medConfigs, setMedConfigs] = useState<Map<string, MedConfig>>(new Map());
-  const medSearchReqRef = useRef(0);
-  const medSearchBoxRef = useRef<HTMLDivElement>(null);
 
-  // Stable key per generic — covers numeric IDs, string IDs, and (future)
-  // free-text custom entries.
-  const genericKey = (g: GenericLike): string => `g:${String(g.id)}`;
+  const selectedGenerics = useMemo(() => {
+    const map = new Map<string, GenericMedicationLike>();
+    for (const key of selectedMedKeys) {
+      const cfg = medConfigs.get(key);
+      if (cfg) map.set(key, cfg.generic);
+    }
+    return map;
+  }, [selectedMedKeys, medConfigs]);
+
+  const selectedMedicationConfigs = useMemo(() => {
+    const map = new Map<string, MedicationSelectionConfig>();
+    for (const [key, cfg] of medConfigs.entries()) {
+      map.set(key, {
+        dose: cfg.dosage,
+        doseUnit: normalizePrescriptionDoseUnit(
+          cfg.unit,
+          cfg.generic.dosage_form || cfg.generic.form,
+        ),
+        frequency: cfg.frequency,
+        durationDays: cfg.durationDays === '' ? '' : Number(cfg.durationDays) || '',
+        route: cfg.route,
+        instructions: cfg.instructions,
+      });
+    }
+    return map;
+  }, [medConfigs]);
 
   const loadOrders = useCallback(async () => {
     const observation = isObservationAdmission(admission);
@@ -482,9 +456,6 @@ export function WardDoctorOrdersSection({
     setWoundType('');
     setWoundLocation('');
     setDressingNotes('');
-    setMedSearch('');
-    setMedGenerics([]);
-    setShowMedDropdown(false);
     setSelectedMedKeys([]);
     setMedConfigs(new Map());
   };
@@ -513,66 +484,27 @@ export function WardDoctorOrdersSection({
     setMedConfigs(new Map());
   };
 
-  // Debounced generics search — only runs while the dropdown is open and a
-  // medication-like order kind is selected, so we don't send phantom requests.
-  useEffect(() => {
-    if (!addOpen) return;
-    if (orderKind !== 'medication' && orderKind !== 'injection') return;
-    if (!showMedDropdown) return;
-    const term = medSearch.trim();
-    if (!term) {
-      setMedGenerics([]);
-      return;
-    }
-    const reqId = ++medSearchReqRef.current;
-    const t = setTimeout(async () => {
-      try {
-        setMedSearchLoading(true);
-        const res = await pharmacyService.getGenericsForPrescription({ search: term, page_size: CATALOG_SEARCH_PAGE_SIZE });
-        if (reqId === medSearchReqRef.current) {
-          setMedGenerics(res.results || []);
-        }
-      } catch {
-        if (reqId === medSearchReqRef.current) {
-          setMedGenerics([]);
-        }
-      } finally {
-        if (reqId === medSearchReqRef.current) setMedSearchLoading(false);
-      }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [addOpen, medSearch, orderKind, showMedDropdown]);
-
-  useEffect(() => {
-    if (!addOpen || !showMedDropdown) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const el = medSearchBoxRef.current;
-      if (el && !el.contains(e.target as Node)) setShowMedDropdown(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, [addOpen, showMedDropdown]);
-
-  const toggleGeneric = (g: GenericLike) => {
-    const key = genericKey(g);
-    const already = selectedMedKeys.includes(key);
-    if (already) {
+  const toggleGeneric = (g: GenericMedicationLike, selected: boolean) => {
+    const key = genericMedicationKey(g);
+    if (!selected) {
       removeSelectedMed(key);
       return;
     }
-    const route = mapGenericRouteToOption(g.route, 'Oral');
-    const form = (g.dosage_form || g.form || '').trim();
+    if (selectedMedKeys.includes(key)) return;
+    const defaults = defaultMedicationConfigForGeneric(g, {
+      defaultRoute: orderKind === 'injection' ? 'Intravenous (IV)' : 'Oral',
+    });
     setSelectedMedKeys((prev) => [...prev, key]);
     setMedConfigs((prev) => {
       const next = new Map(prev);
       next.set(key, {
         generic: g,
-        dosage: parseDoseNumber(g.strength),
-        unit: normalizePrescriptionDoseUnit(g.unit, form),
-        frequency: 'Once daily (OD)',
-        durationDays: '',
-        route,
-        instructions: '',
+        dosage: defaults.dosage,
+        unit: defaults.unit,
+        frequency: defaults.frequency,
+        durationDays: String(defaults.durationDays || ''),
+        route: defaults.route,
+        instructions: defaults.instructions,
       });
       return next;
     });
@@ -630,27 +562,21 @@ export function WardDoctorOrdersSection({
       } as const;
 
       if (orderKind === 'instruction') {
-        await apiFetch('/nursing/orders/', {
-          method: 'POST',
-          body: JSON.stringify({
-            ...basePayload,
-            order_type: 'ward instruction',
-            description: instructionText.trim(),
-            frequency: '',
-            duration: '',
-          }),
+        await nursingService.createNursingOrder({
+          ...basePayload,
+          order_type: 'ward instruction',
+          description: instructionText.trim(),
+          frequency: '',
+          duration: '',
         });
         toast.success('Order added');
       } else if (orderKind === 'dressing') {
-        await apiFetch('/nursing/orders/', {
-          method: 'POST',
-          body: JSON.stringify({
-            ...basePayload,
-            order_type: 'dressing',
-            description: buildDressingDescription(),
-            frequency: '',
-            duration: '',
-          }),
+        await nursingService.createNursingOrder({
+          ...basePayload,
+          order_type: 'dressing',
+          description: buildDressingDescription(),
+          frequency: '',
+          duration: '',
         });
         toast.success('Order added');
       } else if (orderKind === 'medication') {
@@ -728,17 +654,14 @@ export function WardDoctorOrdersSection({
           const cfg = medConfigs.get(key);
           if (!cfg) return { ok: false, label: key, err: 'Missing configuration' };
           try {
-            await apiFetch('/nursing/orders/', {
-              method: 'POST',
-              body: JSON.stringify({
-                ...basePayload,
-                order_type: 'injection',
-                description: buildMedDescription(cfg),
-                frequency: cfg.frequency.trim(),
-                duration: cfg.durationDays.trim()
-                  ? `${cfg.durationDays.trim()} day(s)`
-                  : '',
-              }),
+            await nursingService.createNursingOrder({
+              ...basePayload,
+              order_type: 'injection',
+              description: buildMedDescription(cfg),
+              frequency: cfg.frequency.trim(),
+              duration: cfg.durationDays.trim()
+                ? `${cfg.durationDays.trim()} day(s)`
+                : '',
             });
             return { ok: true, label: formatGenericLabel(cfg.generic) };
           } catch (err: any) {
@@ -780,12 +703,9 @@ export function WardDoctorOrdersSection({
   const markInstructionDone = async (order: WardNursingOrderRow) => {
     if (!isInstructionType(order.order_type)) return;
     try {
-      await apiFetch(`/nursing/orders/${order.id}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-        }),
+      await nursingService.updateNursingOrder(order.id, {
+        status: 'completed',
+        completed_at: new Date().toISOString(),
       });
       toast.success('Marked complete');
       void loadOrders();
@@ -808,12 +728,9 @@ export function WardDoctorOrdersSection({
     }
     setEditSaving(true);
     try {
-      await apiFetch(`/nursing/orders/${editingOrder.id}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          description: editDescription.trim(),
-          priority: priorityApi(editPriority),
-        }),
+      await nursingService.updateNursingOrder(editingOrder.id, {
+        description: editDescription.trim(),
+        priority: priorityApi(editPriority),
       });
       toast.success('Order updated');
       setEditingOrder(null);
@@ -829,10 +746,7 @@ export function WardDoctorOrdersSection({
     if (!cancelTarget) return;
     setCancelSubmitting(true);
     try {
-      await apiFetch(`/nursing/orders/${cancelTarget.id}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'cancelled' }),
-      });
+      await nursingService.updateNursingOrder(cancelTarget.id, { status: 'cancelled' });
       toast.success('Order cancelled');
       setCancelTarget(null);
       await loadOrders();
@@ -1209,7 +1123,11 @@ export function WardDoctorOrdersSection({
           }
         }}
       >
-        <DialogContent className={`${modalNoOverflow('md')} max-h-[92vh] flex flex-col gap-0 p-0`}>
+        <DialogContent
+          className={`${modalNoOverflow('ml')} max-h-[92vh] flex flex-col gap-0 p-0${
+            isMedicationWorkflow && addStep === 1 ? ' min-h-[min(540px,92vh)]' : ''
+          }`}
+        >
           <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0 space-y-1">
             <DialogTitle className="flex items-center gap-2 text-lg">
               <Plus className="h-5 w-5 text-blue-500 shrink-0" />
@@ -1261,8 +1179,6 @@ export function WardDoctorOrdersSection({
                     if (next !== 'medication' && next !== 'injection') {
                       setSelectedMedKeys([]);
                       setMedConfigs(new Map());
-                      setMedSearch('');
-                      setShowMedDropdown(false);
                     }
                     if (next !== 'dressing') {
                       setWoundType('');
@@ -1341,119 +1257,23 @@ export function WardDoctorOrdersSection({
                   )}
                 </div>
                 {addStep === 1 && (
-                <div className="space-y-2">
-                  <Label>
-                    Search and Select {orderKind === 'injection' ? 'Injectables' : 'Medications'} *
-                  </Label>
-                  <div className="relative" ref={medSearchBoxRef}>
-                    <Input
-                      value={medSearch}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setMedSearch(v);
-                        setShowMedDropdown(!!v.trim());
-                      }}
-                      onFocus={() => {
-                        if (medSearch.trim()) setShowMedDropdown(true);
-                      }}
-                      placeholder={
-                        orderKind === 'injection'
-                          ? 'Type to search injectable generics — e.g. Ceftriaxone'
-                          : 'Type to search pharmacy generics — e.g. Paracetamol'
-                      }
-                      autoComplete="off"
-                    />
-                    {showMedDropdown && medSearch.trim() && (
-                      <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md max-h-[280px] overflow-y-auto">
-                        {medSearchLoading ? (
-                          <div className="p-3 text-center text-sm text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" />
-                            Searching generics…
-                          </div>
-                        ) : medGenerics.length === 0 ? (
-                          <div className="p-3 text-sm text-muted-foreground">
-                            No generics found for &ldquo;{medSearch.trim()}&rdquo;.
-                          </div>
-                        ) : (
-                          medGenerics.map((g) => {
-                            const key = genericKey(g);
-                            const isSelected = selectedMedKeys.includes(key);
-                            const subline = [g.active_ingredient, g.category, g.route]
-                              .map((v) => (v || '').trim())
-                              .filter(Boolean)
-                              .join(' · ');
-                            return (
-                              <div
-                                key={String(g.id)}
-                                onClick={() => toggleGeneric(g)}
-                                className={`px-3 py-2 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-2 text-sm ${
-                                  isSelected ? 'bg-emerald-500/10' : ''
-                                }`}
-                              >
-                                <span
-                                  className={`mt-0.5 h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
-                                    isSelected
-                                      ? 'bg-emerald-600 border-emerald-600 text-white'
-                                      : 'border-muted-foreground/40'
-                                  }`}
-                                >
-                                  {isSelected && <Check className="h-3 w-3" />}
-                                </span>
-                                <span className="min-w-0 flex-1">
-                                  <div className="font-medium">{formatGenericLabel(g)}</div>
-                                  {subline && (
-                                    <div className="text-xs text-muted-foreground mt-0.5">{subline}</div>
-                                  )}
-                                </span>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                )}
-
-                {selectedMedKeys.length > 0 && (
-                  <div className="rounded-md border bg-emerald-500/5 dark:bg-emerald-500/10 p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                        Selected {orderKind === 'injection' ? 'injectables' : 'medications'} ({selectedMedKeys.length}):
-                      </p>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs text-emerald-700 dark:text-emerald-300 hover:text-emerald-900"
-                        onClick={clearAllMeds}
-                      >
-                        Clear All
-                      </Button>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedMedKeys.map((k) => {
-                        const cfg = medConfigs.get(k);
-                        if (!cfg) return null;
-                        return (
-                          <span
-                            key={k}
-                            className="inline-flex items-center gap-1 rounded-full bg-background border px-2 py-0.5 text-xs"
-                          >
-                            {formatGenericLabel(cfg.generic)}
-                            <button
-                              type="button"
-                              onClick={() => removeSelectedMed(k)}
-                              className="text-muted-foreground hover:text-destructive"
-                              aria-label="Remove"
-                            >
-                              ×
-                            </button>
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <MedicationGenericPicker
+                    active={addOpen}
+                    label={`Search and Select ${orderKind === 'injection' ? 'Injectables' : 'Medications'} *`}
+                    placeholder={
+                      orderKind === 'injection'
+                        ? 'Type to search injectable generics — e.g. Ceftriaxone'
+                        : 'Type to search pharmacy generics — e.g. Paracetamol'
+                    }
+                    selectedKeys={selectedMedKeys}
+                    selectedGenerics={selectedGenerics}
+                    onToggle={toggleGeneric}
+                    onClearAll={clearAllMeds}
+                    selectionStyle="check"
+                    selectedLabel={
+                      orderKind === 'injection' ? 'Selected injectables' : 'Selected medications'
+                    }
+                  />
                 )}
 
                 {selectedMedKeys.length > 0 && addStep === 2 && (
@@ -1469,129 +1289,31 @@ export function WardDoctorOrdersSection({
                     <p className="text-xs text-muted-foreground -mt-2">
                       Set dose, frequency, duration, route, and instructions for each selected {orderKind === 'injection' ? 'injectable' : 'medication'}.
                     </p>
-                    {selectedMedKeys.map((k, idx) => {
-                      const cfg = medConfigs.get(k);
-                      if (!cfg) return null;
-                      return (
-                        <div
-                          key={k}
-                          className="rounded-md border bg-background p-3 space-y-3"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium truncate">
-                                <span className="text-muted-foreground mr-1">{idx + 1}.</span>
-                                {formatGenericLabel(cfg.generic)}
-                              </p>
-                              {cfg.generic.active_ingredient && (
-                                <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                  {cfg.generic.active_ingredient}
-                                </p>
-                              )}
-                            </div>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs text-muted-foreground hover:text-destructive shrink-0"
-                              onClick={() => removeSelectedMed(k)}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                            <div className="space-y-1.5 sm:col-span-4">
-                              <Label className="text-xs">Dose per administration</Label>
-                              <Input
-                                type="text"
-                                inputMode="decimal"
-                                value={cfg.dosage}
-                                onChange={(e) => updateMedConfig(k, { dosage: e.target.value })}
-                                placeholder="e.g., 1, 5"
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1.5 sm:col-span-3">
-                              <Label className="text-xs">Dose unit *</Label>
-                              <Select
-                                value={normalizePrescriptionDoseUnit(
-                                  cfg.unit,
-                                  cfg.generic.dosage_form || cfg.generic.form,
-                                )}
-                                onValueChange={(v) => updateMedConfig(k, { unit: v })}
-                              >
-                                <SelectTrigger className="h-9">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PRESCRIPTION_DOSE_UNITS.map((u) => (
-                                    <SelectItem key={u} value={u}>
-                                      {u}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1.5 sm:col-span-5">
-                              <Label className="text-xs">Frequency *</Label>
-                              <Select
-                                value={cfg.frequency}
-                                onValueChange={(v) => updateMedConfig(k, { frequency: v })}
-                              >
-                                <SelectTrigger className="h-9">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {FREQUENCY_OPTIONS.map((f) => (
-                                    <SelectItem key={f} value={f}>
-                                      {f}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">Duration (days)</Label>
-                              <Input
-                                inputMode="numeric"
-                                value={cfg.durationDays}
-                                onChange={(e) => updateMedConfig(k, { durationDays: e.target.value.replace(/[^0-9]/g, '') })}
-                                placeholder="e.g., 7"
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">Route</Label>
-                              <Select
-                                value={cfg.route}
-                                onValueChange={(v) => updateMedConfig(k, { route: v })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Oral">Oral</SelectItem>
-                                  <SelectItem value="Intramuscular (IM)">Intramuscular (IM)</SelectItem>
-                                  <SelectItem value="Intravenous (IV)">Intravenous (IV)</SelectItem>
-                                  <SelectItem value="Subcutaneous (SC)">Subcutaneous (SC)</SelectItem>
-                                  <SelectItem value="Topical">Topical</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label className="text-xs">Instructions</Label>
-                            <Textarea
-                              rows={2}
-                              value={cfg.instructions}
-                              onChange={(e) => updateMedConfig(k, { instructions: e.target.value })}
-                              placeholder="e.g., Take with food; rotate injection sites; monitor glucose"
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
+                    <MedicationSelectionConfigList
+                      selectedIds={selectedMedKeys}
+                      getMedication={(id) => selectedGenerics.get(id)}
+                      configs={selectedMedicationConfigs}
+                      onUpdateConfig={(id, patch) => {
+                        const cfg = medConfigs.get(id);
+                        if (!cfg) return;
+                        updateMedConfig(id, {
+                          dosage: patch.dose ?? cfg.dosage,
+                          unit: patch.doseUnit ?? cfg.unit,
+                          frequency: patch.frequency ?? cfg.frequency,
+                          durationDays:
+                            patch.durationDays === undefined
+                              ? cfg.durationDays
+                              : patch.durationDays === ''
+                                ? ''
+                                : String(patch.durationDays),
+                          route: patch.route ?? cfg.route,
+                          instructions: patch.instructions ?? cfg.instructions,
+                        });
+                      }}
+                      onRemove={removeSelectedMed}
+                      doseUnitOptions={PRESCRIPTION_DOSE_UNITS}
+                      routeOptions={WARD_MEDICATION_ROUTES}
+                    />
                   </div>
                 )}
               </>

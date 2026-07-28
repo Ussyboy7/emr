@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api-client";
 import {
   consultationService,
   eyeCareService,
   labService,
+  nursingService,
   pharmacyService,
   physioService,
   radiologyService,
@@ -17,7 +17,12 @@ import {
   type ICD10Code,
   type LabTemplate as ServiceLabTemplate,
   type Prescription,
+  type PhysioOrder,
+  type PhysioTemplate,
+  type EyeOrder,
+  type RadiologyTemplate,
 } from "@/lib/services";
+import type { Ward } from "@/lib/services/ward-service";
 import type { ConsultationRoomPatient } from "@/lib/consultation/room-types";
 import {
   type PrescriptionOrderItemInput,
@@ -45,7 +50,7 @@ import {
   buildEyeCreateOrderPayloads,
 } from "@/lib/consultation/orders-utils";
 import {
-  INJECTION_ROUTES,
+  DEFAULT_INJECTION_ROUTE,
   REFERRAL_REASONS,
   REFERRAL_SPECIALTIES,
 } from "@/lib/constants/medical-data";
@@ -64,7 +69,6 @@ import {
   normalizeClinicName,
 } from "@/lib/utils/clinic-utils";
 
-const injectionRoutes = INJECTION_ROUTES;
 const referralSpecialties = REFERRAL_SPECIALTIES;
 const referralReasons = REFERRAL_REASONS;
 
@@ -177,13 +181,13 @@ export function useConsultationRoomOrders({
     presentingComplaint?: string;
   }[]>([]);
 
-  const [wards, setWards] = useState<any[]>([]);
+  const [wards, setWards] = useState<Ward[]>([]);
   const [showAddNursingOrder, setShowAddNursingOrder] = useState(false);
   const [newNursingOrder, setNewNursingOrder] = useState({
     type: "" as string,
     medication: "",
     dosage: "",
-    route: "Intramuscular (IM)",
+    route: DEFAULT_INJECTION_ROUTE as string,
     woundLocation: "",
     woundType: "",
     instructions: "",
@@ -196,7 +200,16 @@ export function useConsultationRoomOrders({
     (order) => order.status === 'Draft' && order.type === 'Observation Admission'
   ).length;
   const [injectionMedicationSearch, setInjectionMedicationSearch] = useState("");
-  const [injectionMedicationResults, setInjectionMedicationResults] = useState<Array<{ id: number | string; name?: string; active_ingredient?: string; category?: string; dosage_form?: string; strength?: string }>>([]);
+  const [injectionMedicationResults, setInjectionMedicationResults] = useState<
+    Array<{
+      id: number | string;
+      name?: string;
+      active_ingredient?: string;
+      category?: string;
+      dosage_form?: string;
+      strength?: string;
+    }>
+  >([]);
   const [loadingInjectionMedications, setLoadingInjectionMedications] = useState(false);
   const [showInjectionMedicationDropdown, setShowInjectionMedicationDropdown] = useState(false);
   const [injectionSelectedIds, setInjectionSelectedIds] = useState<Set<string>>(new Set());
@@ -226,9 +239,12 @@ export function useConsultationRoomOrders({
     const timeout = setTimeout(async () => {
       try {
         setLoadingInjectionMedications(true);
-        const res = await pharmacyService.getGenericsForPrescription({ search: searchTerm, page_size: 50 });
+        const res = await pharmacyService.getGenericsForPrescription({
+          search: searchTerm,
+          page_size: 50,
+        });
         if (requestId === injectionMedicationSearchRef.current) {
-          setInjectionMedicationResults((res as any)?.results || []);
+          setInjectionMedicationResults(res.results || []);
         }
       } catch (err: any) {
         if (requestId === injectionMedicationSearchRef.current) {
@@ -292,14 +308,17 @@ export function useConsultationRoomOrders({
     provisionalDiagnosis: "",
     lmp: ""
   });
-  const [radiologyTemplates, setRadiologyTemplates] = useState<any[]>([]);
+  const [radiologyTemplates, setRadiologyTemplates] = useState<RadiologyTemplate[]>([]);
   const [loadingRadiologyTemplates, setLoadingRadiologyTemplates] = useState(false);
   const [radiologyTemplatesError, setRadiologyTemplatesError] = useState<string | null>(null);
   const [radiologyTemplateSearch, setRadiologyTemplateSearch] = useState("");
   const [showRadiologyTemplateDropdown, setShowRadiologyTemplateDropdown] = useState(false);
-  const [selectedRadiologyTemplateDetails, setSelectedRadiologyTemplateDetails] = useState<Map<number, any>>(new Map());
+  const [selectedRadiologyTemplateDetails, setSelectedRadiologyTemplateDetails] = useState<
+    Map<number, RadiologyTemplate>
+  >(new Map());
   const radiologyTemplateSearchRef = useRef(0);
-  const [otherRadiologyPinnedTemplate, setOtherRadiologyPinnedTemplate] = useState<any | null>(null);
+  const [otherRadiologyPinnedTemplate, setOtherRadiologyPinnedTemplate] =
+    useState<RadiologyTemplate | null>(null);
 
   // Physiotherapy state
   const [physioOrders, setPhysioOrders] = useState<{
@@ -312,7 +331,7 @@ export function useConsultationRoomOrders({
     priority: 'low' | 'normal' | 'high' | 'urgent';
     status: 'Draft' | 'Sent to Physiotherapy' | 'Scheduled' | 'In Progress' | 'Completed';
   }[]>([]);
-  const [physioOrdersFromApi, setPhysioOrdersFromApi] = useState<any[]>([]);
+  const [physioOrdersFromApi, setPhysioOrdersFromApi] = useState<PhysioOrder[]>([]);
   const [showAddPhysio, setShowAddPhysio] = useState(false);
   const [editingPhysioIndex, setEditingPhysioIndex] = useState<number | null>(null);
   const [newPhysio, setNewPhysio] = useState({
@@ -322,7 +341,7 @@ export function useConsultationRoomOrders({
     specialInstructions: "",
     priority: "normal" as 'low' | 'normal' | 'high' | 'urgent'
   });
-  const [physioTemplates, setPhysioTemplates] = useState<any[]>([]);
+  const [physioTemplates, setPhysioTemplates] = useState<PhysioTemplate[]>([]);
   const [loadingPhysioTemplates, setLoadingPhysioTemplates] = useState(false);
 
   // Eye Care state
@@ -339,7 +358,7 @@ export function useConsultationRoomOrders({
     priority: 'low' | 'normal' | 'high' | 'urgent';
     status: 'Draft' | 'Sent to Eye Care' | 'Scheduled' | 'In Progress' | 'Completed';
   }[]>([]);
-  const [eyeOrdersFromApi, setEyeOrdersFromApi] = useState<any[]>([]);
+  const [eyeOrdersFromApi, setEyeOrdersFromApi] = useState<EyeOrder[]>([]);
   const [showAddEye, setShowAddEye] = useState(false);
   const [editingEyeIndex, setEditingEyeIndex] = useState<number | null>(null);
   const [newEye, setNewEye] = useState({
@@ -863,7 +882,7 @@ export function useConsultationRoomOrders({
     });
   };
 
-  const toggleRadiologyTemplateSelection = (template: { id: number }) => {
+  const toggleRadiologyTemplateSelection = (template: RadiologyTemplate) => {
     const templateId = template.id;
     setSelectedRadiologyTemplates((prev) => {
       const next = new Set(prev);
@@ -897,7 +916,7 @@ export function useConsultationRoomOrders({
   }, [selectedLabTemplateDetails, labTemplates, otherLabPinnedTemplate]);
 
   const radiologyTemplatesCatalog = useMemo(() => {
-    const byId = new Map<number, any>();
+    const byId = new Map<number, RadiologyTemplate>();
     for (const template of selectedRadiologyTemplateDetails.values()) {
       byId.set(template.id, template);
     }
@@ -1055,7 +1074,7 @@ export function useConsultationRoomOrders({
     let list = [...radiologyTemplates];
     if (
       otherRadiologyPinnedTemplate &&
-      !list.some((t: any) => t.id === otherRadiologyPinnedTemplate.id)
+      !list.some((t) => t.id === otherRadiologyPinnedTemplate.id)
     ) {
       list = [otherRadiologyPinnedTemplate, ...list];
     }
@@ -1149,7 +1168,7 @@ export function useConsultationRoomOrders({
       presentingComplaint: newNursingOrder.presentingComplaint || undefined
     }]);
     
-    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", instructions: "", priority: "Routine", ward: "", admissionDiagnoses: [], presentingComplaint: "" });
+    setNewNursingOrder({ type: "", medication: "", dosage: "", route: DEFAULT_INJECTION_ROUTE, woundLocation: "", woundType: "", instructions: "", priority: "Routine", ward: "", admissionDiagnoses: [], presentingComplaint: "" });
     setInjectionSelectedIds(new Set());
     setInjectionConfigs(new Map());
     setInjectionMedicationSearch("");
@@ -1249,19 +1268,16 @@ export function useConsultationRoomOrders({
           description = `IV Infusion: ${order.medication}${order.dosage ? ` — ${order.dosage}` : ''}. ${order.instructions}`;
         }
 
-        return apiFetch('/nursing/orders/', {
-          method: 'POST',
-          body: JSON.stringify({
-            patient: numericPatientId,
-            visit: numericVisitId,
-            consultation_session: sessionId,
-            order_type: order.type,
-            description,
-            frequency: order.type === 'Injection' ? 'As ordered' : '',
-            duration: '',
-            status: 'pending',
-            priority: priorityMap[order.priority] || 'medium',
-          }),
+        return nursingService.createNursingOrder({
+          patient: numericPatientId,
+          visit: numericVisitId,
+          consultation_session: sessionId,
+          order_type: order.type,
+          description,
+          frequency: order.type === 'Injection' ? 'As ordered' : '',
+          duration: '',
+          status: 'pending',
+          priority: priorityMap[order.priority] || 'medium',
         });
       };
 
@@ -1313,7 +1329,7 @@ export function useConsultationRoomOrders({
       type: "",
       medication: "",
       dosage: "",
-      route: "Intramuscular (IM)",
+      route: DEFAULT_INJECTION_ROUTE,
       woundLocation: "",
       woundType: "",
       instructions: "",
@@ -1328,7 +1344,7 @@ export function useConsultationRoomOrders({
       type: orderToEdit.type,
       medication: orderToEdit.medication || "",
       dosage: orderToEdit.dosage || "",
-      route: orderToEdit.route || "Intramuscular (IM)",
+      route: orderToEdit.route || DEFAULT_INJECTION_ROUTE,
       woundLocation: orderToEdit.woundLocation || "",
       woundType: orderToEdit.woundType || "",
       instructions: orderToEdit.instructions,
@@ -1828,7 +1844,6 @@ export function useConsultationRoomOrders({
       injectionMedicationDropdownRef,
       injectionMedicationResults,
       injectionMedicationSearch,
-      injectionRoutes,
       injectionSelectedIds,
       isSearchingICD10,
       labTemplateDropdownContainerRef,

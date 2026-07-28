@@ -1,47 +1,32 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertTriangle, Loader2, Pill, Plus, X } from "lucide-react";
 import { toast } from "sonner";
-import { pharmacyService } from "@/lib/services";
 import {
   normalizePrescriptionDoseUnit,
   PRESCRIPTION_DOSE_UNITS,
 } from "@/lib/pharmacy/infer-dose-unit";
 import { MODAL_SIZES } from "@/components/ui/modal-sizes";
+import { MedicationGenericPicker } from "@/components/pharmacy/MedicationGenericPicker";
+import {
+  type GenericMedicationLike,
+  formatGenericMedicationLabel,
+  genericMedicationKey,
+  frequencyToDailyDoses,
+  parseDurationDaysFromString,
+  parseDoseNumberFromString,
+  normalizeGenericMedicationId,
+} from "@/lib/pharmacy/generic-medication";
 
-/** Match consultation room: "Name (strength, form)" */
-function formatMedicationVariantLabel(med: { name?: string; strength?: string; form?: string; dosage_form?: string }): string {
-  const name = med?.name || "";
-  const strength = (med?.strength || "").toString().trim();
-  const form = (med?.dosage_form || med?.form || "").toString().trim();
-  if (strength && form) return `${name} (${strength}, ${form})`;
-  if (strength) return `${name} (${strength})`;
-  if (form) return `${name} (${form})`;
-  return name;
-}
-
-const frequencyToDailyDoses: Record<string, number> = {
-  "Once daily (OD)": 1,
-  "Twice daily (BD)": 2,
-  "Three times daily (TDS)": 3,
-  "Four times daily (QDS)": 4,
-  "Every 6 hours (Q6H)": 4,
-  "Every 8 hours (Q8H)": 3,
-  "Every 12 hours (Q12H)": 2,
-  "At bedtime (Nocte)": 1,
-  "As needed (PRN)": 2,
-  Weekly: 1 / 7,
-  "STAT (Single dose)": 0,
-};
+const formatMedicationVariantLabel = formatGenericMedicationLabel;
 
 export type PrescriptionOrderItemInput = {
   // The pharmacy catalogue generic (required). The consultation modal
@@ -70,24 +55,6 @@ export type PrescriptionOrderSubmitInput = {
   items: PrescriptionOrderItemInput[];
 };
 
-/**
- * Shape of a row returned by `/v1/pharmacy/generics/for_prescription/`.
- * The consultation prescription flow searches the pharmacy *generics*
- * catalogue (canonical molecule + strength + form + route), not brand
- * inventory — the pharmacist picks the brand at dispense time.
- */
-type GenericLike = {
-  id: number | string;
-  name?: string;
-  active_ingredient?: string;
-  category?: string;
-  form?: string;
-  dosage_form?: string;
-  strength?: string;
-  unit?: string;
-  route?: string;
-};
-
 type MedicationConfig = {
   dosage: string;
   frequency: string;
@@ -101,20 +68,6 @@ type MedicationConfig = {
   name?: string;
   generic_name?: string;
 };
-
-function parseDurationDaysFromString(duration?: string): number | "" {
-  if (!duration) return "";
-  const m = String(duration).match(/(\d+)\s*day/i);
-  if (m) return parseInt(m[1], 10);
-  return "";
-}
-
-function parseDosageNumberFromString(dose?: string): string {
-  if (!dose) return "1";
-  const trimmed = String(dose).trim();
-  const m = trimmed.match(/^([\d.]+)/);
-  return m ? m[1] : trimmed;
-}
 
 export function PrescriptionOrderModal({
   open,
@@ -139,27 +92,23 @@ export function PrescriptionOrderModal({
   dialogTitle?: string;
   dialogDescription?: string;
 }) {
-  const [generics, setGenerics] = useState<GenericLike[]>([]);
-  const [loadingMedications, setLoadingMedications] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const [medicationSearch, setMedicationSearch] = useState("");
-  const [showMedicationDropdown, setShowMedicationDropdown] = useState(false);
   const [selectedMedications, setSelectedMedications] = useState<number[]>([]);
   const [medicationConfigs, setMedicationConfigs] = useState<Map<number, MedicationConfig>>(new Map());
+  const [selectedGenerics, setSelectedGenerics] = useState<Map<string, GenericMedicationLike>>(new Map());
 
   const [priority, setPriority] = useState<"Routine" | "Urgent" | "STAT">("Routine");
   const [clinicalIndication, setClinicalIndication] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const searchRequestIdRef = useRef(0);
-  const medicationDropdownRef = useRef<HTMLDivElement>(null);
+  const selectedMedKeys = useMemo(
+    () => selectedMedications.map((id) => `g:${id}`),
+    [selectedMedications],
+  );
 
   const reset = useCallback(() => {
-    setMedicationSearch("");
-    setShowMedicationDropdown(false);
     setSelectedMedications([]);
     setMedicationConfigs(new Map());
-    setGenerics([]);
+    setSelectedGenerics(new Map());
     setPriority("Routine");
     setClinicalIndication("");
     setSubmitting(false);
@@ -175,7 +124,7 @@ export function PrescriptionOrderModal({
       ids.push(medId);
       const durationDays = parseDurationDaysFromString(item.duration);
       configs.set(medId, {
-        dosage: parseDosageNumberFromString(item.dosage),
+        dosage: parseDoseNumberFromString(item.dosage),
         frequency: item.frequency || "Once daily (OD)",
         durationDays,
         route: item.route || "Oral",
@@ -187,63 +136,11 @@ export function PrescriptionOrderModal({
         name: item.medication_name,
       });
     }
-    setMedicationSearch("");
-    setShowMedicationDropdown(false);
     setSelectedMedications(ids);
     setMedicationConfigs(configs);
-    setGenerics([]);
+    setSelectedGenerics(new Map());
     setSubmitting(false);
   }, []);
-
-  // Debounced search (same as consultation room): search as you type, 300ms
-  useEffect(() => {
-    if (!open || !showMedicationDropdown) return;
-    const searchTerm = medicationSearch.trim();
-    if (!searchTerm) {
-      setGenerics([]);
-      return;
-    }
-    const requestId = ++searchRequestIdRef.current;
-    const timeout = setTimeout(async () => {
-      try {
-        setLoadingMedications(true);
-        // Prescribe by generic molecule (not brand). The pharmacist picks the
-        // actual brand from dispensary inventory when filling the order.
-        const res = await pharmacyService.getGenericsForPrescription({ search: searchTerm, page_size: 50 });
-        if (requestId === searchRequestIdRef.current) {
-          const results = (res as any)?.results || [];
-          setGenerics(results);
-          if (results.length === 0) {
-            console.warn(`No generics found for search term: "${searchTerm}"`);
-          }
-        }
-      } catch (err: any) {
-        if (requestId === searchRequestIdRef.current) {
-          console.error("Failed to search generics:", err);
-          const errorMsg = err?.message || err?.detail || "Failed to load medication search results. Check that generics are configured in Pharmacy → Generics.";
-          toast.error(errorMsg);
-          setGenerics([]);
-        }
-      } finally {
-        if (requestId === searchRequestIdRef.current) {
-          setLoadingMedications(false);
-        }
-      }
-    }, 300);
-    return () => clearTimeout(timeout);
-  }, [open, showMedicationDropdown, medicationSearch]);
-
-  // Close dropdown when clicking outside the search block
-  useEffect(() => {
-    if (!open || !showMedicationDropdown) return;
-    const handlePointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      const el = medicationDropdownRef.current;
-      if (el && !el.contains(target)) setShowMedicationDropdown(false);
-    };
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [open, showMedicationDropdown]);
 
   // Reset or prefill when opening
   useEffect(() => {
@@ -257,53 +154,53 @@ export function PrescriptionOrderModal({
     }
   }, [open, initialItems, initialPriority, initialClinicalIndication, reset, applyInitialItems]);
 
-  const normalizeMedicationId = (id: number | string | undefined): number | null => {
-    if (id == null) return null;
-    const n = typeof id === "number" ? id : parseInt(id, 10);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
+  const normalizeMedicationId = normalizeGenericMedicationId;
 
-  const toggleMedicationSelection = useCallback((med: GenericLike) => {
+  const toggleMedicationSelection = useCallback((med: GenericMedicationLike, selected: boolean) => {
     const medId = normalizeMedicationId(med.id);
     if (!medId) return;
+    const key = genericMedicationKey(med);
 
-    setSelectedMedications((prev) => {
-      const isSelected = prev.includes(medId);
-      if (isSelected) {
-        const next = prev.filter(id => id !== medId);
-        setMedicationConfigs((prevConfigs) => {
-          const nextConfigs = new Map(prevConfigs);
-          nextConfigs.delete(medId);
-          return nextConfigs;
-        });
+    if (!selected) {
+      setSelectedMedications((prev) => prev.filter((id) => id !== medId));
+      setMedicationConfigs((prev) => {
+        const next = new Map(prev);
+        next.delete(medId);
         return next;
-      } else {
-        const next = [medId, ...prev];
+      });
+      setSelectedGenerics((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+      return;
+    }
 
-        setMedicationConfigs((prevConfigs) => {
-          const nextConfigs = new Map(prevConfigs);
-          if (!nextConfigs.has(medId)) {
-            // GenericMedication fields are single-valued (one strength, one form,
-            // one route per row) — no comma-splitting needed.
-            const form = (med.dosage_form || med.form || "").trim();
-            const defaultRouteFromForm = form.toLowerCase().includes("injection") || form.toLowerCase().includes("vial") ? "IV" : "Oral";
-            nextConfigs.set(medId, {
-              dosage: "",
-              frequency: "Once daily (OD)",
-              durationDays: "",
-              route: med.route || defaultRouteFromForm,
-              unit: normalizePrescriptionDoseUnit(med.unit, form),
-              strength: (med.strength || "").trim(),
-              form,
-              instructions: "",
-              name: med.name,
-              generic_name: med.active_ingredient,
-            });
-          }
-          return nextConfigs;
-        });
-        return next;
-      }
+    setSelectedMedications((prev) => (prev.includes(medId) ? prev : [medId, ...prev]));
+    setSelectedGenerics((prev) => {
+      const next = new Map(prev);
+      next.set(key, med);
+      return next;
+    });
+    setMedicationConfigs((prev) => {
+      if (prev.has(medId)) return prev;
+      const next = new Map(prev);
+      const form = (med.dosage_form || med.form || "").trim();
+      const defaultRouteFromForm =
+        form.toLowerCase().includes("injection") || form.toLowerCase().includes("vial") ? "IV" : "Oral";
+      next.set(medId, {
+        dosage: "",
+        frequency: "Once daily (OD)",
+        durationDays: "",
+        route: med.route || defaultRouteFromForm,
+        unit: normalizePrescriptionDoseUnit(med.unit, form),
+        strength: (med.strength || "").trim(),
+        form,
+        instructions: "",
+        name: med.name,
+        generic_name: med.active_ingredient,
+      });
+      return next;
     });
   }, []);
 
@@ -339,8 +236,13 @@ export function PrescriptionOrderModal({
       : Math.ceil(dosageValue * dailyDoses * Math.max(days || 1, 1));
   }, []);
 
-  // Results come from API search; no client-side filter needed
-  const filteredMedications = generics;
+  const getGenericById = useCallback(
+    (medId: number): GenericMedicationLike | undefined => {
+      const key = `g:${medId}`;
+      return selectedGenerics.get(key);
+    },
+    [selectedGenerics],
+  );
 
   const buildSubmitPayload = (): PrescriptionOrderSubmitInput | null => {
     if (selectedMedications.length === 0) {
@@ -351,7 +253,7 @@ export function PrescriptionOrderModal({
     const missing: string[] = [];
 
     for (const medId of selectedMedications) {
-      const med = generics.find((m) => normalizeMedicationId(m.id) === medId);
+      const med = getGenericById(medId);
       const cfg = medicationConfigs.get(medId);
       const displayName = med?.name || cfg?.name || "Medication";
       if (!cfg) continue;
@@ -471,97 +373,18 @@ export function PrescriptionOrderModal({
         )}
 
         <div className="space-y-4 py-2">
-          {/* Medication Search */}
-          <div className="space-y-2">
-            <Label>Search and Select Medications *</Label>
-            <div className="relative" ref={medicationDropdownRef}>
-              <Input
-                placeholder="Search generics by name, active ingredient, category, strength, form, or route..."
-                value={medicationSearch}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setMedicationSearch(v);
-                  if (v.trim()) setShowMedicationDropdown(true);
-                  else setShowMedicationDropdown(false);
-                }}
-                onFocus={() => { if (medicationSearch.trim()) setShowMedicationDropdown(true); }}
-              />
-              {showMedicationDropdown && medicationSearch.trim() && (
-                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
-                  {loadingMedications ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                      Loading medications...
-                    </div>
-                  ) : filteredMedications.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground space-y-2">
-                      <div>No generics found for "{medicationSearch}"</div>
-                      <div className="text-xs text-muted-foreground/75">Try a different search term, or check that generics have been added to Pharmacy → Generics.</div>
-                    </div>
-                  ) : (
-                    filteredMedications.map((med) => {
-                      const id = normalizeMedicationId(med.id);
-                      if (!id) return null;
-                      const isSelected = selectedMedications.includes(id);
-                      return (
-                        <div
-                          key={id}
-                          onClick={() => toggleMedicationSelection(med)}
-                          className={`p-3 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-3 ${
-                            isSelected ? "bg-violet-50 dark:bg-violet-900/20" : ""
-                          }`}
-                        >
-                          <Checkbox checked={isSelected} onCheckedChange={() => toggleMedicationSelection(med)} />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm">{formatMedicationVariantLabel(med)}</div>
-                            {(() => {
-                              const subline = [med.active_ingredient, med.category]
-                                .map((v) => (v || "").trim())
-                                .filter((v) => v.length > 0)
-                                .join(" • ");
-                              return subline ? (
-                                <div className="text-xs text-muted-foreground mt-1">{subline}</div>
-                              ) : null;
-                            })()}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              )}
-            </div>
-
-            {selectedMedications.length > 0 && (
-              <div className="mt-2 space-y-2">
-                <div className="text-sm font-medium">Selected Medications ({selectedMedications.length}):</div>
-                <div className="flex flex-wrap gap-2">
-                  {selectedMedications.map((medId) => {
-                    const med = generics.find((m) => normalizeMedicationId(m.id) === medId);
-                    const cfg = medicationConfigs.get(medId);
-                    const displayName = med ? formatMedicationVariantLabel(med) : (cfg ? formatMedicationVariantLabel({ name: cfg.name, strength: cfg.strength, form: cfg.form }) : "Medication");
-                    return (
-                      <Badge key={medId} variant="secondary" className="flex items-center gap-1">
-                        {displayName}
-                        <X className="h-3 w-3 cursor-pointer" onClick={() => toggleMedicationSelection(med || { id: medId })} />
-                      </Badge>
-                    );
-                  })}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedMedications([]);
-                    setMedicationConfigs(new Map());
-                  }}
-                  className="text-xs"
-                >
-                  Clear All
-                </Button>
-              </div>
-            )}
-          </div>
+          <MedicationGenericPicker
+            active={open}
+            selectedKeys={selectedMedKeys}
+            selectedGenerics={selectedGenerics}
+            onToggle={toggleMedicationSelection}
+            onClearAll={() => {
+              setSelectedMedications([]);
+              setMedicationConfigs(new Map());
+              setSelectedGenerics(new Map());
+            }}
+            selectionStyle="checkbox"
+          />
 
           {/* Medication Configuration */}
           {selectedMedications.length > 0 && (
@@ -580,10 +403,10 @@ export function PrescriptionOrderModal({
 
               <div className="space-y-3">
                 {selectedMedications.map((medId) => {
-                  const med = generics.find((m) => normalizeMedicationId(m.id) === medId);
+                  const med = getGenericById(medId);
                   const cfg = medicationConfigs.get(medId);
                   if (!cfg) return null;
-                  const displayMed: GenericLike = med || { id: medId, name: cfg.name, active_ingredient: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
+                  const displayMed: GenericMedicationLike = med || { id: medId, name: cfg.name, active_ingredient: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
                   const activeIngredient = (med?.active_ingredient || cfg.generic_name || "").trim();
                   const renderMedForm = (med?.dosage_form || med?.form || "").trim();
                   const defaultCfg = {
@@ -611,7 +434,7 @@ export function PrescriptionOrderModal({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => toggleMedicationSelection(med || { id: medId })}
+                          onClick={() => toggleMedicationSelection(displayMed, false)}
                           className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
                         >
                           <X className="h-3 w-3" />

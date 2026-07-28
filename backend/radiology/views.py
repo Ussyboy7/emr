@@ -132,29 +132,26 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='resolve')
     def resolve_template(self, request):
         """Return a single template by exact code (no paginated list hop)."""
-        code = (request.query_params.get('code') or '').strip()
-        if not code:
-            return Response({'detail': 'code is required'}, status=status.HTTP_400_BAD_REQUEST)
-        template = self.get_queryset().filter(code__iexact=code).first()
-        if not template:
-            return Response({'detail': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(RadiologyTemplateSerializer(template).data)
+        from common.diagnostic_catalog import resolve_catalog_template_by_code
+
+        code = request.query_params.get('code') or ''
+        data, error = resolve_catalog_template_by_code(
+            self.get_queryset(),
+            code,
+            RadiologyTemplateSerializer,
+        )
+        if error is not None:
+            return error
+        return Response(data)
 
     @extend_schema(tags=["Radiology"], summary="List stats", description="Template tab counts in one request.")
     @action(detail=False, methods=['get'], url_path='list-stats')
     def list_stats(self, request):
         """Template tab counts in one request."""
-        qs = RadiologyTemplate.objects.all()
+        from common.diagnostic_catalog import build_catalog_list_stats
+
         categories = ['xray', 'ultrasound', 'mri', 'ct']
-        by_cat = {
-            row['category']: row['count']
-            for row in qs.values('category').annotate(count=Count('id'))
-        }
-        return Response({
-            'total': qs.count(),
-            'active': qs.filter(is_active=True).count(),
-            **{cat: by_cat.get(cat, 0) for cat in categories},
-        })
+        return Response(build_catalog_list_stats(RadiologyTemplate.objects.all(), categories))
 
     def perform_create(self, serializer):
         template = serializer.save()
