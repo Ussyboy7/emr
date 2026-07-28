@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,15 +8,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Calendar, TestTube, ScanLine, Pill, Heart,
   Activity, Building2, ClipboardList, ChevronLeft, ChevronRight,
-  Loader2, AlertTriangle, FileText, Share2, User, Eye, ClipboardCheck,
+  Loader2, AlertTriangle, FileText, Share2, User, Eye, ClipboardCheck, FolderOpen, Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDisplayDate } from '@/lib/dates';
 import { usePatientHistory, type PatientHistoryData } from '@/hooks/usePatientHistory';
 import { printMedicalCertificatePdf } from '@/lib/medical-records/medicalCertificatePdf';
 import { PatientHistoryReferralViewDialog } from '@/components/patient-history/PatientHistoryReferralViewDialog';
+import { AddClinicalDocumentDialog } from '@/components/medical-records/AddClinicalDocumentDialog';
+import { BulkClinicalDocumentsDialog } from '@/components/medical-records/BulkClinicalDocumentsDialog';
+import { openMediaInNewTab } from '@/lib/media-url';
 import { referralStatusLabel, getStatusBadgeClass } from '@/lib/referrals/referral-helpers';
 import type { AnnualCheckup } from '@/lib/services/annual-checkup-service';
+import type { ClinicalDocumentType } from '@/lib/services/patient-service';
 
 // --- Helpers ---
 
@@ -97,6 +101,8 @@ export interface PatientHistoryTabsProps {
   showCertificates?: boolean;
   showReferrals?: boolean;
   showBackground?: boolean;
+  showDocuments?: boolean;
+  allowDocumentActions?: boolean;
   /** Show Annual Check-up tab (typically for employees) */
   showAnnual?: boolean;
   scheduleCheckupHref?: string;
@@ -123,6 +129,8 @@ export interface PatientHistoryTabsProps {
   onViewReferral?: (referral: any) => void;
   /** Opens medical certificate issue flow (patient record context). */
   onIssueCertificate?: () => void;
+  /** Opens add clinical document dialog (patient record context). */
+  onAddDocument?: () => void;
   /** Bump to refetch history after certificate create, etc. */
   historyReloadToken?: number;
   /** Called after referral issue/submit from the view dialog. */
@@ -139,6 +147,8 @@ export function PatientHistoryTabs({
   showCertificates = false,
   showReferrals = false,
   showBackground = false,
+  showDocuments = false,
+  allowDocumentActions = true,
   showAnnual = false,
   scheduleCheckupHref,
   initialData,
@@ -158,6 +168,7 @@ export function PatientHistoryTabs({
   onViewAnnualCheckup,
   onViewReferral,
   onIssueCertificate,
+  onAddDocument,
   historyReloadToken,
   onReferralUpdated,
   backgroundExtra,
@@ -193,6 +204,14 @@ export function PatientHistoryTabs({
   const [referralViewId, setReferralViewId] = useState<number | null>(null);
   const [referralViewRefreshKey, setReferralViewRefreshKey] = useState(0);
   const [referralDialogOpen, setReferralDialogOpen] = useState(false);
+  const [addDocOpen, setAddDocOpen] = useState(false);
+  const [bulkDocOpen, setBulkDocOpen] = useState(false);
+  const [viewingDocId, setViewingDocId] = useState<number | null>(null);
+  const previousControlledTabRef = useRef<string | undefined>(undefined);
+  const [docPrefill, setDocPrefill] = useState<{
+    referralId?: number | null;
+    docType?: ClinicalDocumentType;
+  }>({});
 
   const handleSubTabChange = (value: string) => {
     if (!tabProp) setLocalTab(value);
@@ -203,7 +222,9 @@ export function PatientHistoryTabs({
   };
 
   useEffect(() => {
-    if (tabProp === 'referrals' && showReferrals) {
+    const previousTab = previousControlledTabRef.current;
+    previousControlledTabRef.current = tabProp;
+    if (tabProp === 'referrals' && showReferrals && previousTab !== 'referrals') {
       reloadHistory();
     }
   }, [tabProp, showReferrals, reloadHistory]);
@@ -231,6 +252,47 @@ export function PatientHistoryTabs({
     }
   };
 
+  const handleViewDocument = async (doc: { id?: number; file?: string }) => {
+    if (!doc.file) {
+      toast.error('No file attached');
+      return;
+    }
+    setViewingDocId(doc.id ?? null);
+    try {
+      await openMediaInNewTab(doc.file);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to open document');
+    } finally {
+      setViewingDocId(null);
+    }
+  };
+
+  const openAddDocument = () => {
+    if (onAddDocument) {
+      onAddDocument();
+      return;
+    }
+    setDocPrefill({});
+    setAddDocOpen(true);
+  };
+
+  const handleAttachReferralReturnDoc = (referral: any) => {
+    const specialty = String(referral?.specialty || '').toLowerCase();
+    const facility = String(referral?.facility || '').toLowerCase();
+    const hint = `${specialty} ${facility}`;
+    const docType: ClinicalDocumentType =
+      hint.includes('lab')
+        ? 'lab'
+        : hint.includes('radio') || hint.includes('xray') || hint.includes('scan') || hint.includes('imaging')
+          ? 'radiology'
+          : 'consultation_report';
+    setDocPrefill({
+      referralId: typeof referral?.id === 'number' ? referral.id : null,
+      docType,
+    });
+    setAddDocOpen(true);
+  };
+
   // --- Tabs definition ---
   const tabs = useMemo(() => {
     const all: { value: string; label: string; icon: typeof Calendar; count?: number }[] = [];
@@ -252,10 +314,18 @@ export function PatientHistoryTabs({
     all.push({ value: 'eye', label: 'Eye Care', icon: Eye, count: data.eyeOrders.length });
     all.push({ value: 'wards', label: compact ? 'Wards' : 'Ward Admissions', icon: Building2, count: data.wardAdmissions.length });
     if (showCertificates) all.push({ value: 'certificates', label: 'Certificates', icon: FileText, count: data.certificates.length });
+    if (showDocuments) {
+      all.push({
+        value: 'documents',
+        label: 'Documents',
+        icon: FolderOpen,
+        count: data.clinicalDocuments?.length ?? 0,
+      });
+    }
     if (showReferrals) all.push({ value: 'referrals', label: 'Referrals', icon: Share2, count: data.referrals.length });
     if (showBackground) all.push({ value: 'background', label: 'Background', icon: User });
     return all;
-  }, [showVisits, showAnnual, showCertificates, showReferrals, showBackground, data, compact]);
+  }, [showVisits, showAnnual, showCertificates, showDocuments, showReferrals, showBackground, data, compact]);
 
   if (loading && !initialData) {
     return (
@@ -798,6 +868,90 @@ export function PatientHistoryTabs({
             </TabsContent>
           )}
 
+          {/* Clinical documents (scanned / external) */}
+          {showDocuments && (
+            <TabsContent value="documents" className="mt-4">
+              {allowDocumentActions ? (
+                <div className="flex justify-end mb-3">
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => setBulkDocOpen(true)}>
+                      <FolderOpen className="h-4 w-4 mr-2" />
+                      Bulk scan
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={openAddDocument}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add document
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {(data.clinicalDocuments?.length ?? 0) === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No scanned or external documents yet
+                </p>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">Date</th>
+                        <th className="px-4 py-2 text-left font-medium">Type</th>
+                        <th className="px-4 py-2 text-left font-medium">Source</th>
+                        <th className="px-4 py-2 text-left font-medium">Title / facility</th>
+                        <th className="px-4 py-2 text-left font-medium">Uploaded by</th>
+                        <th className="px-4 py-2 text-center font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {(data.clinicalDocuments || []).map((d: any) => (
+                        <tr key={d.id} className="hover:bg-muted/30">
+                          <td className="px-4 py-3 text-muted-foreground">{formatDate(d.document_date)}</td>
+                          <td className="px-4 py-3">
+                            <Badge variant="outline" className="text-xs">
+                              {d.doc_type_display || humanizeStatus(d.doc_type)}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge className="text-xs bg-slate-500/10 text-slate-700">
+                              {d.source_display || humanizeStatus(d.source)}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="font-medium">{d.title || d.original_filename || '—'}</p>
+                            {(d.facility || d.referral_id_display) && (
+                              <p className="text-xs text-muted-foreground">
+                                {[d.facility, d.referral_id_display].filter(Boolean).join(' · ')}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {d.uploaded_by_name_snapshot || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={viewingDocId === d.id}
+                              onClick={() => { void handleViewDocument(d); }}
+                            >
+                              {viewingDocId === d.id ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <Eye className="h-4 w-4 mr-1" />
+                              )}
+                              View
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+          )}
+
           {/* Referrals */}
           {showReferrals && (
             <TabsContent value="referrals" className="mt-4">
@@ -812,6 +966,9 @@ export function PatientHistoryTabs({
                         <th className="px-4 py-2 text-left font-medium">Facility</th>
                         <th className="px-4 py-2 text-left font-medium">Specialty</th>
                         <th className="px-4 py-2 text-left font-medium">Status</th>
+                        {allowDocumentActions ? (
+                          <th className="px-4 py-2 text-center font-medium">Return doc</th>
+                        ) : null}
                         <th className="px-4 py-2 text-center font-medium">Action</th>
                       </tr>
                     </thead>
@@ -826,6 +983,13 @@ export function PatientHistoryTabs({
                               {referralStatusLabel(r.status)}
                             </Badge>
                           </td>
+                          {allowDocumentActions ? (
+                            <td className="px-4 py-3 text-center">
+                              <Button variant="ghost" size="sm" onClick={() => handleAttachReferralReturnDoc(r)}>
+                                <FolderOpen className="h-4 w-4 mr-1" /> Attach
+                              </Button>
+                            </td>
+                          ) : null}
                           <td className="px-4 py-3 text-center">
                             <Button variant="ghost" size="sm" onClick={() => handleViewReferral(r)}>
                               <Eye className="h-4 w-4 mr-1" /> View
@@ -921,6 +1085,28 @@ export function PatientHistoryTabs({
         referralId={referralViewId}
         refreshKey={referralViewRefreshKey}
         onReferralUpdated={reloadHistory}
+      />
+    ) : null}
+    {!onAddDocument && showDocuments && allowDocumentActions ? (
+      <AddClinicalDocumentDialog
+        open={addDocOpen}
+        onOpenChange={setAddDocOpen}
+        patientNumericId={patientId}
+        defaultReferralId={docPrefill.referralId}
+        defaultDocType={docPrefill.docType}
+        onUploaded={() => {
+          reloadHistory();
+        }}
+      />
+    ) : null}
+    {!onAddDocument && showDocuments && allowDocumentActions ? (
+      <BulkClinicalDocumentsDialog
+        open={bulkDocOpen}
+        onOpenChange={setBulkDocOpen}
+        patientNumericId={patientId}
+        onUploaded={() => {
+          reloadHistory();
+        }}
       />
     ) : null}
     </>

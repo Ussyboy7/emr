@@ -132,6 +132,16 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
         many=True,
     ).data
 
+    from patients.models import PatientClinicalDocument
+    from patients.serializers import PatientClinicalDocumentSerializer
+
+    clinical_documents = PatientClinicalDocumentSerializer(
+        PatientClinicalDocument.objects.filter(patient_id=pid)
+        .select_related("uploaded_by", "referral")
+        .order_by("-document_date", "-uploaded_at")[:_OVERVIEW_LIMIT],
+        many=True,
+    ).data
+
     history, _created = MedicalHistory.objects.get_or_create(patient=patient)
     medical_history = MedicalHistorySerializer(history).data
 
@@ -147,6 +157,7 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
         "ward_admissions": list_payload(ward_admissions),
         "certificates": list_payload(certificates),
         "referrals": list_payload(referrals),
+        "clinical_documents": list_payload(clinical_documents),
         "visits": visits,
         "annual_checkups": list_payload(annual_checkups),
         "medical_history": medical_history,

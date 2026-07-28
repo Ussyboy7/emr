@@ -84,6 +84,30 @@ export interface PatientRecordsNote {
   recorded_at: string;
 }
 
+export type ClinicalDocumentType = 'consultation_report' | 'lab' | 'radiology' | 'other';
+export type ClinicalDocumentSource = 'scanned_paper' | 'external_facility';
+
+export interface PatientClinicalDocument {
+  id: number;
+  patient: number;
+  doc_type: ClinicalDocumentType | string;
+  doc_type_display?: string;
+  source: ClinicalDocumentSource | string;
+  source_display?: string;
+  document_date: string;
+  title: string;
+  facility: string;
+  clinician_name: string;
+  notes: string;
+  file: string;
+  original_filename: string;
+  referral: number | null;
+  referral_id_display?: string | null;
+  uploaded_by: number | null;
+  uploaded_by_name_snapshot: string;
+  uploaded_at: string;
+}
+
 export interface Patient {
   id: number;
   patient_id: string;
@@ -459,6 +483,7 @@ class PatientService {
     ward_admissions: { results: unknown[]; count: number };
     certificates: { results: unknown[]; count: number };
     referrals: { results: unknown[]; count: number };
+    clinical_documents: { results: unknown[]; count: number };
     visits: unknown[];
     annual_checkups: { results: unknown[]; count: number };
     medical_history: unknown;
@@ -495,6 +520,82 @@ class PatientService {
     return apiFetch<PatientRecordsNote>(`/patients/${patientId}/records-notes/`, {
       method: 'POST',
       body: JSON.stringify({ note }),
+    });
+  }
+
+  async getClinicalDocuments(
+    patientId: number,
+    params?: { doc_type?: string },
+  ): Promise<PatientClinicalDocument[]> {
+    const query = params?.doc_type ? buildQueryString({ doc_type: params.doc_type }) : '';
+    return apiFetch<PatientClinicalDocument[]>(`/patients/${patientId}/clinical-documents/${query}`);
+  }
+
+  async uploadClinicalDocument(
+    patientId: number,
+    data: {
+      file: File;
+      doc_type: ClinicalDocumentType | string;
+      source: ClinicalDocumentSource | string;
+      document_date: string;
+      title?: string;
+      facility?: string;
+      clinician_name?: string;
+      notes?: string;
+      referral?: number | null;
+      close_referral?: boolean;
+      mirror_into_results?: boolean;
+    },
+  ): Promise<PatientClinicalDocument> {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('doc_type', data.doc_type);
+    formData.append('source', data.source);
+    formData.append('document_date', data.document_date);
+    if (data.title?.trim()) formData.append('title', data.title.trim());
+    if (data.facility?.trim()) formData.append('facility', data.facility.trim());
+    if (data.clinician_name?.trim()) formData.append('clinician_name', data.clinician_name.trim());
+    if (data.notes?.trim()) formData.append('notes', data.notes.trim());
+    if (data.referral != null) formData.append('referral', String(data.referral));
+    if (data.close_referral) formData.append('close_referral', 'true');
+    if (data.mirror_into_results) formData.append('mirror_into_results', 'true');
+    return apiFetch<PatientClinicalDocument>(`/patients/${patientId}/clinical-documents/`, {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async uploadClinicalDocumentsBulk(
+    patientId: number,
+    data: {
+      files: File[];
+      doc_type: ClinicalDocumentType | string;
+      source: ClinicalDocumentSource | string;
+      document_date: string;
+      title?: string;
+      facility?: string;
+      clinician_name?: string;
+      notes?: string;
+      referral?: number | null;
+      close_referral?: boolean;
+      mirror_into_results?: boolean;
+    },
+  ): Promise<PatientClinicalDocument[]> {
+    const formData = new FormData();
+    data.files.forEach((file) => formData.append('files', file));
+    formData.append('doc_type', data.doc_type);
+    formData.append('source', data.source);
+    formData.append('document_date', data.document_date);
+    if (data.title?.trim()) formData.append('title', data.title.trim());
+    if (data.facility?.trim()) formData.append('facility', data.facility.trim());
+    if (data.clinician_name?.trim()) formData.append('clinician_name', data.clinician_name.trim());
+    if (data.notes?.trim()) formData.append('notes', data.notes.trim());
+    if (data.referral != null) formData.append('referral', String(data.referral));
+    if (data.close_referral) formData.append('close_referral', 'true');
+    if (data.mirror_into_results) formData.append('mirror_into_results', 'true');
+    return apiFetch<PatientClinicalDocument[]>(`/patients/${patientId}/clinical-documents-bulk/`, {
+      method: 'POST',
+      body: formData,
     });
   }
 

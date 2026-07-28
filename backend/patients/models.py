@@ -1214,6 +1214,97 @@ class PatientRecordsNote(models.Model):
         super().save(*args, **kwargs)
 
 
+class PatientClinicalDocument(models.Model):
+    """
+    Scanned or externally returned clinical documents on the patient chart.
+
+    Examples: paper consultation reports, external lab/radiology PDFs,
+    specialist letters returned after referral.
+    """
+
+    DOC_TYPE_CHOICES = [
+        ("consultation_report", "Consultation report"),
+        ("lab", "Lab result"),
+        ("radiology", "Radiology / imaging"),
+        ("other", "Other"),
+    ]
+
+    SOURCE_CHOICES = [
+        ("scanned_paper", "Scanned paper"),
+        ("external_facility", "External facility"),
+    ]
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="clinical_documents",
+    )
+    doc_type = models.CharField(
+        max_length=32,
+        choices=DOC_TYPE_CHOICES,
+        db_index=True,
+    )
+    source = models.CharField(
+        max_length=32,
+        choices=SOURCE_CHOICES,
+        default="scanned_paper",
+        db_index=True,
+    )
+    document_date = models.DateField(
+        help_text="Encounter / result date (when the clinical event happened).",
+        db_index=True,
+    )
+    title = models.CharField(max_length=200, blank=True)
+    facility = models.CharField(max_length=200, blank=True)
+    clinician_name = models.CharField(max_length=200, blank=True)
+    notes = models.CharField(max_length=500, blank=True)
+    file = models.FileField(upload_to="patients/clinical_documents/%Y/%m/")
+    original_filename = models.CharField(max_length=255, blank=True)
+    referral = models.ForeignKey(
+        "consultation.Referral",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clinical_documents",
+    )
+    uploaded_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_clinical_documents",
+    )
+    uploaded_by_name_snapshot = models.CharField(max_length=200, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "patient_clinical_documents"
+        ordering = ["-document_date", "-uploaded_at", "-id"]
+        indexes = [
+            models.Index(fields=["patient", "-document_date"]),
+            models.Index(fields=["patient", "doc_type"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"ClinicalDocument #{self.pk} ({self.doc_type}) patient={self.patient_id}"
+
+    def save(self, *args, **kwargs):
+        self.title = (self.title or "").strip()[:200]
+        self.facility = (self.facility or "").strip()[:200]
+        self.clinician_name = (self.clinician_name or "").strip()[:200]
+        self.notes = (self.notes or "").strip()[:500]
+        if self.uploaded_by_id and not self.uploaded_by_name_snapshot:
+            try:
+                self.uploaded_by_name_snapshot = (
+                    self.uploaded_by.get_full_name()
+                    or getattr(self.uploaded_by, "username", "")
+                    or ""
+                )
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
+
+
 class PatientMerge(models.Model):
     """
     Audit row for a patient merge event.

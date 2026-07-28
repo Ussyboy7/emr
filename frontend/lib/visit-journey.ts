@@ -601,6 +601,7 @@ export async function loadVisitJourneyData(idToUse: string | number): Promise<{
         wardAdmissions: [],
         certificates: [],
         referrals: [],
+        clinicalDocuments: [],
         medicalHistory: null,
         visits: [],
         annualCheckups: [],

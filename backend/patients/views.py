@@ -34,6 +34,7 @@ from .models import (
     AnnualCheckup,
     AnnualCheckupProgrammeSettings,
     PatientRecordsNote,
+    PatientClinicalDocument,
 )
 from .serializers import (
     PatientSerializer,
@@ -48,6 +49,7 @@ from .serializers import (
     AnnualCheckupProgrammeSerializer,
     AnnualCheckupOrderInvestigationsSerializer,
     PatientRecordsNoteSerializer,
+    PatientClinicalDocumentSerializer,
 )
 from .annual_checkup_services import (
     create_annual_checkup_for_visit,
@@ -76,6 +78,142 @@ from .permissions import (
     requires_lifecycle_category_change,
 )
 from .workflow import close_visit_workflow, finalize_consultation_artifacts_for_visit
+
+
+def _boolish(value) -> bool:
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _snapshot_actor_name(user) -> str:
+    try:
+        return user.get_full_name() or getattr(user, 'username', '') or ''
+    except Exception:
+        return str(user)
+
+
+def _mirror_clinical_document_into_result_tabs(*, patient, doc, referral, actor) -> dict:
+    """
+    Create lightweight external lab / radiology records so uploaded return
+    documents also appear in the clinical Lab Results / Imaging tabs.
+    """
+    outcome = {
+        'lab_order_id': None,
+        'lab_test_id': None,
+        'lab_result_id': None,
+        'radiology_order_id': None,
+        'radiology_study_id': None,
+        'radiology_report_id': None,
+    }
+
+    visit = getattr(referral, 'visit', None)
+    session = getattr(referral, 'session', None)
+    facility_name = (doc.facility or getattr(referral, 'facility', '') or '').strip()
+    clinician_name = (
+        doc.clinician_name
+        or getattr(referral, 'referred_by_name', '')
+        or getattr(getattr(referral, 'referred_by', None), 'get_full_name', lambda: '')()
+        or ''
+    ).strip()
+    title = (doc.title or doc.original_filename or '').strip()
+
+    if doc.doc_type == 'lab':
+        from laboratory.models import LabOrder, LabTest, LabResult
+
+        order = LabOrder.objects.create(
+            patient=patient,
+            doctor=getattr(referral, 'referred_by', None),
+            visit=visit,
+            consultation_session=session,
+            source_type='external_manual',
+            external_requesting_doctor_name=clinician_name[:200],
+            manual_request_reference=getattr(referral, 'referral_id', '')[:100],
+            priority='routine',
+            clinic=(getattr(visit, 'clinic', '') or getattr(referral, 'specialty', '') or 'External Laboratory')[:100],
+            clinical_notes=(doc.notes or getattr(referral, 'reason', '') or '')[:1000],
+            created_by=actor,
+            location_clinic=getattr(patient, 'location_clinic', None),
+            processing_clinic=getattr(patient, 'location_clinic', None),
+        )
+        test = LabTest.objects.create(
+            order=order,
+            name=title[:200] or 'External lab result',
+            code='EXT-LAB',
+            sample_type='External',
+            status='verified',
+            processing_method='outsourced',
+            outsourced_lab=facility_name[:200],
+            result_file=doc.file.name,
+            notes=(doc.notes or '')[:1000],
+            processed_by=actor,
+            processed_at=timezone.now(),
+            verified_by=actor,
+            verified_at=timezone.now(),
+        )
+        result = LabResult.objects.create(
+            test=test,
+            order=order,
+            patient=patient,
+            overall_status='normal',
+            priority='medium',
+        )
+        outcome.update(
+            {
+                'lab_order_id': order.id,
+                'lab_test_id': test.id,
+                'lab_result_id': result.id,
+            }
+        )
+        return outcome
+
+    if doc.doc_type == 'radiology':
+        from radiology.models import RadiologyOrder, RadiologyStudy, RadiologyReport
+
+        order = RadiologyOrder.objects.create(
+            patient=patient,
+            doctor=getattr(referral, 'referred_by', None),
+            visit=visit,
+            consultation_session=session,
+            source_type='external_manual',
+            external_requesting_doctor_name=clinician_name[:200],
+            manual_request_reference=getattr(referral, 'referral_id', '')[:100],
+            priority='routine',
+            clinic=(getattr(visit, 'clinic', '') or getattr(referral, 'specialty', '') or 'External Radiology')[:100],
+            clinical_notes=(doc.notes or getattr(referral, 'reason', '') or '')[:1000],
+            provisional_diagnosis=(getattr(referral, 'clinical_summary', '') or '')[:1000],
+            created_by=actor,
+            location_clinic=getattr(patient, 'location_clinic', None),
+            processing_clinic=getattr(patient, 'location_clinic', None),
+            status='verified',
+        )
+        study = RadiologyStudy.objects.create(
+            order=order,
+            procedure=title[:200] or 'External imaging report',
+            modality='External',
+            status='verified',
+            processing_method='outsourced',
+            outsourced_facility=facility_name[:200],
+            report=doc.notes or f'External imaging report from {facility_name or "partner facility"}',
+            report_file=doc.file.name,
+            reported_by=actor,
+            reported_at=timezone.now(),
+            verified_by=actor,
+            verified_at=timezone.now(),
+        )
+        report = RadiologyReport.objects.create(
+            study=study,
+            order=order,
+            patient=patient,
+            overall_status='normal',
+            priority='medium',
+        )
+        outcome.update(
+            {
+                'radiology_order_id': order.id,
+                'radiology_study_id': study.id,
+                'radiology_report_id': report.id,
+            }
+        )
+    return outcome
 
 
 class PatientPagination(PageNumberPagination):
@@ -957,6 +1095,217 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             request=request,
         )
         return Response(PatientRecordsNoteSerializer(note).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        tags=["Patients"],
+        summary="Clinical documents",
+        description="List or upload scanned/external clinical documents for a patient.",
+    )
+    @action(
+        detail=True,
+        methods=['get', 'post'],
+        url_path='clinical-documents',
+        parser_classes=[MultiPartParser, FormParser, JSONParser],
+    )
+    def clinical_documents(self, request, pk=None):
+        patient = self.get_object()
+        if request.method == 'GET':
+            docs = (
+                patient.clinical_documents.select_related('uploaded_by', 'referral')
+                .all()
+            )
+            doc_type = (request.query_params.get('doc_type') or '').strip()
+            if doc_type:
+                docs = docs.filter(doc_type=doc_type)
+            return Response(PatientClinicalDocumentSerializer(docs, many=True, context={'request': request}).data)
+
+        serializer = PatientClinicalDocumentSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+
+        referral = None
+        referral_raw = request.data.get('referral')
+        if referral_raw not in (None, '', 'null'):
+            try:
+                referral_pk = int(referral_raw)
+            except (TypeError, ValueError):
+                return Response({'detail': 'Invalid referral id.'}, status=status.HTTP_400_BAD_REQUEST)
+            from consultation.models import Referral
+            referral = Referral.objects.filter(pk=referral_pk, patient_id=patient.id).first()
+            if referral is None:
+                return Response(
+                    {'detail': 'Referral not found for this patient.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        upload = serializer.validated_data['file']
+        original_name = getattr(upload, 'name', '') or ''
+
+        user = request.user
+        name = _snapshot_actor_name(user)
+        mirror_into_results = _boolish(request.data.get('mirror_into_results'))
+
+        with transaction.atomic():
+            doc = PatientClinicalDocument.objects.create(
+                patient=patient,
+                doc_type=serializer.validated_data['doc_type'],
+                source=serializer.validated_data.get('source') or 'scanned_paper',
+                document_date=serializer.validated_data['document_date'],
+                title=(serializer.validated_data.get('title') or '').strip()[:200],
+                facility=(serializer.validated_data.get('facility') or '').strip()[:200],
+                clinician_name=(serializer.validated_data.get('clinician_name') or '').strip()[:200],
+                notes=(serializer.validated_data.get('notes') or '').strip()[:500],
+                file=upload,
+                original_filename=original_name[:255],
+                referral=referral,
+                uploaded_by=user if getattr(user, 'is_authenticated', False) else None,
+                uploaded_by_name_snapshot=name,
+            )
+
+            mirror_summary = {}
+            if mirror_into_results and doc.doc_type in ('lab', 'radiology'):
+                mirror_summary = _mirror_clinical_document_into_result_tabs(
+                    patient=patient,
+                    doc=doc,
+                    referral=referral,
+                    actor=user,
+                )
+
+            close_referral = _boolish(request.data.get('close_referral'))
+            if close_referral and referral is not None and referral.status in ('approved_for_forms', 'scheduled'):
+                referral.status = 'closed'
+                referral.closed_at = timezone.now()
+                referral.save(update_fields=['status', 'closed_at'])
+
+        AuditService.log_patient_action(
+            user=user,
+            action='update',
+            patient=patient,
+            module='medical_records',
+            description=(
+                f'Uploaded clinical document ({doc.doc_type}) for '
+                f'{patient.get_full_name()} ({patient.patient_id})'
+            ),
+            new_values={
+                'clinical_document_id': doc.id,
+                'doc_type': doc.doc_type,
+                **mirror_summary,
+            },
+            request=request,
+        )
+        return Response(
+            PatientClinicalDocumentSerializer(doc, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        tags=["Patients"],
+        summary="Bulk clinical documents",
+        description="Upload multiple scanned documents for one patient with shared metadata.",
+    )
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='clinical-documents-bulk',
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def clinical_documents_bulk(self, request, pk=None):
+        patient = self.get_object()
+        uploads = request.FILES.getlist('files')
+        if not uploads:
+            return Response({'detail': 'At least one file is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        name = _snapshot_actor_name(user)
+        mirror_into_results = _boolish(request.data.get('mirror_into_results'))
+        close_referral = _boolish(request.data.get('close_referral'))
+
+        referral = None
+        referral_raw = request.data.get('referral')
+        if referral_raw not in (None, '', 'null'):
+            try:
+                referral_pk = int(referral_raw)
+            except (TypeError, ValueError):
+                return Response({'detail': 'Invalid referral id.'}, status=status.HTTP_400_BAD_REQUEST)
+            from consultation.models import Referral
+            referral = Referral.objects.filter(pk=referral_pk, patient_id=patient.id).first()
+            if referral is None:
+                return Response(
+                    {'detail': 'Referral not found for this patient.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        shared = {
+            'doc_type': request.data.get('doc_type'),
+            'source': request.data.get('source') or 'scanned_paper',
+            'document_date': request.data.get('document_date'),
+            'title': request.data.get('title'),
+            'facility': request.data.get('facility'),
+            'clinician_name': request.data.get('clinician_name'),
+            'notes': request.data.get('notes'),
+            'referral': referral.id if referral else None,
+        }
+
+        created_docs = []
+        with transaction.atomic():
+            for upload in uploads:
+                serializer = PatientClinicalDocumentSerializer(
+                    data={**shared, 'file': upload},
+                    context={'request': request},
+                )
+                serializer.is_valid(raise_exception=True)
+                doc = PatientClinicalDocument.objects.create(
+                    patient=patient,
+                    doc_type=serializer.validated_data['doc_type'],
+                    source=serializer.validated_data.get('source') or 'scanned_paper',
+                    document_date=serializer.validated_data['document_date'],
+                    title=(serializer.validated_data.get('title') or '').strip()[:200],
+                    facility=(serializer.validated_data.get('facility') or '').strip()[:200],
+                    clinician_name=(serializer.validated_data.get('clinician_name') or '').strip()[:200],
+                    notes=(serializer.validated_data.get('notes') or '').strip()[:500],
+                    file=serializer.validated_data['file'],
+                    original_filename=(getattr(upload, 'name', '') or '')[:255],
+                    referral=referral,
+                    uploaded_by=user if getattr(user, 'is_authenticated', False) else None,
+                    uploaded_by_name_snapshot=name,
+                )
+                if mirror_into_results and doc.doc_type in ('lab', 'radiology'):
+                    _mirror_clinical_document_into_result_tabs(
+                        patient=patient,
+                        doc=doc,
+                        referral=referral,
+                        actor=user,
+                    )
+                created_docs.append(doc)
+
+            if close_referral and referral is not None and referral.status in ('approved_for_forms', 'scheduled'):
+                referral.status = 'closed'
+                referral.closed_at = timezone.now()
+                referral.save(update_fields=['status', 'closed_at'])
+
+        AuditService.log_patient_action(
+            user=user,
+            action='update',
+            patient=patient,
+            module='medical_records',
+            description=(
+                f'Bulk uploaded {len(created_docs)} clinical document(s) for '
+                f'{patient.get_full_name()} ({patient.patient_id})'
+            ),
+            new_values={
+                'clinical_document_ids': [doc.id for doc in created_docs],
+                'doc_type': shared['doc_type'],
+                'bulk_count': len(created_docs),
+            },
+            request=request,
+        )
+        return Response(
+            PatientClinicalDocumentSerializer(
+                created_docs,
+                many=True,
+                context={'request': request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @extend_schema(tags=["Patients"], summary="Unmerge", description="Reverse a previous merge. Admin-only emergency undo.")
     @action(detail=True, methods=['post'], url_path='unmerge')

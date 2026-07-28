@@ -12,6 +12,7 @@ export interface PatientHistoryData {
   wardAdmissions: any[];
   certificates: any[];
   referrals: any[];
+  clinicalDocuments: any[];
   medicalHistory: any;
   visits: any[];
   annualCheckups: AnnualCheckup[];
@@ -29,6 +30,7 @@ export type ClinicalOverviewPayload = {
   ward_admissions?: { results: unknown[]; count: number };
   certificates?: { results: unknown[]; count: number };
   referrals?: { results: unknown[]; count: number };
+  clinical_documents?: { results: unknown[]; count: number };
   visits: unknown[];
   annual_checkups?: { results: unknown[]; count: number };
   medical_history: unknown;
@@ -173,6 +175,7 @@ export function mapClinicalOverviewToPatientHistory(
     wardAdmissions: overview.ward_admissions?.results || [],
     certificates: overview.certificates?.results || [],
     referrals: refList,
+    clinicalDocuments: overview.clinical_documents?.results || [],
     medicalHistory: overview.medical_history,
     visits: combinedVisits,
     annualCheckups: (overview.annual_checkups?.results || []) as AnnualCheckup[],

@@ -1236,13 +1236,17 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           showAnnual={patient.category === "employee"}
           scheduleCheckupHref={`/medical-records/visits/new?patient=${encodeURIComponent(patient.patient_id || String(patient.id))}&visit_type=annual_checkup`}
           showCertificates
+          showDocuments
           showReferrals
           showBackground
           tab={historyTab}
           onTabChange={setHistoryTab}
           onIssueCertificate={() => setCertDialogOpen(true)}
           historyReloadToken={historyReloadToken}
-          onReferralUpdated={() => setHistoryReloadToken((n) => n + 1)}
+          onReferralUpdated={() => {
+            setHistoryReloadToken((n) => n + 1);
+            if (patient?.id) void loadPatientHistory(patient.id);
+          }}
           onViewConsultation={viewSessionDetails}
           onViewAnnualCheckup={viewAnnualCheckupDetails}
           onViewVisit={openVisitDetail}

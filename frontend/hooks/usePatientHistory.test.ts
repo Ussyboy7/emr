@@ -14,6 +14,7 @@ const mockMappedHistory = {
   wardAdmissions: [],
   certificates: [],
   referrals: [],
+  clinicalDocuments: [],
   medicalHistory: null,
   visits: [],
   annualCheckups: [],

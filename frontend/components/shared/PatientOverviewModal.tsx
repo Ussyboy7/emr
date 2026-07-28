@@ -209,6 +209,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
   const [eyeOrders, setEyeOrders] = useState<any[]>([]);
   const [wardAdmissions, setWardAdmissions] = useState<any[]>([]);
   const [medicalCertificates, setMedicalCertificates] = useState<any[]>([]);
+  const [clinicalDocuments, setClinicalDocuments] = useState<any[]>([]);
   const [dependents, setDependents] = useState<DependentPatient[]>([]);
   const [dependentsLoading, setDependentsLoading] = useState(false);
   const [isAddDependentOpen, setIsAddDependentOpen] = useState(false);
@@ -302,6 +303,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       const eyeOrdersList = mapped.eyeOrders;
       const wardAdmissionsList = mapped.wardAdmissions;
       const certificatesList = mapped.certificates;
+      const clinicalDocumentsList = mapped.clinicalDocuments;
 
       if (apiPatient.category === 'employee' || apiPatient.category === 'retiree') {
         setDependentsLoading(true);
@@ -490,6 +492,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       setWardAdmissions(wardAdmissionsList);
 
       setMedicalCertificates(certificatesList);
+      setClinicalDocuments(clinicalDocumentsList || []);
 
       setImagingResults(
         imagingOrdersList.map((item: any) => {
@@ -1082,6 +1085,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 imagingResults={imagingResults}
                 prescriptions={prescriptions}
                 vitalSigns={vitalSigns}
+                clinicalDocuments={clinicalDocuments}
                 onVisitClick={handleViewVisit}
               />
             </TabsContent>

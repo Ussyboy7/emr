@@ -5,7 +5,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from .photo import patient_photo_url
-from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate, AnnualCheckup, PatientRecordsNote
+from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate, AnnualCheckup, PatientRecordsNote, PatientClinicalDocument
 
 
 def _patient_photo_url(obj) -> str | None:
@@ -806,3 +806,76 @@ class PatientRecordsNoteSerializer(serializers.ModelSerializer):
             "recorded_by_name_snapshot",
             "recorded_at",
         ]
+
+
+class PatientClinicalDocumentSerializer(serializers.ModelSerializer):
+    """Scanned / external clinical documents on the patient chart."""
+
+    referral_id_display = serializers.SerializerMethodField()
+    doc_type_display = serializers.CharField(source="get_doc_type_display", read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+
+    class Meta:
+        model = PatientClinicalDocument
+        fields = [
+            "id",
+            "patient",
+            "doc_type",
+            "doc_type_display",
+            "source",
+            "source_display",
+            "document_date",
+            "title",
+            "facility",
+            "clinician_name",
+            "notes",
+            "file",
+            "original_filename",
+            "referral",
+            "referral_id_display",
+            "uploaded_by",
+            "uploaded_by_name_snapshot",
+            "uploaded_at",
+        ]
+        read_only_fields = [
+            "id",
+            "patient",
+            "original_filename",
+            "uploaded_by",
+            "uploaded_by_name_snapshot",
+            "uploaded_at",
+            "doc_type_display",
+            "source_display",
+            "referral_id_display",
+        ]
+
+    def get_referral_id_display(self, obj) -> str | None:
+        if obj.referral_id and obj.referral:
+            return obj.referral.referral_id
+        return None
+
+    def validate_file(self, value):
+        if value in (None, ""):
+            raise serializers.ValidationError("File is required.")
+        from common.upload_validation import UploadValidationError, validate_upload_file, sanitize_upload_filename
+
+        try:
+            validate_upload_file(value)
+        except UploadValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        # Normalize filename for storage / display
+        name = sanitize_upload_filename(getattr(value, "name", None) or "document.pdf")
+        value.name = name
+        return value
+
+    def validate_doc_type(self, value):
+        allowed = {c[0] for c in PatientClinicalDocument.DOC_TYPE_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid document type.")
+        return value
+
+    def validate_source(self, value):
+        allowed = {c[0] for c in PatientClinicalDocument.SOURCE_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid source.")
+        return value

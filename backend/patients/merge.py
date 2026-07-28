@@ -64,6 +64,7 @@ RELATED_TO_PATIENT = [
     "radiology.RadiologyReport",
     "appointments.Appointment",
     "patients.PatientRecordsNote",
+    "patients.PatientClinicalDocument",
 ]
 
 # Maps related-model app_label.ModelName → field name on PatientMerge audit.

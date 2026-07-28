@@ -53,6 +53,8 @@ export function ConsultationRoomHistoryTab({
           defaultTab="background"
           showVisits
           showCertificates
+          showDocuments
+          allowDocumentActions={false}
           showReferrals
           showBackground
           onViewVisit={async (v) => {

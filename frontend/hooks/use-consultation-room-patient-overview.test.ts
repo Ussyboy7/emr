@@ -13,6 +13,7 @@ const mockMapClinicalOverview = vi.fn(() => ({
   wardAdmissions: [],
   certificates: [],
   referrals: [],
+  clinicalDocuments: [],
   medicalHistory: null,
   visits: [],
   annualCheckups: [],

@@ -12,6 +12,7 @@ from .models import (
     AnnualCheckupExemption,
     AnnualCheckupProgrammeSettings,
     PatientRecordsNote,
+    PatientClinicalDocument,
 )
 
 
@@ -138,4 +139,32 @@ class PatientRecordsNoteAdmin(admin.ModelAdmin):
         'recorded_by_name_snapshot',
     ]
     readonly_fields = ['recorded_at', 'recorded_by', 'recorded_by_name_snapshot', 'source']
+
+
+@admin.register(PatientClinicalDocument)
+class PatientClinicalDocumentAdmin(admin.ModelAdmin):
+    list_display = [
+        'id',
+        'patient',
+        'doc_type',
+        'source',
+        'document_date',
+        'uploaded_by_name_snapshot',
+        'uploaded_at',
+    ]
+    list_filter = ['doc_type', 'source', 'document_date']
+    search_fields = [
+        'title',
+        'facility',
+        'patient__surname',
+        'patient__first_name',
+        'patient__patient_id',
+        'original_filename',
+    ]
+    readonly_fields = [
+        'uploaded_at',
+        'uploaded_by',
+        'uploaded_by_name_snapshot',
+        'original_filename',
+    ]
 

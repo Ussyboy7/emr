@@ -4,7 +4,9 @@ import { useMemo } from 'react';
 import { formatDisplayDateMedium, toApiDateFromInstant } from "@/lib/dates";
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Clock, Stethoscope, TestTube, ScanLine, Pill, Heart, FileText } from 'lucide-react';
+import { Calendar, Clock, Stethoscope, TestTube, ScanLine, Pill, Heart, FileText, FolderOpen } from 'lucide-react';
+import { toast } from 'sonner';
+import { openMediaInNewTab } from '@/lib/media-url';
 
 // Helper function to normalize date to YYYY-MM-DD format for consistent grouping
 const normalizeDate = (dateString: string | undefined): string => {
@@ -31,12 +33,13 @@ interface TimelineTabProps {
   imagingResults: any[];
   prescriptions: any[];
   vitalSigns: any[];
+  clinicalDocuments?: any[];
   onVisitClick?: (visit: any) => void;
 }
 
 interface TimelineEvent {
   id: string;
-  type: 'visit' | 'consultation' | 'lab' | 'imaging' | 'prescription' | 'vital';
+  type: 'visit' | 'consultation' | 'lab' | 'imaging' | 'prescription' | 'vital' | 'document';
   date: string;
   time?: string;
   title: string;
@@ -52,6 +55,7 @@ export function TimelineTab({
   imagingResults,
   prescriptions,
   vitalSigns,
+  clinicalDocuments = [],
   onVisitClick,
 }: TimelineTabProps) {
   const timelineEvents = useMemo(() => {
@@ -147,6 +151,22 @@ export function TimelineTab({
       });
     });
 
+    clinicalDocuments.forEach((doc) => {
+      const typeLabel =
+        doc.doc_type_display ||
+        String(doc.doc_type || 'Document').replace(/_/g, ' ');
+      const sourceLabel = doc.source_display || String(doc.source || '').replace(/_/g, ' ');
+      events.push({
+        id: `document-${doc.id}`,
+        type: 'document',
+        date: normalizeDate(doc.document_date),
+        title: doc.title || typeLabel,
+        description: [sourceLabel, doc.facility, doc.clinician_name].filter(Boolean).join(' · '),
+        icon: FolderOpen,
+        metadata: doc,
+      });
+    });
+
     // Filter out events with invalid dates and sort by date (newest first)
     return events
       .filter(event => event.date && safeParseDate(event.date))
@@ -156,7 +176,7 @@ export function TimelineTab({
         if (!dateA || !dateB) return 0;
         return dateB.getTime() - dateA.getTime();
       });
-  }, [visits, consultationSessions, labResults, imagingResults, prescriptions, vitalSigns]);
+  }, [visits, consultationSessions, labResults, imagingResults, prescriptions, vitalSigns, clinicalDocuments]);
 
   // Group events by date
   const groupedEvents = useMemo(() => {
@@ -208,6 +228,8 @@ export function TimelineTab({
         return 'bg-violet-500';
       case 'vital':
         return 'bg-rose-500';
+      case 'document':
+        return 'bg-indigo-500';
       default:
         return 'bg-gray-500';
     }
@@ -227,6 +249,8 @@ export function TimelineTab({
         return 'Prescription';
       case 'vital':
         return 'Vital Signs';
+      case 'document':
+        return 'Document';
       default:
         return type;
     }
@@ -263,6 +287,19 @@ export function TimelineTab({
                 {events.map((event) => {
                   const Icon = event.icon;
                   const isVisitClickable = event.type === 'visit' && !!onVisitClick && !!event.metadata;
+                  const isDocumentClickable = event.type === 'document' && !!event.metadata?.file;
+                  const isClickable = isVisitClickable || isDocumentClickable;
+                  const handleActivate = () => {
+                    if (isVisitClickable) {
+                      onVisitClick(event.metadata);
+                      return;
+                    }
+                    if (isDocumentClickable) {
+                      void openMediaInNewTab(event.metadata.file).catch((err: unknown) => {
+                        toast.error(err instanceof Error ? err.message : 'Failed to open document');
+                      });
+                    }
+                  };
                   return (
                     <div key={event.id} className="relative">
                       {/* Timeline dot */}
@@ -273,21 +310,17 @@ export function TimelineTab({
                       {/* Event card */}
                       <Card
                         className={`ml-8 hover:shadow-md transition-shadow${
-                          isVisitClickable ? ' cursor-pointer hover:bg-muted/40' : ''
+                          isClickable ? ' cursor-pointer hover:bg-muted/40' : ''
                         }`}
-                        onClick={
-                          isVisitClickable
-                            ? () => onVisitClick(event.metadata)
-                            : undefined
-                        }
-                        role={isVisitClickable ? 'button' : undefined}
-                        tabIndex={isVisitClickable ? 0 : undefined}
+                        onClick={isClickable ? handleActivate : undefined}
+                        role={isClickable ? 'button' : undefined}
+                        tabIndex={isClickable ? 0 : undefined}
                         onKeyDown={
-                          isVisitClickable
+                          isClickable
                             ? (e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();
-                                  onVisitClick(event.metadata);
+                                  handleActivate();
                                 }
                               }
                             : undefined

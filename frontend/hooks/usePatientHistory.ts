@@ -25,6 +25,7 @@ export function usePatientHistory(patientId: number | null): UsePatientHistoryRe
     wardAdmissions: [],
     certificates: [],
     referrals: [],
+    clinicalDocuments: [],
     medicalHistory: null,
     visits: [],
     annualCheckups: [],
