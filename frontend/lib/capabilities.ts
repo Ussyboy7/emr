@@ -21,6 +21,15 @@ export const ALL_CAPABILITIES: Capability[] = [
   { id: "ward_order_edit", name: "Edit/cancel ward doctor orders", module: "Consultation", description: "Edit or cancel pending ward orders" },
   { id: "ward_order_perform", name: "Perform ward nursing tasks", module: "Nursing", description: "Administer injections, dressings, and ward instructions" },
   { id: "consultation_queue_override", name: "Override consultation room presence", module: "Nursing", description: "Send or reassign when doctor is not on seat (requires reason)" },
+  { id: "clinical_data_view_all", name: "View all clinics (aggregate view)", module: "Administration", description: "Read data across every clinic via scope=all (leadership)" },
+  { id: "pharmacy_dispense", name: "Dispense prescriptions", module: "Pharmacy", description: "Perform stock deduction and dispense medication" },
+  { id: "pharmacy_stock_issue", name: "Issue stock from store", module: "Pharmacy", description: "Transfer stock between store and dispensary" },
+  { id: "pharmacy_inventory_adjust", name: "Adjust pharmacy inventory", module: "Pharmacy", description: "Add, edit, or adjust medication inventory" },
+  { id: "lab_result_submit", name: "Submit lab results", module: "Laboratory", description: "Enter results for collected/processed lab tests" },
+  { id: "lab_result_verify", name: "Verify lab results", module: "Laboratory", description: "Approve verified lab results" },
+  { id: "radiology_result_verify", name: "Verify radiology reports", module: "Radiology", description: "Approve verified radiology reports" },
+  { id: "nursing_order_create", name: "Create nursing orders", module: "Nursing", description: "Add new nursing orders" },
+  { id: "medical_certificate_issue", name: "Issue medical certificates", module: "Medical Records", description: "Create and manage medical certificates" },
 ];
 
 /** Capabilities stripped when duplicating or seeding support roles. */
@@ -36,6 +45,7 @@ export const SENSITIVE_CAPABILITY_IDS = [
   "notification_routing_manage",
   "hr_compliance_manage",
   "annual_checkup_signoff",
+  "clinical_data_view_all",
 ] as const;
 
 export const PAGE_TO_CAPABILITIES: Record<string, string[]> = {
@@ -46,6 +56,12 @@ export const PAGE_TO_CAPABILITIES: Record<string, string[]> = {
   "/hr/exemptions": ["hr_compliance_manage"],
   "/consultation/wards": ["ward_order_create", "ward_order_edit"],
   "/nursing/wards": ["ward_order_perform"],
+  "/laboratory": ["lab_result_submit", "lab_result_verify"],
+  "/radiology": ["radiology_result_verify"],
+  "/pharmacy": ["pharmacy_dispense", "pharmacy_stock_issue", "pharmacy_inventory_adjust"],
+  "/nursing": ["nursing_order_create"],
+  "/medical-records": ["medical_certificate_issue"],
+  "/consultation": ["medical_certificate_issue"],
 };
 
 export function convertCapabilitiesFromBackend(

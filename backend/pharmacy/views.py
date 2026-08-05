@@ -37,8 +37,9 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from decimal import Decimal, InvalidOperation
 
-from common.mixins import ClinicScopedMixin
+from common.mixins import FacilityScopedMixin
 from common.openapi import document_viewset
+from permissions.user_capabilities import ensure_capability
 from .combo_utils import combo_component_names_from_display_name
 from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine, HodStockIssue
 from .serializers import (
@@ -59,7 +60,7 @@ from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
 from audit.models import ActivityLog
 from organization.models import SystemConfig
-from accounts.utils import resolve_clinic_id
+from accounts.utils import resolve_facility_id
 
 
 @document_viewset(tag="Pharmacy", resource="generic medications")
@@ -436,10 +437,10 @@ class MedicationViewSet(viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Pharmacy", resource="medication inventory")
-class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class MedicationInventoryViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing medication inventory."""
     
-    clinic_filter_field = 'location_clinic'
+    facility_filter_field = 'location_clinic'
     serializer_class = MedicationInventorySerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -499,7 +500,7 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 'issue__issued_by', 'stock_issue_line',
                 'stock_issue_line__source_inventory_item', 'location_clinic',
             )
-            clinic_id = resolve_clinic_id(self.request.user)
+            clinic_id = resolve_facility_id(self.request.user)
             if clinic_id is not None:
                 qs = qs.filter(location_clinic=clinic_id)
             return qs.order_by('received_at')
@@ -825,6 +826,11 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         This updates `quantity` and logs an audit record tagged as a batch adjustment.
         """
+        ensure_capability(
+            request.user,
+            "pharmacy_inventory_adjust",
+            "Only authorised pharmacy staff can adjust inventory.",
+        )
         inventory = self.get_object()
 
         try:
@@ -926,7 +932,7 @@ class MedicationInventoryViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     partial_update=extend_schema(summary="Partially update prescription", tags=["Pharmacy"]),
     destroy=extend_schema(summary="Delete prescription", tags=["Pharmacy"]),
 )
-class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing prescriptions."""
     serializer_class = PrescriptionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -1059,7 +1065,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             .select_related("medication")
             .order_by("received_at")
         )
-        clinic_id = resolve_clinic_id(request.user)
+        clinic_id = resolve_facility_id(request.user)
         if clinic_id is not None:
             receipt_qs = receipt_qs.filter(location_clinic=clinic_id)
 
@@ -1147,7 +1153,7 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
     
     def perform_create(self, serializer):
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         # Set doctor from request user if not provided
         if not serializer.validated_data.get('doctor') and self.request.user.is_authenticated:
             prescription = serializer.save(created_by=self.request.user, doctor=self.request.user)
@@ -1458,8 +1464,14 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     
     @extend_schema(tags=["Pharmacy"], summary="Dispense", description="Dispense medication from a prescription.")
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def dispense(self, request, pk=None):
         """Dispense medication from a prescription."""
+        ensure_capability(
+            request.user,
+            "pharmacy_dispense",
+            "Only authorised pharmacy staff can dispense prescriptions.",
+        )
         prescription = self.get_object()
         item_id = request.data.get('item_id')
         coverage_quantity_raw = request.data.get('coverage_quantity', None)
@@ -1499,8 +1511,8 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             dispensed_medication = item.medication
 
             if receipt_line_id:
-                receipt_line = DispensaryReceiptLine.objects.select_related('medication').get(id=receipt_line_id)
-                clinic_id = resolve_clinic_id(request.user)
+                receipt_line = DispensaryReceiptLine.objects.select_for_update().select_related('medication').get(id=receipt_line_id)
+                clinic_id = resolve_facility_id(request.user)
                 if clinic_id is not None and receipt_line.location_clinic_id != clinic_id:
                     return Response(
                         {'error': 'This receipt line belongs to a different clinic'},
@@ -1512,8 +1524,10 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
                 dispensed_medication = receipt_line.medication
-                receipt_line.quantity_remaining -= quantity
+                # Atomic deduction to prevent oversell under concurrent dispenses.
+                receipt_line.quantity_remaining = F('quantity_remaining') - quantity
                 receipt_line.save(update_fields=['quantity_remaining'])
+                receipt_line.refresh_from_db(fields=['quantity_remaining'])
             if not dispensed_medication:
                 return Response(
                     {'error': 'Cannot determine medication brand. Please select specific inventory or receipt.'},
@@ -1816,10 +1830,10 @@ class PrescriptionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Pharmacy", resource="dispenses", read_only=True)
-class DispenseViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
+class DispenseViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing dispense history."""
     
-    clinic_filter_field = 'prescription__location_clinic'
+    facility_filter_field = 'prescription__location_clinic'
     serializer_class = DispenseSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['prescription', 'medication', 'dispensed_by']
@@ -1910,10 +1924,10 @@ class DispenseViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
 
 
 @document_viewset(tag="Pharmacy", resource="inventory alerts", read_only=True)
-class InventoryAlertViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
+class InventoryAlertViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for inventory alerts (low stock, expiring items)."""
     
-    clinic_filter_field = 'location_clinic'
+    facility_filter_field = 'location_clinic'
     serializer_class = MedicationInventorySerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     ordering_fields = ['expiry_date', 'quantity']
@@ -1980,10 +1994,10 @@ class InventoryAlertViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
 
 
 @document_viewset(tag="Pharmacy", resource="stock requests")
-class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class StockRequestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing stock requests."""
     
-    clinic_filter_field = 'clinic'
+    facility_filter_field = 'clinic'
     queryset = StockRequest.objects.all()
     serializer_class = StockRequestSerializer
     pagination_class = FlexiblePageNumberPagination
@@ -1993,17 +2007,17 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
-    def auto_set_clinic(self, serializer):
+    def auto_set_facility(self, serializer):
         """Always stamp the requester's clinic; multi-clinic mode still validates explicit picks."""
-        clinic_val = serializer.validated_data.get(self.clinic_filter_field)
+        clinic_val = serializer.validated_data.get(self.facility_filter_field)
         if clinic_val is None:
-            from accounts.utils import resolve_clinic
+            from accounts.utils import resolve_facility
 
-            clinic = resolve_clinic(self.request.user)
+            clinic = resolve_facility(self.request.user)
             if clinic is not None:
-                serializer.validated_data[self.clinic_filter_field] = clinic
+                serializer.validated_data[self.facility_filter_field] = clinic
         else:
-            super().auto_set_clinic(serializer)
+            super().auto_set_facility(serializer)
 
     def _stock_request_operation(self) -> str:
         action = getattr(self, "action", None) or "read"
@@ -2123,7 +2137,7 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             serializer.validated_data.get('to_location'),
             operation="create",
         )
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         serializer.save(requested_by=self.request.user)
 
     def partial_update(self, request, *args, **kwargs):
@@ -2283,11 +2297,17 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
     @extend_schema(tags=["Pharmacy"], summary="Fulfill", description="Fulfill a stock request.")
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def fulfill(self, request, pk=None):
         """
         Fulfill a stock request.
         Creates a StockIssue and moves inventory from source to destination.
         """
+        ensure_capability(
+            request.user,
+            "pharmacy_stock_issue",
+            "Only authorised pharmacy staff can issue stock.",
+        )
         stock_request = self.get_object()
         
         if stock_request.status in ['fulfilled', 'cancelled', 'rejected']:
@@ -2312,13 +2332,17 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                 continue
 
             # Find available inventory in source location (e.g. 'Store')
-            source_inventory_qs = MedicationInventory.objects.filter(
-                medication=item.medication,
-                location=stock_request.from_location,
-                quantity__gt=0,
-                expiry_date__gt=timezone.now().date()
-            ).order_by('expiry_date') # FIFO
-            source_inventory = list(source_inventory_qs)
+            # Locked for update so concurrent fulfills can't oversell the same batch.
+            source_inventory = list(
+                MedicationInventory.objects.select_for_update()
+                .filter(
+                    medication=item.medication,
+                    location=stock_request.from_location,
+                    quantity__gt=0,
+                    expiry_date__gt=timezone.now().date()
+                )
+                .order_by('expiry_date')  # FIFO
+            )
             available_qty = sum((inv.quantity for inv in source_inventory), Decimal('0'))
             
             qty_to_fulfill = remaining_needed
@@ -2339,9 +2363,9 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                         notes=f"Fulfilled request {stock_request.request_id}"
                     )
                 
-                # 1. Deduct from source
-                inv_item.quantity -= transfer_qty
-                inv_item.save()
+                # 1. Deduct from source (atomic to avoid oversell under concurrency)
+                inv_item.quantity = F('quantity') - transfer_qty
+                inv_item.save(update_fields=['quantity'])
                 
                 # 2 & 3. Destination: Store→Dispensary uses DispensaryReceiptLine; else MedicationInventory
                 is_store_to_dispensary = (
@@ -2361,9 +2385,9 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     )
                     receipt_clinic = stock_request.clinic
                     if receipt_clinic is None and stock_request.requested_by_id:
-                        from accounts.utils import resolve_clinic
+                        from accounts.utils import resolve_facility
 
-                        receipt_clinic = resolve_clinic(stock_request.requested_by)
+                        receipt_clinic = resolve_facility(stock_request.requested_by)
                     DispensaryReceiptLine.objects.create(
                         medication=item.medication,
                         quantity=transfer_qty,
@@ -2391,10 +2415,10 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                         }
                     )
                     if not created:
-                        dest_inv.quantity += transfer_qty
+                        dest_inv.quantity = F('quantity') + transfer_qty
                         if dest_inv.min_stock_level == 0 and inv_item.min_stock_level:
                             dest_inv.min_stock_level = inv_item.min_stock_level
-                        dest_inv.save()
+                        dest_inv.save(update_fields=['quantity', 'min_stock_level'])
                     else:
                         dest_inv.quantity = transfer_qty
                         dest_inv.save()
@@ -2486,9 +2510,9 @@ class StockRequestViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Pharmacy", resource="stock issues", read_only=True)
-class StockIssueViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
+class StockIssueViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for listing stock issues (e.g. receipts from Central Store to Dispensary)."""
-    clinic_filter_field = 'request__clinic'
+    facility_filter_field = 'request__clinic'
     queryset = StockIssue.objects.select_related('request', 'issued_by').prefetch_related('lines__medication').all()
     serializer_class = StockIssueSerializer
     pagination_class = FlexiblePageNumberPagination
@@ -2502,10 +2526,10 @@ class StockIssueViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
 
 
 @document_viewset(tag="Pharmacy", resource="HOD stock issues")
-class HodStockIssueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class HodStockIssueViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """Discretionary issues from the Pharmacy HOD store."""
 
-    clinic_filter_field = 'location_clinic'
+    facility_filter_field = 'location_clinic'
     serializer_class = HodStockIssueSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -2573,7 +2597,7 @@ class HodStockIssueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         from pharmacy.hod_store import HOD_STORE_LOCATION, user_can_operate_hod_store
-        from accounts.utils import resolve_clinic
+        from accounts.utils import resolve_facility
 
         self._ensure_hod_access()
         medication = serializer.validated_data['medication']
@@ -2596,14 +2620,19 @@ class HodStockIssueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         with transaction.atomic():
             if inventory_item is not None:
+                # Lock the specific batch so a concurrent HOD issue can't oversell it.
+                inventory_item = (
+                    MedicationInventory.objects.select_for_update().get(pk=inventory_item.pk)
+                )
                 if inventory_item.location != HOD_STORE_LOCATION:
                     raise ValidationError({'inventory_item_id': ['Batch is not in HOD store.']})
                 if inventory_item.medication_id != medication.id:
                     raise ValidationError({'inventory_item_id': ['Batch medication does not match.']})
                 if inventory_item.quantity < remaining:
                     raise ValidationError({'quantity': ['Insufficient stock in selected batch.']})
-                inventory_item.quantity -= remaining
+                inventory_item.quantity = F('quantity') - remaining
                 inventory_item.save(update_fields=['quantity'])
+                inventory_item.refresh_from_db(fields=['quantity'])
                 used_item = inventory_item
             else:
                 batches = list(
@@ -2633,7 +2662,7 @@ class HodStockIssueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
                     if used_item is None:
                         used_item = batch
 
-            clinic = resolve_clinic(self.request.user)
+            clinic = resolve_facility(self.request.user)
             issue = HodStockIssue.objects.create(
                 medication=medication,
                 inventory_item=used_item,

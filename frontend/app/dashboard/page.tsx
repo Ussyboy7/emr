@@ -16,16 +16,22 @@ import {
   FileText, Syringe, ScanLine, Loader2
 } from 'lucide-react';
 import { getOperationalDashboard } from '@/lib/services/dashboard-service';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
 import { getHomeRouteForUser, isPathAllowedByPages } from '@/lib/home-route';
 import { getServerToday } from '@/lib/utils/serverTime';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { ClinicFilter } from '@/components/shared/ClinicFilter';
+import { clinicGuardRowClass } from '@/lib/clinic-guard';
+import { useClinic } from '@/hooks/use-clinic';
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const clinicIdParam = searchParams.get('clinic_id');
   const { currentUser, hydrated } = useCurrentUser();
+  const { activeClinicId: guardActiveClinicId } = useClinic();
   const homeRoute = getHomeRouteForUser(currentUser);
 
   // Super admin can view global dashboard.
@@ -79,7 +85,9 @@ export default function DashboardPage() {
         today = undefined;
       }
 
-      const data = await getOperationalDashboard(today ? { date: today } : undefined);
+      const data = await getOperationalDashboard(
+        clinicIdParam ? { date: today, clinic_id: clinicIdParam } : today ? { date: today } : undefined,
+      );
 
       setTodayStats(data.todayStats);
       setQueueStatus(data.queueStatus);
@@ -101,7 +109,7 @@ export default function DashboardPage() {
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, []);
+  }, [clinicIdParam]);
 
   useEffect(() => {
     // Don't fire 10 parallel API calls before auth state has hydrated — otherwise
@@ -159,6 +167,7 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex gap-2">
+            <ClinicFilter />
             <Button asChild variant="outline">
               <Link href="/medical-records/patients/new"><UserPlus className="h-4 w-4 mr-2" />Register Patient</Link>
             </Button>
@@ -338,24 +347,27 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {recentPatients.map((patient, index) => (
-                    <div key={patient.visitId ?? `${patient.id}-${index}`} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
-                          {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                  {recentPatients.map((patient, index) => {
+                    const guardClass = clinicGuardRowClass(patient, guardActiveClinicId);
+                    return (
+                      <div key={patient.visitId ?? `${patient.id}-${index}`} className={`flex items-center justify-between p-3 rounded-lg hover:bg-muted transition-colors ${guardClass || 'bg-muted/50'}`}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
+                            {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                          </div>
+                          <div>
+                            <p className="font-medium">{patient.name}</p>
+                            <p className="text-xs text-muted-foreground">{joinDisplayParts([patient.id, patient.clinic, patient.time])}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium">{patient.name}</p>
-                          <p className="text-xs text-muted-foreground">{joinDisplayParts([patient.id, patient.clinic, patient.time])}</p>
-                        </div>
+                        <Badge variant={
+                          patient.status === 'Completed' ? 'default' :
+                          patient.status === 'In Consultation' ? 'secondary' :
+                          'outline'
+                        }>{patient.status}</Badge>
                       </div>
-                      <Badge variant={
-                        patient.status === 'Completed' ? 'default' :
-                        patient.status === 'In Consultation' ? 'secondary' :
-                        'outline'
-                      }>{patient.status}</Badge>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

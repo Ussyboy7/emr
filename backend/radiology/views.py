@@ -19,8 +19,9 @@ from django.http import HttpResponse
 from common.pagination import CatalogPageNumberPagination
 from laboratory.pagination import FlexiblePageNumberPagination
 
-from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
+from common.mixins import FacilityScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_PK_PARAMS, document_viewset
+from permissions.user_capabilities import ensure_capability
 logger = logging.getLogger(__name__)
 
 
@@ -397,7 +398,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         order = serializer.save(created_by=self.request.user)
         
         # Log audit
@@ -885,7 +886,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing individual radiology studies (like lab tests)."""
 
-    clinic_filter_field = 'order__processing_clinic'
+    facility_filter_field = 'order__processing_clinic'
     serializer_class = RadiologyStudySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'processing_method', 'modality']
@@ -1180,10 +1181,10 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Radiology", resource="radiology reports", read_only=True)
-class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
+class RadiologyReportViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing radiology reports awaiting verification."""
 
-    clinic_filter_field = 'order__processing_clinic'
+    facility_filter_field = 'order__processing_clinic'
     serializer_class = RadiologyReportSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
@@ -1268,6 +1269,11 @@ class RadiologyReportViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verify a radiology report."""
+        ensure_capability(
+            request.user,
+            "radiology_result_verify",
+            "Only authorised radiology staff can verify reports.",
+        )
         report = self.get_object()
         study = report.study
         

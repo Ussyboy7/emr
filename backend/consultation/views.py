@@ -57,9 +57,9 @@ from patients.nursing_leg_status import (
     mark_consultation_session_clinic_completed,
     visit_should_close_after_clinic_completion,
 )
-from common.mixins import ClinicScopedMixin
+from common.mixins import FacilityScopedMixin
 from common.openapi import REFERRAL_FORM_PK_PARAMS, document_viewset
-from accounts.utils import resolve_clinic_id
+from accounts.utils import resolve_facility_id
 from organization.models import SystemConfig
 from .room_presence import (
     assert_room_accepting_patients,
@@ -114,10 +114,10 @@ class ReferralFacilityViewSet(viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Consultation", resource="consultation rooms")
-class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class ConsultationRoomViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation rooms."""
     
-    clinic_filter_field = 'clinic'
+    facility_filter_field = 'clinic'
     serializer_class = ConsultationRoomSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'specialty', 'is_active', 'clinic', 'room_type']
@@ -336,7 +336,7 @@ class ConsultationRoomViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     partial_update=extend_schema(summary="Partially update consultation session", tags=["Consultation"]),
     destroy=extend_schema(summary="End or remove consultation session", tags=["Consultation"]),
 )
-class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation sessions."""
     serializer_class = ConsultationSessionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -483,7 +483,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             except DRFValidationError as exc:
                 return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
 
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
 
         try:
             with transaction.atomic():
@@ -955,7 +955,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             referred_at__lte=end_date
         )
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            clinic_id = resolve_clinic_id(self.request.user)
+            clinic_id = resolve_facility_id(self.request.user)
             if clinic_id is not None:
                 period_referrals = period_referrals.filter(
                     Q(visit__location_clinic=clinic_id) | Q(session__location_clinic=clinic_id)
@@ -971,7 +971,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             diagnosed_at__lte=end_date
         )
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            clinic_id = resolve_clinic_id(self.request.user)
+            clinic_id = resolve_facility_id(self.request.user)
             if clinic_id is not None:
                 period_diagnoses = period_diagnoses.filter(
                     Q(visit__location_clinic=clinic_id) | Q(session__location_clinic=clinic_id)
@@ -1131,7 +1131,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         # Queue stats
         queue_qs = ConsultationQueue.objects.filter(is_active=True)
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            q_clinic_id = resolve_clinic_id(self.request.user)
+            q_clinic_id = resolve_facility_id(self.request.user)
             if q_clinic_id is not None:
                 queue_qs = queue_qs.filter(room__clinic=q_clinic_id)
         queue_count = queue_qs.count()
@@ -1139,7 +1139,7 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         # Referrals stats
         pending_qs = Referral.objects.filter(status__in=['draft', 'sent'])
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            r_clinic_id = resolve_clinic_id(self.request.user)
+            r_clinic_id = resolve_facility_id(self.request.user)
             if r_clinic_id is not None:
                 pending_qs = pending_qs.filter(
                     Q(visit__location_clinic=r_clinic_id) | Q(session__location_clinic=r_clinic_id)
@@ -1266,10 +1266,10 @@ class ConsultationSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Consultation", resource="consultation queues")
-class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class ConsultationQueueViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation queue."""
     
-    clinic_filter_field = 'room__clinic'
+    facility_filter_field = 'room__clinic'
     serializer_class = ConsultationQueueSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['room', 'patient', 'is_active', 'visit']
@@ -1676,7 +1676,7 @@ class ConsultationQueueViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Consultation", resource="referrals")
-class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class ReferralViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing referrals."""
     serializer_class = ReferralSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -1745,7 +1745,7 @@ class ReferralViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
     def scope_queryset(self, qs):
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            clinic_id = resolve_clinic_id(self.request.user)
+            clinic_id = resolve_facility_id(self.request.user)
             if clinic_id is not None:
                 qs = qs.filter(
                     Q(visit__location_clinic=clinic_id) | Q(session__location_clinic=clinic_id)
@@ -2389,10 +2389,10 @@ class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 @document_viewset(tag="Consultation", resource="diagnoses")
-class DiagnosisViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class DiagnosisViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing patient diagnoses."""
 
-    clinic_filter_field = 'visit__location_clinic'
+    facility_filter_field = 'visit__location_clinic'
     serializer_class = DiagnosisSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'visit', 'session', 'icd10_code', 'status', 'certainty']

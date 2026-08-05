@@ -72,6 +72,17 @@ def user_has_capability(user, capability_id: str) -> bool:
     return capability_id in get_user_capabilities(user)
 
 
+def ensure_capability(user, capability_id: str, message: str = "You do not have permission for this action.") -> None:
+    """Raise PermissionDenied unless the user holds the capability (superusers pass)."""
+    from rest_framework.exceptions import PermissionDenied
+
+    if getattr(user, "is_superuser", False):
+        return
+    if user_has_capability(user, capability_id):
+        return
+    raise PermissionDenied(message)
+
+
 def build_effective_access_for_role(role) -> dict:
     """Preview pages, capabilities, and API families for a single access role."""
     from permissions.capabilities import CAPABILITY_CATALOG, PAGE_API_FAMILIES

@@ -13,11 +13,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
 
-from common.mixins import ClinicScopedMixin
+from common.mixins import FacilityScopedMixin
 from common.openapi import document_viewset
-from accounts.utils import resolve_clinic_id
+from accounts.utils import resolve_facility_id
 from organization.models import SystemConfig
 from permissions.ward_action_permissions import ensure_doctor_action, ensure_nurse_action
+from permissions.user_capabilities import ensure_capability
 from .models import NursingOrder, Procedure
 from .serializers import NursingOrderSerializer, ProcedureSerializer
 from .admission_orders import filter_orders_for_admission
@@ -31,7 +32,7 @@ from audit.services import AuditService
     partial_update=extend_schema(summary="Partially update nursing order", tags=["Nursing"]),
     destroy=extend_schema(summary="Delete nursing order", tags=["Nursing"]),
 )
-class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class NursingOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing nursing orders."""
     serializer_class = NursingOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -62,6 +63,12 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def _assert_can_create_order(self, order_type):
         if self._is_ward_order_type(order_type):
             ensure_doctor_action(self.request.user, "Only doctors can create or edit ward doctor orders.")
+        else:
+            ensure_capability(
+                self.request.user,
+                "nursing_order_create",
+                "Only authorised nursing staff can create nursing orders.",
+            )
 
     def _assert_can_update_order(self, instance: NursingOrder, payload: dict):
         current_type = getattr(instance, 'order_type', '')
@@ -205,7 +212,7 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._assert_can_create_order(serializer.validated_data.get('order_type'))
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         save_kwargs = {'created_by': self.request.user}
         if not serializer.validated_data.get('ordered_by'):
             save_kwargs['ordered_by'] = self.request.user
@@ -266,7 +273,7 @@ class NursingOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Nursing", resource="nursing procedures")
-class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class ProcedureViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing procedures."""
     serializer_class = ProcedureSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -292,7 +299,7 @@ class ProcedureViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     
     def scope_queryset(self, qs):
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            clinic_id = resolve_clinic_id(self.request.user)
+            clinic_id = resolve_facility_id(self.request.user)
             if clinic_id is not None:
                 qs = qs.filter(
                     Q(nursing_order__location_clinic=clinic_id) |

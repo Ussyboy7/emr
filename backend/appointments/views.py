@@ -12,7 +12,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from datetime import datetime, timedelta
 
-from common.mixins import ClinicScopedMixin
+from common.mixins import FacilityScopedMixin
 from common.openapi import document_viewset
 from drf_spectacular.utils import extend_schema
 from .models import Appointment, AppointmentSlot
@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 @document_viewset(tag="Appointments", resource="appointments")
-class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class AppointmentViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing appointments."""
     
-    clinic_filter_field = 'clinic'
+    facility_filter_field = 'clinic'
     serializer_class = AppointmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = AppointmentFilter
@@ -51,7 +51,7 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
     
     def perform_create(self, serializer):
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         appointment = serializer.save(created_by=self.request.user)
 
         patient_user = getattr(appointment.patient, "user", None)
@@ -129,10 +129,10 @@ class AppointmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Appointments", resource="appointment slots")
-class AppointmentSlotViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class AppointmentSlotViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing appointment slots."""
     
-    clinic_filter_field = 'clinic'
+    facility_filter_field = 'clinic'
     serializer_class = AppointmentSlotSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['doctor', 'clinic', 'day_of_week', 'is_available']
@@ -148,6 +148,6 @@ class AppointmentSlotViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         serializer.save()
 

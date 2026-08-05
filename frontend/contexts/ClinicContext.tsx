@@ -16,7 +16,9 @@ interface ClinicContextType {
   activeClinicName: string | null;
   clinics: ClinicInfo[];
   isMultiClinic: boolean;
-  switchClinic: (clinicId: number) => Promise<void>;
+  canViewAllClinics: boolean;
+  switchClinic: (clinicId: number | null) => Promise<void>;
+  clinicVersion: number;
   loading: boolean;
 }
 
@@ -27,12 +29,18 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   const [allClinics, setAllClinics] = useState<ClinicInfo[]>([]);
   const [clinicsLoaded, setClinicsLoaded] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [clinicVersion, setClinicVersion] = useState(0);
 
   const clinics_ids = currentUser?.clinics_ids;
   const active_clinic_id = currentUser?.active_clinic_id ?? null;
   const multi_clinic_enabled = currentUser?.multi_clinic_enabled ?? false;
   const currentUserId = currentUser?.id;
   const autoSetClinicAttemptedRef = useRef(false);
+
+  const canViewAllClinics = Boolean(
+    currentUser?.isSuperuser ||
+      currentUser?.capabilities?.includes("clinical_data_view_all"),
+  );
 
   // Auto-set active clinic to the first assigned clinic if none is set yet (once per session).
   useEffect(() => {
@@ -85,7 +93,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     return allClinics.find((c) => c.id === active_clinic_id)?.name ?? null;
   }, [allClinics, active_clinic_id]);
 
-  const switchClinic = useCallback(async (clinicId: number) => {
+  const switchClinic = useCallback(async (clinicId: number | null) => {
     setSwitching(true);
     try {
       await apiFetch("/accounts/auth/me/", {
@@ -93,8 +101,10 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ active_clinic: clinicId }),
       });
       await refresh();
-      // Reload the page so all data-fetching hooks re-run with the new clinic ID
-      window.location.reload();
+      // Bump the clinic version so Providers remounts the page tree below this
+      // context. Every data-fetching effect re-runs against the new clinic scope
+      // without a full browser reload.
+      setClinicVersion((v) => v + 1);
     } finally {
       setSwitching(false);
     }
@@ -105,9 +115,11 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     activeClinicName,
     clinics: userClinics,
     isMultiClinic: multi_clinic_enabled && userClinics.length > 1,
+    canViewAllClinics,
     switchClinic,
+    clinicVersion,
     loading: !clinicsLoaded || switching,
-  }), [active_clinic_id, activeClinicName, userClinics, multi_clinic_enabled, switchClinic, clinicsLoaded, switching]);
+  }), [active_clinic_id, activeClinicName, userClinics, multi_clinic_enabled, canViewAllClinics, switchClinic, clinicVersion, clinicsLoaded, switching]);
 
   return (
     <ClinicContext.Provider value={value}>

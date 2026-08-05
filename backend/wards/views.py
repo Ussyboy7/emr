@@ -37,7 +37,7 @@ from .serializers import (
     AdmissionTreatmentRowSerializer,
     AdmissionEscortSerializer,
 )
-from common.mixins import ClinicScopedMixin
+from common.mixins import FacilityScopedMixin
 from common.openapi import document_viewset
 from organization.models import SystemConfig
 from audit.services import AuditService
@@ -46,10 +46,10 @@ from permissions.ward_action_permissions import ensure_doctor_action, ensure_nur
 from .bed_ops import assign_admission_bed, clear_admission_bed, sync_bed_occupancy_after_admission_create
 
 @document_viewset(tag="Wards", resource="wards")
-class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class WardViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing wards."""
 
-    clinic_filter_field = 'clinic'
+    facility_filter_field = 'clinic'
     serializer_class = WardSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['ward_type', 'status', 'floor', 'building', 'clinic']
@@ -64,7 +64,7 @@ class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         return self.scope_queryset(Ward.objects.all().prefetch_related('beds'))
 
     def perform_create(self, serializer):
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         ward = serializer.save(created_by=self.request.user)
 
         # Log audit
@@ -106,10 +106,10 @@ class WardViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Wards", resource="beds")
-class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class BedViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing beds."""
 
-    clinic_filter_field = 'ward__clinic'
+    facility_filter_field = 'ward__clinic'
     serializer_class = BedSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['ward', 'bed_type', 'status']
@@ -199,10 +199,10 @@ class BedViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Wards", resource="patient admissions")
-class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class PatientAdmissionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing patient admissions."""
 
-    clinic_filter_field = 'visit__location_clinic'
+    facility_filter_field = 'visit__location_clinic'
     serializer_class = PatientAdmissionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'ward', 'bed', 'status', 'admission_type', 'admitting_doctor']
@@ -1180,10 +1180,10 @@ class PatientAdmissionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Wards", resource="ward assignments")
-class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class WardAssignmentViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing ward assignments."""
 
-    clinic_filter_field = 'admission__visit__location_clinic'
+    facility_filter_field = 'admission__visit__location_clinic'
     serializer_class = WardAssignmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['admission', 'nurse', 'assignment_type', 'status']
@@ -1289,10 +1289,10 @@ class WardAssignmentViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Wards", resource="admission observation vitals")
-class AdmissionObservationVitalViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class AdmissionObservationVitalViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """Continuous observation vitals for a ward admission (filter: ?admission=)."""
 
-    clinic_filter_field = 'admission__visit__location_clinic'
+    facility_filter_field = 'admission__visit__location_clinic'
     serializer_class = AdmissionObservationVitalSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ["admission"]
@@ -1321,7 +1321,7 @@ class AdmissionObservationVitalViewSet(ClinicScopedMixin, viewsets.ModelViewSet)
 
 
 @document_viewset(tag="Wards", resource="admission escorts")
-class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class AdmissionEscortViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """Escort assignments for ward admissions.
 
     Listing supports the nurse "patients leaving with us" queue via
@@ -1330,7 +1330,7 @@ class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     captures the call-back from the receiving facility.
     """
 
-    clinic_filter_field = 'admission__visit__location_clinic'
+    facility_filter_field = 'admission__visit__location_clinic'
     serializer_class = AdmissionEscortSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['admission', 'facility', 'referral']
@@ -1443,10 +1443,10 @@ class AdmissionEscortViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Wards", resource="admission treatment rows")
-class AdmissionTreatmentRowViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class AdmissionTreatmentRowViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """Treatment sheet rows for a ward admission (filter: ?admission=)."""
 
-    clinic_filter_field = 'admission__visit__location_clinic'
+    facility_filter_field = 'admission__visit__location_clinic'
     serializer_class = AdmissionTreatmentRowSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ["admission"]

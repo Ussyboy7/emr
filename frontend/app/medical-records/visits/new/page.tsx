@@ -22,7 +22,7 @@ import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { 
   Calendar, User, Send, Stethoscope, ClipboardList, Search, AlertTriangle,
-  MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle, X
+  MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle, X, Star
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
@@ -69,7 +69,7 @@ function NewVisitPageContent() {
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
   const [createdVisitData, setCreatedVisitData] = useState<{ visitId: string; patientName: string; date: string; time: string; location: string; clinic: string } | null>(null);
 
-  const { activeClinicId, clinics: userClinics, isMultiClinic } = useClinic();
+  const { activeClinicId, clinics: userClinics } = useClinic();
 
   const [formData, setFormData] = useState({
     patientId: patientIdParam || '',
@@ -86,24 +86,52 @@ function NewVisitPageContent() {
   const [visitClinicNames, setVisitClinicNames] = useState<string[]>([]);
   const [visitClinicsLoading, setVisitClinicsLoading] = useState(false);
 
-  const facilityIdForLocation = useMemo(() => {
-    const loc = (formData.location || '').trim();
-    if (!loc) return null;
-    return locationOptions.find((o) => o.value === loc)?.id ?? null;
-  }, [formData.location, locationOptions]);
+  // Facility selector options are a single source of truth: list only the user's
+  // assigned clinics (labelled with their address). Value = clinic name, id = clinic.
+  const userClinicIds = useMemo(
+    () => new Set((userClinics || []).map((c) => c.id)),
+    [userClinics]
+  );
+  const facilityOptions = useMemo(() => {
+    const opts = locationOptions.filter((o) => userClinicIds.has(o.id));
+    return opts.length > 0 ? opts : locationOptions;
+  }, [locationOptions, userClinicIds]);
+
+  const selectedFacilityId = useMemo(
+    () =>
+      formData.locationClinic ??
+      facilityOptions.find((o) => o.value === formData.location)?.id ??
+      null,
+    [formData.locationClinic, formData.location, facilityOptions]
+  );
 
   useEffect(() => {
     setFormData((prev) => ({ ...prev, clinics: [] }));
-  }, [facilityIdForLocation]);
+  }, [selectedFacilityId]);
+
+  // Preselect the active clinic's facility once options are available.
+  useEffect(() => {
+    if (formData.location || facilityOptions.length === 0) return;
+    const preferred =
+      activeClinicId != null
+        ? facilityOptions.find((o) => o.id === activeClinicId)
+        : undefined;
+    const pick = preferred ?? facilityOptions[0];
+    if (!pick) return;
+    setFormData((prev) => ({ ...prev, location: pick.value, locationClinic: pick.id }));
+  }, [activeClinicId, facilityOptions, formData.location]);
+
+  const handleFacilityChange = (value: string) => {
+    const opt = facilityOptions.find((o) => o.value === value);
+    setFormData((prev) => ({
+      ...prev,
+      location: value,
+      locationClinic: opt?.id ?? prev.locationClinic,
+    }));
+  };
 
   useEffect(() => {
-    if (activeClinicId && !formData.locationClinic) {
-      setFormData((prev) => ({ ...prev, locationClinic: activeClinicId }));
-    }
-  }, [activeClinicId]);
-
-  useEffect(() => {
-    if (!facilityIdForLocation) {
+    if (!selectedFacilityId) {
       setVisitClinicNames([]);
       setVisitClinicsLoading(false);
       return;
@@ -112,7 +140,7 @@ function NewVisitPageContent() {
     (async () => {
       setVisitClinicsLoading(true);
       try {
-        const rows = await adminService.getFacilityVisitClinics(facilityIdForLocation);
+        const rows = await adminService.getFacilityVisitClinics(selectedFacilityId);
         if (!cancelled) {
           setVisitClinicNames((rows || []).map((r) => r.name));
         }
@@ -125,7 +153,7 @@ function NewVisitPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [facilityIdForLocation]);
+  }, [selectedFacilityId]);
 
   // Set date/time on client only to avoid hydration mismatch (new Date() differs server vs client)
   useEffect(() => {
@@ -268,18 +296,15 @@ function NewVisitPageContent() {
     }
   };
 
-  // Calculate completion percentage
+  // Calculate completion percentage (required user inputs only; date/time auto-default).
   const completionPercentage = useMemo(() => {
     let completed = 0;
-    let total = 5; // patient, visitType, clinic(s), location, date
+    let total = 4; // patient, visitType, facility, clinic(s)
 
     if (selectedPatient) completed++;
     if (formData.visitType) completed++;
-    if (formData.clinics.length > 0) completed++; // At least one clinic selected
     if (formData.location) completed++;
-    if (formData.visitDate) completed++;
-
-
+    if (formData.clinics.length > 0) completed++; // At least one clinic selected
 
     return Math.round((completed / total) * 100);
   }, [selectedPatient, formData]);
@@ -304,20 +329,27 @@ function NewVisitPageContent() {
       return;
     }
 
+    // Every selected clinic must be recognized by the OPD master list, otherwise it
+    // would be silently dropped from the payload on submit.
+    const normalizedClinicNames = formData.clinics.map((c) => normalizeClinicName(c, opdMasterNames));
+    const unknownClinics = formData.clinics.filter((_, i) => !normalizedClinicNames[i]);
+    if (unknownClinics.length > 0) {
+      toast.error(`Unrecognised clinic (please remove it and choose from the list): ${unknownClinics.join(', ')}`);
+      return;
+    }
+
     try {
       setIsSubmitting(true);
 
       // Prepare visit data for API
       // Ensure proper data types and format
       const patientId = selectedPatient.numericId || selectedPatient.id;
-      const primaryClinic = formData.clinics[0]; // First clinic is primary
+      const primaryClinic = normalizedClinicNames[0]; // First clinic is primary
       const visitData = {
         patient: typeof patientId === 'string' ? parseInt(patientId, 10) : patientId,
         visit_type: formData.visitType,
-        clinic: normalizeClinicName(primaryClinic, opdMasterNames) || primaryClinic.trim(),
-        clinics: formData.clinics
-          .map((c) => normalizeClinicName(c, opdMasterNames))
-          .filter((x): x is string => Boolean(x)),
+        clinic: primaryClinic || formData.clinics[0].trim(),
+        clinics: normalizedClinicNames,
         location: formData.location || '',
         date: formData.visitDate,
         // Ensure time is in HH:MM:SS format for Django
@@ -566,34 +598,19 @@ function NewVisitPageContent() {
 
                 {/* Facility (site) and clinics */}
                 <div className="space-y-4">
-                  {isMultiClinic && (
-                    <div className="space-y-2">
-                      <Label>Care Facility *</Label>
-                      <p className="text-xs text-muted-foreground">Select the care facility for this visit.</p>
-                      <Select
-                        value={formData.locationClinic?.toString() || ''}
-                        onValueChange={(v) => setFormData((prev) => ({ ...prev, locationClinic: parseInt(v) }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select care facility" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {userClinics.map((c) => (
-                            <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
                   <div className="space-y-2">
-                    <Label>Facility (location) *</Label>
+                    <Label>Facility *</Label>
                     <p className="text-xs text-muted-foreground">Select the physical site where this visit will take place.</p>
-                    <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)} disabled={locationOptions.length === 0}>
+                    <Select
+                      value={formData.location}
+                      onValueChange={handleFacilityChange}
+                      disabled={locationOptions.length === 0}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder={locationOptions.length === 0 ? "No facilities—add one in Admin" : "Select facility"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {locationOptions.map((loc) => (
+                        {facilityOptions.map((loc) => (
                           <SelectItem key={loc.value} value={loc.value}>{loc.label}</SelectItem>
                         ))}
                       </SelectContent>
@@ -641,9 +658,11 @@ function NewVisitPageContent() {
                     )}
                     {formData.clinics.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">
-                        {formData.clinics.map((clinic) => (
-                          <Badge key={clinic} variant="secondary" className="gap-1">
+                        {formData.clinics.map((clinic, idx) => (
+                          <Badge key={clinic} variant={idx === 0 ? "default" : "secondary"} className="gap-1">
+                            {idx === 0 && <Star className="h-3 w-3" />}
                             {clinic}
+                            {idx === 0 && <span className="text-xs opacity-80">Primary</span>}
                             <button
                               onClick={() => handleClinicToggle(clinic)}
                               className="ml-1 hover:text-destructive"

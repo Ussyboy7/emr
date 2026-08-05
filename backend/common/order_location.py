@@ -63,9 +63,9 @@ def resolve_order_location_clinic(*, visit=None, session=None, user=None):
             return loc
 
     if user is not None:
-        from accounts.utils import resolve_clinic
+        from accounts.utils import resolve_facility
 
-        clinic = resolve_clinic(user)
+        clinic = resolve_facility(user)
         if clinic is not None:
             return clinic
 

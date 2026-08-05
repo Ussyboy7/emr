@@ -127,12 +127,15 @@ def patient_gender_key(patient: Patient) -> str | None:
     return None
 
 
-def attendable_visits_queryset():
+def attendable_visits_queryset(org_clinic_id: int | None = None):
     vital_exists = VitalReading.objects.filter(visit_id=OuterRef("pk"))
-    return Visit.objects.filter(
+    qs = Visit.objects.filter(
         Q(status__in=["in_progress", "completed"])
         | (Q(status="cancelled") & Exists(vital_exists))
     ).select_related("patient")
+    if org_clinic_id is not None:
+        qs = qs.filter(location_clinic_id=org_clinic_id)
+    return qs
 
 
 def clinics_for_visit(visit: Visit) -> list[str]:
@@ -216,12 +219,15 @@ def build_attendance_statistics(
     end_date: date,
     metric: Metric = "attendance_count",
     clinic_filter: str | None = None,
+    org_clinic_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Build the full matrix or a single-clinic slice.
 
     clinic_filter: canonical clinic name; when set, only that clinic's rows are returned
                    (no weekend row).
+    org_clinic_id: organization.Clinic PK; when set, only visits belonging to that
+                   org clinic are counted (multi-clinic tenant scoping).
     """
     active_clinics = get_active_clinic_rows()
     active_names = {c["key"] for c in active_clinics}
@@ -235,7 +241,7 @@ def build_attendance_statistics(
     weekend_store = _empty_clinic_store(metric)
     weekend_visits_counted: set[int] = set()
 
-    visits = attendable_visits_queryset().filter(
+    visits = attendable_visits_queryset(org_clinic_id=org_clinic_id).filter(
         date__gte=start_date,
         date__lte=end_date,
     )

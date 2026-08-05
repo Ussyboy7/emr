@@ -18,8 +18,8 @@ from django.db import transaction
 from django.utils import timezone
 from datetime import date, timedelta
 
-from common.mixins import ClinicScopedMixin
-from accounts.utils import resolve_clinic, resolve_clinic_id
+from common.mixins import FacilityScopedMixin
+from accounts.utils import resolve_facility, resolve_facility_id
 from organization.models import SystemConfig
 from django.http import HttpResponse
 from django.core.files.base import ContentFile
@@ -506,7 +506,7 @@ def _apply_patient_list_filters(queryset, request):
     partial_update=extend_schema(summary="Partially update patient", tags=["Patients"]),
     destroy=extend_schema(summary="Deactivate patient", tags=["Patients"]),
 )
-class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class PatientViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing patients.
     
@@ -518,7 +518,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     destroy: Soft delete a patient (set is_active=False)
     """
     
-    clinic_filter_field = 'location_clinic'
+    facility_filter_field = 'location_clinic'
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Support file uploads
     pagination_class = PatientPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -551,7 +551,11 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(merged_into__isnull=False)
         elif not include_merged:
             queryset = queryset.filter(merged_into__isnull=True)
-        queryset = self.scope_queryset(queryset).select_related('principal_staff', 'created_by', 'updated_by')
+        # Patients are a universal/shared registry: any patient may receive care at
+        # any clinic, so the master list, counts, and retrieve are intentionally NOT
+        # clinic-scoped. Clinic attribution (home clinic) is informational only; see
+        # scope_queryset usage on visit/vitals sub-actions for per-clinic gating.
+        queryset = queryset.select_related('principal_staff', 'created_by', 'updated_by')
         if self.action == 'list':
             latest_visit = Visit.objects.filter(patient=OuterRef('pk')).order_by(
                 '-date', '-time', '-created_at'
@@ -563,6 +567,14 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
             )
             queryset = _apply_patient_list_filters(queryset, self.request)
         return queryset
+
+    def filter_queryset(self, queryset):
+        # Patients are a universal registry, so reads (list/counts/retrieve) must not
+        # be clinic-scoped. Apply standard DRF filter backends only; the per-clinic
+        # gating for encounter sub-actions (visits/vitals) is applied in those actions.
+        for backend in list(self.filter_backends):
+            queryset = backend().filter_queryset(self.request, queryset, self)
+        return queryset
     
     def get_serializer_class(self):
         """Use lightweight serializer for list, full serializer for detail."""
@@ -572,7 +584,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Set created_by when creating a patient and log audit."""
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         patient = serializer.save(created_by=self.request.user)
         AuditService.log_patient_action(
             user=self.request.user,
@@ -1386,7 +1398,7 @@ class PatientViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     partial_update=extend_schema(summary="Partially update visit", tags=["Visits"]),
     destroy=extend_schema(summary="Cancel or remove visit", tags=["Visits"]),
 )
-class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class VisitViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing patient visits.
     """
@@ -1662,6 +1674,8 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
         old_instance = self.get_object()
         old_status = old_instance.status
 
+        self.auto_set_facility(serializer)
+
         visit = serializer.save()
 
         if old_status != visit.status and visit.status in ('completed', 'cancelled'):
@@ -1715,7 +1729,7 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Set created_by when creating a visit and log audit."""
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         visit = serializer.save(created_by=self.request.user)
         if visit.visit_type == "annual_checkup":
             create_annual_checkup_for_visit(visit)
@@ -1773,12 +1787,12 @@ class VisitViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     partial_update=extend_schema(summary="Partially update vitals", tags=["Vitals"]),
     destroy=extend_schema(summary="Delete vital reading", tags=["Vitals"]),
 )
-class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class VitalReadingViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing vital readings.
     """
     
-    clinic_filter_field = 'visit__location_clinic'
+    facility_filter_field = 'visit__location_clinic'
     serializer_class = VitalReadingSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'visit']
@@ -2042,12 +2056,13 @@ class VitalReadingViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Patients", resource="medical certificates")
-class MedicalCertificateViewSet(viewsets.ModelViewSet):
+class MedicalCertificateViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """
     Persisted medical certificates.
     Created from consultation or Medical Records; PDF via GET .../pdf/ (NPA house style).
     """
     serializer_class = MedicalCertificateSerializer
+    facility_filter_field = "patient__location_clinic"
     pagination_class = MedicalCertificatePagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     ordering_fields = ["issued_at", "valid_from", "valid_to", "certificate_number"]
@@ -2065,6 +2080,13 @@ class MedicalCertificateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         # Stamp who issued the certificate (doctor) - DB snapshot fields are handled in the model.
+        from permissions.user_capabilities import ensure_capability
+
+        ensure_capability(
+            self.request.user,
+            "medical_certificate_issue",
+            "Only authorised staff can issue medical certificates.",
+        )
         serializer.save(issued_by=self.request.user)
 
     @extend_schema(tags=["Patients"], summary="Pdf", description="Download medical certificate as PDF (NPA house style).")
@@ -2078,14 +2100,14 @@ class MedicalCertificateViewSet(viewsets.ModelViewSet):
 
 
 @document_viewset(tag="HR", resource="annual checkups")
-class AnnualCheckupViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class AnnualCheckupViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """
     Annual employee check-up programme records.
 
     Linked 1:1 to visits with visit_type=annual_checkup.
     """
 
-    clinic_filter_field = "visit__location_clinic"
+    facility_filter_field = "visit__location_clinic"
     serializer_class = AnnualCheckupSerializer
     http_method_names = ["get", "post", "patch", "head", "options"]
     filter_backends = [DjangoFilterBackend, OrderingFilter]

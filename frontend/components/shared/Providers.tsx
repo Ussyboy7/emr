@@ -8,7 +8,7 @@ import { ClientErrorBoundary } from '@/components/shared/ClientErrorBoundary';
 import { Toaster as ToastToaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { OrganizationProvider } from "@/contexts/OrganizationContext";
-import { ClinicProvider } from "@/contexts/ClinicContext";
+import { ClinicProvider, useClinicContext } from "@/contexts/ClinicContext";
 import { ServerDateProvider } from "@/components/providers/ServerDateProvider";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
@@ -67,6 +67,13 @@ function AuthzGate({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ClinicScopeTree({ children }: { children: React.ReactNode }) {
+  // Remounts the page tree whenever the active clinic changes so data-fetching
+  // effects re-run against the new scope (replaces the old full-page reload).
+  const { clinicVersion } = useClinicContext();
+  return <div key={clinicVersion} className="contents">{children}</div>;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider
@@ -77,15 +84,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
     >
       <OrganizationProvider>
         <ClinicProvider>
-          <ClientErrorBoundary>
-            <TooltipProvider>
-              <ServerDateProvider>
-                <AuthzGate>{children}</AuthzGate>
-              </ServerDateProvider>
-              <Toaster />
-              <ToastToaster />
-            </TooltipProvider>
-          </ClientErrorBoundary>
+          <ClinicScopeTree>
+            <ClientErrorBoundary>
+              <TooltipProvider>
+                <ServerDateProvider>
+                  <AuthzGate>{children}</AuthzGate>
+                </ServerDateProvider>
+                <Toaster />
+                <ToastToaster />
+              </TooltipProvider>
+            </ClientErrorBoundary>
+          </ClinicScopeTree>
         </ClinicProvider>
       </OrganizationProvider>
     </ThemeProvider>

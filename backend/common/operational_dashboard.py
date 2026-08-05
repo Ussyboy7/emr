@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from appointments.models import Appointment
 from common.cache_helpers import cache_get_or_set
+from common.mixins import SCOPE_ALL
 from consultation.models import ConsultationQueue, ConsultationSession
 from laboratory.models import LabTest
 from patients.models import Visit
@@ -25,21 +26,37 @@ def _parse_api_date(raw: str | None) -> date:
     return timezone.localdate()
 
 
-def build_operational_dashboard(target_date: date | None = None) -> dict:
+def build_operational_dashboard(
+    target_date: date | None = None, *, clinic_scope=None
+) -> dict:
+    """
+    Single-request aggregates for the global EMR operational dashboard.
+
+    ``clinic_scope`` mirrors ``common.mixins.resolve_facility_scope`` output:
+    ``None`` (no scoping), ``SCOPE_ALL`` (all clinics), or a ``Clinic`` instance.
+    """
     today = target_date or timezone.localdate()
     yesterday = today - timedelta(days=1)
-    cache_key = f"operational_dashboard:{today.isoformat()}"
+    scope_id = getattr(clinic_scope, "id", None) if clinic_scope not in (None, SCOPE_ALL) else clinic_scope
+    cache_key = f"operational_dashboard:{today.isoformat()}:{scope_id or 'all'}"
 
     def _build() -> dict:
         day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
         day_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
 
-        visits_today_qs = Visit.objects.filter(
-            Q(created_at__date=today) | Q(date=today)
+        def scoped(qs, field="location_clinic_id"):
+            if clinic_scope is None or clinic_scope == SCOPE_ALL:
+                return qs
+            return qs.filter(**{field: clinic_scope})
+
+        visits_today_qs = scoped(
+            Visit.objects.filter(Q(created_at__date=today) | Q(date=today))
         )
         patients_today = visits_today_qs.values("patient_id").distinct().count()
         patients_yesterday = (
-            Visit.objects.filter(Q(created_at__date=yesterday) | Q(date=yesterday))
+            scoped(
+                Visit.objects.filter(Q(created_at__date=yesterday) | Q(date=yesterday))
+            )
             .values("patient_id")
             .distinct()
             .count()
@@ -50,12 +67,17 @@ def build_operational_dashboard(target_date: date | None = None) -> dict:
             else 0
         )
 
-        consultation_today = ConsultationSession.objects.filter(
-            started_at__gte=day_start,
-            started_at__lte=day_end,
+        consultation_today = scoped(
+            ConsultationSession.objects.filter(
+                started_at__gte=day_start,
+                started_at__lte=day_end,
+            )
         ).count()
 
-        lab_agg = LabTest.objects.aggregate(
+        lab_agg = scoped(
+            LabTest.objects.all(),
+            field="order__location_clinic_id",
+        ).aggregate(
             pending=Count("id", filter=Q(status="pending")),
             in_progress=Count(
                 "id",
@@ -66,22 +88,30 @@ def build_operational_dashboard(target_date: date | None = None) -> dict:
         lab_pending = lab_agg["pending"] or 0
         lab_tests_today = lab_pending + (lab_agg["in_progress"] or 0)
 
-        prescriptions_today = Prescription.objects.filter(
-            dispensed_at__date=today,
-            status="dispensed",
+        prescriptions_today = scoped(
+            Prescription.objects.filter(
+                dispensed_at__date=today,
+                status="dispensed",
+            )
         ).count()
 
-        consultation_waiting = ConsultationQueue.objects.filter(is_active=True).count()
-        pharmacy_queue = Prescription.objects.filter(status="pending").count()
+        consultation_waiting = scoped(
+            ConsultationQueue.objects.filter(is_active=True), field="room__clinic_id"
+        ).count()
+        pharmacy_queue = scoped(
+            Prescription.objects.filter(status="pending")
+        ).count()
 
         nursing_pool = (
-            Visit.objects.filter(date=today)
+            scoped(
+                Visit.objects.filter(date=today)
+            )
             .exclude(status__in=["cancelled", "completed"])
             .count()
         )
 
         recent_visits = (
-            visits_today_qs.select_related("patient")
+            visits_today_qs.select_related("patient", "location_clinic")
             .order_by("-created_at")[:5]
         )
         recent_patients = []
@@ -99,7 +129,8 @@ def build_operational_dashboard(target_date: date | None = None) -> dict:
                     "visitId": visit.id,
                     "id": patient.patient_id if patient else "",
                     "name": patient.get_full_name() if patient else "",
-                    "clinic": visit.clinic or "",
+                    "clinic": getattr(visit.location_clinic, "name", None) or visit.clinic or "",
+                    "locationClinicId": visit.location_clinic_id,
                     "time": (visit.created_at or timezone.now()).isoformat(),
                     "status": status_label,
                 }
@@ -116,7 +147,7 @@ def build_operational_dashboard(target_date: date | None = None) -> dict:
                 }
             )
         low_stock = (
-            MedicationInventory.objects.filter(quantity__lte=F("min_stock_level"))
+            scoped(MedicationInventory.objects.filter(quantity__lte=F("min_stock_level")))
             .exclude(quantity=0)
             .count()
         )
@@ -129,9 +160,10 @@ def build_operational_dashboard(target_date: date | None = None) -> dict:
                 }
             )
 
+        # Per-organization-clinic breakdown (location_clinic FK, not the legacy string).
         clinic_counts: dict[str, int] = defaultdict(int)
-        for row in visits_today_qs.values("clinic").annotate(c=Count("id")):
-            label = (row.get("clinic") or "Unassigned").strip() or "Unassigned"
+        for row in visits_today_qs.values("location_clinic__name").annotate(c=Count("id")):
+            label = (row.get("location_clinic__name") or "Unassigned").strip() or "Unassigned"
             clinic_counts[label] += row["c"]
         clinic_rows = [
             {
@@ -144,9 +176,12 @@ def build_operational_dashboard(target_date: date | None = None) -> dict:
         ]
 
         upcoming = (
-            Appointment.objects.filter(
-                appointment_date__gte=today,
-                status__in=["scheduled", "confirmed"],
+            scoped(
+                Appointment.objects.filter(
+                    appointment_date__gte=today,
+                    status__in=["scheduled", "confirmed"],
+                ),
+                field="clinic_id",
             )
             .select_related("patient", "clinic")
             .order_by("appointment_date", "appointment_time")[:3]

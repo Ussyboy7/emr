@@ -55,8 +55,9 @@ from .serializers import (
     TemplateFieldOptionSerializer,
     OTHER_TEMPLATE_CODES,
 )
-from common.mixins import ClinicScopedMixin, LabRadiologyScopedMixin
+from common.mixins import FacilityScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_ID_PARAMS, document_viewset
+from permissions.user_capabilities import ensure_capability
 from .pagination import FlexiblePageNumberPagination, LabCatalogPagination
 from .result_display import dedupe_result_alias_rows, sort_lab_result_rows_for_pdf
 from audit.services import AuditService
@@ -385,7 +386,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         # Set the doctor field using multiple fallback strategies
         data = serializer.validated_data.copy()
         if data.get('source_type') != 'external_manual' and ('doctor' not in data or data['doctor'] is None):
@@ -940,6 +941,11 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def submit_results(self, request, pk=None):
         """Submit results for a test."""
+        ensure_capability(
+            request.user,
+            "lab_result_submit",
+            "Only authorised laboratory staff can submit results.",
+        )
         order = self.get_object()
         test_id = request.data.get('test_id')
         results = _parse_results_payload(request.data.get('results', {}))
@@ -1105,9 +1111,10 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Laboratory", resource="lab tests")
-class LabTestViewSet(viewsets.ModelViewSet):
+class LabTestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing lab tests."""
     serializer_class = LabTestSerializer
+    facility_filter_field = 'order__location_clinic'
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['order', 'status', 'processing_method', 'order__patient']
     ordering_fields = ['created_at']
@@ -1202,10 +1209,10 @@ class LabTestViewSet(viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Laboratory", resource="lab results", read_only=True)
-class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
+class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing lab results awaiting verification."""
     
-    clinic_filter_field = 'order__processing_clinic'
+    facility_filter_field = 'order__processing_clinic'
     serializer_class = LabResultSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
@@ -1733,6 +1740,11 @@ class LabResultViewSet(ClinicScopedMixin, viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verify a lab result."""
+        ensure_capability(
+            request.user,
+            "lab_result_verify",
+            "Only authorised laboratory staff can verify results.",
+        )
         result = self.get_object()
         test = result.test
 

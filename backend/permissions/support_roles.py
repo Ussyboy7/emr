@@ -25,6 +25,7 @@ SENSITIVE_CAPABILITY_IDS: frozenset[str] = frozenset(
         "notification_routing_manage",
         "hr_compliance_manage",
         "annual_checkup_signoff",
+        "clinical_data_view_all",
     }
 )
 

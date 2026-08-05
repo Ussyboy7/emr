@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.openapi import document_api_view
-from accounts.utils import resolve_clinic_id
+from accounts.utils import resolve_facility_id
 from organization.models import SystemConfig
 from physiotherapy.filters import filter_physio_orders_by_search
 from physiotherapy.models import PhysioOrder, PhysioSession
@@ -40,7 +40,7 @@ def _filter_orders_by_search(qs, search: str):
 
 def _scope_orders_for_user(qs, user):
     if SystemConfig.is_enabled('multi_clinic_enabled'):
-        clinic_id = resolve_clinic_id(user)
+        clinic_id = resolve_facility_id(user)
         if clinic_id is not None:
             qs = qs.filter(location_clinic_id=clinic_id)
     return qs

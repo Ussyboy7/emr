@@ -10,6 +10,7 @@ from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
 from consultation.models import ConsultationSession, Diagnosis
+from common.mixins import SCOPE_ALL
 from laboratory.models import LabOrder, LabTest
 from patients.models import Patient, Visit
 from pharmacy.models import MedicationInventory, Prescription
@@ -67,23 +68,32 @@ def _category_rows(visits_qs) -> tuple[list[dict[str, Any]], dict[str, int]]:
 
 
 def build_clinical_dashboard(
-    start_dt: datetime, end_dt: datetime, *, all_time: bool = False
+    start_dt: datetime, end_dt: datetime, *, all_time: bool = False, clinic_scope=None
 ) -> dict[str, Any]:
     start_d = start_dt.date()
     end_d = end_dt.date()
 
-    visits = Visit.objects.filter(date__gte=start_d, date__lte=end_d).select_related("patient")
+    def scoped(qs, field="location_clinic_id"):
+        if clinic_scope is None or clinic_scope == SCOPE_ALL:
+            return qs
+        return qs.filter(**{field: clinic_scope})
+
+    visits = scoped(
+        Visit.objects.filter(date__gte=start_d, date__lte=end_d).select_related("patient")
+    )
     total_visits = visits.count()
     completed_visits = visits.filter(status="completed").count()
     completion_rate = round((completed_visits / total_visits * 100) if total_visits else 0, 1)
 
     unique_patients_seen = visits.values("patient").distinct().count()
-    total_active_patients = Patient.objects.filter(is_active=True).count()
+    total_active_patients = scoped(Patient.objects.filter(is_active=True)).count()
 
-    sessions = ConsultationSession.objects.filter(
-        started_at__gte=start_dt,
-        started_at__lte=end_dt,
-    ).exclude(status="cancelled")
+    sessions = scoped(
+        ConsultationSession.objects.filter(
+            started_at__gte=start_dt,
+            started_at__lte=end_dt,
+        ).exclude(status="cancelled")
+    )
     completed_sessions = sessions.filter(status="completed")
     completed_count = completed_sessions.count()
 
@@ -94,10 +104,15 @@ def build_clinical_dashboard(
     avg_duration = round(sum(durations) / len(durations), 1) if durations else 0.0
     avg_wait = avg_duration  # best available proxy without queue timestamps
 
-    lab_orders = LabOrder.objects.filter(ordered_at__gte=start_dt, ordered_at__lte=end_dt)
-    tests_qs = LabTest.objects.filter(
-        order__ordered_at__gte=start_dt,
-        order__ordered_at__lte=end_dt,
+    lab_orders = scoped(
+        LabOrder.objects.filter(ordered_at__gte=start_dt, ordered_at__lte=end_dt)
+    )
+    tests_qs = scoped(
+        LabTest.objects.filter(
+            order__ordered_at__gte=start_dt,
+            order__ordered_at__lte=end_dt,
+        ),
+        field="order__location_clinic_id",
     )
     tests_total = tests_qs.count()
     tests_verified = tests_qs.filter(status="verified").count()
@@ -128,23 +143,30 @@ def build_clinical_dashboard(
         {"test": row["name"] or "Unknown", "count": row["count"]} for row in top_tests
     ]
 
-    rx_period = Prescription.objects.filter(
-        prescribed_at__gte=start_dt,
-        prescribed_at__lte=end_dt,
-    ).exclude(status="cancelled")
+    rx_period = scoped(
+        Prescription.objects.filter(
+            prescribed_at__gte=start_dt,
+            prescribed_at__lte=end_dt,
+        ).exclude(status="cancelled")
+    )
     dispensed_period = rx_period.filter(status="dispensed")
-    pending_rx = Prescription.objects.filter(status="pending").count()
-    low_stock = MedicationInventory.objects.filter(quantity__lte=F("min_stock_level")).count()
+    pending_rx = scoped(Prescription.objects.filter(status="pending")).count()
+    low_stock = scoped(
+        MedicationInventory.objects.filter(quantity__lte=F("min_stock_level"))
+    ).count()
 
     wait_samples = []
     for rx in dispensed_period.filter(dispensed_at__isnull=False, prescribed_at__isnull=False)[:200]:
         wait_samples.append((rx.dispensed_at - rx.prescribed_at).total_seconds() / 60)
     avg_rx_wait = round(sum(wait_samples) / len(wait_samples), 1) if wait_samples else 0.0
 
-    diag_qs = Diagnosis.objects.filter(
-        diagnosed_at__gte=start_dt,
-        diagnosed_at__lte=end_dt,
-        icd10_code__isnull=False,
+    diag_qs = scoped(
+        Diagnosis.objects.filter(
+            diagnosed_at__gte=start_dt,
+            diagnosed_at__lte=end_dt,
+            icd10_code__isnull=False,
+        ),
+        field="session__location_clinic_id",
     )
     diag_total = diag_qs.count()
     top_diag_rows = (
@@ -165,8 +187,9 @@ def build_clinical_dashboard(
     ]
 
     clinic_distribution: dict[str, int] = defaultdict(int)
-    for row in visits.values("clinic").annotate(c=Count("id")).order_by("-c"):
-        label = (row["clinic"] or "Unspecified").strip() or "Unspecified"
+    # Keyed on the organization.Clinic FK (location_clinic), not the legacy string field.
+    for row in visits.values("location_clinic__name").annotate(c=Count("id")).order_by("-c"):
+        label = (row["location_clinic__name"] or "Unspecified").strip() or "Unspecified"
         clinic_distribution[label] += row["c"]
 
     category_rows, attendance_totals = _category_rows(visits)

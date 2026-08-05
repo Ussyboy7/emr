@@ -24,6 +24,23 @@ from reports.export_helpers import respond_with_export
 from common.openapi import document_api_view
 
 
+def _org_clinic_scope(request):
+    """Resolve the request's org-clinic scope (query param or session), or None when unscoped."""
+    from common.mixins import SCOPE_ALL, resolve_facility_scope
+
+    scope = resolve_facility_scope(request)
+    if scope is None or scope == SCOPE_ALL:
+        return None
+    return scope.id
+
+
+def _scope_visits_by_org_clinic(request, qs):
+    """Apply org-clinic tenant scoping to a report queryset (multi-clinic aware)."""
+    from common.mixins import scope_query_by_facility
+
+    return scope_query_by_facility(qs, request, field="location_clinic_id")
+
+
 def _period_bounds_from_request(request, *, default_to_current_year=False):
     """Parse request query params into inclusive (start, end) date bounds."""
     from common.report_period import bounds_from_request
@@ -638,10 +655,13 @@ class ClinicAttendanceReportView(views.APIView):
             request, default_to_current_year=True
         )
 
-        # Filter visits by clinic
-        history_queryset = Visit.objects.filter(
-            status__in=['completed', 'in_progress'],
-            clinic__icontains=clinic_type,
+        # Filter visits by clinic (OPD type) and org-clinic tenant scope
+        history_queryset = _scope_visits_by_org_clinic(
+            request,
+            Visit.objects.filter(
+                status__in=['completed', 'in_progress'],
+                clinic__icontains=clinic_type,
+            ),
         ).select_related('patient')
         visits_queryset = history_queryset.filter(
             date__gte=period_start,
@@ -922,15 +942,18 @@ class GOPAttendanceReportView(views.APIView):
         )
 
         # GOPD / legacy general-outpatient visit lines (primary clinic, JSON clinics list, or legacy labels)
-        history_visits = Visit.objects.filter(
-            status__in=['completed', 'in_progress']
-        ).filter(
-            Q(visit_type='consultation')
-            | Q(clinic__icontains='general')
-            | Q(clinic__icontains='outpatient')
-            | Q(clinic__iexact='GOPD')
-            | Q(clinic__iexact='gopd')
-            | Q(clinics__contains=['GOPD'])
+        history_visits = _scope_visits_by_org_clinic(
+            request,
+            Visit.objects.filter(
+                status__in=['completed', 'in_progress']
+            ).filter(
+                Q(visit_type='consultation')
+                | Q(clinic__icontains='general')
+                | Q(clinic__icontains='outpatient')
+                | Q(clinic__iexact='GOPD')
+                | Q(clinic__iexact='gopd')
+                | Q(clinics__contains=['GOPD'])
+            ),
         ).select_related('patient').annotate(
             month=ExtractMonth('date')
         )
@@ -1515,6 +1538,7 @@ class AttendanceStatisticsReportView(views.APIView):
             end_date=period_end,
             metric=metric,
             clinic_filter=clinic_type,
+            org_clinic_id=_org_clinic_scope(request),
         )
 
         history_qs = Visit.objects.all()

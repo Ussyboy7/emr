@@ -26,6 +26,7 @@ export interface OperationalDashboardPayload {
     id: string;
     name: string;
     clinic: string;
+    locationClinicId?: number | null;
     time: string;
     status: string;
   }>;
@@ -45,7 +46,7 @@ export interface OperationalDashboardPayload {
 }
 
 export async function getOperationalDashboard(
-  params?: { date?: string },
+  params?: { date?: string; clinic_id?: string },
 ): Promise<OperationalDashboardPayload> {
   const qs = buildQueryString((params || {}) as Record<string, string | undefined>);
   return apiFetch<OperationalDashboardPayload>(`/common/dashboard/operational${qs || '/'}`);

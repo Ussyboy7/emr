@@ -19,12 +19,17 @@ class ClinicalDashboardAnalyticsView(views.APIView):
     permission_classes = AuthenticatedWithPageAccess
 
     def get(self, request):
+        from common.mixins import resolve_facility_scope
+
         parsed = parse_analytics_dates(request)
         if isinstance(parsed, Response):
             return parsed
 
         start_dt, end_dt, all_time = parsed
-        data = build_clinical_dashboard(start_dt, end_dt, all_time=all_time)
+        clinic_scope = resolve_facility_scope(request)
+        data = build_clinical_dashboard(
+            start_dt, end_dt, all_time=all_time, clinic_scope=clinic_scope
+        )
 
         exported = maybe_export_analytics(request, data, module_key="clinical")
         if exported is not None:

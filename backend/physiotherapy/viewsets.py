@@ -20,9 +20,9 @@ from rest_framework.response import Response
 from common.pagination import StandardPageNumberPagination
 
 from common.session_report_pdf import build_physio_session_pdf_bytes
-from accounts.utils import resolve_clinic, resolve_clinic_id
+from accounts.utils import resolve_facility, resolve_facility_id
 from common.cache_helpers import cache_get_or_set
-from common.mixins import ClinicScopedMixin
+from common.mixins import FacilityScopedMixin
 from common.openapi import document_destroy_viewset, document_viewset
 from organization.models import SystemConfig
 from patients.models import Visit
@@ -61,7 +61,7 @@ class PhysioTemplateViewSet(viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Physiotherapy", resource="physio orders")
-class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = PhysioOrderFilter
@@ -93,7 +93,7 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         from common.order_location import apply_order_location_clinic
 
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         validated = apply_order_location_clinic(
             dict(serializer.validated_data),
             user=self.request.user,
@@ -271,7 +271,7 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
             visit_qs = Visit.objects.select_related("patient").filter(pk=visit_id)
             if SystemConfig.is_enabled('multi_clinic_enabled'):
-                v_clinic_id = resolve_clinic_id(self.request.user)
+                v_clinic_id = resolve_facility_id(self.request.user)
                 if v_clinic_id is not None:
                     visit_qs = visit_qs.filter(location_clinic=v_clinic_id)
             visit = visit_qs.first()
@@ -332,13 +332,13 @@ class PhysioOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Physiotherapy", resource="physio sessions")
-class PhysioSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class PhysioSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = PhysioSessionFilter
     ordering_fields = ["scheduled_at", "created_at", "completed_at", "status", "session_number"]
     ordering = ["-completed_at", "-scheduled_at"]
-    clinic_filter_field = 'order__location_clinic'
+    facility_filter_field = 'order__location_clinic'
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):

@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.mixins import scope_query_by_facility
 from common.openapi import document_api_view
 from radiology.models import RadiologyOrder, RadiologyReport, RadiologyStudy
 
@@ -79,18 +80,19 @@ class RadiologyPatientTrackerView(APIView):
 
         orders_qs = (
             RadiologyOrder.objects.all()
-            .select_related('patient', 'doctor')
+            .select_related('patient', 'doctor', 'location_clinic')
             .prefetch_related(
                 Prefetch('studies', queryset=RadiologyStudy.objects.select_related('template').order_by('id'))
             )
         )
+        orders_qs = scope_query_by_facility(orders_qs, request, field='location_clinic_id')
         orders_qs = _filter_orders_by_search(orders_qs, search)[:40]
 
         for order in orders_qs:
             patient = order.patient
             patient_name = patient.get_full_name() if patient else ''
             patient_id = getattr(patient, 'patient_id', '') or ''
-            clinic = order.clinic or ''
+            clinic = getattr(order.location_clinic, 'name', None) or order.clinic or ''
             for study in order.studies.all():
                 key = ('study', study.id)
                 if key in seen:
@@ -136,7 +138,10 @@ class RadiologyPatientTrackerView(APIView):
 
         pending_verification = (
             RadiologyReport.objects.filter(study__status='reported')
-            .select_related('patient', 'order', 'study')
+            .select_related('patient', 'order', 'study', 'order__location_clinic')
+        )
+        pending_verification = scope_query_by_facility(
+            pending_verification, request, field='order__location_clinic_id'
         )
         pending_verification = _filter_reports_by_search(pending_verification, search)[:40]
 
@@ -155,7 +160,7 @@ class RadiologyPatientTrackerView(APIView):
                 'study_status': study.status,
                 'study_status_display': _study_status_display(study.status),
                 'order_id': row.order.order_id if row.order else None,
-                'clinic': row.order.clinic if row.order else None,
+                'clinic': getattr(row.order.location_clinic, 'name', None) if row.order else (row.order.clinic if row.order else None),
                 'screen': 'verification',
                 'tab': 'pending',
                 'screen_label': 'Verify Reports',

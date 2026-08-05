@@ -28,7 +28,7 @@ import { LogOut, Shield, Clock, Calendar, Bell, HelpCircle, Settings, Stethoscop
 export const TopBar = () => {
   const router = useRouter();
   const { currentUser, hydrated } = useCurrentUser();
-  const { activeClinicId, activeClinicName, clinics, isMultiClinic, switchClinic, loading: clinicLoading } = useClinic();
+  const { activeClinicId, activeClinicName, clinics, isMultiClinic, canViewAllClinics, switchClinic, loading: clinicLoading } = useClinic();
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
@@ -165,7 +165,7 @@ export const TopBar = () => {
                 <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-sidebar-foreground hover:bg-sidebar-accent px-1.5 md:px-2">
                   <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
                   <span className="max-w-[80px] md:max-w-[120px] truncate font-medium">
-                    {clinicLoading ? "..." : activeClinicName || "Select clinic"}
+                    {clinicLoading ? "..." : activeClinicId === null && canViewAllClinics ? "All Clinics" : activeClinicName || "Select clinic"}
                   </span>
                   <svg className="h-3 w-3 text-sidebar-foreground/50 hidden md:block" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -177,6 +177,27 @@ export const TopBar = () => {
                   Switch clinic
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {canViewAllClinics && (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => switchClinic(null)}
+                      className={activeClinicId === null ? "bg-accent font-medium" : ""}
+                    >
+                      <div
+                        className={`h-1.5 w-1.5 rounded-full flex-shrink-0 mr-2 ${
+                          activeClinicId === null ? "bg-indigo-400" : "bg-sidebar-foreground/30"
+                        }`}
+                      />
+                      <span className="truncate">All Clinics</span>
+                      {activeClinicId === null && (
+                        <svg className="h-4 w-4 ml-auto text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 {clinics.map((clinic) => (
                   <DropdownMenuItem
                     key={clinic.id}

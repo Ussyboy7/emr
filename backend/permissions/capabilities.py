@@ -20,6 +20,15 @@ CAPABILITY_CATALOG: tuple[tuple[str, str, str, str], ...] = (
     ("ward_order_edit", "Edit/cancel ward doctor orders", "Consultation", "Edit or cancel pending ward orders"),
     ("ward_order_perform", "Perform ward nursing tasks", "Nursing", "Administer injections, dressings, and ward instructions"),
     ("consultation_queue_override", "Override consultation room presence", "Nursing", "Send or reassign patients when doctor is not on seat (requires reason)"),
+    ("clinical_data_view_all", "View all clinics (aggregate view)", "Administration", "Read data across every clinic via scope=all (leadership)"),
+    ("pharmacy_dispense", "Dispense prescriptions", "Pharmacy", "Perform stock deduction and dispense medication"),
+    ("pharmacy_stock_issue", "Issue stock from store", "Pharmacy", "Transfer stock between store and dispensary"),
+    ("pharmacy_inventory_adjust", "Adjust pharmacy inventory", "Pharmacy", "Add, edit, or adjust medication inventory"),
+    ("lab_result_submit", "Submit lab results", "Laboratory", "Enter results for collected/processed lab tests"),
+    ("lab_result_verify", "Verify lab results", "Laboratory", "Approve verified lab results"),
+    ("radiology_result_verify", "Verify radiology reports", "Radiology", "Approve verified radiology reports"),
+    ("nursing_order_create", "Create nursing orders", "Nursing", "Add new nursing orders"),
+    ("medical_certificate_issue", "Issue medical certificates", "Medical Records", "Create and manage medical certificates"),
 )
 
 ALL_CAPABILITY_IDS: frozenset[str] = frozenset(c[0] for c in CAPABILITY_CATALOG)
@@ -35,6 +44,16 @@ PAGE_TO_CAPABILITIES: dict[str, frozenset[str]] = {
     "/hr/exemptions": frozenset({"hr_compliance_manage"}),
     "/consultation/wards": frozenset({"ward_order_create", "ward_order_edit"}),
     "/nursing/wards": frozenset({"ward_order_perform"}),
+    # Write actions implied by module pages (admins can tighten roles later by
+    # removing the capability without revoking page access).
+    "/laboratory": frozenset({"lab_result_submit", "lab_result_verify"}),
+    "/radiology": frozenset({"radiology_result_verify"}),
+    "/pharmacy": frozenset(
+        {"pharmacy_dispense", "pharmacy_stock_issue", "pharmacy_inventory_adjust"}
+    ),
+    "/nursing": frozenset({"nursing_order_create"}),
+    "/medical-records": frozenset({"medical_certificate_issue"}),
+    "/consultation": frozenset({"medical_certificate_issue"}),
 }
 
 # Documented API families per page (for admin effective-access preview).
@@ -55,5 +74,23 @@ PAGE_API_FAMILIES: dict[str, tuple[tuple[str, str, str], ...]] = {
     "/admin/settings": (
         ("notifications/", "*", "Notification admin"),
         ("common/routing-matrix", "*", "Requires notification_routing_manage"),
+    ),
+    "/laboratory": (
+        ("laboratory/orders/{id}/submit_results/", "POST", "Requires lab_result_submit"),
+        ("laboratory/results/{id}/verify/", "POST", "Requires lab_result_verify"),
+    ),
+    "/radiology": (
+        ("radiology/reports/{id}/verify/", "POST", "Requires radiology_result_verify"),
+    ),
+    "/pharmacy": (
+        ("pharmacy/prescriptions/{id}/dispense/", "POST", "Requires pharmacy_dispense"),
+        ("pharmacy/stock-requests/{id}/fulfill/", "POST", "Requires pharmacy_stock_issue"),
+        ("pharmacy/inventory/{id}/record_adjustment/", "POST", "Requires pharmacy_inventory_adjust"),
+    ),
+    "/nursing": (
+        ("nursing/orders/", "POST", "Requires nursing_order_create (non-ward orders)"),
+    ),
+    "/medical-records": (
+        ("patients/medical-certificates/", "POST", "Requires medical_certificate_issue"),
     ),
 }

@@ -461,10 +461,12 @@ class OperationalDashboardView(views.APIView):
     """Single-request aggregates for the global EMR home dashboard."""
 
     def get(self, request):
+        from common.mixins import resolve_facility_scope
         from .operational_dashboard import _parse_api_date, build_operational_dashboard
 
         target = _parse_api_date(request.query_params.get("date"))
-        return Response(build_operational_dashboard(target))
+        clinic_scope = resolve_facility_scope(request)
+        return Response(build_operational_dashboard(target, clinic_scope=clinic_scope))
 
 
 @document_api_view(tag="Dashboard", summary="Admin dashboard statistics")

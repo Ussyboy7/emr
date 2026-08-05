@@ -41,9 +41,9 @@ def user_can_operate_central_store(user) -> bool:
     clinic_id = get_central_store_clinic_id()
     if clinic_id is None:
         return False
-    from accounts.utils import resolve_clinic_id
+    from accounts.utils import resolve_facility_id
 
-    return resolve_clinic_id(user) == clinic_id
+    return resolve_facility_id(user) == clinic_id
 
 
 def user_has_central_store_requests_page(user) -> bool:

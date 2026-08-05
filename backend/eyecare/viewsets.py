@@ -22,9 +22,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from common.pagination import StandardPageNumberPagination
 
 from .report_pdf import build_eye_session_pdf_response
-from accounts.utils import resolve_clinic, resolve_clinic_id
+from accounts.utils import resolve_facility, resolve_facility_id
 from common.cache_helpers import cache_get_or_set
-from common.mixins import ClinicScopedMixin
+from common.mixins import FacilityScopedMixin
 from common.openapi import document_destroy_viewset, document_viewset
 from organization.models import SystemConfig
 from patients.models import Visit
@@ -46,7 +46,7 @@ EYE_ORDER_LEG_RANK = {"in_progress": 0, "scheduled": 1, "pending": 2, "completed
 
 
 @document_viewset(tag="Eyecare", resource="eye orders")
-class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class EyeOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """Eye clinic orders (queue + CRUD)."""
     pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -123,7 +123,7 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         from common.order_location import apply_order_location_clinic
 
-        self.auto_set_clinic(serializer)
+        self.auto_set_facility(serializer)
         validated = apply_order_location_clinic(
             dict(serializer.validated_data),
             user=self.request.user,
@@ -331,7 +331,7 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
         visit_qs = Visit.objects.select_related("patient").filter(pk=visit_id)
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            v_clinic_id = resolve_clinic_id(self.request.user)
+            v_clinic_id = resolve_facility_id(self.request.user)
             if v_clinic_id is not None:
                 visit_qs = visit_qs.filter(location_clinic=v_clinic_id)
         visit = visit_qs.first()
@@ -391,7 +391,7 @@ class EyeOrderViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Eyecare", resource="eye sessions")
-class EyeSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
+class EyeSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """Eye clinic clinical sessions."""
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     pagination_class = StandardPageNumberPagination
@@ -399,7 +399,7 @@ class EyeSessionViewSet(ClinicScopedMixin, viewsets.ModelViewSet):
     filterset_class = EyeSessionFilter
     ordering_fields = ["scheduled_at", "created_at", "completed_at", "status", "session_number"]
     ordering = ["-completed_at", "-scheduled_at"]
-    clinic_filter_field = 'order__location_clinic'
+    facility_filter_field = 'order__location_clinic'
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -487,9 +487,9 @@ class EyeSessionDiagnosticFileViewSet(mixins.DestroyModelMixin, viewsets.Generic
         from organization.models import SystemConfig
 
         if SystemConfig.is_enabled('multi_clinic_enabled'):
-            from accounts.utils import resolve_clinic_id
+            from accounts.utils import resolve_facility_id
 
-            clinic_id = resolve_clinic_id(self.request.user)
+            clinic_id = resolve_facility_id(self.request.user)
             if clinic_id is not None:
                 qs = qs.filter(session__order__location_clinic_id=clinic_id)
         return qs
