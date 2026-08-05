@@ -741,23 +741,21 @@ class PatientViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             'nonnpa': qs.filter(category='nonnpa').count(),
         })
 
-    @extend_schema(tags=["Patients"], summary="Visits", description="Get all visits for a patient.")
+    @extend_schema(tags=["Patients"], summary="Visits", description="Get all visits for a patient across all facilities.")
     @action(detail=True, methods=['get'])
     def visits(self, request, pk=None):
-        """Get all visits for a patient."""
+        """Get all visits for a patient (org-wide chart: not facility-scoped)."""
         patient = self.get_object()
         qs = annotate_visit_history_flags(patient.visits.all()).order_by('-date', '-time')
-        qs = self.scope_queryset(qs)
         serializer = VisitSerializer(qs, many=True)
         return Response(serializer.data)
     
-    @extend_schema(tags=["Patients"], summary="Vitals", description="Get all vital readings for a patient.")
+    @extend_schema(tags=["Patients"], summary="Vitals", description="Get all vital readings for a patient across all facilities.")
     @action(detail=True, methods=['get'])
     def vitals(self, request, pk=None):
-        """Get all vital readings for a patient."""
+        """Get all vital readings for a patient (org-wide chart: not facility-scoped)."""
         patient = self.get_object()
         qs = patient.vital_readings.all().order_by('-recorded_at')
-        qs = self.scope_queryset(qs)
         serializer = VitalReadingSerializer(qs, many=True)
         return Response(serializer.data)
     
