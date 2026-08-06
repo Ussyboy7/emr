@@ -53,7 +53,7 @@ interface ApiUser {
   is_department_head?: boolean;
   is_pharmacy_hod?: boolean;
   headed_departments?: { id: number; name: string }[];
-  clinics_ids?: number[];
+  location_clinics?: number[];
   active_clinic_id?: number | null;
   multi_clinic_enabled?: boolean;
   [key: string]: unknown; // Allow additional properties
@@ -101,7 +101,7 @@ const mapApiUserToUser = (data: ApiUser): User => {
     isDepartmentHead: data.is_department_head ?? false,
     isPharmacyHod: data.is_pharmacy_hod ?? false,
     headedDepartments: Array.isArray(data.headed_departments) ? data.headed_departments : [],
-    clinics_ids: data.clinics_ids ?? undefined,
+    location_clinics: data.location_clinics ?? undefined,
     active_clinic_id: data.active_clinic_id ?? undefined,
     multi_clinic_enabled: data.multi_clinic_enabled ?? false,
   };

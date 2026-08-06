@@ -43,7 +43,7 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
     occupancy_count = serializers.SerializerMethodField()
     my_presence_status = serializers.SerializerMethodField()
     my_accepting_patients = serializers.SerializerMethodField()
-    clinic_name = serializers.CharField(source='clinic.name', read_only=True, allow_null=True)
+    clinic_name = serializers.CharField(source='location_clinic.name', read_only=True, allow_null=True)
     current_doctor_id = serializers.SerializerMethodField()
     current_doctor_name = serializers.SerializerMethodField()
     presence_status = serializers.SerializerMethodField()
@@ -61,17 +61,17 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         location_str = validated_data.get('location')
-        if location_str and validated_data.get('clinic') is None:
+        if location_str and validated_data.get('location_clinic') is None:
             clinic = self._resolve_clinic_from_location(location_str)
             if clinic:
-                validated_data['clinic'] = clinic
+                validated_data['location_clinic'] = clinic
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
         location_str = validated_data.get('location', instance.location)
-        if location_str and 'clinic' not in validated_data:
+        if location_str and 'location_clinic' not in validated_data:
             clinic = self._resolve_clinic_from_location(location_str)
-            validated_data['clinic'] = clinic
+            validated_data['location_clinic'] = clinic
         return super().update(instance, validated_data)
     
     class Meta:

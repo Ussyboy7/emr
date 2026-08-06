@@ -13,15 +13,15 @@ def resolve_facility(user):
 
     When multi_clinic_enabled is True:
         - Returns user.active_clinic if set
-        - Falls back to user.clinic (home clinic)
+        - Falls back to user.location_clinic (home clinic)
     When multi_clinic_enabled is False:
-        - Returns user.clinic (unchanged behavior)
+        - Returns user.location_clinic (unchanged behavior)
     """
     if not user or not user.is_authenticated:
         return None
     if SystemConfig.is_enabled('multi_clinic_enabled'):
-        return user.active_clinic or user.clinic
-    return user.clinic
+        return user.active_clinic or user.location_clinic
+    return user.location_clinic
 
 
 def resolve_facility_id(user):

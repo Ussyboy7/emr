@@ -30,11 +30,11 @@ def get_pharmacy_department():
 
     return (
         Department.objects.filter(
-            clinic__code=CENTRAL_STORE_CLINIC_CODE,
+            location_clinic__code=CENTRAL_STORE_CLINIC_CODE,
             code=PHARMACY_DEPARTMENT_CODE,
             is_active=True,
         )
-        .select_related("head", "clinic")
+        .select_related("head", "location_clinic")
         .first()
     )
 

@@ -37,7 +37,7 @@ class DependentIdSyncTests(TestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="Sync Clinic", code="SYNC")
         cls.dept = Department.objects.create(
-            clinic=cls.clinic, name="Medical Records", code="MR"
+            location_clinic=cls.clinic, name="Medical Records", code="MR"
         )
         cls.head = _head_user("sync-head", cls.dept)
         cls.dept.head = cls.head

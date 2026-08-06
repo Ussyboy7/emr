@@ -1719,7 +1719,7 @@ class VisitViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                     action_url='/nursing/pool-queue',
                     object_type='visit',
                     object_id=str(visit.id),
-                    clinic_id=getattr(self.request.user, 'clinic_id', None),
+                    clinic_id=getattr(self.request.user, 'location_clinic_id', None),
                 )
         except Exception:
             # Notifications must never break core workflow actions

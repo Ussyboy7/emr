@@ -25,7 +25,7 @@ class ConsultationRoom(models.Model):
     
     name = models.CharField(max_length=100)
     room_number = models.CharField(max_length=50, db_index=True)
-    clinic = models.ForeignKey(
+    location_clinic = models.ForeignKey(
         'organization.Clinic',
         on_delete=models.CASCADE,
         related_name='consultation_rooms',
@@ -53,11 +53,11 @@ class ConsultationRoom(models.Model):
         db_table = 'consultation_rooms'
         ordering = ['room_number']
         constraints = [
-            models.UniqueConstraint(fields=['name', 'clinic'], name='uq_room_name_per_clinic'),
-            models.UniqueConstraint(fields=['room_number', 'clinic'], name='uq_room_number_per_clinic'),
+            models.UniqueConstraint(fields=['name', 'location_clinic'], name='uq_room_name_per_clinic'),
+            models.UniqueConstraint(fields=['room_number', 'location_clinic'], name='uq_room_number_per_clinic'),
         ]
         indexes = [
-            models.Index(fields=['clinic', 'status']),
+            models.Index(fields=['location_clinic', 'status']),
             models.Index(fields=['room_number']),
         ]
     
@@ -205,8 +205,8 @@ class ConsultationSession(models.Model):
         if self.location_clinic_id is None and self.room_id:
             try:
                 room = self.room
-                if room.clinic_id:
-                    self.location_clinic_id = room.clinic_id
+                if room.location_clinic_id:
+                    self.location_clinic_id = room.location_clinic_id
             except Exception:
                 pass
 

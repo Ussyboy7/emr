@@ -17,8 +17,8 @@ class SupersedeDuplicateGenericLinesTest(APITestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="Bode Thomas Clinic", code="BODE-THOMAS")
         cls.user = create_test_user("rx_dedup", pages=["/pharmacy"], system_role="Pharmacist")
-        cls.user.clinic = cls.clinic
-        cls.user.save(update_fields=["clinic"])
+        cls.user.location_clinic = cls.clinic
+        cls.user.save(update_fields=["location_clinic"])
         cls.patient = Patient.objects.create(
             patient_id="RX-DEDUP-PT",
             surname="Patient",

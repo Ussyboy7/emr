@@ -24,9 +24,9 @@ def user_assigned_to_central_store(user) -> bool:
     clinic_id = get_central_store_clinic_id()
     if clinic_id is None:
         return False
-    if getattr(user, "clinic_id", None) == clinic_id:
+    if getattr(user, "location_clinic_id", None) == clinic_id:
         return True
-    clinics = getattr(user, "clinics", None)
+    clinics = getattr(user, "location_clinics", None)
     if clinics is not None:
         return clinics.filter(id=clinic_id).exists()
     return False

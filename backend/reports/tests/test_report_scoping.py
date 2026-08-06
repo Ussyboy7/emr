@@ -170,10 +170,10 @@ class ReportFacilityScopingTest(APITestCase):
         cls.beta, _ = Clinic.objects.get_or_create(code="SCOPE-B", defaults={"name": "Beta"})
 
         cls.alpha_user = create_test_user("scope_alpha", pages=["/medical-records/reports"])
-        cls.alpha_user.clinic = cls.alpha
+        cls.alpha_user.location_clinic = cls.alpha
         cls.alpha_user.active_clinic = cls.alpha
         cls.alpha_user.save()
-        cls.alpha_user.clinics.add(cls.alpha)
+        cls.alpha_user.location_clinics.add(cls.alpha)
 
         # One clinic-A patient + visit, one clinic-B patient + visit.
         cls.pat_a = Patient.objects.create(

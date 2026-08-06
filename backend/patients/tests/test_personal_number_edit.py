@@ -44,7 +44,7 @@ class PersonalNumberEditTests(TestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="PN Clinic", code="PNC")
         cls.dept = Department.objects.create(
-            clinic=cls.clinic, name="Medical Records", code="MR"
+            location_clinic=cls.clinic, name="Medical Records", code="MR"
         )
         cls.mro = _mro_user("pn-mro", cls.dept)
         cls.admin = _admin_user("pn-admin")

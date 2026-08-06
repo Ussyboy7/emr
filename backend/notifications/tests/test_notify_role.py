@@ -43,8 +43,8 @@ class NotifyRoleTests(TestCase):
             dept_name="Nursing",
         )
 
-        nurse_a = create_nursing_officer("nurse_a", clinic=clinic_a, department=dept_a)
-        create_nursing_officer("nurse_b", clinic=clinic_b, department=dept_b)
+        nurse_a = create_nursing_officer("nurse_a", location_clinic=clinic_a, department=dept_a)
+        create_nursing_officer("nurse_b", location_clinic=clinic_b, department=dept_b)
 
         created = NotificationService.notify_role(
             role_name="Nursing Officer",

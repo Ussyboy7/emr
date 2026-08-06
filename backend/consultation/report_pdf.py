@@ -86,7 +86,7 @@ def build_consultation_report_pdf(session):
     )
 
     clinic_name = (
-        session.room.clinic.name if session.room and session.room.clinic else "—"
+        session.room.location_clinic.name if session.room and session.room.location_clinic else "—"
     )
 
     duration_str = (

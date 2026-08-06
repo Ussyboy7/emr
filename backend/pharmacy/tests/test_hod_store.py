@@ -27,7 +27,7 @@ class HodStoreAccessTest(TestCase):
             code=CENTRAL_STORE_CLINIC_CODE,
         )
         cls.dept = Department.objects.create(
-            clinic=cls.clinic,
+            location_clinic=cls.clinic,
             name="Pharmacy",
             code="PHARM",
         )
@@ -72,7 +72,7 @@ class HodStockIssueAPITest(APITestCase):
             code=CENTRAL_STORE_CLINIC_CODE,
         )
         cls.dept = Department.objects.create(
-            clinic=cls.clinic,
+            location_clinic=cls.clinic,
             name="Pharmacy",
             code="PHARM",
         )
@@ -83,9 +83,9 @@ class HodStockIssueAPITest(APITestCase):
         )
         cls.dept.head = cls.head
         cls.dept.save(update_fields=["head"])
-        cls.head.clinic = cls.clinic
+        cls.head.location_clinic = cls.clinic
         cls.head.active_clinic = cls.clinic
-        cls.head.save(update_fields=["clinic", "active_clinic"])
+        cls.head.save(update_fields=["location_clinic", "active_clinic"])
 
         cls.medication, _generic = _make_medication(name="Test Drug HOD", code="TST-HOD-001")
         cls.batch = MedicationInventory.objects.create(
@@ -155,8 +155,8 @@ class DispensaryStockRequestAccessTest(APITestCase):
             "disp_pharm",
             pages=["/pharmacy/inventory", "/pharmacy/requests"],
         )
-        cls.dispensary_user.clinic = cls.clinic
-        cls.dispensary_user.save(update_fields=["clinic"])
+        cls.dispensary_user.location_clinic = cls.clinic
+        cls.dispensary_user.save(update_fields=["location_clinic"])
 
     def test_dispensary_pharmacist_can_create_store_to_dispensary_request(self):
         self.client.force_authenticate(user=self.dispensary_user)
@@ -208,16 +208,16 @@ class CentralStoreApproveStockRequestTest(APITestCase):
             "disp_requester",
             pages=["/pharmacy/requests"],
         )
-        cls.dispensary_user.clinic = cls.other
-        cls.dispensary_user.save(update_fields=["clinic"])
+        cls.dispensary_user.location_clinic = cls.other
+        cls.dispensary_user.save(update_fields=["location_clinic"])
         cls.store_staff = create_test_user(
             "store_approver",
             pages=["/pharmacy/store", "/pharmacy/store/requests"],
         )
-        cls.store_staff.clinic = cls.central
+        cls.store_staff.location_clinic = cls.central
         cls.store_staff.active_clinic = cls.other
-        cls.store_staff.save(update_fields=["clinic", "active_clinic"])
-        cls.store_staff.clinics.add(cls.central, cls.other)
+        cls.store_staff.save(update_fields=["location_clinic", "active_clinic"])
+        cls.store_staff.location_clinics.add(cls.central, cls.other)
 
     def test_approve_store_to_dispensary_request(self):
         self.client.force_authenticate(user=self.dispensary_user)
@@ -246,7 +246,7 @@ class PharmacyHodUserManagementTest(TestCase):
             code="BODE-THOMAS",
         )
         cls.dept = Department.objects.create(
-            clinic=cls.clinic,
+            location_clinic=cls.clinic,
             name="Pharmacy",
             code="PHARM",
         )

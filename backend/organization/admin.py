@@ -14,15 +14,15 @@ class ClinicAdmin(admin.ModelAdmin):
 
 @admin.register(Department)
 class DepartmentAdmin(admin.ModelAdmin):
-    list_display = ['name', 'code', 'clinic', 'head', 'is_active', 'created_at']
-    list_filter = ['clinic', 'is_active']
-    search_fields = ['name', 'code', 'clinic__name']
+    list_display = ['name', 'code', 'location_clinic', 'head', 'is_active', 'created_at']
+    list_filter = ['location_clinic', 'is_active']
+    search_fields = ['name', 'code', 'location_clinic__name']
 
 
 @admin.register(Room)
 class RoomAdmin(admin.ModelAdmin):
-    list_display = ['room_number', 'name', 'clinic', 'room_type', 'status', 'is_active']
-    list_filter = ['room_type', 'status', 'clinic', 'is_active']
+    list_display = ['room_number', 'name', 'location_clinic', 'room_type', 'status', 'is_active']
+    list_filter = ['room_type', 'status', 'location_clinic', 'is_active']
     search_fields = ['name', 'room_number', 'location']
 
 

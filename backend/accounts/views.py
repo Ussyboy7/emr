@@ -52,7 +52,7 @@ class UserViewSet(viewsets.ModelViewSet):
     """
 
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['system_role', 'is_active', 'is_staff', 'is_management', 'clinic', 'department']
+    filterset_fields = ['system_role', 'is_active', 'is_staff', 'is_management', 'location_clinic', 'department']
     search_fields = ['username', 'email', 'first_name', 'last_name', 'employee_id']
     ordering_fields = ['username', 'date_joined', 'last_name']
     ordering = ['username']
@@ -72,7 +72,7 @@ class UserViewSet(viewsets.ModelViewSet):
         Note: We keep `retrieve` unscoped so other parts of the app (e.g., displaying the ordering
         doctor's name) can look up staff across modules. Mutations remain protected below.
         """
-        qs = User.objects.all().select_related('clinic', 'department').prefetch_related(
+        qs = User.objects.all().select_related('location_clinic', 'department').prefetch_related(
             Prefetch(
                 'user_roles',
                 queryset=UserRole.objects.select_related('role').filter(role__is_active=True).order_by('-assigned_at'),
@@ -151,7 +151,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
         Returns a minimal user representation. Supports search/filter/order/pagination.
         """
-        qs = User.objects.filter(is_active=True).select_related('clinic', 'department')
+        qs = User.objects.filter(is_active=True).select_related('location_clinic', 'department')
         qs = self.filter_queryset(qs)
         page = self.paginate_queryset(qs)
         if page is not None:
@@ -164,7 +164,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def public(self, request, pk=None):
         """Minimal user profile for cross-department display (e.g., doctor name)."""
-        user = User.objects.select_related('clinic', 'department').get(pk=pk)
+        user = User.objects.select_related('location_clinic', 'department').get(pk=pk)
         return Response(UserDirectorySerializer(user).data)
 
     def perform_create(self, serializer):
@@ -230,12 +230,12 @@ class UserViewSet(viewsets.ModelViewSet):
             new_dept = serializer.validated_data.get("department")
             if new_dept is not None:
                 assert_department_id_managed(self.request.user, new_dept.id)
-        if "clinic" in serializer.validated_data and not self.request.user.is_superuser:
-            new_clinic = serializer.validated_data.get("clinic")
+        if "location_clinic" in serializer.validated_data and not self.request.user.is_superuser:
+            new_clinic = serializer.validated_data.get("location_clinic")
             if (
                 new_clinic is not None
-                and self.request.user.clinic_id is not None
-                and new_clinic.id != self.request.user.clinic_id
+                and self.request.user.location_clinic_id is not None
+                and new_clinic.id != self.request.user.location_clinic_id
             ):
                 raise PermissionDenied("You cannot change a user to another clinic.")
 
@@ -306,7 +306,7 @@ class UserViewSet(viewsets.ModelViewSet):
         if active_clinic_id is not None:
             from organization.models import SystemConfig
             if SystemConfig.is_enabled('multi_clinic_enabled'):
-                assigned_ids = set(request.user.clinics.values_list('id', flat=True))
+                assigned_ids = set(request.user.location_clinics.values_list('id', flat=True))
                 try:
                     clinic_id = int(active_clinic_id)
                 except (TypeError, ValueError):

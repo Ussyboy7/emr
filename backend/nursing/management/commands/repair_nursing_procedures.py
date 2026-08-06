@@ -122,8 +122,8 @@ class Command(BaseCommand):
                 clinic_id = order.visit.location_clinic_id
             elif order.patient_id and order.patient.location_clinic_id:
                 clinic_id = order.patient.location_clinic_id
-            elif order.ordered_by_id and order.ordered_by.clinic_id:
-                clinic_id = order.ordered_by.clinic_id
+            elif order.ordered_by_id and order.ordered_by.location_clinic_id:
+                clinic_id = order.ordered_by.location_clinic_id
             if clinic_id:
                 candidates.append((order.pk, clinic_id))
 

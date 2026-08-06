@@ -354,8 +354,8 @@ export default function UserManagementPage() {
           ? user.custom_pages
           : [];
       setFormData((prev) => ({ ...prev, restrictedPages: restricted }));
-      if (Array.isArray((user as any)?.clinics_ids)) {
-        setFormData((prev) => ({ ...prev, clinics: (user as any).clinics_ids }));
+      if (Array.isArray((user as any)?.location_clinics)) {
+        setFormData((prev) => ({ ...prev, clinics: (user as any).location_clinics }));
       }
       if ((user as any)?.department != null) {
         setFormData((prev) => ({ ...prev, departmentId: (user as any).department }));
@@ -418,7 +418,7 @@ export default function UserManagementPage() {
         employee_id: formData.employeeId || undefined,
         department: formData.departmentId || undefined,
         access_role_id: Number(formData.accessRoleId),
-        clinics: formData.clinics || [],
+        location_clinics: formData.clinics || [],
       } as any);
 
       if (!newUser.id) {
@@ -459,7 +459,7 @@ export default function UserManagementPage() {
         department: formData.departmentId || undefined,
         custom_pages_mode: (formData.restrictedPages && formData.restrictedPages.length > 0) ? "restrict" : "",
         custom_pages: normalizeRolePagePaths(formData.restrictedPages || []),
-        clinics: formData.clinics || [],
+        location_clinics: formData.clinics || [],
       });
 
       // Persist access role assignment (single-select UX).

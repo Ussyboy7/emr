@@ -96,7 +96,7 @@ def build_operational_dashboard(
         ).count()
 
         consultation_waiting = scoped(
-            ConsultationQueue.objects.filter(is_active=True), field="room__clinic_id"
+            ConsultationQueue.objects.filter(is_active=True), field="room__location_clinic_id"
         ).count()
         pharmacy_queue = scoped(
             Prescription.objects.filter(status="pending")
@@ -181,9 +181,9 @@ def build_operational_dashboard(
                     appointment_date__gte=today,
                     status__in=["scheduled", "confirmed"],
                 ),
-                field="clinic_id",
+                field="location_clinic_id",
             )
-            .select_related("patient", "clinic")
+            .select_related("patient", "location_clinic")
             .order_by("appointment_date", "appointment_time")[:3]
         )
         upcoming_rows = [
@@ -191,7 +191,7 @@ def build_operational_dashboard(
                 "patient": apt.patient.get_full_name() if apt.patient_id else "Unknown Patient",
                 "type": apt.appointment_type,
                 "time": f"{apt.appointment_date} {apt.appointment_time}",
-                "clinic": getattr(apt.clinic, "name", None) or "General",
+                "clinic": getattr(apt.location_clinic, "name", None) or "General",
             }
             for apt in upcoming
         ]

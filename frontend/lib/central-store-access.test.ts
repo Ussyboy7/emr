@@ -7,7 +7,7 @@ const baseUser = (overrides: Partial<User> = {}): User =>
     id: "1",
     username: "pharm",
     permissions: ["/pharmacy/store"],
-    clinics_ids: [5],
+    location_clinics: [5],
     ...overrides,
   }) as User;
 
@@ -26,7 +26,7 @@ describe("central-store-access", () => {
   it("hides nav when role has store page but user not assigned to Bode Thomas", () => {
     expect(
       canShowCentralStoreNav(
-        baseUser({ clinics_ids: [2] }),
+        baseUser({ location_clinics: [2] }),
         [
           { id: 2, code: "TIN-CAN" },
           { id: 5, code: "BODE-THOMAS" },
@@ -44,7 +44,7 @@ describe("central-store-access", () => {
   it("hides nav after clinics load when user is not assigned to Bode Thomas", () => {
     expect(
       canShowCentralStoreNav(
-        baseUser({ clinics_ids: [2] }),
+        baseUser({ location_clinics: [2] }),
         [{ id: 2, code: "TIN-CAN" }],
         { clinicsLoading: false },
       ),
@@ -62,7 +62,7 @@ describe("central-store-access", () => {
   it("allows superuser regardless of clinic assignment", () => {
     expect(
       canShowCentralStoreNav(
-        baseUser({ isSuperuser: true, clinics_ids: [] }),
+        baseUser({ isSuperuser: true, location_clinics: [] }),
         [{ id: 5, code: "BODE-THOMAS" }],
       ),
     ).toBe(true);

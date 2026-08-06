@@ -36,10 +36,10 @@ def list_online_users():
     users = User.objects.filter(
         is_active=True,
         last_activity__gte=online_presence_cutoff(),
-    ).select_related('clinic', 'active_clinic')
+    ).select_related('location_clinic', 'active_clinic')
     result = []
     for u in users:
-        clinic = u.active_clinic or u.clinic
+        clinic = u.active_clinic or u.location_clinic
         role_label = ''
         if u.is_superuser:
             role_label = 'Super Admin'

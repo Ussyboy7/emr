@@ -72,15 +72,15 @@ class Command(BaseCommand):
 
         # 1. Isolated activated users -> Bode Thomas (home + M2M)
         isolated = list(
-            User.objects.filter(is_active=True, clinic__isnull=True)
-            .exclude(clinics__isnull=False)
+            User.objects.filter(is_active=True, location_clinic__isnull=True)
+            .exclude(location_clinics__isnull=False)
             .distinct()
         )
         if not dry_run:
             for user in isolated:
-                user.clinic = bode
-                user.save(update_fields=["clinic"])
-                user.clinics.add(bode)
+                user.location_clinic = bode
+                user.save(update_fields=["location_clinic"])
+                user.location_clinics.add(bode)
         self.stdout.write(f"users to upsert -> Bode: {len(isolated)}" + (" (dry-run)" if dry_run else ""))
 
         # 2. Parent-first backfills, in dependency order

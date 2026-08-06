@@ -236,7 +236,7 @@ export default function ClinicDepartmentPage() {
           deputyUserId: dept.deputy_head != null ? String(dept.deputy_head) : '',
           staffCount: dept.staff_count ?? 0,
           clinics: dept.clinic_name ? [dept.clinic_name] : [],
-          clinic: dept.clinic?.toString() || '',
+          clinic: dept.location_clinic?.toString() || '',
           isActive: dept.is_active,
         }));
         setDepartments(transformedDepts);
@@ -598,7 +598,7 @@ export default function ClinicDepartmentPage() {
         code: deptForm.code,
         name: deptForm.name,
         description: deptForm.description,
-        clinic: parseInt(deptForm.clinic as string),
+        location_clinic: parseInt(deptForm.clinic as string),
         head: deptForm.headUserId ? parseInt(deptForm.headUserId as string, 10) : undefined,
         deputy_head: deptForm.deputyUserId ? parseInt(deptForm.deputyUserId as string, 10) : undefined,
         is_active: deptForm.isActive,
@@ -630,7 +630,7 @@ export default function ClinicDepartmentPage() {
         code: deptForm.code,
         name: deptForm.name,
         description: deptForm.description,
-        clinic: parseInt(deptForm.clinic as string),
+        location_clinic: parseInt(deptForm.clinic as string),
         head: deptForm.headUserId ? parseInt(deptForm.headUserId as string, 10) : undefined,
         deputy_head: deptForm.deputyUserId ? parseInt(deptForm.deputyUserId as string, 10) : undefined,
         is_active: deptForm.isActive,

@@ -49,10 +49,10 @@ from .bed_ops import assign_admission_bed, clear_admission_bed, sync_bed_occupan
 class WardViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing wards."""
 
-    facility_filter_field = 'clinic'
+    facility_filter_field = 'location_clinic'
     serializer_class = WardSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['ward_type', 'status', 'floor', 'building', 'clinic']
+    filterset_fields = ['ward_type', 'status', 'floor', 'building', 'location_clinic']
     search_fields = ['name', 'ward_code', 'description']
     ordering_fields = ['name', 'ward_code', 'created_at']
     ordering = ['name']
@@ -109,7 +109,7 @@ class WardViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 class BedViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing beds."""
 
-    facility_filter_field = 'ward__clinic'
+    facility_filter_field = 'ward__location_clinic'
     serializer_class = BedSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['ward', 'bed_type', 'status']
@@ -228,7 +228,7 @@ class PatientAdmissionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             'visit',
             'visit__location_clinic',
             'ward',
-            'ward__clinic',
+            'ward__location_clinic',
             'bed',
             'admitting_doctor',
             'discharge_doctor',

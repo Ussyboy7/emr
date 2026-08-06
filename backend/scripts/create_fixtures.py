@@ -136,7 +136,7 @@ def create_fixtures():
     )
     
     dept, _ = Department.objects.get_or_create(
-        clinic=clinic,
+        location_clinic=clinic,
         name='General Practice',
         defaults={
             'code': 'GEN-PRAC',
@@ -148,7 +148,7 @@ def create_fixtures():
         room_number='R001',
         defaults={
             'name': 'Consultation Room 1',
-            'clinic': clinic,
+            'location_clinic': clinic,
             'department': dept,
             'room_type': 'consultation',
             'status': 'active',

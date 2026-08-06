@@ -627,7 +627,7 @@ class ServicesActivitiesReportView(views.APIView):
             issued_at__date__lte=period_end,
         ).select_related("patient")
         if org_facility_id is not None:
-            sick_leave_qs = sick_leave_qs.filter(issued_by__clinic_id=org_facility_id)
+            sick_leave_qs = sick_leave_qs.filter(issued_by__location_clinic_id=org_facility_id)
         sick_leave_male = gender_event_counts(sick_leave_qs, "male")
         sick_leave_female = gender_event_counts(sick_leave_qs, "female")
         sick_leave = sick_leave_male + sick_leave_female

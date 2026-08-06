@@ -135,9 +135,9 @@ class FacilityScopedMixin:
         if self.request.user.is_superuser:
             return
         chosen_id = self._get_facility_id(facility_value)
-        assigned = set(self.request.user.clinics.values_list('id', flat=True))
+        assigned = set(self.request.user.location_clinics.values_list('id', flat=True))
         if not assigned:
-            assigned = {self.request.user.clinic_id} if self.request.user.clinic_id else set()
+            assigned = {self.request.user.location_clinic_id} if self.request.user.location_clinic_id else set()
         if chosen_id not in assigned:
             raise serializers.ValidationError(
                 {self.facility_filter_field: ["You are not assigned to this facility."]}

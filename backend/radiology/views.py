@@ -450,7 +450,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                 action_url="/radiology/orders",
                 object_type='radiology_order',
                 object_id=str(order.id),
-                clinic_id=getattr(self.request.user, 'clinic_id', None),
+                clinic_id=getattr(self.request.user, 'location_clinic_id', None),
             )
         except Exception:
             # Notifications must never break radiology order creation

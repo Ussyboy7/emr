@@ -40,11 +40,11 @@ class Command(BaseCommand):
             creator_clinic_id = None
             if patient.created_by_id:
                 user = patient.created_by
-                assigned = list(user.clinics.values_list('id', flat=True))
+                assigned = list(user.location_clinics.values_list('id', flat=True))
                 if assigned:
                     creator_clinic_id = assigned[0]
-                elif user.clinic_id:
-                    creator_clinic_id = user.clinic_id
+                elif user.location_clinic_id:
+                    creator_clinic_id = user.location_clinic_id
 
             if creator_clinic_id is not None:
                 Patient.objects.filter(pk=patient.pk).update(

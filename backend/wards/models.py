@@ -44,7 +44,7 @@ class Ward(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
 
     # Clinic association
-    clinic = models.ForeignKey(
+    location_clinic = models.ForeignKey(
         'organization.Clinic',
         on_delete=models.SET_NULL,
         null=True,

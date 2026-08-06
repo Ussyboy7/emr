@@ -20,7 +20,7 @@ function userAssignedToCentralStoreClinic(
   user: User,
   clinics: Array<{ id: number; code?: string }>,
 ): boolean | null {
-  const assigned = new Set(user.clinics_ids || []);
+  const assigned = new Set(user.location_clinics || []);
   if (assigned.size === 0) return false;
   const central = clinics.find(
     (c) => (c.code || "").toUpperCase() === CENTRAL_STORE_CLINIC_CODE,
@@ -45,5 +45,5 @@ export function canShowCentralStoreNav(
   if (assignment === true) return true;
   if (assignment === false) return false;
 
-  return Boolean(options?.clinicsLoading && (user.clinics_ids?.length ?? 0) > 0);
+  return Boolean(options?.clinicsLoading && (user.location_clinics?.length ?? 0) > 0);
 }

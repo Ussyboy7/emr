@@ -958,7 +958,7 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             'visit__location_clinic',
             'consultation_session',
             'consultation_session__location_clinic',
-            'consultation_session__room__clinic',
+            'consultation_session__room__location_clinic',
             'location_clinic',
             'created_by',
         ).prefetch_related(
@@ -1187,7 +1187,7 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                 action_url="/pharmacy/prescriptions",
                 object_type='prescription',
                 object_id=str(prescription.id),
-                clinic_id=getattr(self.request.user, 'clinic_id', None),
+                clinic_id=getattr(self.request.user, 'location_clinic_id', None),
             )
         except Exception:
             # Notifications must never break prescription creation
@@ -1997,12 +1997,12 @@ class InventoryAlertViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
 class StockRequestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing stock requests."""
     
-    facility_filter_field = 'clinic'
+    facility_filter_field = 'location_clinic'
     queryset = StockRequest.objects.all()
     serializer_class = StockRequestSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'from_location', 'to_location', 'requested_by', 'clinic']
+    filterset_fields = ['status', 'from_location', 'to_location', 'requested_by', 'location_clinic']
     search_fields = ['request_id', 'notes']
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
@@ -2101,7 +2101,7 @@ class StockRequestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                 qs = qs.filter(created_at__date__lte=dt)
             except ValueError:
                 pass
-        return qs.select_related("clinic", "requested_by", "confirmed_by")
+        return qs.select_related("location_clinic", "requested_by", "confirmed_by")
     
     def get_object(self):
         obj = super().get_object()
@@ -2383,7 +2383,7 @@ class StockRequestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                         destination_inventory_item=None,
                         quantity=transfer_qty
                     )
-                    receipt_clinic = stock_request.clinic
+                    receipt_clinic = stock_request.location_clinic
                     if receipt_clinic is None and stock_request.requested_by_id:
                         from accounts.utils import resolve_facility
 
@@ -2512,7 +2512,7 @@ class StockRequestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 @document_viewset(tag="Pharmacy", resource="stock issues", read_only=True)
 class StockIssueViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for listing stock issues (e.g. receipts from Central Store to Dispensary)."""
-    facility_filter_field = 'request__clinic'
+    facility_filter_field = 'request__location_clinic'
     queryset = StockIssue.objects.select_related('request', 'issued_by').prefetch_related('lines__medication').all()
     serializer_class = StockIssueSerializer
     pagination_class = FlexiblePageNumberPagination

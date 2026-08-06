@@ -36,7 +36,7 @@ class PromoteCsrPermissionTests(TestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="MR Clinic", code="MRC")
         cls.dept = Department.objects.create(
-            clinic=cls.clinic, name="Medical Records", code="MR"
+            location_clinic=cls.clinic, name="Medical Records", code="MR"
         )
         cls.staff_patient = Patient.objects.create(
             patient_id="E-STAFF-001",

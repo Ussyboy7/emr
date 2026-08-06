@@ -37,10 +37,10 @@ class UserManagementHelperTests(TestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="Test Clinic", code="TC")
         cls.dept_a = Department.objects.create(
-            clinic=cls.clinic, name="Dept A", code="DA"
+            location_clinic=cls.clinic, name="Dept A", code="DA"
         )
         cls.dept_b = Department.objects.create(
-            clinic=cls.clinic, name="Dept B", code="DB"
+            location_clinic=cls.clinic, name="Dept B", code="DB"
         )
 
     def test_department_head_without_staff_flag(self):
@@ -81,10 +81,10 @@ class UserManagementHttpTests(TestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="UM Clinic", code="UMC")
         cls.dept = Department.objects.create(
-            clinic=cls.clinic, name="Medical Records", code="MR"
+            location_clinic=cls.clinic, name="Medical Records", code="MR"
         )
         cls.other_dept = Department.objects.create(
-            clinic=cls.clinic, name="Laboratory", code="LAB"
+            location_clinic=cls.clinic, name="Laboratory", code="LAB"
         )
 
         cls.head = _user_with_pages(

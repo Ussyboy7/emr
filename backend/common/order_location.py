@@ -31,13 +31,13 @@ def order_location_clinic_name(order) -> str | None:
 
 
 def ward_clinic_name(admission) -> str | None:
-    """Display name from admission.ward.clinic FK."""
+    """Display name from admission.ward.location_clinic FK."""
     if admission is None:
         return None
     ward = getattr(admission, "ward", None)
     if ward is None:
         return None
-    clinic = getattr(ward, "clinic", None)
+    clinic = getattr(ward, "location_clinic", None)
     return clinic.name if clinic is not None else None
 
 
@@ -53,7 +53,7 @@ def resolve_order_location_clinic(*, visit=None, session=None, user=None):
             return loc
         room = getattr(session, "room", None)
         if room is not None:
-            room_clinic = getattr(room, "clinic", None)
+            room_clinic = getattr(room, "location_clinic", None)
             if room_clinic is not None:
                 return room_clinic
 

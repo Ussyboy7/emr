@@ -54,10 +54,10 @@ class ClinicViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # We count *recent activity* rather than direct FKs because in
-        # practice ``Patient.location_clinic`` and ``User.clinic`` are
+        # practice ``Patient.location_clinic`` and ``User.location_clinic`` are
         # rarely backfilled, but every Visit/ConsultationSession does
         # carry a clinic linkage (Visit.location_clinic and
-        # ConsultationSession.room.clinic respectively). The 30-day
+        # ConsultationSession.room.location_clinic respectively). The 30-day
         # window keeps the dashboard tile honest: it reflects current
         # operational throughput, not "anyone who ever touched this
         # clinic".
@@ -162,12 +162,12 @@ class ClinicViewSet(viewsets.ModelViewSet):
         active_clinics = Clinic.objects.filter(is_active=True).count()
         total_departments = Department.objects.count()
 
-        facility_users = User.objects.filter(clinic__isnull=False, is_active=True).count()
+        facility_users = User.objects.filter(location_clinic__isnull=False, is_active=True).count()
         department_users = User.objects.filter(department__isnull=False, is_active=True).count()
         total_staff_links = facility_users + department_users
 
-        org_rooms = Room.objects.filter(is_active=True, clinic__isnull=False).count()
-        consult_rooms = ConsultationRoom.objects.filter(is_active=True, clinic__isnull=False).count()
+        org_rooms = Room.objects.filter(is_active=True, location_clinic__isnull=False).count()
+        consult_rooms = ConsultationRoom.objects.filter(is_active=True, location_clinic__isnull=False).count()
         total_rooms = org_rooms + consult_rooms
 
         return Response(
@@ -255,7 +255,7 @@ class DepartmentViewSet(viewsets.ModelViewSet):
     """ViewSet for managing departments."""
     serializer_class = DepartmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['clinic', 'is_active']
+    filterset_fields = ['location_clinic', 'is_active']
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
@@ -264,7 +264,7 @@ class DepartmentViewSet(viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Department.objects.none()
         
-        return Department.objects.all().select_related('clinic', 'head', 'deputy_head')
+        return Department.objects.all().select_related('location_clinic', 'head', 'deputy_head')
     
     def perform_create(self, serializer):
         """Create department and log audit."""
@@ -277,7 +277,7 @@ class DepartmentViewSet(viewsets.ModelViewSet):
             module='administration',
             object_repr=department.name,
             description=f'Created department: {department.name}',
-            new_values={'name': department.name, 'code': department.code, 'clinic_id': str(department.clinic.id) if department.clinic else None, 'is_active': department.is_active},
+            new_values={'name': department.name, 'code': department.code, 'clinic_id': str(department.location_clinic.id) if department.location_clinic else None, 'is_active': department.is_active},
             request=self.request,
         )
     
@@ -323,7 +323,7 @@ class RoomViewSet(viewsets.ModelViewSet):
     """ViewSet for managing rooms."""
     serializer_class = RoomSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['clinic', 'department', 'room_type', 'status', 'is_active']
+    filterset_fields = ['location_clinic', 'department', 'room_type', 'status', 'is_active']
     search_fields = ['name', 'room_number', 'location']
     ordering_fields = ['room_number', 'name']
     ordering = ['room_number']
@@ -332,7 +332,7 @@ class RoomViewSet(viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Room.objects.none()
         
-        return Room.objects.all().select_related('clinic', 'department')
+        return Room.objects.all().select_related('location_clinic', 'department')
     
     def perform_create(self, serializer):
         """Create room and log audit."""

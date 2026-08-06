@@ -111,7 +111,7 @@ class Department(models.Model):
     Department within a clinic.
     """
     
-    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='departments')
+    location_clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='departments')
     name = models.CharField(max_length=200, db_index=True)
     code = models.CharField(max_length=50, db_index=True)
     description = models.TextField(blank=True)
@@ -136,15 +136,15 @@ class Department(models.Model):
     
     class Meta:
         db_table = 'departments'
-        unique_together = [['clinic', 'name']]
-        ordering = ['clinic__name', 'name']
+        unique_together = [['location_clinic', 'name']]
+        ordering = ['location_clinic__name', 'name']
         indexes = [
-            models.Index(fields=['clinic', 'is_active']),
+            models.Index(fields=['location_clinic', 'is_active']),
             models.Index(fields=['name']),
         ]
     
     def __str__(self):
-        return f"{self.name} ({self.clinic.name})"
+        return f"{self.name} ({self.location_clinic.name})"
 
 
 class Room(models.Model):
@@ -168,7 +168,7 @@ class Room(models.Model):
     
     name = models.CharField(max_length=200)
     room_number = models.CharField(max_length=50, unique=True, db_index=True)
-    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='rooms', null=True, blank=True)
+    location_clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='rooms', null=True, blank=True)
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True, related_name='rooms')
     room_type = models.CharField(max_length=50, choices=TYPE_CHOICES, default='consultation')
     location = models.CharField(max_length=200, blank=True)
@@ -185,7 +185,7 @@ class Room(models.Model):
         ordering = ['room_number']
         indexes = [
             models.Index(fields=['room_number']),
-            models.Index(fields=['clinic', 'status']),
+            models.Index(fields=['location_clinic', 'status']),
             models.Index(fields=['room_type', 'status']),
         ]
     

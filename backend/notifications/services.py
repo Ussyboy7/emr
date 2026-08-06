@@ -209,7 +209,7 @@ class NotificationService:
         try:
             users = User.objects.filter(system_role=role_name, is_active=True)
             if clinic_id is not None:
-                users = users.filter(clinic_id=clinic_id)
+                users = users.filter(location_clinic_id=clinic_id)
             if department_id is not None:
                 users = users.filter(department_id=department_id)
             else:

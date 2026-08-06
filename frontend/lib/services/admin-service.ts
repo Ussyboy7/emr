@@ -23,15 +23,15 @@ export interface User {
   date_joined: string;
   last_login?: string;
   last_activity?: string;
-  clinic?: number;
-  clinic_name?: string;
+  location_clinic?: number;
+  location_clinic_name?: string;
   department?: number;  // Changed from string to number (ForeignKey)
   department_name?: string;
   specialty?: string;
   license_number?: string;
   license_expiry?: string;
   qualification?: string;
-  clinics?: number[];  // Multi-clinic M2M assignments
+  location_clinics?: number[];  // Multi-clinic M2M assignments
 }
 
 export interface Role {
@@ -78,7 +78,7 @@ export interface Department {
   code: string;
   name: string;
   description?: string;
-  clinic?: number;
+  location_clinic?: number;
   clinic_name?: string;
   head?: number;
   head_name?: string;
@@ -192,12 +192,12 @@ class AdminService {
     
     if (data.phone) createData.phone = data.phone;
     if (data.system_role) createData.system_role = data.system_role;
-    if (data.clinic !== undefined) createData.clinic = data.clinic;
+    if (data.location_clinic !== undefined) createData.location_clinic = data.location_clinic;
     if (data.department !== undefined) createData.department = data.department;
     if (data.is_active !== undefined) createData.is_active = data.is_active;
     if ((data as any).employee_id) createData.employee_id = (data as any).employee_id;
     if ((data as any).access_role_id !== undefined) createData.access_role_id = (data as any).access_role_id;
-    if (data.clinics !== undefined) createData.clinics = data.clinics;
+    if (data.location_clinics !== undefined) createData.location_clinics = data.location_clinics;
     
     return apiFetch<User>('/accounts/users/', {
       method: 'POST',
@@ -220,12 +220,12 @@ class AdminService {
     if (data.email !== undefined) updateData.email = data.email;
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.system_role !== undefined) updateData.system_role = data.system_role;
-    if (data.clinic !== undefined) updateData.clinic = data.clinic;
+    if (data.location_clinic !== undefined) updateData.location_clinic = data.location_clinic;
     if (data.department !== undefined) updateData.department = data.department;
     // Note: is_active may not be in UserUpdateSerializer - would need backend update
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
     if ((data as any).employee_id !== undefined) updateData.employee_id = (data as any).employee_id;
-    if (data.clinics !== undefined) updateData.clinics = data.clinics;
+    if (data.location_clinics !== undefined) updateData.location_clinics = data.location_clinics;
     
     return apiFetch<User>(`/accounts/users/${userId}/`, {
       method: 'PATCH',
@@ -498,7 +498,7 @@ class AdminService {
    * Get all departments
    */
   async getDepartments(params?: {
-    clinic?: number;
+    location_clinic?: number;
     is_active?: boolean;
     search?: string;
     page?: number;
@@ -546,7 +546,7 @@ class AdminService {
    * ``Rooms: 0`` while the management page listed 11 rows.
    */
   async getRooms(params?: {
-    clinic?: number;
+    location_clinic?: number;
     department?: number;
     room_type?: string;
     status?: string;

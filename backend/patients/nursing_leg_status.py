@@ -67,8 +67,8 @@ def resolve_session_completed_clinic(visit, session) -> Optional[str]:
     if not consult:
         return None
     room = getattr(session, 'room', None)
-    if room is not None and getattr(room, 'clinic_id', None):
-        clinic_name = getattr(room.clinic, 'name', None)
+    if room is not None and getattr(room, 'location_clinic_id', None):
+        clinic_name = getattr(room.location_clinic, 'name', None)
         if clinic_name:
             matched = _match_visit_clinic_name(visit, clinic_name)
             if matched:

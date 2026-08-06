@@ -105,7 +105,7 @@ export type User = {
   isDepartmentHead?: boolean;
   isPharmacyHod?: boolean;
   headedDepartments?: { id: number; name: string }[];
-  clinics_ids?: number[];
+  location_clinics?: number[];
   active_clinic_id?: number | null;
   multi_clinic_enabled?: boolean;
 };

@@ -23,25 +23,26 @@ def grant_pages(user, pages: list[str]) -> None:
 
 def create_clinic_department(*, clinic_code: str, dept_code: str, dept_name: str):
     clinic = Clinic.objects.create(name=f"Clinic {clinic_code}", code=clinic_code)
-    department = Department.objects.create(clinic=clinic, name=dept_name, code=dept_code)
+    department = Department.objects.create(location_clinic=clinic, name=dept_name, code=dept_code)
     return clinic, department
 
 
-def create_nursing_officer(username: str, *, clinic=None, department=None):
+def create_nursing_officer(username: str, *, location_clinic=None, department=None):
     """Nursing Officer with department hints satisfied for notify_role routing."""
-    if clinic is None or department is None:
+    if location_clinic is None or department is None:
         clinic, department = create_clinic_department(
             clinic_code=f"C-{username}"[:50],
             dept_code="NURSING",
             dept_name="Nursing",
         )
+        location_clinic = clinic
     user = User.objects.create_user(
         username=username,
         password="testpass123",
         first_name="Nurse",
         last_name="Test",
         system_role="Nursing Officer",
-        clinic=clinic,
+        location_clinic=location_clinic,
         department=department,
     )
     grant_pages(user, ["/nursing/pool-queue", "/nursing"])

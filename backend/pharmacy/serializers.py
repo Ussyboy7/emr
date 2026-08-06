@@ -281,7 +281,7 @@ class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
         if clinic:
             return clinic.name
         req = getattr(obj, 'request', None)
-        req_clinic = getattr(req, 'clinic', None) if req else None
+        req_clinic = getattr(req, 'location_clinic', None) if req else None
         return req_clinic.name if req_clinic else None
 
     @extend_schema_field(OpenApiTypes.STR)
@@ -894,8 +894,8 @@ class StockRequestSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_clinic_name(self, obj):
-        if obj.clinic_id:
-            return obj.clinic.name
+        if obj.location_clinic_id:
+            return obj.location_clinic.name
         return None
 
     class Meta:

@@ -90,11 +90,11 @@ class StockRequestWorkflowTest(APITestCase):
         from organization.models import Clinic
 
         clinic = Clinic.objects.create(name="Bode Thomas Clinic", code="BODE-THOMAS")
-        self.user.clinic = clinic
-        self.user.save(update_fields=["clinic"])
+        self.user.location_clinic = clinic
+        self.user.save(update_fields=["location_clinic"])
         resp = self._create_stock_request()
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(resp.data["clinic"], clinic.pk)
+        self.assertEqual(resp.data["location_clinic"], clinic.pk)
         self.assertEqual(resp.data["clinic_name"], clinic.name)
 
     # -- approve --

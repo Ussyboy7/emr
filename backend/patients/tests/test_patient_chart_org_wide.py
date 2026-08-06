@@ -31,7 +31,7 @@ class PatientChartOrgWideTests(TestCase):
         cls.apapa, _ = Clinic.objects.get_or_create(code="TEST-APAPA", defaults={"name": "Apapa"})
 
         cls.dept = Department.objects.create(
-            clinic=cls.hq, name="Outpatient", code="OPD-TEST"
+            location_clinic=cls.hq, name="Outpatient", code="OPD-TEST"
         )
         cls.doctor = User.objects.create_user(
             username="hq_doctor",
@@ -46,10 +46,10 @@ class PatientChartOrgWideTests(TestCase):
             permissions=["/medical-records/patients", "/medical-records/visits"],
         )
         UserRole.objects.create(user=cls.doctor, role=role)
-        cls.doctor.clinic = cls.hq
+        cls.doctor.location_clinic = cls.hq
         cls.doctor.active_clinic = cls.hq
         cls.doctor.save()
-        cls.doctor.clinics.add(cls.hq)
+        cls.doctor.location_clinics.add(cls.hq)
 
         cls.patient = Patient.objects.create(
             patient_id="CHART-PT-001",

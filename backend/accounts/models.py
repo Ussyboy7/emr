@@ -45,7 +45,7 @@ class User(AbstractUser):
     )
     
     # Organizational structure - linked to organization app
-    clinic = models.ForeignKey(
+    location_clinic = models.ForeignKey(
         'organization.Clinic',
         on_delete=models.SET_NULL,
         null=True,
@@ -63,7 +63,7 @@ class User(AbstractUser):
     )
 
     # Multi-clinic support
-    clinics = models.ManyToManyField(
+    location_clinics = models.ManyToManyField(
         'organization.Clinic',
         blank=True,
         related_name='assigned_staff',
@@ -109,7 +109,7 @@ class User(AbstractUser):
             models.Index(fields=['employee_id']),
             models.Index(fields=['system_role']),
             models.Index(fields=['email']),
-            models.Index(fields=['clinic', 'department']),
+            models.Index(fields=['location_clinic', 'department']),
         ]
     
     def __str__(self):

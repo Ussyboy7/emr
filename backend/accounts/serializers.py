@@ -17,11 +17,11 @@ class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model."""
 
     full_name = serializers.SerializerMethodField()
-    clinic_name = serializers.CharField(source="clinic.name", read_only=True)
+    location_clinic_name = serializers.CharField(source="location_clinic.name", read_only=True)
     department_name = serializers.CharField(source="department.name", read_only=True)
     permissions = serializers.SerializerMethodField()
     multi_clinic_enabled = serializers.SerializerMethodField()
-    clinics_ids = serializers.SerializerMethodField()
+    location_clinics = serializers.SerializerMethodField()
     active_clinic_id = serializers.SerializerMethodField()
     is_department_head = serializers.SerializerMethodField()
     is_department_deputy = serializers.SerializerMethodField()
@@ -46,8 +46,8 @@ class UserSerializer(serializers.ModelSerializer):
             "grade_level",
             "system_role",
             "permissions",
-            "clinic",
-            "clinic_name",
+            "location_clinic",
+            "location_clinic_name",
             "department",
             "department_name",
             "directorate",
@@ -69,7 +69,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_login",
             "date_joined",
             # Multi-clinic fields
-            "clinics_ids",
+            "location_clinics",
             "active_clinic_id",
             "multi_clinic_enabled",
         ]
@@ -78,9 +78,9 @@ class UserSerializer(serializers.ModelSerializer):
             "date_joined",
             "last_activity",
             "last_login",
-            "clinic_name",
+            "location_clinic_name",
             "department_name",
-            "clinics_ids",
+            "location_clinics",
             "multi_clinic_enabled",
         ]
         extra_kwargs = {
@@ -97,8 +97,8 @@ class UserSerializer(serializers.ModelSerializer):
         return SystemConfig.is_enabled('multi_clinic_enabled')
 
     @extend_schema_field({"type": "array", "items": {"type": "integer"}})
-    def get_clinics_ids(self, obj):
-        return list(obj.clinics.values_list('id', flat=True))
+    def get_location_clinics(self, obj):
+        return list(obj.location_clinics.values_list('id', flat=True))
 
     @extend_schema_field({"type": "integer", "nullable": True})
     def get_active_clinic_id(self, obj):
@@ -174,7 +174,7 @@ class UserDirectorySerializer(serializers.ModelSerializer):
     """
 
     full_name = serializers.SerializerMethodField()
-    clinic_name = serializers.CharField(source="clinic.name", read_only=True)
+    clinic_name = serializers.CharField(source="location_clinic.name", read_only=True)
     department_name = serializers.CharField(source="department.name", read_only=True)
     # Frontend expects `system_role_name` in some places.
     system_role_name = serializers.CharField(source="system_role", read_only=True)
@@ -192,7 +192,7 @@ class UserDirectorySerializer(serializers.ModelSerializer):
             "employee_id",
             "grade_level",
             "system_role_name",
-            "clinic",
+            "location_clinic",
             "clinic_name",
             "department",
             "department_name",
@@ -208,8 +208,8 @@ class UserDirectorySerializer(serializers.ModelSerializer):
 class UserCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new users."""
 
-    clinics = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=User.clinics.rel.model.objects.all(), required=False
+    location_clinics = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.location_clinics.rel.model.objects.all(), required=False
     )
     password = serializers.CharField(write_only=True, validators=[validate_password])
     password_confirm = serializers.CharField(write_only=True)
@@ -228,7 +228,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "employee_id",
             "grade_level",
             "system_role",
-            "clinic",
+            "location_clinic",
             "department",  # New ForeignKey fields
             "directorate",
             "division",  # Legacy fields
@@ -239,7 +239,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "is_staff",
             "custom_pages_mode",
             "custom_pages",
-            "clinics",  # Multi-clinic assignments
+            "location_clinics",  # Multi-clinic assignments
         ]
         read_only_fields = ["id"]
 
@@ -253,20 +253,20 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("password_confirm")
         password = validated_data.pop("password")
-        clinics_data = validated_data.pop("clinics", None)
+        clinics_data = validated_data.pop("location_clinics", None)
         user = User.objects.create_user(**validated_data)
         user.set_password(password)
         user.save()
         if clinics_data is not None:
-            user.clinics.set(clinics_data)
+            user.location_clinics.set(clinics_data)
         return user
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating user profile."""
 
-    clinics = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=User.clinics.rel.model.objects.all(), required=False
+    location_clinics = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.location_clinics.rel.model.objects.all(), required=False
     )
 
     class Meta:
@@ -280,7 +280,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             "bio",
             "grade_level",
             "system_role",
-            "clinic",
+            "location_clinic",
             "department",  # New ForeignKey fields
             "directorate",
             "division",  # Legacy fields
@@ -289,7 +289,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             "custom_pages_mode",
             "custom_pages",
             "active_clinic",  # Allow switching active clinic via update_me
-            "clinics",  # Multi-clinic assignments
+            "location_clinics",  # Multi-clinic assignments
         ]
 
 

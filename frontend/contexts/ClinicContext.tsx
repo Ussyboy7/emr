@@ -31,7 +31,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   const [switching, setSwitching] = useState(false);
   const [clinicVersion, setClinicVersion] = useState(0);
 
-  const clinics_ids = currentUser?.clinics_ids;
+  const location_clinics = currentUser?.location_clinics;
   const active_clinic_id = currentUser?.active_clinic_id ?? null;
   const multi_clinic_enabled = currentUser?.multi_clinic_enabled ?? false;
   const currentUserId = currentUser?.id;
@@ -46,22 +46,22 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated || !currentUserId || !multi_clinic_enabled) return;
     if (active_clinic_id !== null && active_clinic_id !== undefined) return;
-    if (!clinics_ids || clinics_ids.length === 0) return;
+    if (!location_clinics || location_clinics.length === 0) return;
     if (autoSetClinicAttemptedRef.current) return;
 
     autoSetClinicAttemptedRef.current = true;
     apiFetch("/accounts/auth/me/", {
       method: "PATCH",
-      body: JSON.stringify({ active_clinic: clinics_ids[0] }),
+      body: JSON.stringify({ active_clinic: location_clinics[0] }),
     })
       .then(() => refresh())
       .catch(() => {
         autoSetClinicAttemptedRef.current = false;
       });
-  }, [hydrated, currentUserId, clinics_ids, active_clinic_id, multi_clinic_enabled, refresh]);
+  }, [hydrated, currentUserId, location_clinics, active_clinic_id, multi_clinic_enabled, refresh]);
 
   useEffect(() => {
-    if (!hydrated || !currentUserId || !clinics_ids || clinics_ids.length === 0) {
+    if (!hydrated || !currentUserId || !location_clinics || location_clinics.length === 0) {
       setClinicsLoaded(false);
       return;
     }
@@ -80,13 +80,13 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
         setClinicsLoaded(true);
       });
     return () => { cancelled = true; };
-  }, [hydrated, currentUserId, clinics_ids]);
+  }, [hydrated, currentUserId, location_clinics]);
 
   const userClinics = useMemo(() => {
-    if (!clinics_ids || clinics_ids.length === 0) return [];
-    const ids = new Set(clinics_ids);
+    if (!location_clinics || location_clinics.length === 0) return [];
+    const ids = new Set(location_clinics);
     return allClinics.filter((c) => ids.has(c.id));
-  }, [allClinics, clinics_ids]);
+  }, [allClinics, location_clinics]);
 
   const activeClinicName = useMemo(() => {
     if (!active_clinic_id) return null;

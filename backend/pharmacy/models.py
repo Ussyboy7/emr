@@ -721,7 +721,7 @@ class StockRequest(models.Model):
 
     from_location = models.CharField(max_length=100)
     to_location = models.CharField(max_length=100)
-    clinic = models.ForeignKey(
+    location_clinic = models.ForeignKey(
         'organization.Clinic',
         on_delete=models.SET_NULL,
         null=True, blank=True,

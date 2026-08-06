@@ -32,10 +32,10 @@ class CentralStoreAccessTests(TestCase):
             defaults={"name": "Other Test Clinic"},
         )
         cls.user = User.objects.create_user(username="store_pharm", password="x")
-        cls.user.clinic = cls.central
+        cls.user.location_clinic = cls.central
+        cls.user.location_clinics.add(cls.central)
         cls.user.active_clinic = cls.central
         cls.user.save()
-        cls.user.clinics.add(cls.central)
 
     def test_get_central_store_clinic_id_uses_code(self):
         self.assertEqual(get_central_store_clinic_id(), self.central.id)

@@ -46,7 +46,7 @@ class PatientPhotoUploadTests(TestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="MR Clinic", code="MRC2")
         cls.dept = Department.objects.create(
-            clinic=cls.clinic, name="Medical Records", code="MR2"
+            location_clinic=cls.clinic, name="Medical Records", code="MR2"
         )
         cls.mro = _user_with_pages(
             "mro-photo",

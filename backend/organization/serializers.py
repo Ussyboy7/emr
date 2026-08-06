@@ -57,7 +57,7 @@ class ClinicSerializer(serializers.ModelSerializer):
         """
         from consultation.models import ConsultationRoom
         org_rooms_count = obj.rooms.filter(is_active=True).count()
-        consult_rooms_count = ConsultationRoom.objects.filter(clinic=obj, is_active=True).count()
+        consult_rooms_count = ConsultationRoom.objects.filter(location_clinic=obj, is_active=True).count()
         return org_rooms_count + consult_rooms_count
     
     @extend_schema_field(OpenApiTypes.STR)
@@ -83,7 +83,7 @@ class ClinicSerializer(serializers.ModelSerializer):
 class DepartmentSerializer(serializers.ModelSerializer):
     """Serializer for Department model."""
     
-    clinic_name = serializers.CharField(source='clinic.name', read_only=True)
+    clinic_name = serializers.CharField(source='location_clinic.name', read_only=True)
     head_name = serializers.CharField(source='head.get_full_name', read_only=True, allow_null=True)
     deputy_head_name = serializers.CharField(source='deputy_head.get_full_name', read_only=True, allow_null=True)
     staff_count = serializers.SerializerMethodField()
@@ -116,7 +116,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     """Serializer for Room model."""
     
-    clinic_name = serializers.CharField(source='clinic.name', read_only=True, allow_null=True)
+    clinic_name = serializers.CharField(source='location_clinic.name', read_only=True, allow_null=True)
     department_name = serializers.CharField(source='department.name', read_only=True, allow_null=True)
     
     class Meta:

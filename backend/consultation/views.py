@@ -117,10 +117,10 @@ class ReferralFacilityViewSet(viewsets.ModelViewSet):
 class ConsultationRoomViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation rooms."""
     
-    facility_filter_field = 'clinic'
+    facility_filter_field = 'location_clinic'
     serializer_class = ConsultationRoomSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'specialty', 'is_active', 'clinic', 'room_type']
+    filterset_fields = ['status', 'specialty', 'is_active', 'location_clinic', 'room_type']
     search_fields = ['name', 'room_number', 'location']
     ordering_fields = ['room_number', 'name']
     ordering = ['room_number']
@@ -140,7 +140,7 @@ class ConsultationRoomViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         
         return self.scope_queryset(
             ConsultationRoom.objects.all()
-            .select_related('clinic')
+            .select_related('location_clinic')
             .prefetch_related(
                 Prefetch(
                     'occupancies',
@@ -360,7 +360,7 @@ class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         
         qs = ConsultationSession.objects.all().select_related(
             'room',
-            'room__clinic',
+            'room__location_clinic',
             'patient',
             'doctor',
             'visit',
@@ -1089,7 +1089,7 @@ class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         from organization.models import Clinic
         clinic_breakdown = []
         for clinic in Clinic.objects.filter(is_active=True):
-            clinic_rooms = ConsultationRoom.objects.filter(clinic=clinic, is_active=True)
+            clinic_rooms = ConsultationRoom.objects.filter(location_clinic=clinic, is_active=True)
             clinic_sessions = month_sessions.filter(room__in=clinic_rooms)
             if clinic_sessions.exists():
                 clinic_breakdown.append({
@@ -1133,7 +1133,7 @@ class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         if SystemConfig.is_enabled('multi_clinic_enabled'):
             q_clinic_id = resolve_facility_id(self.request.user)
             if q_clinic_id is not None:
-                queue_qs = queue_qs.filter(room__clinic=q_clinic_id)
+                queue_qs = queue_qs.filter(room__location_clinic=q_clinic_id)
         queue_count = queue_qs.count()
         
         # Referrals stats
@@ -1269,7 +1269,7 @@ class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 class ConsultationQueueViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing consultation queue."""
     
-    facility_filter_field = 'room__clinic'
+    facility_filter_field = 'room__location_clinic'
     serializer_class = ConsultationQueueSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['room', 'patient', 'is_active', 'visit']
@@ -1504,7 +1504,7 @@ class ConsultationQueueViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             
             if non_physio_clinics:
                 matching_rooms = ConsultationRoom.objects.filter(
-                    clinic__name__in=non_physio_clinics,
+                    location_clinic__name__in=non_physio_clinics,
                     status='active',
                     is_active=True
                 ).exclude(id=room.id)  # Exclude the room we just created

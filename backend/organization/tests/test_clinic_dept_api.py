@@ -48,7 +48,7 @@ class DepartmentCRUDTest(APITestCase):
 
     def test_create_department(self):
         resp = self.client.post("/api/v1/organization/departments/", {
-            "clinic": self.clinic_id,
+            "location_clinic": self.clinic_id,
             "name": "Cardiology",
             "code": "CARD",
         }, format="json")

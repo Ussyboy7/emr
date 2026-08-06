@@ -13,14 +13,14 @@ class RoomModelTest(APITestCase):
     def setUpTestData(cls):
         cls.clinic = Clinic.objects.create(name="Room Test Clinic", code="RTC01")
         cls.department = Department.objects.create(
-            clinic=cls.clinic, name="Surgery", code="SURG"
+            location_clinic=cls.clinic, name="Surgery", code="SURG"
         )
 
     def test_create_room_defaults(self):
         room = Room.objects.create(
             name="Consultation A",
             room_number="R-001",
-            clinic=self.clinic,
+            location_clinic=self.clinic,
         )
         self.assertEqual(room.room_type, "consultation")
         self.assertEqual(room.status, "active")
@@ -31,7 +31,7 @@ class RoomModelTest(APITestCase):
         room = Room.objects.create(
             name="Emergency Bay",
             room_number="R-002",
-            clinic=self.clinic,
+            location_clinic=self.clinic,
             room_type="emergency",
             capacity=4,
         )
@@ -40,7 +40,7 @@ class RoomModelTest(APITestCase):
 
     def test_room_str(self):
         room = Room.objects.create(
-            name="Exam Room", room_number="R-003", clinic=self.clinic
+            name="Exam Room", room_number="R-003", location_clinic=self.clinic
         )
         self.assertEqual(str(room), "R-003 - Exam Room")
 
@@ -48,7 +48,7 @@ class RoomModelTest(APITestCase):
         room = Room.objects.create(
             name="OR-1",
             room_number="R-004",
-            clinic=self.clinic,
+            location_clinic=self.clinic,
             department=self.department,
             room_type="procedure",
         )
@@ -71,7 +71,7 @@ class RoomAPITest(APITestCase):
         resp = self.client.post("/api/v1/organization/rooms/", {
             "name": "Room A",
             "room_number": "API-R001",
-            "clinic": self.clinic.id,
+            "location_clinic": self.clinic.id,
             "room_type": "consultation",
             "capacity": 2,
         }, format="json")
@@ -80,13 +80,13 @@ class RoomAPITest(APITestCase):
         self.assertEqual(resp.data["capacity"], 2)
 
     def test_list_rooms(self):
-        Room.objects.create(name="L1", room_number="LR-001", clinic=self.clinic)
+        Room.objects.create(name="L1", room_number="LR-001")
         resp = self.client.get("/api/v1/organization/rooms/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_update_room_status(self):
         room = Room.objects.create(
-            name="Maint Room", room_number="MR-001", clinic=self.clinic
+            name="Maint Room", room_number="MR-001"
         )
         resp = self.client.patch(
             f"/api/v1/organization/rooms/{room.id}/",
@@ -99,7 +99,7 @@ class RoomAPITest(APITestCase):
 
     def test_delete_room(self):
         room = Room.objects.create(
-            name="Del Room", room_number="DR-001", clinic=self.clinic
+            name="Del Room", room_number="DR-001"
         )
         resp = self.client.delete(f"/api/v1/organization/rooms/{room.id}/")
         self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
@@ -107,10 +107,10 @@ class RoomAPITest(APITestCase):
 
     def test_filter_rooms_by_type(self):
         Room.objects.create(
-            name="ER", room_number="FT-001", clinic=self.clinic, room_type="emergency"
+            name="ER", room_number="FT-001", location_clinic=self.clinic, room_type="emergency"
         )
         Room.objects.create(
-            name="Consult", room_number="FT-002", clinic=self.clinic, room_type="consultation"
+            name="Consult", room_number="FT-002", location_clinic=self.clinic, room_type="consultation"
         )
         resp = self.client.get("/api/v1/organization/rooms/?room_type=emergency")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)

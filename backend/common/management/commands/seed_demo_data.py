@@ -873,8 +873,8 @@ class Command(BaseCommand):
             if created or not user.check_password('Changeme'):
                 user.set_password('Changeme')
                 # Update clinic and department if they weren't set during creation
-                if not user.clinic:
-                    user.clinic = clinic
+                if not user.location_clinic:
+                    user.location_clinic = clinic
                 if not user.department and dept_name and dept_name in departments:
                     user.department = departments[dept_name]
                 user.save()
@@ -986,8 +986,8 @@ class Command(BaseCommand):
                 }
             )
             # Update existing rooms to link to clinic if they don't have one
-            if not created and not room.clinic:
-                room.clinic = clinic
+            if not created and not room.location_clinic:
+                room.location_clinic = clinic
                 room.save()
             if created:
                 consultation_rooms_created += 1
