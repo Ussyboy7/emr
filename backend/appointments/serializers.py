@@ -16,6 +16,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
     patient_code = serializers.CharField(source='patient.patient_id', read_only=True)
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     clinic_name = serializers.CharField(source='clinic.name', read_only=True, allow_null=True)
+    location_clinic_name = serializers.CharField(source='location_clinic.name', read_only=True, allow_null=True)
     room_name = serializers.CharField(source='room.name', read_only=True, allow_null=True)
 
     @extend_schema_field(OpenApiTypes.STR)

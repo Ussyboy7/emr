@@ -7,10 +7,18 @@ from rest_framework.test import APITestCase
 
 from appointments.models import Appointment
 from common.tests.support import create_test_user, create_test_patient_visit
+from organization.models import OutpatientClinicType
 
 User = get_user_model()
 
 BASE_URL = "/api/v1/appointments/"
+
+
+def _clinic_type():
+    obj, _ = OutpatientClinicType.objects.get_or_create(
+        code="gopd", defaults={"name": "GOPD"}
+    )
+    return obj
 
 
 class AppointmentSetupMixin:
@@ -20,10 +28,12 @@ class AppointmentSetupMixin:
         self.user = create_test_user("apt_user", pages=["/medical-records/appointments"])
         self.client.force_authenticate(user=self.user)
         self.patient, self.visit = create_test_patient_visit(patient_id="APT-PT-001")
+        self.clinic_type = _clinic_type()
 
     def _payload(self, **overrides):
         defaults = {
             "patient": self.patient.pk,
+            "clinic": self.clinic_type.pk,
             "appointment_date": str(date.today() + timedelta(days=1)),
             "appointment_time": "09:00:00",
             "appointment_type": "consultation",
@@ -38,6 +48,7 @@ class AppointmentSetupMixin:
         defaults = {
             "patient": self.patient,
             "doctor": self.user,
+            "clinic": self.clinic_type,
             "appointment_date": date.today() + timedelta(days=1),
             "appointment_time": time(9, 0),
             "appointment_type": "consultation",
@@ -458,3 +469,67 @@ class AppointmentRBACTests(APITestCase):
             "appointment_time": "09:00:00",
         }, format="json")
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class AppointmentClinicTypeTests(AppointmentSetupMixin, APITestCase):
+    """clinic is a clinic TYPE (GOPD, Eye, …), not a facility."""
+
+    def test_clinic_is_clinic_type_not_facility(self):
+        apt = self._create_appointment()
+        self.assertIsInstance(apt.clinic, OutpatientClinicType)
+        self.assertEqual(apt.clinic.name, self.clinic_type.name)
+        self.assertIsNone(apt.location_clinic)
+
+    def test_create_requires_clinic(self):
+        payload = self._payload()
+        del payload["clinic"]
+        resp = self.client.post(BASE_URL, payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_returns_clinic_name_and_location_clinic_name(self):
+        resp = self.client.post(BASE_URL, self._payload(), format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["clinic"], self.clinic_type.pk)
+        self.assertEqual(resp.data["clinic_name"], self.clinic_type.name)
+        self.assertIn("location_clinic_name", resp.data)
+        self.assertIsNone(resp.data["location_clinic_name"])
+        self.assertNotIn("clinics", resp.data)
+
+    def test_location_clinic_set_on_update(self):
+        from organization.models import Clinic
+
+        clinic, _ = Clinic.objects.get_or_create(code="BODE-T", defaults={"name": "Bode Thomas"})
+        apt = self._create_appointment()
+        resp = self.client.patch(
+            f"{BASE_URL}{apt.pk}/",
+            {"location_clinic": clinic.pk},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["location_clinic"], clinic.pk)
+        self.assertEqual(resp.data["location_clinic_name"], clinic.name)
+
+
+class AppointmentOrgWideTests(AppointmentSetupMixin, APITestCase):
+    """Appointments are org-wide (no facility boundary)."""
+
+    def setUp(self):
+        super().setUp()
+        from organization.models import Clinic, SystemConfig
+
+        SystemConfig.objects.update_or_create(
+            key="multi_clinic_enabled",
+            defaults={"value": "true", "description": "Enable multi-clinic mode (test)"},
+        )
+        self.clinic_b, _ = Clinic.objects.get_or_create(code="BODE-B", defaults={"name": "Bode Beta"})
+        self.apt_b = self._create_appointment(
+            patient=self.patient,
+            appointment_date=date.today() + timedelta(days=4),
+            location_clinic=self.clinic_b,
+        )
+
+    def test_user_sees_appointments_at_other_facility(self):
+        resp = self.client.get(BASE_URL)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {r["id"] for r in resp.data["results"]}
+        self.assertIn(self.apt_b.pk, ids)

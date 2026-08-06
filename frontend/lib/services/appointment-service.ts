@@ -14,10 +14,14 @@ export interface Appointment {
   patient_name?: string;
   doctor?: number;
   doctor_name?: string;
+  /** Clinic type FK id (GOPD, Eye Clinic, …). */
   clinic?: number;
+  /** Clinic type name (e.g. GOPD). */
   clinic_name?: string;
-  /** OPD clinic names — align with organization OutpatientClinicType (API). */
-  clinics?: string[];
+  /** Facility FK id (site where the appointment happens). */
+  location_clinic?: number | null;
+  /** Facility name (e.g. Bode Thomas). */
+  location_clinic_name?: string | null;
   room?: number;
   room_name?: string;
   appointment_type: 'consultation' | 'follow_up' | 'routine' | 'emergency' | 'procedure';
@@ -45,6 +49,7 @@ class AppointmentService {
     patient?: number;
     doctor?: number;
     clinic?: number;
+    location_clinic?: number;
     status?: string;
     appointment_type?: string;
     appointment_date?: string;
@@ -65,6 +70,7 @@ class AppointmentService {
     patient?: number;
     doctor?: number;
     clinic?: number;
+    location_clinic?: number;
     appointment_type?: string;
     appointment_date?: string;
     start_date?: string;
@@ -94,7 +100,8 @@ class AppointmentService {
   async createAppointment(data: {
     patient: number;
     doctor?: number;
-    clinic?: number;
+    clinic: number;
+    location_clinic?: number | null;
     room?: number;
     appointment_type: 'consultation' | 'follow_up' | 'routine' | 'emergency' | 'procedure';
     appointment_date: string;
@@ -102,7 +109,6 @@ class AppointmentService {
     duration_minutes?: number;
     reason?: string;
     notes?: string;
-    clinics?: string[];
     is_recurring?: boolean;
     recurrence_pattern?: string;
     recurrence_end_date?: string;
@@ -118,7 +124,7 @@ class AppointmentService {
    */
   async updateAppointment(
     id: number,
-    data: Partial<Appointment> & { clinic?: number | null; clinics?: string[] }
+    data: Partial<Appointment> & { clinic?: number | null; location_clinic?: number | null }
   ): Promise<Appointment> {
     return apiFetch<Appointment>(`/appointments/${id}/`, {
       method: 'PATCH',

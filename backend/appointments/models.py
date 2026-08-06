@@ -37,7 +37,20 @@ class Appointment(models.Model):
         related_name='appointments',
         limit_choices_to={'system_role': 'Medical Doctor'}
     )
-    clinic = models.ForeignKey('organization.Clinic', on_delete=models.SET_NULL, null=True, blank=True, related_name='appointments')
+    clinic = models.ForeignKey(
+        'organization.OutpatientClinicType',
+        on_delete=models.PROTECT,
+        related_name='appointments',
+        help_text="Clinic type this appointment is for (GOPD, Eye Clinic, Physiotherapy, …)",
+    )
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='appointments',
+        help_text="Facility/site where the appointment happens (set by reception; may be null until assigned)",
+    )
     room = models.ForeignKey('organization.Room', on_delete=models.SET_NULL, null=True, blank=True, related_name='appointments')
     
     appointment_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='consultation')
@@ -50,13 +63,6 @@ class Appointment(models.Model):
     reason = models.TextField(blank=True, help_text="Reason for appointment")
     notes = models.TextField(blank=True)
 
-    # Same canonical names as visits (GOPD, Eye Clinic, Physiotherapy, …); primary clinic FK synced on save when possible
-    clinics = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="List of clinic names for this appointment (matches standard clinic list)",
-    )
-    
     # Recurring appointment
     is_recurring = models.BooleanField(default=False)
     recurrence_pattern = models.CharField(max_length=50, blank=True, help_text="daily, weekly, monthly")
@@ -100,15 +106,6 @@ class Appointment(models.Model):
             else:
                 new_num = 1
             self.appointment_id = f"APT-{year}-{new_num:06d}"
-
-        if self.clinics:
-            from organization.models import Clinic
-
-            first = self.clinics[0]
-            if isinstance(first, str) and first.strip():
-                match = Clinic.objects.filter(name__iexact=first.strip()).first()
-                if match:
-                    self.clinic = match
 
         super().save(*args, **kwargs)
     

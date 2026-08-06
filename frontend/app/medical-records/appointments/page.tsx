@@ -15,7 +15,7 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { AdvancedDateRangeDialog } from "@/components/shared/AdvancedDateRangeDialog";
 import { CustomDateRangeButton } from "@/components/shared/CustomDateRangeButton";
-import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
+import { DEFAULT_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 import {
   formatDisplayDate,
   formatDisplayDateMedium,
@@ -47,9 +47,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { appointmentService, type Appointment } from "@/lib/services/appointment-service";
-import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
+import { patientService, type Patient as ApiPatient } from "@/lib/services";
 import { useOutpatientClinicTypes } from "@/hooks/use-outpatient-clinic-types";
-import { useClinic } from "@/hooks/use-clinic";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
@@ -72,20 +71,15 @@ function canScheduleVisitFromAppointment(a: Appointment): boolean {
   return ["scheduled", "confirmed", "in_progress"].includes(a.status);
 }
 
-function appointmentClinicsForForm(a: Appointment): string[] {
-  if (a.clinics && a.clinics.length > 0) return a.clinics;
-  if (a.clinic_name) return [a.clinic_name];
-  return [];
-}
-
 function formatAppointmentClinics(a: Appointment): string {
-  if (a.clinics && a.clinics.length > 0) return a.clinics.join(", ");
-  return a.clinic_name || "No clinic";
+  const clinic = a.clinic_name || "No clinic";
+  const location = a.location_clinic_name;
+  return location ? `${clinic} · ${location}` : clinic;
 }
 
 export default function AppointmentsPage() {
   const { ready, handleAuthError } = useMedicalRecordsPageAuth();
-  const { names: opdClinicNames } = useOutpatientClinicTypes();
+  const { types: opdClinicTypes } = useOutpatientClinicTypes();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -98,8 +92,6 @@ export default function AppointmentsPage() {
   const [dateRange, setDateRange] = useState({ from: "", to: "" });
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [clinicFilter, setClinicFilter] = useState("all");
-  const { isMultiClinic } = useClinic();
-  const [clinicOptions, setClinicOptions] = useState<{ id: number; name: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -120,7 +112,7 @@ export default function AppointmentsPage() {
   // Form states
   const [formData, setFormData] = useState({
     appointment_type: "consultation" as Appointment["appointment_type"],
-    clinics: [] as string[],
+    clinic: null as number | null,
     appointment_date: "",
     appointment_time: "09:00",
     duration_minutes: 30,
@@ -202,15 +194,6 @@ export default function AppointmentsPage() {
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await adminService.getClinics({ page_size: MAX_LIST_PAGE_SIZE, is_active: true });
-        if (cancelled) return;
-        setClinicOptions((res.results || []).map((c) => ({ id: c.id, name: c.name })));
-      } catch {
-        if (!cancelled) setClinicOptions([]);
-      }
-    })();
     return () => {
       cancelled = true;
     };
@@ -227,7 +210,7 @@ export default function AppointmentsPage() {
       if (debouncedSearchQuery) params.search = debouncedSearchQuery;
       if (statusFilter !== "all") params.status = statusFilter;
       if (typeFilter !== "all") params.appointment_type = typeFilter;
-      if (!isMultiClinic && clinicFilter !== "all") params.clinic = Number(clinicFilter);
+      if (clinicFilter !== "all") params.clinic = Number(clinicFilter);
 
       const { appointment_date, start_date, end_date } = buildAppointmentDateParams();
       if (appointment_date) params.appointment_date = appointment_date;
@@ -264,7 +247,7 @@ export default function AppointmentsPage() {
       const stats = await appointmentService.getListStats({
         search: debouncedSearchQuery || undefined,
         appointment_type: typeFilter !== "all" ? typeFilter : undefined,
-        clinic: !isMultiClinic && clinicFilter !== "all" ? Number(clinicFilter) : undefined,
+        clinic: clinicFilter !== "all" ? Number(clinicFilter) : undefined,
         appointment_date,
         start_date,
         end_date,
@@ -301,7 +284,7 @@ export default function AppointmentsPage() {
     resetCreatePatientPicker();
     setFormData({
       appointment_type: "consultation",
-      clinics: [],
+      clinic: null,
       appointment_date: "",
       appointment_time: "09:00",
       duration_minutes: 30,
@@ -310,14 +293,8 @@ export default function AppointmentsPage() {
     });
   };
 
-  const handleClinicToggle = (clinicName: string) => {
-    setFormData((prev) => {
-      const next = [...prev.clinics];
-      const i = next.indexOf(clinicName);
-      if (i >= 0) next.splice(i, 1);
-      else next.push(clinicName);
-      return { ...prev, clinics: next };
-    });
+  const handleClinicChange = (clinicId: number | null) => {
+    setFormData((prev) => ({ ...prev, clinic: clinicId }));
   };
 
   const handleCreateAppointment = async () => {
@@ -325,20 +302,20 @@ export default function AppointmentsPage() {
       toast.error("Please search and select a patient.");
       return;
     }
-    if (formData.clinics.length === 0) {
-      toast.error("Select at least one clinic (e.g. GOPD, Eye Clinic).");
+    if (!formData.clinic) {
+      toast.error("Select a clinic (e.g. GOPD, Eye Clinic).");
       return;
     }
     try {
       const appointmentData = {
         patient: selectedCreatePatient.id,
         appointment_type: formData.appointment_type,
+        clinic: formData.clinic,
         appointment_date: formData.appointment_date,
         appointment_time: formData.appointment_time,
         duration_minutes: formData.duration_minutes,
         reason: formData.reason || undefined,
         notes: formData.notes || undefined,
-        clinics: formData.clinics,
       };
 
       await appointmentService.createAppointment(appointmentData);
@@ -354,21 +331,21 @@ export default function AppointmentsPage() {
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
-    if (formData.clinics.length === 0) {
-      toast.error("Select at least one clinic.");
+    if (!formData.clinic) {
+      toast.error("Select a clinic.");
       return;
     }
 
     try {
       const appointmentData = {
         appointment_type: formData.appointment_type,
+        clinic: formData.clinic,
         appointment_date: formData.appointment_date,
         appointment_time: formData.appointment_time,
         duration_minutes: formData.duration_minutes,
         reason: formData.reason || undefined,
         notes: formData.notes || undefined,
         status: selectedAppointment.status,
-        clinics: formData.clinics,
       };
 
       await appointmentService.updateAppointment(selectedAppointment.id, appointmentData);
@@ -429,7 +406,7 @@ export default function AppointmentsPage() {
     setSelectedAppointment(appointment);
     setFormData({
       appointment_type: appointment.appointment_type,
-      clinics: appointmentClinicsForForm(appointment),
+      clinic: appointment.clinic ?? null,
       appointment_date: appointment.appointment_date,
       appointment_time: appointment.appointment_time,
       duration_minutes: appointment.duration_minutes,
@@ -642,21 +619,19 @@ export default function AppointmentsPage() {
                     <SelectItem value="routine">Routine Checkup</SelectItem>
                   </SelectContent>
                 </Select>
-                {!isMultiClinic && (
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="Clinic" />
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Clinic type" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Clinics</SelectItem>
-                    {clinicOptions.map((c) => (
+                    {opdClinicTypes.map((c) => (
                       <SelectItem key={c.id} value={String(c.id)}>
                         {c.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                )}
               </div>
             </div>
           </CardContent>
@@ -990,49 +965,22 @@ export default function AppointmentsPage() {
                   </Select>
                 </div>
               <div className="space-y-3">
-                <Label>Clinics *</Label>
+                <Label htmlFor="clinic">Clinic *</Label>
                 <p className="text-xs text-muted-foreground">
-                  Select one or more clinics for this appointment (e.g. GOPD, Eye Clinic, Physiotherapy)
+                  Select the clinic this appointment belongs to (e.g. GOPD, Eye Clinic, Physiotherapy)
                 </p>
-                <div className="grid max-h-[280px] grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-border p-2 md:grid-cols-3">
-                  {opdClinicNames.map((clinic) => {
-                    const isSelected = formData.clinics.includes(clinic);
-                    return (
-                      <button
-                        key={clinic}
-                        type="button"
-                        onClick={() => handleClinicToggle(clinic)}
-                        className={`rounded-md p-2 text-center transition-all ${
-                          isSelected
-                            ? "border border-teal-500 bg-teal-500/10"
-                            : "border border-transparent hover:border-primary/50"
-                        }`}
-                      >
-                        <p className={`text-sm font-medium ${isSelected ? "text-teal-600 dark:text-teal-400" : "text-foreground"}`}>
-                          {clinic}
-                        </p>
-                        {isSelected && <CheckCircle className="mx-auto mt-1 h-3 w-3 text-teal-600 dark:text-teal-400" />}
-                      </button>
-                    );
-                  })}
-                </div>
-                {formData.clinics.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {formData.clinics.map((clinic) => (
-                      <Badge key={clinic} variant="secondary" className="gap-1">
-                        {clinic}
-                        <button
-                          type="button"
-                          className="ml-1 hover:text-destructive"
-                          onClick={() => handleClinicToggle(clinic)}
-                          aria-label={`Remove ${clinic}`}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
+                <Select value={formData.clinic ? String(formData.clinic) : undefined} onValueChange={(v) => handleClinicChange(Number(v))}>
+                  <SelectTrigger id="clinic">
+                    <SelectValue placeholder="Select a clinic" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {opdClinicTypes.map((clinic) => (
+                      <SelectItem key={clinic.id} value={String(clinic.id)}>
+                        {clinic.name}
+                      </SelectItem>
                     ))}
-                  </div>
-                )}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
@@ -1092,7 +1040,7 @@ export default function AppointmentsPage() {
               </Button>
               <Button
                 onClick={handleCreateAppointment}
-                disabled={!selectedCreatePatient || !formData.appointment_date || formData.clinics.length === 0}
+                disabled={!selectedCreatePatient || !formData.appointment_date || !formData.clinic}
               >
                 Create Appointment
               </Button>
@@ -1136,49 +1084,22 @@ export default function AppointmentsPage() {
                   </Select>
                 </div>
                 <div className="space-y-3 sm:col-span-2">
-                  <Label>Clinics *</Label>
+                  <Label htmlFor="edit-clinic">Clinic *</Label>
                   <p className="text-xs text-muted-foreground">
-                    Select one or more clinics (same list as New Visit)
+                    Select the clinic this appointment belongs to
                   </p>
-                  <div className="grid max-h-[240px] grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-border p-2 md:grid-cols-3">
-                    {opdClinicNames.map((clinic) => {
-                      const isSelected = formData.clinics.includes(clinic);
-                      return (
-                        <button
-                          key={clinic}
-                          type="button"
-                          onClick={() => handleClinicToggle(clinic)}
-                          className={`rounded-md p-2 text-center transition-all ${
-                            isSelected
-                              ? "border border-teal-500 bg-teal-500/10"
-                              : "border border-transparent hover:border-primary/50"
-                          }`}
-                        >
-                          <p className={`text-sm font-medium ${isSelected ? "text-teal-600 dark:text-teal-400" : "text-foreground"}`}>
-                            {clinic}
-                          </p>
-                          {isSelected && <CheckCircle className="mx-auto mt-1 h-3 w-3 text-teal-600 dark:text-teal-400" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {formData.clinics.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {formData.clinics.map((clinic) => (
-                        <Badge key={clinic} variant="secondary" className="gap-1">
-                          {clinic}
-                          <button
-                            type="button"
-                            className="ml-1 hover:text-destructive"
-                            onClick={() => handleClinicToggle(clinic)}
-                            aria-label={`Remove ${clinic}`}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </Badge>
+                  <Select value={formData.clinic ? String(formData.clinic) : undefined} onValueChange={(v) => handleClinicChange(Number(v))}>
+                    <SelectTrigger id="edit-clinic">
+                      <SelectValue placeholder="Select a clinic" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {opdClinicTypes.map((clinic) => (
+                        <SelectItem key={clinic.id} value={String(clinic.id)}>
+                          {clinic.name}
+                        </SelectItem>
                       ))}
-                    </div>
-                  )}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4">
@@ -1277,7 +1198,7 @@ export default function AppointmentsPage() {
                   </div>
 
                   <div>
-                    <Label className="text-sm font-medium text-muted-foreground">Clinics</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">Clinic</Label>
                     <p className="inline-flex flex-wrap items-center gap-2 font-medium">
                       <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
                       {formatAppointmentClinics(selectedAppointment)}

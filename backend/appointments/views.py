@@ -24,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 @document_viewset(tag="Appointments", resource="appointments")
-class AppointmentViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
-    """ViewSet for managing appointments."""
+class AppointmentViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing appointments.
+
+    Appointments are org-wide: they are defined by their clinic TYPE (GOPD, Eye
+    Clinic, …) and optionally a facility (``location_clinic``), so no facility
+    boundary is applied.
+    """
     
-    facility_filter_field = 'clinic'
     serializer_class = AppointmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = AppointmentFilter
@@ -46,12 +50,11 @@ class AppointmentViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Appointment.objects.none()
         
-        return self.scope_queryset(
-            Appointment.objects.all().select_related('patient', 'doctor', 'clinic', 'room', 'created_by')
+        return Appointment.objects.all().select_related(
+            'patient', 'doctor', 'clinic', 'location_clinic', 'room', 'created_by'
         )
     
     def perform_create(self, serializer):
-        self.auto_set_facility(serializer)
         appointment = serializer.save(created_by=self.request.user)
 
         patient_user = getattr(appointment.patient, "user", None)

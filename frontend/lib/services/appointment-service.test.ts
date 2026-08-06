@@ -56,6 +56,7 @@ describe('appointmentService', () => {
 
       const res = await appointmentService.createAppointment({
         patient: 10,
+        clinic: 2,
         appointment_type: 'consultation',
         appointment_date: '2025-01-20',
         appointment_time: '09:00',

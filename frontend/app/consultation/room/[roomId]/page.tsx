@@ -129,7 +129,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const resolvedParams = use(params);
   const roomId = resolvedParams.roomId;
   const { ready, currentUser, handleAuthError } = useConsultationPageAuth();
-  const { names: opdClinicNames } = useOutpatientClinicTypes();
+  const { names: opdClinicNames, types: opdClinicTypes } = useOutpatientClinicTypes();
 
   const [room, setRoom] = useState<ConsultationRoom | null>(null);
   const [currentPatient, setCurrentPatient] = useState<Patient | null>(null);
@@ -940,29 +940,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const reasonForAppt = trimmedReason || 'Follow-up visit';
         try {
           const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
-          const followUpClinics = getVisitServiceClinicsList({
+          const followUpClinicNames = getVisitServiceClinicsList({
             clinic: currentPatient.visitClinic,
             clinics: currentPatient.clinics,
           })
             .map((c) => normalizeClinicName(c, opdClinicNames))
             .filter((c): c is string => Boolean(c));
-          if (followUpClinics.length === 0) {
+          if (followUpClinicNames.length === 0) {
             toast.warning('Follow-up appointment was not saved (no service clinics on this visit).');
           } else {
-            await appointmentService.createAppointment({
-              patient: patientId,
-              appointment_type: 'follow_up',
-              appointment_date: followUpDate,
-              appointment_time: '09:00:00',
-              duration_minutes: 30,
-              reason: reasonForAppt,
-              notes: `Follow-up from consultation session ${sessionId}. Reason: ${reasonForAppt}`,
-              clinics: followUpClinics,
-            });
-            debugConsultationRoom('Follow-up appointment created');
-            toast.success('Follow-up appointment saved', {
-              description: `${reasonForAppt} — ${followUpDate}. View it under Medical Records → Appointments.`,
-            });
+            const followUpClinicId = opdClinicTypes.find((t) => t.name === followUpClinicNames[0])?.id;
+            if (!followUpClinicId) {
+              toast.warning('Follow-up appointment was not saved (unknown service clinic).');
+            } else {
+              await appointmentService.createAppointment({
+                patient: patientId,
+                appointment_type: 'follow_up',
+                clinic: followUpClinicId,
+                appointment_date: followUpDate,
+                appointment_time: '09:00:00',
+                duration_minutes: 30,
+                reason: reasonForAppt,
+                notes: `Follow-up from consultation session ${sessionId}. Reason: ${reasonForAppt}`,
+              });
+              debugConsultationRoom('Follow-up appointment created');
+              toast.success('Follow-up appointment saved', {
+                description: `${reasonForAppt} — ${followUpDate}. View it under Medical Records → Appointments.`,
+              });
+            }
           }
         } catch (apptError: any) {
           const msg = apptError?.message || 'Could not create follow-up appointment';

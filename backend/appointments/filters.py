@@ -14,6 +14,7 @@ class AppointmentFilter(django_filters.FilterSet):
             "patient",
             "doctor",
             "clinic",
+            "location_clinic",
             "status",
             "appointment_type",
             "appointment_date",
