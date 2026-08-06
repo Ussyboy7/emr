@@ -60,8 +60,11 @@ def build_escort_log_report(
     *,
     status_filter: str = "",
     outcome_filter: str = "",
+    org_facility_id: int | None = None,
 ) -> dict:
     escorts = _escorts_in_period(period_start, period_end)
+    if org_facility_id is not None:
+        escorts = escorts.filter(admission__visit__location_clinic_id=org_facility_id)
 
     status_key = (status_filter or "").strip().lower()
     if status_key == "pending":

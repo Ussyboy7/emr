@@ -78,11 +78,14 @@ def build_visit_statistics_report(
     start_date: date,
     end_date: date,
     group_by: GroupBy = "month",
+    org_facility_id: int | None = None,
 ) -> dict[str, Any]:
     if group_by not in GROUP_BY_LABELS:
         group_by = "month"
 
     visits = Visit.objects.filter(date__gte=start_date, date__lte=end_date)
+    if org_facility_id is not None:
+        visits = visits.filter(location_clinic_id=org_facility_id)
     trunc_fn = {"day": TruncDay, "week": TruncWeek, "month": TruncMonth}.get(
         group_by, TruncMonth
     )

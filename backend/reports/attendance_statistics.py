@@ -389,7 +389,13 @@ def _fix_footer_rows(report: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
-def build_attendance_statistics_report(**kwargs) -> dict[str, Any]:
+def build_attendance_statistics_report(
+    *,
+    org_facility_id: int | None = None,
+    **kwargs,
+) -> dict[str, Any]:
+    if org_facility_id is not None and "org_clinic_id" not in kwargs:
+        kwargs["org_clinic_id"] = org_facility_id
     report = build_attendance_statistics(**kwargs)
     return _fix_footer_rows(report)
 

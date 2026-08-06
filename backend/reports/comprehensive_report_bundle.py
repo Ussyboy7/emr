@@ -19,8 +19,10 @@ from reports.radiological_report import build_radiological_report
 from reports.referral_tracking_report import build_referral_tracking_report
 
 
-def _lifecycle_summary(period_start: date, period_end: date) -> dict:
+def _lifecycle_summary(period_start: date, period_end: date, org_facility_id: int | None = None) -> dict:
     history = Visit.objects.filter(status__in=["completed", "in_progress"]).select_related("patient")
+    if org_facility_id is not None:
+        history = history.filter(location_clinic_id=org_facility_id)
     period_visits = history.filter(date__gte=period_start, date__lte=period_end)
     patient_ids = period_visits.values_list("patient_id", flat=True).distinct()
     total_seen = patient_ids.count()
@@ -44,11 +46,18 @@ SECTION_BUILDERS: list[tuple[str, str, Callable[[date, date], dict[str, Any]]]] 
 ]
 
 
-def build_comprehensive_report_bundle(period_start: date, period_end: date) -> dict:
+def build_comprehensive_report_bundle(period_start: date, period_end: date, org_facility_id: int | None = None) -> dict:
     sections: list[dict[str, Any]] = []
     for key, title, builder in SECTION_BUILDERS:
         try:
-            payload = builder(period_start, period_end)
+            if key == "attendance_summary":
+                payload = build_attendance_summary_report(
+                    period_start,
+                    period_end,
+                    lifecycle_summary=_lifecycle_summary(period_start, period_end, org_facility_id),
+                )
+            else:
+                payload = builder(period_start, period_end)
         except Exception as exc:
             payload = {"error": str(exc)}
         sections.append({"key": key, "title": title, "report": payload})

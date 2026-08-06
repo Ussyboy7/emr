@@ -12,18 +12,23 @@ EMPLOYEE_CATEGORY_Q = Q(patient__category="employee")
 NON_EMPLOYEE_CATEGORY_Q = ~Q(patient__category="employee")
 
 
-def _diagnosis_qs(period_start: date, period_end: date):
-    return Diagnosis.objects.filter(
+def _diagnosis_qs(period_start: date, period_end: date, org_facility_id: int | None = None):
+    qs = Diagnosis.objects.filter(
         session__status="completed",
         icd10_code__isnull=False,
         patient__isnull=False,
         session__started_at__date__gte=period_start,
         session__started_at__date__lte=period_end,
     )
+    if org_facility_id is not None:
+        qs = qs.filter(visit__location_clinic_id=org_facility_id)
+    return qs
 
 
-def build_disease_pattern_report(period_start: date, period_end: date) -> dict:
-    diagnosis_qs = _diagnosis_qs(period_start, period_end)
+def build_disease_pattern_report(
+    period_start: date, period_end: date, org_facility_id: int | None = None
+) -> dict:
+    diagnosis_qs = _diagnosis_qs(period_start, period_end, org_facility_id=org_facility_id)
     diagnosis_rows = (
         diagnosis_qs.values(
             code=F("icd10_code__code"),
@@ -89,6 +94,7 @@ def build_disease_pattern_compared_report(
     period_end: date,
     *,
     periods: int = 3,
+    org_facility_id: int | None = None,
 ) -> dict:
     """ICD-10 codes compared across N consecutive periods ending at period_end."""
     length_days = (period_end - period_start).days + 1
@@ -101,7 +107,8 @@ def build_disease_pattern_compared_report(
         end = start - timedelta(days=1)
 
     period_reports = [
-        build_disease_pattern_report(p_start, p_end) for p_start, p_end, _ in period_slices
+        build_disease_pattern_report(p_start, p_end, org_facility_id=org_facility_id)
+        for p_start, p_end, _ in period_slices
     ]
     period_labels = [label for _, _, label in period_slices]
     rows = merge_icd_period_reports(period_slices, period_reports)

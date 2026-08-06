@@ -37,8 +37,11 @@ def medical_exam_lab_orders_filter(period_start: date, period_end: date) -> Q:
     )
 
 
-def build_lab_attendance_report(period_start: date, period_end: date) -> dict:
-    history_orders = LabOrder.objects.filter(patient__isnull=False).select_related("patient").distinct()
+def build_lab_attendance_report(period_start: date, period_end: date, org_facility_id: int | None = None) -> dict:
+    history_orders = LabOrder.objects.filter(patient__isnull=False)
+    if org_facility_id is not None:
+        history_orders = history_orders.filter(location_clinic_id=org_facility_id)
+    history_orders = history_orders.select_related("patient").distinct()
     lab_orders = history_orders.filter(
         ordered_at__date__gte=period_start,
         ordered_at__date__lte=period_end,
@@ -112,10 +115,11 @@ def build_lab_attendance_report(period_start: date, period_end: date) -> dict:
     first_time_patients = 0
     returning_patients = 0
     if period_start and period_end and unique_patient_ids:
+        first_lab_qs = LabOrder.objects.filter(patient__isnull=False, patient=OuterRef("pk"))
+        if org_facility_id is not None:
+            first_lab_qs = first_lab_qs.filter(location_clinic_id=org_facility_id)
         first_lab_date_subquery = (
-            LabOrder.objects.filter(patient__isnull=False, patient=OuterRef("pk"))
-            .order_by("ordered_at", "id")
-            .values("ordered_at__date")[:1]
+            first_lab_qs.order_by("ordered_at", "id").values("ordered_at__date")[:1]
         )
         patients_qs = Patient.objects.filter(id__in=unique_patient_ids).annotate(
             first_lab_order_date=Subquery(first_lab_date_subquery, output_field=DateField())

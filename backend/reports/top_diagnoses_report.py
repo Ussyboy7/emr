@@ -13,6 +13,7 @@ def build_top_diagnoses_report(
     period_end: date,
     *,
     limit: int = 20,
+    org_facility_id: int | None = None,
 ) -> dict:
     limit = max(1, min(int(limit), 100))
 
@@ -23,6 +24,8 @@ def build_top_diagnoses_report(
         session__started_at__date__gte=period_start,
         session__started_at__date__lte=period_end,
     )
+    if org_facility_id is not None:
+        qs = qs.filter(visit__location_clinic_id=org_facility_id)
 
     total_lines = qs.count()
     distinct_codes = (

@@ -55,17 +55,20 @@ def _facility_display_name(referral: Referral) -> str:
     return (referral.facility or "").strip() or "Unregistered facility"
 
 
-def _is_new_referral(referral: Referral) -> bool:
+def _is_new_referral(referral: Referral, org_facility_id: int | None = None) -> bool:
     """First referral for patient + registered facility before this row's date."""
     if referral.patient_id is None:
         return True
+    facility_filter = Q()
+    if org_facility_id is not None:
+        facility_filter = Q(visit__location_clinic_id=org_facility_id)
     if referral.facility_partner_id:
         earlier = Referral.objects.filter(
             patient_id=referral.patient_id,
             facility_partner_id=referral.facility_partner_id,
             referred_at__lt=referral.referred_at,
-        ).exclude(status__in=CANCELLED_STATUSES)
-        return not earlier.exists()
+        ).filter(facility_filter)
+        return not earlier.exclude(status__in=CANCELLED_STATUSES).exists()
     facility_name = (referral.facility or "").strip().lower()
     if not facility_name:
         return True
@@ -74,13 +77,16 @@ def _is_new_referral(referral: Referral) -> bool:
             patient_id=referral.patient_id,
             referred_at__lt=referral.referred_at,
         )
+        .filter(facility_filter)
         .exclude(status__in=CANCELLED_STATUSES)
         .filter(Q(facility__iexact=referral.facility) | Q(facility_partner__name__iexact=referral.facility))
     )
     return not earlier.exists()
 
 
-def build_retainership_pivot(period_start: date, period_end: date) -> list[dict]:
+def build_retainership_pivot(
+    period_start: date, period_end: date, org_facility_id: int | None = None
+) -> list[dict]:
     referrals = (
         Referral.objects.filter(
             referred_at__date__gte=period_start,
@@ -91,13 +97,15 @@ def build_retainership_pivot(period_start: date, period_end: date) -> list[dict]
         .select_related("patient", "facility_partner")
         .order_by("referred_at")
     )
+    if org_facility_id is not None:
+        referrals = referrals.filter(visit__location_clinic_id=org_facility_id)
 
     pivot: dict[str, dict[str, int]] = {}
     for referral in referrals:
         name = _facility_display_name(referral)
         if name not in pivot:
             pivot[name] = {"new": 0, "follow_up": 0, "total": 0}
-        if _is_new_referral(referral):
+        if _is_new_referral(referral, org_facility_id=org_facility_id):
             pivot[name]["new"] += 1
         else:
             pivot[name]["follow_up"] += 1
@@ -117,7 +125,9 @@ def build_retainership_pivot(period_start: date, period_end: date) -> list[dict]
     return rows
 
 
-def build_referral_tracking_report(period_start: date, period_end: date) -> dict:
+def build_referral_tracking_report(
+    period_start: date, period_end: date, org_facility_id: int | None = None
+) -> dict:
     referrals = (
         Referral.objects.filter(
             referred_at__date__gte=period_start,
@@ -127,6 +137,8 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
         .select_related("patient", "facility_partner")
         .order_by("-referred_at")
     )
+    if org_facility_id is not None:
+        referrals = referrals.filter(visit__location_clinic_id=org_facility_id)
 
     total = referrals.count()
     distinct_patients = referrals.values("patient").distinct().count()
@@ -135,7 +147,7 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
     new_count = 0
     follow_up_count = 0
     for referral in active.iterator():
-        if _is_new_referral(referral):
+        if _is_new_referral(referral, org_facility_id=org_facility_id):
             new_count += 1
         else:
             follow_up_count += 1
@@ -173,7 +185,7 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
                 }
             )
 
-    retainership = build_retainership_pivot(period_start, period_end)
+    retainership = build_retainership_pivot(period_start, period_end, org_facility_id=org_facility_id)
 
     rows = []
     for referral in referrals[:500]:
@@ -196,7 +208,7 @@ def build_referral_tracking_report(period_start: date, period_end: date) -> dict
                 ),
                 "specialty": referral.specialty,
                 "facility": _facility_display_name(referral),
-                "is_new": _is_new_referral(referral),
+                "is_new": _is_new_referral(referral, org_facility_id=org_facility_id),
                 "referred_at": referral.referred_at.isoformat() if referral.referred_at else None,
             }
         )

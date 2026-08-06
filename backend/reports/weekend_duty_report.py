@@ -17,9 +17,11 @@ from reports.attendance_statistics import (
 WEEKEND_WEEKDAYS = (1, 7)
 
 
-def _weekend_visits_queryset(attendable_visits_queryset, period_start: date, period_end: date):
+def _weekend_visits_queryset(
+    attendable_visits_queryset, period_start: date, period_end: date, org_facility_id: int | None = None
+):
     return (
-        attendable_visits_queryset()
+        attendable_visits_queryset(org_clinic_id=org_facility_id)
         .filter(
             date__gte=period_start,
             date__lte=period_end,
@@ -36,9 +38,10 @@ def build_weekend_duty_report(
     period_end: date,
     *,
     attendable_visits_queryset,
+    org_facility_id: int | None = None,
 ) -> dict:
     visits = _weekend_visits_queryset(
-        attendable_visits_queryset, period_start, period_end
+        attendable_visits_queryset, period_start, period_end, org_facility_id
     )
     total_visit_records = visits.count()
     distinct_patients = visits.values("patient").distinct().count()

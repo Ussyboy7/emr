@@ -131,7 +131,9 @@ class TopDiagnosesReportView(views.APIView):
         except (TypeError, ValueError):
             limit = 20
         period_start, period_end = _period_bounds_from_request(request)
-        report = build_top_diagnoses_report(period_start, period_end, limit=limit)
+        report = build_top_diagnoses_report(
+            period_start, period_end, limit=limit, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -150,10 +152,16 @@ class LabPerformanceReportView(views.APIView):
         
         from laboratory.models import LabOrder, LabTest
         
+        org_facility_id = _org_clinic_scope(request)
+        
         # Get all tests this month
         tests_this_month = LabTest.objects.filter(
             order__ordered_at__date__gte=start_of_month
         )
+        if org_facility_id is not None:
+            tests_this_month = tests_this_month.filter(
+                order__location_clinic_id=org_facility_id
+            )
         
         # Completed tests
         completed_tests = tests_this_month.filter(status='verified').count()
@@ -166,6 +174,10 @@ class LabPerformanceReportView(views.APIView):
             verified_at__isnull=False,
             order__ordered_at__isnull=False
         ).exclude(verified_at__lt=F('order__ordered_at'))[:100]  # Sample for performance
+        if org_facility_id is not None:
+            verified_tests = verified_tests.filter(
+                order__location_clinic_id=org_facility_id
+            )
         
         avg_turnaround_hours = 0
         if verified_tests.exists():
@@ -185,6 +197,14 @@ class LabPerformanceReportView(views.APIView):
         ).exclude(notes__isnull=True).exclude(notes='').filter(
             notes__icontains='critical'
         ).count()
+        if org_facility_id is not None:
+            critical_values = LabTest.objects.filter(
+                status='verified',
+                verified_at__date__gte=start_of_month,
+                order__location_clinic_id=org_facility_id,
+            ).exclude(notes__isnull=True).exclude(notes='').filter(
+                notes__icontains='critical'
+            ).count()
         
         stats = {
             'tests_this_month': total_tests,
@@ -208,15 +228,27 @@ class PharmacyPerformanceReportView(views.APIView):
         start_of_month = today.replace(day=1)
         
         from pharmacy.models import Prescription, MedicationInventory
-        
+
+        org_facility_id = _org_clinic_scope(request)
+
         # Prescriptions dispensed this month
         dispensed_this_month = Prescription.objects.filter(
             dispensed_at__date__gte=start_of_month,
             status='dispensed'
-        ).count()
+        )
+        if org_facility_id is not None:
+            dispensed_this_month = dispensed_this_month.filter(
+                location_clinic_id=org_facility_id
+            )
+        dispensed_this_month = dispensed_this_month.count()
         
         # Pending prescriptions
-        pending_prescriptions = Prescription.objects.filter(status='pending').count()
+        pending_prescriptions = Prescription.objects.filter(status='pending')
+        if org_facility_id is not None:
+            pending_prescriptions = pending_prescriptions.filter(
+                location_clinic_id=org_facility_id
+            )
+        pending_prescriptions = pending_prescriptions.count()
         
         # Average wait time (time from prescribed to dispensed)
         dispensed_prescriptions = Prescription.objects.filter(
@@ -224,6 +256,10 @@ class PharmacyPerformanceReportView(views.APIView):
             dispensed_at__isnull=False,
             prescribed_at__isnull=False
         ).exclude(dispensed_at__lt=F('prescribed_at'))[:100]  # Sample for performance
+        if org_facility_id is not None:
+            dispensed_prescriptions = dispensed_prescriptions.filter(
+                location_clinic_id=org_facility_id
+            )
         
         avg_wait_minutes = 0
         if dispensed_prescriptions.exists():
@@ -237,7 +273,12 @@ class PharmacyPerformanceReportView(views.APIView):
         # Low stock items
         low_stock_count = MedicationInventory.objects.filter(
             quantity__lte=F('min_stock_level')
-        ).count()
+        )
+        if org_facility_id is not None:
+            low_stock_count = low_stock_count.filter(
+                location_clinic_id=org_facility_id
+            )
+        low_stock_count = low_stock_count.count()
         
         stats = {
             'dispensed_this_month': dispensed_this_month,
@@ -280,8 +321,11 @@ class AttendanceSummaryReportView(views.APIView):
             request, default_to_current_year=True
         )
 
-        history_queryset = Visit.objects.filter(
-            status__in=['completed', 'in_progress']
+        history_queryset = _scope_visits_by_org_clinic(
+            request,
+            Visit.objects.filter(
+                status__in=['completed', 'in_progress']
+            ),
         ).select_related('patient')
         visits_queryset = history_queryset.filter(
             date__gte=period_start,
@@ -350,6 +394,7 @@ class VisitStatisticsReportView(views.APIView):
             start_date=period_start,
             end_date=period_end,
             group_by=group_by,
+            org_facility_id=_org_clinic_scope(request),
         )
 
         user = request.user
@@ -396,12 +441,17 @@ class DispensedPrescriptionsReportView(views.APIView):
         if group_by not in ("day", "week", "month"):
             group_by = "month"
 
+        org_facility_id = _org_clinic_scope(request)
+
         prescriptions = Prescription.objects.filter(
             status='dispensed',
             dispensed_at__isnull=False,
             dispensed_at__date__gte=period_start,
             dispensed_at__date__lte=period_end,
-        ).select_related('patient')
+        )
+        if org_facility_id is not None:
+            prescriptions = prescriptions.filter(location_clinic_id=org_facility_id)
+        prescriptions = prescriptions.select_related('patient')
 
         period_data = build_prescription_period_breakdown(
             prescriptions,
@@ -437,7 +487,12 @@ class DispensedPrescriptionsReportView(views.APIView):
         dispense_ids = Dispense.objects.filter(
             dispensed_at__date__gte=period_start,
             dispensed_at__date__lte=period_end,
-        ).values_list('prescription_item_id', flat=True).distinct()
+        )
+        if org_facility_id is not None:
+            dispense_ids = dispense_ids.filter(
+                prescription_item__prescription__location_clinic_id=org_facility_id
+            )
+        dispense_ids = dispense_ids.values_list('prescription_item_id', flat=True).distinct()
         dispensed_items_qs = dispensed_items_qs.filter(id__in=dispense_ids)
 
         dispensed_items_rows = (
@@ -489,7 +544,9 @@ class LaboratoryAttendanceReportView(views.APIView):
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
-        report = build_lab_attendance_report(period_start, period_end)
+        report = build_lab_attendance_report(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -509,7 +566,9 @@ class ComprehensiveReportView(views.APIView):
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
-        report = build_comprehensive_report_bundle(period_start, period_end)
+        report = build_comprehensive_report_bundle(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -548,6 +607,10 @@ class ServicesActivitiesReportView(views.APIView):
             end_date=period_end,
         )
 
+        org_facility_id = _org_clinic_scope(request)
+        if org_facility_id is not None:
+            procedures = procedures.filter(visit__location_clinic_id=org_facility_id)
+
         injections_qs = filter_procedures_by_history_type(procedures, "injection")
         injections_male = gender_event_counts(injections_qs, "male")
         injections_female = gender_event_counts(injections_qs, "female")
@@ -563,6 +626,8 @@ class ServicesActivitiesReportView(views.APIView):
             issued_at__date__gte=period_start,
             issued_at__date__lte=period_end,
         ).select_related("patient")
+        if org_facility_id is not None:
+            sick_leave_qs = sick_leave_qs.filter(issued_by__clinic_id=org_facility_id)
         sick_leave_male = gender_event_counts(sick_leave_qs, "male")
         sick_leave_female = gender_event_counts(sick_leave_qs, "female")
         sick_leave = sick_leave_male + sick_leave_female
@@ -571,6 +636,8 @@ class ServicesActivitiesReportView(views.APIView):
             referred_at__date__gte=period_start,
             referred_at__date__lte=period_end,
         ).select_related("patient")
+        if org_facility_id is not None:
+            referrals_qs = referrals_qs.filter(visit__location_clinic_id=org_facility_id)
         referrals_male = gender_event_counts(referrals_qs, "male")
         referrals_female = gender_event_counts(referrals_qs, "female")
         referrals_total = referrals_male + referrals_female
@@ -810,7 +877,9 @@ class RadiologicalServicesReportView(views.APIView):
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
-        report = build_radiological_report(period_start, period_end)
+        report = build_radiological_report(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -827,7 +896,9 @@ class ReferralTrackingReportView(views.APIView):
         from reports.referral_tracking_report import build_referral_tracking_report
 
         period_start, period_end = _period_bounds_from_request(request)
-        report = build_referral_tracking_report(period_start, period_end)
+        report = build_referral_tracking_report(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -846,7 +917,9 @@ class DiseasePatternReportView(views.APIView):
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
-        report = build_disease_pattern_report(period_start, period_end)
+        report = build_disease_pattern_report(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -871,7 +944,7 @@ class DiseasePatternComparedReportView(views.APIView):
             periods = 3
         periods = max(2, min(periods, 6))
         report = build_disease_pattern_compared_report(
-            period_start, period_end, periods=periods
+            period_start, period_end, periods=periods, org_facility_id=_org_clinic_scope(request)
         )
         return respond_with_export(
             request,
@@ -889,7 +962,9 @@ class ObservationAdmissionsReportView(views.APIView):
         from reports.observation_admissions import build_observation_admissions_report
 
         period_start, period_end = _period_bounds_from_request(request)
-        report = build_observation_admissions_report(period_start, period_end)
+        report = build_observation_admissions_report(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -906,7 +981,9 @@ class PhysioClinicalDiagnosisReportView(views.APIView):
         from reports.physio_clinical_diagnosis import build_physio_clinical_diagnosis_report
 
         period_start, period_end = _period_bounds_from_request(request)
-        report = build_physio_clinical_diagnosis_report(period_start, period_end)
+        report = build_physio_clinical_diagnosis_report(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -923,7 +1000,9 @@ class EyeClinicalDiagnosisReportView(views.APIView):
         from reports.eye_clinical_diagnosis import build_eye_clinical_diagnosis_report
 
         period_start, period_end = _period_bounds_from_request(request)
-        report = build_eye_clinical_diagnosis_report(period_start, period_end)
+        report = build_eye_clinical_diagnosis_report(
+            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+        )
         return respond_with_export(
             request,
             report,
@@ -1080,6 +1159,7 @@ class WeekendCallDutyReportView(views.APIView):
             period_start,
             period_end,
             attendable_visits_queryset=attendable_visits_queryset,
+            org_facility_id=_org_clinic_scope(request),
         )
         return respond_with_export(
             request,
@@ -1101,6 +1181,10 @@ class NewRegistrationsReportView(views.APIView):
     def get(self, request):
         period_start, period_end = _period_bounds_from_request(request)
 
+        # Org-wide report: patient registry is universal (see manifest in
+        # reports/tests/test_report_scoping.py). Per-facility breakdown uses
+        # each patient's registered-at facility (location_clinic).
+
         qs = Patient.objects.filter(
             is_active=True,
             created_at__date__gte=period_start,
@@ -1113,6 +1197,20 @@ class NewRegistrationsReportView(views.APIView):
         by_category = {}
         for category, _ in Patient.CATEGORY_CHOICES:
             by_category[category] = qs.filter(category=category).count()
+
+        # Facility breakdown (registered-at facility), org-wide by default.
+        by_facility_rows = (
+            Patient.objects.filter(
+                is_active=True,
+                created_at__date__gte=period_start,
+                created_at__date__lte=period_end,
+                location_clinic__isnull=False,
+            )
+            .values('location_clinic__name')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        by_facility = [{'facility': r['location_clinic__name'], 'count': r['count']} for r in by_facility_rows]
 
         # Daily breakdown
         daily_qs = (
@@ -1132,6 +1230,7 @@ class NewRegistrationsReportView(views.APIView):
         report = {
             'total': total,
             'by_category': by_category,
+            'by_facility': by_facility,
             'daily_data': daily_data,
             'start_date': period_start.isoformat(),
             'end_date': period_end.isoformat(),
@@ -1162,12 +1261,16 @@ class DrugExpiryWatchReportView(views.APIView):
         today = timezone.now().date()
         cutoff = today + timedelta(days=days_window)
 
+        org_facility_id = _org_clinic_scope(request)
+
         qs = (
             MedicationInventory.objects
             .filter(expiry_date__gte=today, expiry_date__lte=cutoff, quantity__gt=0)
             .select_related('medication', 'medication__generic')
             .order_by('expiry_date')
         )
+        if org_facility_id is not None:
+            qs = qs.filter(location_clinic_id=org_facility_id)
 
         buckets = {
             '0_30': qs.filter(expiry_date__lte=today + timedelta(days=30)),
@@ -1182,7 +1285,10 @@ class DrugExpiryWatchReportView(views.APIView):
         already_expired = MedicationInventory.objects.filter(
             expiry_date__lt=today,
             quantity__gt=0,
-        ).count()
+        )
+        if org_facility_id is not None:
+            already_expired = already_expired.filter(location_clinic_id=org_facility_id)
+        already_expired = already_expired.count()
         summary['already_expired'] = already_expired
 
         items = []
@@ -1234,10 +1340,14 @@ class TopPrescribedDrugsReportView(views.APIView):
             limit = 20
         period_start, period_end = _period_bounds_from_request(request)
 
+        org_facility_id = _org_clinic_scope(request)
+
         qs = PrescriptionItem.objects.filter(
             prescription__prescribed_at__date__gte=period_start,
             prescription__prescribed_at__date__lte=period_end,
         )
+        if org_facility_id is not None:
+            qs = qs.filter(prescription__location_clinic_id=org_facility_id)
 
         # Aggregate by medication (brand), falling back to generic for items without a brand.
         from django.db.models import Sum, F
@@ -1294,6 +1404,9 @@ class StaffProductivityReportView(views.APIView):
             date__gte=period_start,
             date__lte=period_end,
         )
+        org_facility_id = _org_clinic_scope(request)
+        if org_facility_id is not None:
+            visit_qs = visit_qs.filter(location_clinic_id=org_facility_id)
 
         rows = []
         for doctor in doctors_qs:
@@ -1349,6 +1462,13 @@ class CriticalLabResultsReportView(views.APIView):
             )
             .select_related('test', 'test__order', 'patient', 'order__patient')
         )
+        org_facility_id = _org_clinic_scope(request)
+        if org_facility_id is not None:
+            from django.db.models import Q as _Q
+            qs = qs.filter(
+                _Q(test__order__location_clinic_id=org_facility_id)
+                | _Q(order__location_clinic_id=org_facility_id)
+            )
 
         total = qs.count()
         items = []
@@ -1460,6 +1580,9 @@ class NotifiableDiseasesReportView(views.APIView):
             diagnosed_at__date__gte=period_start,
             diagnosed_at__date__lte=period_end,
         ).select_related('icd10_code', 'patient', 'session', 'diagnosed_by')
+        org_facility_id = _org_clinic_scope(request)
+        if org_facility_id is not None:
+            qs = qs.filter(visit__location_clinic_id=org_facility_id)
 
         total = qs.count()
         items = []
@@ -1541,8 +1664,8 @@ class AttendanceStatisticsReportView(views.APIView):
             org_clinic_id=_org_clinic_scope(request),
         )
 
-        history_qs = Visit.objects.all()
-        period_qs = attendable_visits_queryset().filter(
+        history_qs = _scope_visits_by_org_clinic(request, Visit.objects.all())
+        period_qs = attendable_visits_queryset(org_clinic_id=_org_clinic_scope(request)).filter(
             date__gte=period_start,
             date__lte=period_end,
         )

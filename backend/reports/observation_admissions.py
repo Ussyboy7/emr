@@ -15,7 +15,12 @@ from wards.models import PatientAdmission
 OBSERVATION_TYPES = ("observation", "daycare_observation")
 
 
-def build_observation_admissions_report(period_start: date, period_end: date) -> dict:
+def build_observation_admissions_report(
+    period_start: date,
+    period_end: date,
+    *,
+    org_facility_id: int | None = None,
+) -> dict:
     admissions = (
         PatientAdmission.objects.filter(
             admission_type__in=OBSERVATION_TYPES,
@@ -26,6 +31,8 @@ def build_observation_admissions_report(period_start: date, period_end: date) ->
         .select_related("patient")
         .order_by("admission_date")
     )
+    if org_facility_id is not None:
+        admissions = admissions.filter(visit__location_clinic_id=org_facility_id)
 
     total_events = admissions.count()
 

@@ -44,10 +44,11 @@ def _study_modality(study: RadiologyStudy) -> str:
     return procedure or "Unspecified"
 
 
-def build_radiological_report(period_start: date, period_end: date) -> dict:
-    history_studies = RadiologyStudy.objects.filter(
-        order__patient__isnull=False
-    ).select_related(
+def build_radiological_report(period_start: date, period_end: date, org_facility_id: int | None = None) -> dict:
+    history_studies = RadiologyStudy.objects.filter(order__patient__isnull=False)
+    if org_facility_id is not None:
+        history_studies = history_studies.filter(order__location_clinic_id=org_facility_id)
+    history_studies = history_studies.select_related(
         "order__patient",
         "order__location_clinic",
         "order__processing_clinic",

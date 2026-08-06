@@ -9,7 +9,12 @@ from physiotherapy.models import PhysioSession
 from reports.icd_diagnosis_aggregation import build_icd_frequency_rows, increment_icd_counts
 
 
-def build_physio_clinical_diagnosis_report(period_start: date, period_end: date) -> dict:
+def build_physio_clinical_diagnosis_report(
+    period_start: date,
+    period_end: date,
+    *,
+    org_facility_id: int | None = None,
+) -> dict:
     sessions = (
         PhysioSession.objects.filter(
             status="completed",
@@ -20,6 +25,8 @@ def build_physio_clinical_diagnosis_report(period_start: date, period_end: date)
         .select_related("order", "order__patient", "order__consultation_session")
         .order_by("completed_at")
     )
+    if org_facility_id is not None:
+        sessions = sessions.filter(order__location_clinic_id=org_facility_id)
 
     counts: dict[tuple[str, str], int] = defaultdict(int)
     for session in sessions:
