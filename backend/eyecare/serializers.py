@@ -31,7 +31,7 @@ class EyeOrderSerializer(serializers.ModelSerializer):
         model = EyeOrder
         fields = [
             'id', 'patient', 'patient_name', 'patient_id', 'patient_photo', 'ordered_by', 'ordered_by_name',
-            'visit', 'consultation_session',
+            'visit', 'consultation_session', 'admission',
             'chief_complaint', 'visual_acuity_od', 'visual_acuity_os', 'visual_acuity_ou',
             'refraction_od', 'refraction_os', 'iop_od', 'iop_os',
             'diagnosis', 'treatment_plan', 'special_instructions',
@@ -51,7 +51,7 @@ class EyeOrderCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = EyeOrder
         fields = [
-            'patient', 'visit', 'consultation_session',
+            'patient', 'visit', 'consultation_session', 'admission',
             'chief_complaint', 'visual_acuity_od', 'visual_acuity_os', 'visual_acuity_ou',
             'refraction_od', 'refraction_os', 'iop_od', 'iop_os',
             'diagnosis', 'treatment_plan', 'special_instructions',

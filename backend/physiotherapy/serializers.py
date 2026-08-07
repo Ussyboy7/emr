@@ -28,7 +28,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'patient', 'patient_name', 'patient_id', 'patient_photo',
             'ordered_by', 'ordered_by_name', 'consultation_session',
-            'visit',
+            'visit', 'admission',
             'history_clinical_findings', 'diagnosis', 'drug_history', 'special_instructions',
             'priority', 'status', 'referral_source', 'ordered_at', 'scheduled_at', 'completed_at',
             'sessions_completed',
@@ -82,7 +82,7 @@ class PhysioOrderCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PhysioOrder
         fields = [
-            'patient', 'visit', 'consultation_session',
+            'patient', 'visit', 'consultation_session', 'admission',
             'history_clinical_findings', 'diagnosis', 'drug_history', 'special_instructions',
             'priority', 'referral_source',
         ]
