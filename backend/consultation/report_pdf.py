@@ -234,7 +234,7 @@ def build_consultation_report_pdf(session):
     # ── Lab Orders ──
     if visit:
         from laboratory.models import LabOrder, LabTest
-        lab_orders = LabOrder.objects.filter(visit=visit).prefetch_related(
+        lab_orders = LabOrder.objects.filter(consultation_session=session).prefetch_related(
             "tests__template"
         )
         lab_rows = []
@@ -269,7 +269,7 @@ def build_consultation_report_pdf(session):
     # ── Radiology Orders ──
     if visit:
         from radiology.models import RadiologyOrder
-        rad_orders = RadiologyOrder.objects.filter(visit=visit).prefetch_related(
+        rad_orders = RadiologyOrder.objects.filter(consultation_session=session).prefetch_related(
             "studies"
         )
         rad_rows = []

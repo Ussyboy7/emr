@@ -496,6 +496,45 @@ def build_admission_summary_pdf(admission) -> bytes:
         )
 
     # ------------------------------------------------------------------
+    # 7b. Physiotherapy
+    # ------------------------------------------------------------------
+    physio_rows = _load_physio(admission)
+    if physio_rows:
+        story.append(section_heading("7b. Physiotherapy"))
+        story.append(data_table(
+            ["Diagnosis", "Status"],
+            [[p["diagnosis"], p["status"]] for p in physio_rows],
+            col_widths=[page_width * 0.6, page_width * 0.4],
+            italic_col=None,
+        ))
+
+    # ------------------------------------------------------------------
+    # 7c. Eye care
+    # ------------------------------------------------------------------
+    eye_rows = _load_eye(admission)
+    if eye_rows:
+        story.append(section_heading("7c. Eye care"))
+        story.append(data_table(
+            ["Diagnosis", "Status"],
+            [[e["diagnosis"], e["status"]] for e in eye_rows],
+            col_widths=[page_width * 0.6, page_width * 0.4],
+            italic_col=None,
+        ))
+
+    # ------------------------------------------------------------------
+    # 7d. Referrals
+    # ------------------------------------------------------------------
+    ref_rows = _load_referrals(admission)
+    if ref_rows:
+        story.append(section_heading("7d. Referrals"))
+        story.append(data_table(
+            ["Specialty", "Status", "Referral ID"],
+            [[r["specialty"], r["status"], r["referral_id"]] for r in ref_rows],
+            col_widths=[page_width * 0.4, page_width * 0.3, page_width * 0.3],
+            italic_col=None,
+        ))
+
+    # ------------------------------------------------------------------
     # 8. Progress notes (currently appended to admission_notes)
     # ------------------------------------------------------------------
     if admission.admission_notes:
@@ -693,19 +732,26 @@ def _load_nursing_orders(admission) -> list[dict]:
 
 
 def _load_pharmacy(admission) -> list[dict]:
-    """Prescriptions on this admission's visit, with per-item dispense status."""
-    if not admission.visit_id:
-        return []
+    """Prescriptions on this admission, with per-item dispense status."""
     try:
         from pharmacy.models import Prescription
     except Exception:
         return []
 
+    if admission.pk:
+        rx_qs = Prescription.objects.filter(admission_id=admission.pk)
+    else:
+        if not admission.visit_id:
+            return []
+        rx_qs = Prescription.objects.filter(
+            visit_id=admission.visit_id,
+            prescribed_at__gte=admission.admission_date,
+        )
+        if admission.discharge_date:
+            rx_qs = rx_qs.filter(prescribed_at__lte=admission.discharge_date)
+
     prescriptions = (
-        Prescription.objects.filter(visit_id=admission.visit_id)
-        .filter(prescribed_at__gte=admission.admission_date)
-        .order_by("prescribed_at")
-        .prefetch_related("medications__generic")
+        rx_qs.order_by("prescribed_at").prefetch_related("medications__generic")
     )
     out = []
     for rx in prescriptions:
@@ -762,19 +808,24 @@ def _load_pharmacy(admission) -> list[dict]:
 
 def _load_lab(admission) -> list[dict]:
     """Lab tests ordered during this admission (one row per test)."""
-    if not admission.visit_id:
-        return []
     try:
         from laboratory.models import LabOrder
     except Exception:
         return []
 
-    orders = (
-        LabOrder.objects.filter(visit_id=admission.visit_id)
-        .filter(ordered_at__gte=admission.admission_date)
-        .order_by("ordered_at")
-        .prefetch_related("tests")
-    )
+    if admission.pk:
+        orders = LabOrder.objects.filter(admission_id=admission.pk)
+    else:
+        if not admission.visit_id:
+            return []
+        orders = LabOrder.objects.filter(
+            visit_id=admission.visit_id,
+            ordered_at__gte=admission.admission_date,
+        )
+        if admission.discharge_date:
+            orders = orders.filter(ordered_at__lte=admission.discharge_date)
+
+    orders = orders.order_by("ordered_at").prefetch_related("tests")
     rows = []
     for order in orders:
         order_no = (
@@ -1485,18 +1536,24 @@ def build_responsibility_form_pdf(admission, form_type: str = "auto") -> bytes:
 
 def _load_radiology(admission) -> list[dict]:
     """Radiology orders + brief report summary."""
-    if not admission.visit_id:
-        return []
     try:
         from radiology.models import RadiologyOrder
     except Exception:
         return []
 
-    orders = (
-        RadiologyOrder.objects.filter(visit_id=admission.visit_id)
-        .filter(ordered_at__gte=admission.admission_date)
-        .order_by("ordered_at")
-    )
+    if admission.pk:
+        orders = RadiologyOrder.objects.filter(admission_id=admission.pk)
+    else:
+        if not admission.visit_id:
+            return []
+        orders = RadiologyOrder.objects.filter(
+            visit_id=admission.visit_id,
+            ordered_at__gte=admission.admission_date,
+        )
+        if admission.discharge_date:
+            orders = orders.filter(ordered_at__lte=admission.discharge_date)
+
+    orders = orders.order_by("ordered_at")
     out = []
     for order in orders:
         proc = (
@@ -1519,3 +1576,58 @@ def _load_radiology(admission) -> list[dict]:
             "report_summary": (report or "")[:160],
         })
     return out
+
+
+def _load_physio(admission) -> list[dict]:
+    """Physiotherapy orders raised for this admission."""
+    if not admission.pk:
+        return []
+    try:
+        from physiotherapy.models import PhysioOrder
+    except Exception:
+        return []
+    qs = PhysioOrder.objects.filter(admission_id=admission.pk).order_by("ordered_at")
+    return [
+        {
+            "diagnosis": getattr(p, "diagnosis", "") or "—",
+            "status": getattr(p, "status", "") or "",
+        }
+        for p in qs
+    ]
+
+
+def _load_eye(admission) -> list[dict]:
+    """Eye care orders raised for this admission."""
+    if not admission.pk:
+        return []
+    try:
+        from eyecare.models import EyeOrder
+    except Exception:
+        return []
+    qs = EyeOrder.objects.filter(admission_id=admission.pk).order_by("ordered_at")
+    return [
+        {
+            "diagnosis": getattr(o, "diagnosis", "") or "—",
+            "status": getattr(o, "status", "") or "",
+        }
+        for o in qs
+    ]
+
+
+def _load_referrals(admission) -> list[dict]:
+    """Referrals raised for this admission."""
+    if not admission.pk:
+        return []
+    try:
+        from consultation.models import Referral
+    except Exception:
+        return []
+    qs = Referral.objects.filter(admission_id=admission.pk).order_by("referred_at")
+    return [
+        {
+            "specialty": getattr(r, "specialty", "") or "—",
+            "status": getattr(r, "status", "") or "",
+            "referral_id": getattr(r, "referral_id", "") or "—",
+        }
+        for r in qs
+    ]
