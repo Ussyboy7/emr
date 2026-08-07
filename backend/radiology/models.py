@@ -147,6 +147,13 @@ class RadiologyOrder(models.Model):
     doctor = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='ordered_radiology')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='radiology_orders')
     consultation_session = models.ForeignKey('consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True, related_name='radiology_orders')
+    admission = models.ForeignKey(
+        'wards.PatientAdmission',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='radiology_orders',
+    )
 
     source_type = models.CharField(max_length=30, choices=SOURCE_TYPE_CHOICES, default='internal_emr', db_index=True)
     external_clinic = models.ForeignKey(

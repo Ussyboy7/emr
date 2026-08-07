@@ -425,6 +425,13 @@ class Referral(models.Model):
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='referrals')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
     session = models.ForeignKey(ConsultationSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
+    admission = models.ForeignKey(
+        'wards.PatientAdmission',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='referrals',
+    )
 
     referred_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='referrals_made')
     specialty = models.CharField(max_length=100, help_text="Target specialty or department")

@@ -44,6 +44,13 @@ class EyeOrder(models.Model):
         blank=True,
         related_name="eye_orders",
     )
+    admission = models.ForeignKey(
+        "wards.PatientAdmission",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="eye_orders",
+    )
     location_clinic = models.ForeignKey(
         'organization.Clinic',
         on_delete=models.SET_NULL,
