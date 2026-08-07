@@ -19,6 +19,7 @@ import {
 import { useWardAdmissionDateParams } from '@/hooks/use-ward-admission-date-params';
 import { WARD_ACTIVE_STATUS_IN } from '@/lib/ward/ward-admission-list-params';
 import { ProgressNotesTimeline } from '@/components/ward/ProgressNotesTimeline';
+import { PatientHistoryTabs } from '@/components/patient-history/PatientHistoryTabs';
 import { WardAdmissionDocumentsMenu } from '@/components/ward/WardAdmissionDocumentsMenu';
 import { WardLatestHandoverCard } from '@/components/ward/WardLatestHandoverCard';
 import { WardVitalsHistory } from '@/components/ward/WardVitalsHistory';
@@ -28,7 +29,7 @@ import {
 } from '@/lib/ward-admission-ui';
 import {
   Users, Search, Eye, AlertTriangle, CheckCircle,
-  Bed, Loader2, FileText, Send,
+  Bed, Loader2, FileText, Send, History,
 } from 'lucide-react';
 import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/components/referrals/FacilityPartnerSelect';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -1001,12 +1002,16 @@ export default function WardRoundsPage() {
                 </div>
               </DialogHeader>
               <Tabs value={detailsTab} onValueChange={(v) => setDetailsTab(v as WardDoctorDetailsTab)} className="flex-1 min-h-0 flex flex-col">
-                <TabsList className="mx-5 mt-3 grid grid-cols-3 h-9 shrink-0">
+                <TabsList className="mx-5 mt-3 grid grid-cols-4 h-9 shrink-0">
                   <TabsTrigger value="overview" className="text-xs">Round</TabsTrigger>
                   <TabsTrigger value="orders" className="text-xs">Orders</TabsTrigger>
                   <TabsTrigger value="notes" className="text-xs">
                     <FileText className="h-3 w-3 mr-1 hidden sm:inline" />
                     Timeline
+                  </TabsTrigger>
+                  <TabsTrigger value="patient" className="text-xs">
+                    <History className="h-3 w-3 mr-1 hidden sm:inline" />
+                    Patient History
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="overview" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
@@ -1272,6 +1277,13 @@ export default function WardRoundsPage() {
                       <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
                       <p className="text-sm text-muted-foreground">No timeline entries yet.</p>
                     </div>
+                  )}
+                </TabsContent>
+                <TabsContent value="patient" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2">
+                  {selectedAdmission?.patient ? (
+                    <PatientHistoryTabs patientId={selectedAdmission.patient} />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No patient selected.</p>
                   )}
                 </TabsContent>
               </Tabs>

@@ -2,7 +2,7 @@ import type { PatientAdmission } from '@/lib/services/ward-service';
 
 export type WardDetailsTab = 'overview' | 'orders' | 'nursing';
 
-export type WardDoctorDetailsTab = 'overview' | 'orders' | 'notes';
+export type WardDoctorDetailsTab = 'overview' | 'orders' | 'notes' | 'patient';
 
 export function isObservationAdmission(admission: Pick<PatientAdmission, 'admission_type'>): boolean {
   const t = (admission.admission_type || '').toLowerCase().replace(/_/g, ' ');
