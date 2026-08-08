@@ -30,7 +30,14 @@ import {
 import {
   Users, Search, Eye, AlertTriangle, CheckCircle,
   Bed, Loader2, FileText, Send, History,
+  TestTube, ScanLine, Activity,
 } from 'lucide-react';
+import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultation/orders/LabOrderModal';
+import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from '@/components/consultation/orders/RadiologyOrderModal';
+import { PhysioOrderModal, type PhysioOrderSubmitInput } from '@/components/consultation/orders/PhysioOrderModal';
+import { NewEyeOrderModal } from '@/components/eyecare/NewEyeOrderModal';
+import { WardCreateReferralDialog } from '@/components/ward/WardCreateReferralDialog';
+import { useWardOrders } from '@/hooks/use-ward-orders';
 import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/components/referrals/FacilityPartnerSelect';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -158,6 +165,14 @@ export default function WardRoundsPage() {
   const [cancelReferralReason, setCancelReferralReason] = useState('');
   const [isCancellingReferral, setIsCancellingReferral] = useState(false);
 
+  // Full order suite (lab / imaging / physio / eye / referral) open state.
+  // Prescriptions are created inside WardDoctorOrdersSection with its own flow.
+  const [labOrderOpen, setLabOrderOpen] = useState(false);
+  const [radiologyOrderOpen, setRadiologyOrderOpen] = useState(false);
+  const [physioOrderOpen, setPhysioOrderOpen] = useState(false);
+  const [eyeOrderOpen, setEyeOrderOpen] = useState(false);
+  const [referralOrderOpen, setReferralOrderOpen] = useState(false);
+
   const resetDischargeForm = () => {
     setDischargeData({
       discharge_type: 'regular',
@@ -280,6 +295,72 @@ export default function WardRoundsPage() {
   useEffect(() => {
     setAdmissionsPage(1);
   }, [statusFilter, selectedWard, typeFilter, dateFilter, dateRange.from, dateRange.to, debouncedSearch, escalatedOnly, unassignedBedOnly]);
+
+  // Full order suite — admission-scoped orchestration (Task 7). Every creator
+  // stamps the selected admission's patient/visit/admission and toasts on
+  // success/failure. Payloads intentionally never carry consultation_session.
+  const reloadWardData = useCallback(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  const wardOrders = useWardOrders({
+    admission: selectedAdmission,
+    visitId: selectedAdmission?.visit,
+    patientId: selectedAdmission?.patient,
+    onChanged: reloadWardData,
+  });
+
+  const handleWardLabOrder = async (payload: LabOrderSubmitInput) => {
+    if (!selectedAdmission) return;
+    await wardOrders.createLab({
+      priority: payload.priority,
+      clinical_notes: payload.clinicalNotes || undefined,
+      tests_data: payload.templates.map((t) => ({
+        name: t.name,
+        code:
+          t.code ||
+          t.name
+            .substring(0, 24)
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, "_")
+            .replace(/^_|_$/g, "") ||
+          "LAB",
+        sample_type: t.sample_type || "Blood",
+        template: t.id,
+        status: "pending",
+        notes: payload.clinicalNotes || "",
+      })),
+    } as any);
+  };
+
+  const handleWardRadiologyOrder = async (payload: RadiologyOrderSubmitInput) => {
+    if (!selectedAdmission) return;
+    await wardOrders.createRadiology({
+      priority: payload.priority,
+      clinical_notes: payload.clinicalIndication?.trim() || undefined,
+      provisional_diagnosis: payload.provisionalDiagnosis?.trim() || undefined,
+      lmp: payload.lmp || undefined,
+      studies_data: payload.templates.map((t) => ({
+        procedure: t.name,
+        body_part: t.body_part || "",
+        modality: t.modality || "X-Ray",
+        template: t.id,
+        status: "pending",
+      })),
+    } as any);
+  };
+
+  const handleWardPhysioOrder = async (payload: PhysioOrderSubmitInput) => {
+    if (!selectedAdmission) return;
+    await wardOrders.createPhysio({
+      history_clinical_findings: payload.historyClinicalFindings || undefined,
+      diagnosis: payload.diagnosis.trim(),
+      drug_history: payload.drugHistory || undefined,
+      special_instructions: payload.specialInstructions || undefined,
+      priority: payload.priority,
+      referral_source: 'doctor',
+    } as any);
+  };
 
   useEffect(() => {
     if (!ready) return;
@@ -931,7 +1012,16 @@ export default function WardRoundsPage() {
 
         {/* Admission Details Dialog */}
         {selectedAdmission && (
-          <Dialog open={showAdmissionDetails} onOpenChange={setShowAdmissionDetails}>
+          <Dialog open={showAdmissionDetails} onOpenChange={(open) => {
+            setShowAdmissionDetails(open);
+            if (!open) {
+              setLabOrderOpen(false);
+              setRadiologyOrderOpen(false);
+              setPhysioOrderOpen(false);
+              setEyeOrderOpen(false);
+              setReferralOrderOpen(false);
+            }
+          }}>
             <DialogContent className={`${modalNoOverflow('xl')} max-h-[92vh] flex flex-col gap-0 p-0`}>
               <DialogHeader className="px-5 pt-5 pb-4 border-b shrink-0">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1250,7 +1340,29 @@ export default function WardRoundsPage() {
                     </div>
                   )}
                 </TabsContent>
-                <TabsContent value="orders" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2">
+                <TabsContent value="orders" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-3">
+                  {userCanAddWardDoctorOrders(currentUser) && selectedAdmission.status === 'admitted' && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mr-1">
+                        New order
+                      </span>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setLabOrderOpen(true)}>
+                        <TestTube className="h-3 w-3 mr-1 text-amber-500" /> Lab
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setRadiologyOrderOpen(true)}>
+                        <ScanLine className="h-3 w-3 mr-1 text-indigo-500" /> Imaging
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setPhysioOrderOpen(true)}>
+                        <Activity className="h-3 w-3 mr-1 text-emerald-500" /> Physio
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setEyeOrderOpen(true)}>
+                        <Eye className="h-3 w-3 mr-1 text-cyan-600" /> Eye
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setReferralOrderOpen(true)}>
+                        <Send className="h-3 w-3 mr-1 text-teal-500" /> Referral
+                      </Button>
+                    </div>
+                  )}
                   <WardDoctorOrdersSection
                     admission={selectedAdmission}
                     allowAddOrders={userCanAddWardDoctorOrders(currentUser)}
@@ -1687,6 +1799,41 @@ export default function WardRoundsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Full order suite modals — wired to admission-stamped useWardOrders
+            creators. Lab/imaging/physio submit through create*; the eye modal
+            creates internally (onSuccess reloads); the referral dialog calls
+            createReferral. */}
+        {selectedAdmission && (
+          <>
+            <LabOrderModal
+              open={labOrderOpen}
+              onOpenChange={setLabOrderOpen}
+              onSubmit={handleWardLabOrder}
+            />
+            <RadiologyOrderModal
+              open={radiologyOrderOpen}
+              onOpenChange={setRadiologyOrderOpen}
+              onSubmit={handleWardRadiologyOrder}
+            />
+            <PhysioOrderModal
+              open={physioOrderOpen}
+              onOpenChange={setPhysioOrderOpen}
+              onSubmit={handleWardPhysioOrder}
+            />
+            <NewEyeOrderModal
+              open={eyeOrderOpen}
+              onOpenChange={setEyeOrderOpen}
+              onSuccess={reloadWardData}
+            />
+            <WardCreateReferralDialog
+              open={referralOrderOpen}
+              onOpenChange={setReferralOrderOpen}
+              admission={selectedAdmission}
+              onSubmit={wardOrders.createReferral}
+            />
+          </>
+        )}
 
       </div>
     </DashboardLayout>
