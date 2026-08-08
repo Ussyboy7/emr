@@ -141,3 +141,60 @@ class OrderAdmissionFkTest(TestCase):
         eye.validated_data["ordered_by"] = doctor
         eye_res = eye.save()
         self.assertEqual(eye_res.admission_id, self.admission.pk)
+
+    def test_pdf_loaders_include_fk_null_orders_in_visit_window(self):
+        """Summary loaders fall back to visit+date window for orders without
+        an admission FK, so ward-created orders are not silently dropped."""
+        from pharmacy.models import GenericMedication, PrescriptionItem
+        from wards.pdfs import _load_pharmacy
+
+        open_admission = PatientAdmission.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            ward=self.ward,
+            admission_diagnosis="Window fallback",
+            status="admitted",
+        )
+
+        rx = Prescription.objects.create(patient=self.patient, visit=self.visit)
+        generic = GenericMedication.objects.create(name="Paracetamol 500mg")
+        PrescriptionItem.objects.create(
+            prescription=rx,
+            generic=generic,
+            quantity=10,
+            unit="tablets",
+            dose="1 tablet",
+            frequency="TDS",
+            duration="3 days",
+        )
+        rows = _load_pharmacy(open_admission)
+        rx_ids = {r["prescription_id"] for r in rows}
+        self.assertTrue(
+            rx_ids,
+            "FK-null prescription should appear in ward summary via window fallback",
+        )
+
+    def test_pdf_load_excludes_orders_attached_to_other_admissions(self):
+        """Orders pinned to a different admission must not leak in via fallback."""
+        from pharmacy.models import GenericMedication, PrescriptionItem
+        from wards.pdfs import _load_pharmacy
+
+        other = PatientAdmission.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            ward=self.ward,
+            admission_diagnosis="Other",
+            status="admitted",
+        )
+        other_rx = Prescription.objects.create(patient=self.patient, admission=other)
+        generic = GenericMedication.objects.create(name="Amoxicillin 500mg")
+        PrescriptionItem.objects.create(
+            prescription=other_rx,
+            generic=generic,
+            quantity=10,
+            unit="tablets",
+            dose="1 tablet",
+            frequency="TDS",
+            duration="5 days",
+        )
+        self.assertEqual(_load_pharmacy(self.admission), [])

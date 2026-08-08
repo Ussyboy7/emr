@@ -15,9 +15,11 @@ interface NewEyeOrderModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
+  admissionId?: number | null;
+  visitId?: number | null;
 }
 
-export function NewEyeOrderModal({ open, onOpenChange, onSuccess }: NewEyeOrderModalProps) {
+export function NewEyeOrderModal({ open, onOpenChange, onSuccess, admissionId, visitId }: NewEyeOrderModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
     patient: '',
@@ -45,6 +47,8 @@ export function NewEyeOrderModal({ open, onOpenChange, onSuccess }: NewEyeOrderM
     try {
       await eyeCareService.createOrder({
         patient: parseInt(form.patient),
+        ...(admissionId != null ? { admission: admissionId } : {}),
+        ...(visitId != null ? { visit: visitId } : {}),
         chief_complaint: form.chief_complaint,
         visual_acuity_od: form.visual_acuity_od,
         visual_acuity_os: form.visual_acuity_os,

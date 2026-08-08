@@ -1825,6 +1825,8 @@ export default function WardRoundsPage() {
               open={eyeOrderOpen}
               onOpenChange={setEyeOrderOpen}
               onSuccess={reloadWardData}
+              admissionId={selectedAdmission.id}
+              visitId={selectedAdmission.visit}
             />
             <WardCreateReferralDialog
               open={referralOrderOpen}

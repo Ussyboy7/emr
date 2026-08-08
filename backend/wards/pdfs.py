@@ -21,6 +21,7 @@ from __future__ import annotations
 from io import BytesIO
 from xml.sax.saxutils import escape as _escape
 
+from django.db.models import Q
 from django.utils import timezone
 
 from reportlab.lib import colors
@@ -496,11 +497,11 @@ def build_admission_summary_pdf(admission) -> bytes:
         )
 
     # ------------------------------------------------------------------
-    # 7b. Physiotherapy
+    # 8. Physiotherapy
     # ------------------------------------------------------------------
     physio_rows = _load_physio(admission)
     if physio_rows:
-        story.append(section_heading("7b. Physiotherapy"))
+        story.append(section_heading("8. Physiotherapy"))
         story.append(data_table(
             ["Diagnosis", "Status"],
             [[p["diagnosis"], p["status"]] for p in physio_rows],
@@ -509,11 +510,11 @@ def build_admission_summary_pdf(admission) -> bytes:
         ))
 
     # ------------------------------------------------------------------
-    # 7c. Eye care
+    # 9. Eye care
     # ------------------------------------------------------------------
     eye_rows = _load_eye(admission)
     if eye_rows:
-        story.append(section_heading("7c. Eye care"))
+        story.append(section_heading("9. Eye care"))
         story.append(data_table(
             ["Diagnosis", "Status"],
             [[e["diagnosis"], e["status"]] for e in eye_rows],
@@ -522,11 +523,11 @@ def build_admission_summary_pdf(admission) -> bytes:
         ))
 
     # ------------------------------------------------------------------
-    # 7d. Referrals
+    # 10. Referrals
     # ------------------------------------------------------------------
     ref_rows = _load_referrals(admission)
     if ref_rows:
-        story.append(section_heading("7d. Referrals"))
+        story.append(section_heading("10. Referrals"))
         story.append(data_table(
             ["Specialty", "Status", "Referral ID"],
             [[r["specialty"], r["status"], r["referral_id"]] for r in ref_rows],
@@ -535,18 +536,18 @@ def build_admission_summary_pdf(admission) -> bytes:
         ))
 
     # ------------------------------------------------------------------
-    # 8. Progress notes (currently appended to admission_notes)
+    # 11. Progress notes (currently appended to admission_notes)
     # ------------------------------------------------------------------
     if admission.admission_notes:
-        story.append(section_heading("8. Progress notes"))
+        story.append(section_heading("11. Progress notes"))
         for chunk in [c for c in admission.admission_notes.split("\n\n") if c.strip()]:
             story.append(body_paragraph(chunk))
             story.append(Spacer(1, 2))
 
     # ------------------------------------------------------------------
-    # 9. Discharge
+    # 12. Discharge
     # ------------------------------------------------------------------
-    story.append(section_heading("9. Discharge plan"))
+    story.append(section_heading("12. Discharge plan"))
     if admission.discharge_date or admission.discharge_diagnosis or admission.discharge_summary:
         story.append(_kv("Type", _humanize(admission.discharge_type)))
         if admission.discharge_diagnosis:
@@ -564,7 +565,7 @@ def build_admission_summary_pdf(admission) -> bytes:
         story.append(italic_paragraph("Discharge has not been initiated."))
 
     # ------------------------------------------------------------------
-    # 10. Nurse exit / sign-out
+    # 13. Nurse exit / sign-out
     # ------------------------------------------------------------------
     if (
         admission.nurse_exit_summary
@@ -573,7 +574,7 @@ def build_admission_summary_pdf(admission) -> bytes:
         or admission.discharged_with
         or admission.companion_name
     ):
-        story.append(section_heading("10. Nurse exit / sign-out"))
+        story.append(section_heading("13. Nurse exit / sign-out"))
         if admission.nurse_exit_summary:
             story.append(_kv("Exit summary", admission.nurse_exit_summary))
         if admission.discharged_with:
@@ -597,11 +598,11 @@ def build_admission_summary_pdf(admission) -> bytes:
             story.append(_kv("Confirmed by", admission.confirmed_by_nurse.get_full_name()))
 
     # ------------------------------------------------------------------
-    # 11. External referral & escort
+    # 14. External referral & escort
     # ------------------------------------------------------------------
     escort = getattr(admission, "escort", None)
     if escort:
-        story.append(section_heading("11. External referral & escort"))
+        story.append(section_heading("14. External referral & escort"))
 
         # Referral block
         ref = escort.referral
@@ -731,6 +732,20 @@ def _load_nursing_orders(admission) -> list[dict]:
     ]
 
 
+def _order_window_q(admission, ts_field) -> Q:
+    """Fallback query matching orders to the admission's visit + date window.
+
+    Used for orders that never got an admission FK (e.g. ward-created
+    prescriptions) so they are not silently dropped from the summary while
+    FK-stamped orders remain the source of truth.
+    """
+    q = Q(admission__isnull=True, visit_id=admission.visit_id)
+    q &= Q(**{f"{ts_field}__gte": admission.admission_date})
+    if admission.discharge_date:
+        q &= Q(**{f"{ts_field}__lte": admission.discharge_date})
+    return q
+
+
 def _load_pharmacy(admission) -> list[dict]:
     """Prescriptions on this admission, with per-item dispense status."""
     try:
@@ -738,17 +753,21 @@ def _load_pharmacy(admission) -> list[dict]:
     except Exception:
         return []
 
-    if admission.pk:
+    if admission.pk and admission.visit_id:
+        rx_qs = Prescription.objects.filter(
+            Q(admission_id=admission.pk) | _order_window_q(admission, "prescribed_at")
+        )
+    elif admission.pk:
         rx_qs = Prescription.objects.filter(admission_id=admission.pk)
-    else:
-        if not admission.visit_id:
-            return []
+    elif admission.visit_id:
         rx_qs = Prescription.objects.filter(
             visit_id=admission.visit_id,
             prescribed_at__gte=admission.admission_date,
         )
         if admission.discharge_date:
             rx_qs = rx_qs.filter(prescribed_at__lte=admission.discharge_date)
+    else:
+        return []
 
     prescriptions = (
         rx_qs.order_by("prescribed_at").prefetch_related("medications__generic")
@@ -813,17 +832,21 @@ def _load_lab(admission) -> list[dict]:
     except Exception:
         return []
 
-    if admission.pk:
+    if admission.pk and admission.visit_id:
+        orders = LabOrder.objects.filter(
+            Q(admission_id=admission.pk) | _order_window_q(admission, "ordered_at")
+        )
+    elif admission.pk:
         orders = LabOrder.objects.filter(admission_id=admission.pk)
-    else:
-        if not admission.visit_id:
-            return []
+    elif admission.visit_id:
         orders = LabOrder.objects.filter(
             visit_id=admission.visit_id,
             ordered_at__gte=admission.admission_date,
         )
         if admission.discharge_date:
             orders = orders.filter(ordered_at__lte=admission.discharge_date)
+    else:
+        return []
 
     orders = orders.order_by("ordered_at").prefetch_related("tests")
     rows = []
@@ -1541,17 +1564,21 @@ def _load_radiology(admission) -> list[dict]:
     except Exception:
         return []
 
-    if admission.pk:
+    if admission.pk and admission.visit_id:
+        orders = RadiologyOrder.objects.filter(
+            Q(admission_id=admission.pk) | _order_window_q(admission, "ordered_at")
+        )
+    elif admission.pk:
         orders = RadiologyOrder.objects.filter(admission_id=admission.pk)
-    else:
-        if not admission.visit_id:
-            return []
+    elif admission.visit_id:
         orders = RadiologyOrder.objects.filter(
             visit_id=admission.visit_id,
             ordered_at__gte=admission.admission_date,
         )
         if admission.discharge_date:
             orders = orders.filter(ordered_at__lte=admission.discharge_date)
+    else:
+        return []
 
     orders = orders.order_by("ordered_at")
     out = []
@@ -1580,13 +1607,26 @@ def _load_radiology(admission) -> list[dict]:
 
 def _load_physio(admission) -> list[dict]:
     """Physiotherapy orders raised for this admission."""
-    if not admission.pk:
-        return []
     try:
         from physiotherapy.models import PhysioOrder
     except Exception:
         return []
-    qs = PhysioOrder.objects.filter(admission_id=admission.pk).order_by("ordered_at")
+
+    if admission.pk and admission.visit_id:
+        qs = PhysioOrder.objects.filter(
+            Q(admission_id=admission.pk) | _order_window_q(admission, "ordered_at")
+        ).order_by("ordered_at")
+    elif admission.pk:
+        qs = PhysioOrder.objects.filter(admission_id=admission.pk).order_by("ordered_at")
+    elif admission.visit_id:
+        qs = PhysioOrder.objects.filter(
+            visit_id=admission.visit_id,
+            ordered_at__gte=admission.admission_date,
+        ).order_by("ordered_at")
+        if admission.discharge_date:
+            qs = qs.filter(ordered_at__lte=admission.discharge_date)
+    else:
+        return []
     return [
         {
             "diagnosis": getattr(p, "diagnosis", "") or "—",
@@ -1598,13 +1638,26 @@ def _load_physio(admission) -> list[dict]:
 
 def _load_eye(admission) -> list[dict]:
     """Eye care orders raised for this admission."""
-    if not admission.pk:
-        return []
     try:
         from eyecare.models import EyeOrder
     except Exception:
         return []
-    qs = EyeOrder.objects.filter(admission_id=admission.pk).order_by("ordered_at")
+
+    if admission.pk and admission.visit_id:
+        qs = EyeOrder.objects.filter(
+            Q(admission_id=admission.pk) | _order_window_q(admission, "ordered_at")
+        ).order_by("ordered_at")
+    elif admission.pk:
+        qs = EyeOrder.objects.filter(admission_id=admission.pk).order_by("ordered_at")
+    elif admission.visit_id:
+        qs = EyeOrder.objects.filter(
+            visit_id=admission.visit_id,
+            ordered_at__gte=admission.admission_date,
+        ).order_by("ordered_at")
+        if admission.discharge_date:
+            qs = qs.filter(ordered_at__lte=admission.discharge_date)
+    else:
+        return []
     return [
         {
             "diagnosis": getattr(o, "diagnosis", "") or "—",
@@ -1616,13 +1669,26 @@ def _load_eye(admission) -> list[dict]:
 
 def _load_referrals(admission) -> list[dict]:
     """Referrals raised for this admission."""
-    if not admission.pk:
-        return []
     try:
         from consultation.models import Referral
     except Exception:
         return []
-    qs = Referral.objects.filter(admission_id=admission.pk).order_by("referred_at")
+
+    if admission.pk and admission.visit_id:
+        qs = Referral.objects.filter(
+            Q(admission_id=admission.pk) | _order_window_q(admission, "referred_at")
+        ).order_by("referred_at")
+    elif admission.pk:
+        qs = Referral.objects.filter(admission_id=admission.pk).order_by("referred_at")
+    elif admission.visit_id:
+        qs = Referral.objects.filter(
+            visit_id=admission.visit_id,
+            referred_at__gte=admission.admission_date,
+        ).order_by("referred_at")
+        if admission.discharge_date:
+            qs = qs.filter(referred_at__lte=admission.discharge_date)
+    else:
+        return []
     return [
         {
             "specialty": getattr(r, "specialty", "") or "—",
