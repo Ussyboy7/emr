@@ -32,7 +32,7 @@ Start here. This index lists **maintained** documentation. Generated API docs li
 | [user/EMR_USER_QUICK_START_GUIDE.md](user/EMR_USER_QUICK_START_GUIDE.md) | End-user quick start |
 | [user/ROLE_MEDICAL_RECORDS.md](user/ROLE_MEDICAL_RECORDS.md) | Medical records role guide |
 | [user/ROLE_NURSING.md](user/ROLE_NURSING.md) | Nursing role guide |
-| [user/ROLE_CONSULTATION.md](user/ROLE_CONSULTATION.md) | Consultation / doctor guide |
+| [user/ROLE_CONSULTATION.md](user/ROLE_CONSULTATION.md) | Consultation / doctor guide — incl. ward rounds order suite (lab / radiology / physio / eye / referral) + Patient History tab |
 | [user/ROLE_LABORATORY.md](user/ROLE_LABORATORY.md) | Laboratory role guide |
 | [user/ROLE_PHARMACY.md](user/ROLE_PHARMACY.md) | Pharmacy role guide |
 | [user/ROLE_ADMINISTRATION.md](user/ROLE_ADMINISTRATION.md) | Administration role guide |
