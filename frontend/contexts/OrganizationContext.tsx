@@ -513,7 +513,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     if (hydrated && currentUser && hasTokens()) {
       setHasSynced(false);
     }
-  }, [currentUser?.id, hydrated]);
+  }, [currentUser, hydrated]);
 
 
   const buildDepartmentPayload = (input: Partial<CreateDepartmentInput>) =>

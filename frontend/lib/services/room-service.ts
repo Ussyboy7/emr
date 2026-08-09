@@ -17,7 +17,7 @@ export interface Room {
   status: 'active' | 'inactive' | 'maintenance';
   capacity: number;
   is_active: boolean;
-  clinic?: number | null;
+  location_clinic?: number | null;
   clinic_name?: string;
   created_at: string;
   updated_at: string;
@@ -40,7 +40,7 @@ export interface RoomFilters {
   specialty?: string;
   is_active?: boolean;
   /** organisation.Clinic pk — preferred over searching ``location`` text */
-  clinic?: number;
+  location_clinic?: number;
   /** Lower-case slug matching ConsultationRoom.room_type */
   room_type?: string;
   search?: string;
@@ -142,4 +142,3 @@ class RoomService {
 }
 
 export const roomService = new RoomService();
-

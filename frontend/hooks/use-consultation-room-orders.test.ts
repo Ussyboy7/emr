@@ -20,6 +20,7 @@ vi.mock('@/lib/consultation/orders-utils', () => ({
 }));
 vi.mock('@/lib/constants/medical-data', () => ({
   INJECTION_ROUTES: ['IM', 'IV'],
+  DEFAULT_INJECTION_ROUTE: 'IM',
   REFERRAL_REASONS: ['Further evaluation'],
   REFERRAL_SPECIALTIES: ['Cardiology'],
 }));

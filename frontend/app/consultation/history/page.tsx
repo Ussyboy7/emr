@@ -471,10 +471,12 @@ export default function ConsultationHistoryPage() {
     setShowViewModal(true);
   };
 
+  const selectedConsultationId = selectedConsultation?.id;
+
   // Load full report session when View modal opens (same as Patient Medical Records View Report)
   useEffect(() => {
-    if (!showViewModal || !selectedConsultation) return;
-    const id = Number(selectedConsultation.id);
+    if (!showViewModal || !selectedConsultationId) return;
+    const id = Number(selectedConsultationId);
     if (Number.isNaN(id)) {
       setLoadingReport(false);
       return;
@@ -493,7 +495,7 @@ export default function ConsultationHistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [showViewModal, selectedConsultation?.id]);
+  }, [showViewModal, selectedConsultationId]);
 
   const canEditConsultation = (consultation: ConsultationRecord): boolean => {
     // Allow editing if within 48 hours of the consultation date/time
@@ -531,8 +533,8 @@ export default function ConsultationHistoryPage() {
 
   // Load orders, session notes, and diagnoses for Edit modal when it opens (synced with backend)
   useEffect(() => {
-    if (!showEditModal || !selectedConsultation) return;
-    const sessionId = parseInt(selectedConsultation.id, 10);
+    if (!showEditModal || !selectedConsultationId) return;
+    const sessionId = parseInt(selectedConsultationId ?? '', 10);
     if (isNaN(sessionId)) return;
 
     const loadOrdersAndSession = async () => {
@@ -557,7 +559,7 @@ export default function ConsultationHistoryPage() {
       }
     };
     loadOrdersAndSession();
-  }, [showEditModal, selectedConsultation?.id]);
+  }, [showEditModal, selectedConsultationId]);
 
   const loadEditOrdersRefetch = async () => {
     if (!selectedConsultation) return;
@@ -577,11 +579,11 @@ export default function ConsultationHistoryPage() {
     }
   };
 
-  const getSelectedPatientId = (): number | null => {
+  const getSelectedPatientId = useCallback((): number | null => {
     if (!selectedConsultation) return null;
     const pid = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
     return pid && !isNaN(pid) ? pid : null;
-  };
+  }, [selectedConsultation]);
 
   const getSelectedSessionId = (): number | null => {
     if (!selectedConsultation) return null;
@@ -659,7 +661,7 @@ export default function ConsultationHistoryPage() {
       }
     };
     loadAllergies();
-  }, [showAddPrescription, showPrescriptionRefill, selectedConsultation?.id]);
+  }, [showAddPrescription, showPrescriptionRefill, getSelectedPatientId]);
 
   const handleSubmitPrescription = async (payload: PrescriptionOrderSubmitInput) => {
     const patientId = getSelectedPatientId();

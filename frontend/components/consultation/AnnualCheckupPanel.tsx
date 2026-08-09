@@ -169,7 +169,7 @@ export function AnnualCheckupPanel({
     loadCheckup();
   }, [loadCheckup]);
 
-  const catalog = checkup?.catalog ?? [];
+  const catalog = useMemo(() => checkup?.catalog ?? [], [checkup?.catalog]);
   const selectedItems = useMemo(
     () => catalog.filter((item) => item.selected),
     [catalog]

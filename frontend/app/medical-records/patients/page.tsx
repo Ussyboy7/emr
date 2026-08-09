@@ -322,7 +322,7 @@ function PatientsListPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [principalIdFromUrl]);
+  }, [principalIdFromUrl, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;
@@ -349,25 +349,6 @@ function PatientsListPageContent() {
     if (principalIdFromUrl != null) setCategoryFilter('dependent');
   }, [principalIdFromUrl]);
 
-  // Load patients from API when page, page size, or server-side filters change
-  useEffect(() => {
-    if (!ready) return;
-    void loadPatients();
-  }, [
-    ready,
-    currentPage,
-    itemsPerPage,
-    debouncedSearchQuery,
-    genderFilter,
-    categoryFilter,
-    locationFilter,
-    principalIdFromUrl,
-    ageRange.min,
-    ageRange.max,
-    dateRange.from,
-    dateRange.to,
-  ]);
-
   // Reset to page 1 when filters or items per page change
   useEffect(() => {
     setCurrentPage(1);
@@ -384,7 +365,7 @@ function PatientsListPageContent() {
     principalIdFromUrl,
   ]);
 
-  const loadPatients = async () => {
+  const loadPatients = useCallback(async () => {
     const reqId = ++loadReqId.current;
     try {
       setLoading(true);
@@ -467,7 +448,13 @@ function PatientsListPageContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, itemsPerPage, principalIdFromUrl, categoryFilter, genderFilter, locationFilter, debouncedSearchQuery, ageRange.min, ageRange.max, dateRange.from, dateRange.to, handleAuthError]);
+
+  // Load patients from API when page, page size, or server-side filters change
+  useEffect(() => {
+    if (!ready) return;
+    void loadPatients();
+  }, [ready, loadPatients]);
 
   const stats = useMemo(() => [
     { label: 'Total Patients', value: counts?.total ?? 0, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },

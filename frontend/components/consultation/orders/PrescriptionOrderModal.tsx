@@ -140,7 +140,7 @@ export function PrescriptionOrderModal({
     setMedicationConfigs(configs);
     setSelectedGenerics(new Map());
     setSubmitting(false);
-  }, []);
+   }, []);
 
   // Reset or prefill when opening
   useEffect(() => {
@@ -202,7 +202,7 @@ export function PrescriptionOrderModal({
       });
       return next;
     });
-  }, []);
+  }, [normalizeMedicationId]);
 
   const updateMedicationConfig = useCallback((medId: number, field: keyof MedicationConfig, value: any) => {
     setMedicationConfigs((prev) => {

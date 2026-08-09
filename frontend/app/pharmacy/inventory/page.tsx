@@ -213,7 +213,7 @@ export default function InventoryPage() {
     if (currentPage !== 1) {
       setCurrentPage(1);
     }
-  }, [debouncedSearch, categoryFilter, stockFilter]);
+  }, [currentPage, debouncedSearch, categoryFilter, stockFilter]);
   
 
   const getDaysUntilExpiry = (expiryDate: string) => {

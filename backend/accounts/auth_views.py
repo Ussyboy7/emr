@@ -1,6 +1,8 @@
 """
 Custom authentication views with audit logging.
 """
+import logging
+
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiResponse
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.views import (
@@ -13,6 +15,8 @@ from audit.services import AuditService
 
 from .jwt_serializers import EmailOrUsernameTokenObtainPairSerializer, EmailOrUsernameTokenRefreshSerializer
 from .models import User as AccountUser
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_user_for_login_audit(identifier: str):
@@ -94,23 +98,26 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 pass
         else:
             # Login failed - log the attempt
-            error_detail = ''
-            if hasattr(response, 'data') and isinstance(response.data, dict):
-                error_detail = str(response.data.get('detail', ''))
-            
-            AuditService.log_activity(
-                user=None,
-                action="login",
-                object_type="user",
-                object_id="",
-                module="authentication",
-                object_repr=raw_login or "unknown",
-                description=f"Failed login attempt for {raw_login or 'unknown'}"
-                + (f": {error_detail}" if error_detail else ""),
-                result="failure",
-                severity="warning",
-                request=request,
-            )
+            try:
+                error_detail = ''
+                if hasattr(response, 'data') and isinstance(response.data, dict):
+                    error_detail = str(response.data.get('detail', ''))
+
+                AuditService.log_activity(
+                    user=None,
+                    action="login",
+                    object_type="user",
+                    object_id="",
+                    module="authentication",
+                    object_repr=raw_login or "unknown",
+                    description=f"Failed login attempt for {raw_login or 'unknown'}"
+                    + (f": {error_detail}" if error_detail else ""),
+                    result="failure",
+                    severity="warning",
+                    request=request,
+                )
+            except Exception:
+                logger.exception("Failed to write audit log for unsuccessful login")
         
         return response
 
@@ -194,4 +201,3 @@ class CustomTokenBlacklistView(TokenBlacklistView):
             )
         
         return response
-

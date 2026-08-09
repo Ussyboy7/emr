@@ -542,7 +542,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [leftWorkflowReason, setLeftWorkflowReason] = useState('Patient left before being seen');
   const [leftWorkflowTarget, setLeftWorkflowTarget] = useState<{ kind: 'queue'; patient: Patient } | { kind: 'session' } | null>(null);
 
-  const loadRoomData = async () => {
+  const loadRoomData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -656,7 +656,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       } finally {
         setLoading(false);
       }
-    };
+    }, [roomId, currentUser?.id, handleAuthError, loadPausedSessions, restoreActiveSession, setPatients]);
   
   const handleToggleAccepting = useCallback(async (accepting: boolean) => {
     const numericRoomId = parseInt(roomId, 10);
@@ -701,7 +701,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   useEffect(() => {
     if (!ready) return;
     void loadRoomData();
-  }, [roomId, ready, currentUser?.id]);
+  }, [roomId, ready, currentUser?.id, loadRoomData]);
 
   // Keep doctor presence alive while in the room (auto-away after backend stale timeout).
   useEffect(() => {

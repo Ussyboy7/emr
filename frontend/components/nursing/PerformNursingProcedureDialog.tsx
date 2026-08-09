@@ -130,7 +130,7 @@ export function PerformNursingProcedureDialog({
     if (procedure.type === 'medication') {
       setMedicationForm((prev) => ({ ...prev, administeredTime: defaultInjectionAdminTime() }));
     }
-  }, [open, procedure?.id, procedure?.type]);
+  }, [open, procedure]);
 
   const injectionSiteOptions = useMemo(() => {
     if (!procedure || procedure.type !== 'injection') return [];

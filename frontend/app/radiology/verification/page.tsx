@@ -97,7 +97,7 @@ export default function RadiologyVerificationPage() {
   const [verificationNotes, setVerificationNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
-  const buildDateQuery = (filter: string): Record<string, string> => {
+  const buildDateQuery = useCallback((filter: string): Record<string, string> => {
     // Anchor on server "today" so filters line up with the server calendar,
     // not the client device clock.
     const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
@@ -114,7 +114,7 @@ export default function RadiologyVerificationPage() {
       return { start_date: formatLocalYmd(start), end_date: anchorYmd };
     }
     return {};
-  };
+  }, [serverToday]);
   
   const paginatedReports = reports;
   const verifiedPaginatedReports = verifiedReports;
@@ -169,7 +169,7 @@ export default function RadiologyVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
+  }, [currentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, handleAuthError, buildDateQuery]);
 
   const loadVerifiedReports = useCallback(async () => {
     try {
@@ -204,7 +204,7 @@ export default function RadiologyVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, serverToday, handleAuthError]);
+  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, handleAuthError, buildDateQuery]);
 
   const loadVerificationCounts = useCallback(async () => {
     try {
@@ -234,7 +234,7 @@ export default function RadiologyVerificationPage() {
       if (handleAuthError(err)) return;
       toast.error('Failed to load verification counts');
     }
-  }, [priorityFilter, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, serverToday, handleAuthError]);
+  }, [priorityFilter, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, handleAuthError, buildDateQuery]);
 
   useEffect(() => {
     if (!ready) return;

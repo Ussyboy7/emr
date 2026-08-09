@@ -9,6 +9,7 @@ import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
  * Sorted by sort_order then name.
  */
 export function useOutpatientClinicTypes(options?: { includeInactive?: boolean }) {
+  const includeInactive = options?.includeInactive;
   const [types, setTypes] = useState<OutpatientClinicType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +20,7 @@ export function useOutpatientClinicTypes(options?: { includeInactive?: boolean }
       setError(null);
       const res = await adminService.getOutpatientClinicTypes({
         page_size: MAX_LIST_PAGE_SIZE,
-        ...(options?.includeInactive ? {} : { is_active: true }),
+          ...(includeInactive ? {} : { is_active: true }),
       });
       const list = [...(res.results || [])].sort(
         (a, b) =>
@@ -32,11 +33,11 @@ export function useOutpatientClinicTypes(options?: { includeInactive?: boolean }
     } finally {
       setLoading(false);
     }
-  }, [options?.includeInactive]);
+  }, [includeInactive]);
 
   useEffect(() => {
     load();
-  }, [options?.includeInactive]);
+  }, [load]);
 
   const names = types.map((t) => t.name);
   return { types, names, loading, error, refetch: load };

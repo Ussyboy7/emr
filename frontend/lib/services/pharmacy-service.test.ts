@@ -27,7 +27,7 @@ describe('pharmacyService', () => {
       const res = await pharmacyService.getPrescriptions({ page: 1 });
       expect(res.results).toHaveLength(1);
       const callArg = mockApiFetch.mock.calls[0][0] as string;
-      expect(callArg).toContain('/v1/pharmacy/prescriptions/');
+      expect(callArg).toContain('/pharmacy/prescriptions/');
     });
   });
 
@@ -37,7 +37,7 @@ describe('pharmacyService', () => {
 
       const res = await pharmacyService.getPrescription(5);
       expect(res.id).toBe(5);
-      expect(mockApiFetch).toHaveBeenCalledWith('/v1/pharmacy/prescriptions/5/');
+      expect(mockApiFetch).toHaveBeenCalledWith('/pharmacy/prescriptions/5/');
     });
   });
 
@@ -47,7 +47,7 @@ describe('pharmacyService', () => {
 
       await pharmacyService.getMedications({ search: 'paracetamol' });
       const callArg = mockApiFetch.mock.calls[0][0] as string;
-      expect(callArg).toContain('/v1/pharmacy/medications/');
+      expect(callArg).toContain('/pharmacy/medications/');
       expect(callArg).toContain('search=paracetamol');
     });
   });
@@ -68,7 +68,7 @@ describe('pharmacyService', () => {
 
       await pharmacyService.getInventory({ page: 1, page_size: 20 });
       const callArg = mockApiFetch.mock.calls[0][0] as string;
-      expect(callArg).toContain('/v1/pharmacy/inventory/');
+      expect(callArg).toContain('/pharmacy/inventory/');
     });
   });
 
@@ -78,7 +78,7 @@ describe('pharmacyService', () => {
 
       await pharmacyService.getStockRequests();
       const callArg = mockApiFetch.mock.calls[0][0] as string;
-      expect(callArg).toContain('/v1/pharmacy/stock-requests/');
+      expect(callArg).toContain('/pharmacy/stock-requests/');
     });
   });
 
@@ -92,7 +92,7 @@ describe('pharmacyService', () => {
         items: [{ medication: 10, quantity: 50 }],
       });
       expect(mockApiFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/v1/pharmacy/stock-requests/'),
+        expect.stringContaining('/pharmacy/stock-requests/'),
         expect.objectContaining({ method: 'POST' }),
       );
       expect(res.id).toBe(1);
@@ -106,7 +106,7 @@ describe('pharmacyService', () => {
       const res = await pharmacyService.checkInteractions([1, 2, 3]);
       expect(res).toEqual([]);
       expect(mockApiFetch).toHaveBeenCalledWith(
-        '/v1/pharmacy/prescriptions/check_interactions/',
+        '/pharmacy/prescriptions/check_interactions/',
         expect.objectContaining({
           method: 'POST',
           body: expect.stringContaining('medication_ids'),
@@ -122,7 +122,7 @@ describe('pharmacyService', () => {
       const res = await pharmacyService.dispense(5, 10, 10);
       expect(res.quantity).toBe(10);
       expect(mockApiFetch).toHaveBeenCalledWith(
-        '/v1/pharmacy/prescriptions/5/dispense/',
+        '/pharmacy/prescriptions/5/dispense/',
         expect.objectContaining({ method: 'POST' }),
       );
     });

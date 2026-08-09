@@ -189,7 +189,7 @@ export default function NursingInventoryPage() {
 
   useEffect(() => {
     if (currentPage !== 1) setCurrentPage(1);
-  }, [debouncedSearch, categoryFilter, stockFilter]);
+  }, [currentPage, debouncedSearch, categoryFilter, stockFilter]);
 
   useReloadOnFocus(silentRefresh);
 

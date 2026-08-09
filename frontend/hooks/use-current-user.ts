@@ -151,7 +151,6 @@ const writeAuthMirrorCookies = (mapped: User) => {
 
 export const useCurrentUser = () => {
   const organization = useContext(OrganizationContext);
-  const users = organization?.users ?? [];
   const [remoteUser, setRemoteUser] = useState<User | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
@@ -200,6 +199,7 @@ export const useCurrentUser = () => {
 
   const resolvedUser = useMemo(() => {
     if (!remoteUser) return null;
+    const users = organization?.users ?? [];
     const orgMatch = users.find(
       (candidate) =>
         candidate.id === remoteUser.id ||
@@ -225,7 +225,7 @@ export const useCurrentUser = () => {
       isDepartmentHead: remoteUser.isDepartmentHead ?? false,
       headedDepartments: remoteUser.headedDepartments ?? [],
     } satisfies User;
-  }, [remoteUser, users]);
+  }, [organization?.users, remoteUser]);
 
   const refresh = useCallback(async () => {
     cachedRemoteUser = undefined;

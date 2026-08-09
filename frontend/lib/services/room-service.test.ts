@@ -32,10 +32,15 @@ describe('roomService', () => {
     it('passes filter params', async () => {
       mockApiFetch.mockResolvedValue({ results: [], count: 0 });
 
-      await roomService.getRooms({ status: 'active', specialty: 'cardiology' });
+      await roomService.getRooms({
+        status: 'active',
+        specialty: 'cardiology',
+        location_clinic: 9,
+      });
       const url = mockApiFetch.mock.calls[0][0] as string;
       expect(url).toContain('status=active');
       expect(url).toContain('specialty=cardiology');
+      expect(url).toContain('location_clinic=9');
     });
   });
 

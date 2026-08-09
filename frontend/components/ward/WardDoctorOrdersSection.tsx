@@ -424,7 +424,7 @@ export function WardDoctorOrdersSection({
       setOrders([]);
       setOrdersLoading(false);
     }
-  }, [admission.id, admission.visit, admission.admission_type, admission.admission_date]);
+  }, [admission]);
 
   useEffect(() => {
     loadOrders();

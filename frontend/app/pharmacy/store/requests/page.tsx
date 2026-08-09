@@ -65,7 +65,7 @@ export default function StoreRequestsPage() {
     setHodMedicationCache((prev) => ({ ...prev, [med.id]: med }));
   }, []);
 
-  const buildDateParams = () => {
+  const buildDateParams = useCallback(() => {
     const p: Record<string, string> = {};
     if (dateFilter === "today") {
       const today = todayApiDateString();
@@ -81,9 +81,9 @@ export default function StoreRequestsPage() {
       p.date_before = todayApiDateString();
     }
     return p;
-  };
+  }, [dateFilter]);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       const baseParams: Record<string, string> = { show_all: 'true' };
       if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
@@ -109,9 +109,9 @@ export default function StoreRequestsPage() {
     } catch (err) {
       handleAuthError(err);
     }
-  };
+  }, [buildDateParams, debouncedSearchQuery, handleAuthError, hodDirection, requestTab]);
 
-  const loadRequests = async () => {
+  const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       const params: Record<string, string | number> = {
@@ -142,17 +142,17 @@ export default function StoreRequestsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [buildDateParams, currentPage, debouncedSearchQuery, handleAuthError, hodDirection, itemsPerPage, requestTab, statusFilter]);
 
   useEffect(() => {
     if (!ready) return;
     loadRequests();
-  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, requestTab, hodDirection, ready]);
+  }, [loadRequests, ready]);
 
   useEffect(() => {
     if (!ready) return;
     loadStats();
-  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, hodDirection, ready]);
+  }, [loadStats, ready]);
 
   const resetHodRequestModal = () => {
     setHodRequestItems([]);

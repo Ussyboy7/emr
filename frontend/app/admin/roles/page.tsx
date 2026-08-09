@@ -217,7 +217,7 @@ export default function RolesPermissionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, typeFilter, statusFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearch, typeFilter, statusFilter, handleAuthError]);
 
   useEffect(() => {
     void loadRoleStats();

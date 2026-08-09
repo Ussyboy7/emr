@@ -252,7 +252,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
     if (isOpen && patient) {
       setOverviewPatientName(patient.name);
     }
-  }, [isOpen, patient?.id, patient?.name]);
+  }, [isOpen, patient]);
 
   const canManageDependents = patientDetail?.category === 'employee' || patientDetail?.category === 'retiree';
 

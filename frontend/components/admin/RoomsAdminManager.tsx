@@ -117,10 +117,10 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
       if (statusFilter !== 'all') params.status = statusFilter;
       if (typeFilter !== 'all') params.room_type = typeFilter;
-      if (locationFilter !== 'all') params.clinic = locationFilter;
+      if (locationFilter !== 'all') params.location_clinic = locationFilter;
       const res = await roomService.getRooms(params);
       const mapped = (res.results || []).map((r: ApiRoom) => {
-        const clinicLabel = clinicOptions.find(o => String(o.value) === String(r.clinic))?.label || r.location || '';
+        const clinicLabel = clinicOptions.find(o => String(o.value) === String(r.location_clinic))?.label || r.location || '';
         return mapRoom(r, clinicLabel);
       });
       setRooms(mapped);
@@ -138,7 +138,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
       const filters: Record<string, string | number> = {};
       if (debouncedSearch.trim()) filters.search = debouncedSearch.trim();
       if (typeFilter !== 'all') filters.room_type = typeFilter;
-      if (locationFilter !== 'all') filters.clinic = locationFilter;
+      if (locationFilter !== 'all') filters.location_clinic = locationFilter;
       const stats = await roomService.getListStats(filters);
       setStats({
         total: stats.total ?? 0,
@@ -187,7 +187,7 @@ const RoomsAdminManager = forwardRef<RoomsAdminManagerHandle, RoomsAdminManagerP
         capacity: formData.capacity ?? 8,
         status: (formData.status || 'Active').toLowerCase(),
         description: formData.description?.trim() || '',
-        clinic: formData.location ? Number(formData.location) : activeClinicId ?? undefined,
+        location_clinic: formData.location ? Number(formData.location) : activeClinicId ?? undefined,
       };
       if (isEdit) {
         await roomService.updateRoom(Number(selectedRoom!.id), payload);

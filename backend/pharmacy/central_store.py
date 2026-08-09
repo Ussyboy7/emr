@@ -3,12 +3,9 @@ Central store (warehouse) is hosted at Bode Thomas Clinic.
 """
 from __future__ import annotations
 
-from functools import lru_cache
-
 CENTRAL_STORE_CLINIC_CODE = "BODE-THOMAS"
 
 
-@lru_cache(maxsize=1)
 def get_central_store_clinic_id() -> int | None:
     from organization.models import Clinic
 

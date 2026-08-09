@@ -80,7 +80,7 @@ class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                 "visit__location_clinic",
                 "consultation_session",
                 "consultation_session__location_clinic",
-                "consultation_session__room__clinic",
+                "consultation_session__room__location_clinic",
                 "location_clinic",
             ).all()
         )

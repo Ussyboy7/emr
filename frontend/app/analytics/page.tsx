@@ -94,7 +94,7 @@ export default function ClinicalAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [reportRange]);
+  }, [reportRange, viewMode]);
 
   useEffect(() => {
     if (canFetchReportPeriod(viewMode, reportRange)) {

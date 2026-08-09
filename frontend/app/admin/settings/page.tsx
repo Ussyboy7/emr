@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -147,7 +147,7 @@ export default function SystemSettingsPage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [librarySearch, setLibrarySearch] = useState("");
 
-  const loadPresentingComplaintLibrary = async () => {
+  const loadPresentingComplaintLibrary = useCallback(async () => {
     setLibraryLoading(true);
     try {
       const categories = await consultationService.getPresentingComplaintLibrary({ include_inactive: true });
@@ -161,18 +161,9 @@ export default function SystemSettingsPage() {
     } finally {
       setLibraryLoading(false);
     }
-  };
+  }, [selectedCategoryId]);
 
-  useEffect(() => {
-    if (!ready) return;
-    void loadPresentingComplaintLibrary();
-    void loadRoutingMatrix();
-    void fetchOrgIdleTimeoutMinutes().then((minutes) => {
-      setSecuritySettings((prev) => ({ ...prev, sessionTimeout: String(minutes) }));
-    });
-  }, [ready]);
-
-  const loadRoutingMatrix = async () => {
+  const loadRoutingMatrix = useCallback(async () => {
     setRoutingLoading(true);
     try {
       const res = await adminService.getNotificationRoutingMatrix();
@@ -185,7 +176,16 @@ export default function SystemSettingsPage() {
     } finally {
       setRoutingLoading(false);
     }
-  };
+  }, [handleAuthError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadPresentingComplaintLibrary();
+    void loadRoutingMatrix();
+    void fetchOrgIdleTimeoutMinutes().then((minutes) => {
+      setSecuritySettings((prev) => ({ ...prev, sessionTimeout: String(minutes) }));
+    });
+  }, [ready, loadPresentingComplaintLibrary, loadRoutingMatrix]);
 
   const handleSaveRoutingMatrix = async () => {
     setRoutingSaving(true);

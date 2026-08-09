@@ -11,7 +11,7 @@ class WardDischargeTest(APITestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.doctor = create_test_user("ward_dr", pages=["/consultation/wards", "/nursing/wards"], system_role="Medical Doctor")
+        cls.doctor = create_test_user("ward_dr", pages=["/consultation/wards"], system_role="Medical Doctor")
         cls.nurse = create_test_user("ward_nurse", pages=["/nursing/wards"], system_role="Nursing Officer")
         cls.patient, cls.visit = create_test_patient_visit(patient_id="WARD-DC-01")
         cls.ward = Ward.objects.create(name="General Male", ward_code="GM1", ward_type="general", total_beds=10)

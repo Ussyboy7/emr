@@ -4,6 +4,8 @@ Covers: JWT login (username & email), token refresh, token blacklist (logout),
 current-user profile (GET/PATCH /me/), password change, and edge cases around
 inactive users, missing fields, and invalid tokens.
 """
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import override_settings
@@ -99,6 +101,19 @@ class LoginTests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_login_wrong_password_still_returns_401_when_audit_logging_fails(self):
+        with patch(
+            "accounts.auth_views.AuditService.log_activity",
+            side_effect=RuntimeError("audit unavailable"),
+        ):
+            resp = self.client.post(
+                TOKEN_URL,
+                {"username": "login_user", "password": "WrongPassword!"},
+                format="json",
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
     def test_login_nonexistent_user_returns_401(self):
         resp = self.client.post(
             TOKEN_URL,
@@ -113,6 +128,19 @@ class LoginTests(APITestCase):
             {"username": "login_user"},
             format="json",
         )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_login_missing_password_still_returns_400_when_audit_logging_fails(self):
+        with patch(
+            "accounts.auth_views.AuditService.log_activity",
+            side_effect=RuntimeError("audit unavailable"),
+        ):
+            resp = self.client.post(
+                TOKEN_URL,
+                {"username": "login_user"},
+                format="json",
+            )
+
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_login_missing_username_returns_400(self):

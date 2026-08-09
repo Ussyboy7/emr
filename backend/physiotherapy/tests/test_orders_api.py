@@ -72,7 +72,9 @@ class PhysioOrderApiTests(APITestCase):
             priority="low",
         )
 
-        res = self.client.get(f"/api/v1/orders/?consultation_session={self.session.pk}")
+        # Evaluating the paginated result exercises every select_related path
+        # used by the consultation-room order lookup.
+        res = self.client.get(f"/api/v1/orders/?consultation_session={self.session.pk}&page_size=100")
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         rows = res.data.get("results", res.data)
         diagnoses = [row["diagnosis"] for row in rows]

@@ -652,6 +652,7 @@ export default function NursingPoolQueuePage() {
     itemsPerPage,
     serverToday,
     handleAuthError,
+    opdClinicNames,
   ]);
 
   // Load data when filters change

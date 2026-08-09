@@ -144,17 +144,7 @@ export default function NursingRequestsPage() {
     return p;
   }, [dateFilter]);
 
-  useEffect(() => {
-    if (!ready) return;
-    void loadStats();
-  }, [ready, debouncedSearchQuery, dateFilter]);
-
-  useEffect(() => {
-    if (!ready) return;
-    void loadRequests();
-  }, [ready, currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter]);
-
-  const loadRequests = async () => {
+  const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       const params: Record<string, string | number> = {
@@ -175,9 +165,9 @@ export default function NursingRequestsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [buildDateParams, currentPage, debouncedSearchQuery, handleAuthError, itemsPerPage, statusFilter]);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       const baseParams: Record<string, string> = {
         to_location: PHARMACY_LOCATIONS.WARD_CARE,
@@ -197,7 +187,17 @@ export default function NursingRequestsPage() {
       if (handleAuthError(err)) return;
       toast.error("Failed to load request statistics");
     }
-  };
+  }, [buildDateParams, debouncedSearchQuery, handleAuthError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadStats();
+  }, [loadStats, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadRequests();
+  }, [loadRequests, ready]);
 
   const closeNewRequestModal = () => {
     setShowNewRequestModal(false);

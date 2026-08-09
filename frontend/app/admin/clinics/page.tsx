@@ -668,7 +668,7 @@ export default function ClinicDepartmentPage() {
     }
   };
 
-  const loadVisitTypes = async () => {
+  const loadVisitTypes = useCallback(async () => {
     try {
       setLoadingVisitTypes(true);
       const res = await adminService.getOutpatientClinicTypes({
@@ -682,13 +682,13 @@ export default function ClinicDepartmentPage() {
     } finally {
       setLoadingVisitTypes(false);
     }
-  };
+  }, [statusFilter]);
 
   useEffect(() => {
     if (activeTab === 'visit_types') {
       loadVisitTypes();
     }
-  }, [activeTab, statusFilter]);
+  }, [activeTab, statusFilter, loadVisitTypes]);
 
   const resetVisitTypeForm = () => {
     setVisitTypeForm({ name: '', code: '', description: '', sort_order: 0, is_active: true });
@@ -1324,4 +1324,3 @@ export default function ClinicDepartmentPage() {
     </DashboardLayout>
   );
 }
-

@@ -58,6 +58,8 @@ class SessionSetupMixin:
             room_number="SR-02",
         )
 
+        self.client.post(f"/api/v1/consultation/rooms/{self.room.pk}/check-in/")
+
         self.visit = Visit.objects.create(
             patient=self.patient,
             date=date.today(),

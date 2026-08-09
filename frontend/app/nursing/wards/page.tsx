@@ -408,7 +408,6 @@ export default function WardCarePage() {
             notes: vitalNoteParts.length ? vitalNoteParts.join('\n\n') : undefined,
           });
         } catch (chartErr) {
-          // eslint-disable-next-line no-console
           console.warn('Failed to write observation vital row', chartErr);
         }
       }

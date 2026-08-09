@@ -420,7 +420,7 @@ export function useConsultationRoomOrders({
   };
 
   // Search ICD-10 codes from API
-  const searchICD10Codes = async (searchTerm: string) => {
+  const searchICD10Codes = useCallback(async (searchTerm: string) => {
     if (!searchTerm.trim()) {
       setIcd10SearchResults([]);
       return;
@@ -440,7 +440,7 @@ export function useConsultationRoomOrders({
     } finally {
       setIsSearchingICD10(false);
     }
-  };
+  }, []);
 
   // (Legacy in-page medication search removed — all prescribing goes through
   // <PrescriptionOrderModal /> which does its own generics lookup.)
@@ -773,21 +773,21 @@ export function useConsultationRoomOrders({
     setShowAddPrescription(true);
   };
 
-  const handlePrescriptionModalOpenChange = (open: boolean) => {
+  const handlePrescriptionModalOpenChange = useCallback((open: boolean) => {
     setShowAddPrescription(open);
     if (!open) {
       setPrescriptionModalInitialItems(undefined);
       setPrescriptionModalInitialPriority(undefined);
       setPrescriptionModalIntent(null);
     }
-  };
+  }, []);
 
-  const handleRefillContinue = (items: PrescriptionOrderItemInput[]) => {
+  const handleRefillContinue = useCallback((items: PrescriptionOrderItemInput[]) => {
     setPrescriptionModalInitialItems(items);
     setPrescriptionModalInitialPriority('Routine');
     setPrescriptionModalIntent('refill');
     setShowAddPrescription(true);
-  };
+  }, []);
 
   const editPrescription = (index: number) => {
     const rx = prescriptions[index];
@@ -808,7 +808,7 @@ export function useConsultationRoomOrders({
     setShowAddPrescription(true);
   };
 
-  const handleAddPrescriptionToOrder = async (payload: PrescriptionOrderSubmitInput) => {
+  const handleAddPrescriptionToOrder = useCallback(async (payload: PrescriptionOrderSubmitInput) => {
     if (payload.items.length === 0) {
       toast.error('Please select at least one medication');
       return;
@@ -860,10 +860,10 @@ export function useConsultationRoomOrders({
     toast.success(`${addedCount} medication(s) added to consultation`, {
       description: 'Prescriptions will be sent to pharmacy when consultation is completed'
     });
-  };
+  }, [prescriptions]);
 
   // Toggle lab template selection
-  const toggleLabTemplateSelection = (template: ServiceLabTemplate) => {
+  const toggleLabTemplateSelection = useCallback((template: ServiceLabTemplate) => {
     const templateId = template.id;
     setSelectedLabTemplates(prev => {
       const newSet = new Set(prev);
@@ -880,9 +880,9 @@ export function useConsultationRoomOrders({
       }
       return newSet;
     });
-  };
+  }, []);
 
-  const toggleRadiologyTemplateSelection = (template: RadiologyTemplate) => {
+  const toggleRadiologyTemplateSelection = useCallback((template: RadiologyTemplate) => {
     const templateId = template.id;
     setSelectedRadiologyTemplates((prev) => {
       const next = new Set(prev);
@@ -899,7 +899,7 @@ export function useConsultationRoomOrders({
       }
       return next;
     });
-  };
+  }, []);
 
   const labTemplatesCatalog = useMemo(() => {
     const byId = new Map<number, ServiceLabTemplate>();
@@ -930,7 +930,7 @@ export function useConsultationRoomOrders({
   }, [selectedRadiologyTemplateDetails, radiologyTemplates, otherRadiologyPinnedTemplate]);
 
   // Add selected lab templates to draft order (like prescriptions)
-  const addLabOrder = () => {
+  const addLabOrder = useCallback(() => {
     if (selectedLabTemplates.size === 0) {
       toast.error('Please select at least one test');
       return;
@@ -962,7 +962,7 @@ export function useConsultationRoomOrders({
     setNewLabOrder({ test: "", priority: "Routine", notes: "" });
     setShowAddLabOrder(false);
     toast.success(`${newOrders.length} test(s) added to order`);
-  };
+  }, [labOrders, labTemplatesCatalog, newLabOrder, otherLabPinnedTemplate, selectedLabTemplates]);
 
   // Send all draft lab orders to lab (like sendPrescriptionsToPharmacy)
   const sendLabOrdersToLab = async () => {
@@ -1082,7 +1082,7 @@ export function useConsultationRoomOrders({
   }, [radiologyTemplates, otherRadiologyPinnedTemplate]);
 
   // Add nursing order to draft (like prescriptions, lab orders, and radiology orders)
-  const addNursingOrder = () => {
+  const addNursingOrder = useCallback(() => {
     if (!newNursingOrder.type || !newNursingOrder.instructions) {
       toast.error('Please fill in all required fields');
       return;
@@ -1179,7 +1179,7 @@ export function useConsultationRoomOrders({
     } else {
       toast.success("Nursing order added to draft");
     }
-  };
+  }, [injectionConfigs, injectionMedicationResults, injectionSelectedIds, newNursingOrder, nursingOrders]);
 
   // Send all draft nursing orders to nursing (like sendPrescriptionsToPharmacy, sendLabOrdersToLab, sendRadiologyOrders)
   const sendNursingOrdersToNursing = async (options?: { silentIfNoDraft?: boolean }): Promise<number> => {
@@ -1363,7 +1363,7 @@ export function useConsultationRoomOrders({
 
 
   // Referral functions
-  const addReferral = async () => {
+  const addReferral = useCallback(async () => {
     if (!newReferral.specialty || !newReferral.facility || !newReferral.reason) {
       toast.error('Please fill in all required fields');
       return;
@@ -1411,11 +1411,11 @@ export function useConsultationRoomOrders({
       console.error('Error creating referral:', err);
       toast.error(err.message || 'Failed to create referral');
     }
-  };
+  }, [currentPatient, newReferral, onReferralCreated, sessionId]);
 
   // Radiology functions
   // Add radiology order to draft (like prescriptions and lab orders)
-  const addRadiologyOrder = () => {
+  const addRadiologyOrder = useCallback(() => {
     if (selectedRadiologyTemplates.size === 0 || !newRadiology.clinicalIndication) {
       toast.error('Please select at least one imaging study and provide clinical indication');
       return;
@@ -1452,7 +1452,7 @@ export function useConsultationRoomOrders({
     setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", provisionalDiagnosis: "", lmp: "" });
     setShowAddRadiology(false);
     toast.success(`${newOrders.length} imaging study/studies added to draft`);
-  };
+  }, [newRadiology, otherRadiologyPinnedTemplate, radiologyOrders, radiologyTemplatesCatalog, selectedRadiologyTemplates]);
 
   // Send all draft radiology orders to radiology (like sendPrescriptionsToPharmacy and sendLabOrdersToLab)
   const sendRadiologyOrders = async () => {
@@ -1517,7 +1517,7 @@ export function useConsultationRoomOrders({
   };
 
   // Physiotherapy order functions
-  const addPhysioOrder = () => {
+  const addPhysioOrder = useCallback(() => {
     const diagnosisError = validateOrderDiagnoses(newPhysio.diagnoses);
     if (diagnosisError) {
       toast.error(diagnosisError);
@@ -1566,7 +1566,7 @@ export function useConsultationRoomOrders({
     });
     setEditingPhysioIndex(null);
     setShowAddPhysio(false);
-  };
+  }, [editingPhysioIndex, newPhysio]);
 
   const editPhysioOrder = (index: number) => {
     const orderToEdit = physioOrders[index];
@@ -1631,7 +1631,7 @@ export function useConsultationRoomOrders({
   };
 
   // Eye Care order functions
-  const addEyeOrder = () => {
+  const addEyeOrder = useCallback(() => {
     const diagnosisError = validateOrderDiagnoses(newEye.diagnoses);
     if (diagnosisError) {
       toast.error(diagnosisError);
@@ -1687,7 +1687,7 @@ export function useConsultationRoomOrders({
     });
     setEditingEyeIndex(null);
     setShowAddEye(false);
-  };
+  }, [editingEyeIndex, newEye]);
 
   const defaultEyeOrderForm = (annual = false) => ({
     chiefComplaint: annual ? "Annual vision screening" : "",
@@ -1979,9 +1979,22 @@ export function useConsultationRoomOrders({
       searchTimeout,
       selectedDiagnosisType,
       selectedLabTemplates,
-      selectedRadiologyTemplates,
-      sessionId,
-      toggleLabTemplateSelection,
+       selectedRadiologyTemplates,
+       sessionId,
+       showAddDiagnosis,
+       showAddEye,
+       showAddLabOrder,
+       showAddNursingOrder,
+       showAddPhysio,
+       showAddPrescription,
+       showAddRadiology,
+       showAddReferral,
+       showDiagnosisDropdown,
+       showInjectionMedicationDropdown,
+       showLabTemplateDropdown,
+       showPrescriptionRefill,
+       showRadiologyTemplateDropdown,
+       toggleLabTemplateSelection,
       toggleRadiologyTemplateSelection,
       wards,
     ],

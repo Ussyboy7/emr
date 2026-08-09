@@ -78,7 +78,10 @@ export default function UserManagementPage() {
     hydrated && isScopedDepartmentUserManager(currentUser),
   );
 
-  const headedDepartments = currentUser?.headedDepartments ?? [];
+  const headedDepartments = useMemo(
+    () => currentUser?.headedDepartments ?? [],
+    [currentUser?.headedDepartments],
+  );
 
   const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
   const [userKpis, setUserKpis] = useState({
@@ -238,7 +241,7 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, roleFilter, statusFilter, departmentFilter]);
+  }, [itemsPerPage, debouncedSearch, roleFilter, statusFilter, departmentFilter, handleAuthError]);
 
 
 

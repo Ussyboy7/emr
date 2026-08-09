@@ -230,7 +230,7 @@ export default function AuditTrailPage() {
     if (currentPage !== 1) {
       setCurrentPage(1);
     }
-  }, [debouncedSearch, moduleFilter, actionFilter, statusFilter, resourceFilter, dateFrom, dateTo, itemsPerPage]);
+  }, [currentPage, debouncedSearch, moduleFilter, actionFilter, statusFilter, resourceFilter, dateFrom, dateTo, itemsPerPage]);
 
   const stats = useMemo(() => auditStats, [auditStats]);
 
@@ -675,4 +675,3 @@ export default function AuditTrailPage() {
     </DashboardLayout>
   );
 }
-

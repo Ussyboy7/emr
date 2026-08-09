@@ -56,7 +56,7 @@ export default function ExecutiveAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [reportRange]);
+  }, [reportRange, viewMode]);
 
   useEffect(() => {
     if (canFetchReportPeriod(viewMode, reportRange)) void fetchReport();

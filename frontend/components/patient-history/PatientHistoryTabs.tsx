@@ -155,7 +155,7 @@ export function PatientHistoryTabs({
     if (!initialData) {
       fetched.reload();
     }
-  }, [onReferralUpdated, initialData, fetched.reload]);
+  }, [onReferralUpdated, initialData, fetched]);
 
   useEffect(() => {
     if (historyReloadToken == null || initialData) return;

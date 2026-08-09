@@ -746,7 +746,7 @@ export default function PrescriptionsPage() {
 
   useEffect(() => {
     if (!ready) return;
-    void loadQueueStats();
+    void loadQueueStatsRef.current();
   }, [searchQuery, statusFilter, genderFilter, dateFilter, ready]);
 
   const loadQueueStatsRef = useRef(loadQueueStats);
@@ -757,7 +757,7 @@ export default function PrescriptionsPage() {
 
   useEffect(() => {
     if (!ready) return;
-    void loadPrescriptions();
+    void loadPrescriptionsRef.current();
   }, [currentPage, itemsPerPage, statusFilter, searchQuery, genderFilter, dateFilter, ready]);
 
   useEffect(() => {
@@ -978,6 +978,9 @@ export default function PrescriptionsPage() {
     }
   };
 
+  const performSubstituteSearchRef = useRef(performSubstituteSearch);
+  performSubstituteSearchRef.current = performSubstituteSearch;
+
   const openBrandSelectionForMed = useCallback(async (med: any) => {
     setSubstitutionMed(med);
     setSubstituteSearchResults([]);
@@ -1007,7 +1010,7 @@ export default function PrescriptionsPage() {
       setBrandSelectionTargetName(targetName);
       brandSelectionGenericIdRef.current = genericId;
       if (genericId) {
-        await performSubstituteSearch('', 'brand_selection');
+        await performSubstituteSearchRef.current('', 'brand_selection');
       } else {
         setSubstituteSearchResults([]);
         toast.error('Prescribed ingredient not found for this line');
@@ -1019,7 +1022,7 @@ export default function PrescriptionsPage() {
     } finally {
       setIsLoadingBrands(false);
     }
-  }, [getCachedMedication, performSubstituteSearch]);
+  }, []);
 
   const openSubstitutionForMed = useCallback(async (med: any) => {
     setSubstitutionMed(med);
@@ -1045,7 +1048,7 @@ export default function PrescriptionsPage() {
           null;
       }
       substituteExcludeGenericIdRef.current = genericId;
-      await performSubstituteSearch('', 'substitute');
+      await performSubstituteSearchRef.current('', 'substitute');
     } catch (err) {
       console.error('Failed to load substitute options:', err);
       setSubstituteSearchResults([]);
@@ -1053,7 +1056,7 @@ export default function PrescriptionsPage() {
     } finally {
       setIsLoadingSubstitutes(false);
     }
-  }, [getCachedMedication]);
+  }, []);
 
   // Load brands when pharmacist selects a generic in Substitute modal
   useEffect(() => {

@@ -355,7 +355,7 @@ export default function RadiologyOrdersPage() {
     } finally {
       setLoadingImagingPartners(false);
     }
-  }, []);
+  }, [handleAuthError]);
 
   // Reset the Add/Edit Partner form to its empty defaults. Called when the
   // dialog closes and after a successful submit so reopening it doesn't
@@ -602,7 +602,7 @@ export default function RadiologyOrdersPage() {
     } finally {
       setLoadingOrderDispatches(false);
     }
-  }, []);
+  }, [handleAuthError]);
 
   /**
    * Open the order-level dispatch dialog. By default every eligible study is
@@ -1023,7 +1023,7 @@ export default function RadiologyOrdersPage() {
     } finally {
       setLoadingTemplates(false);
     }
-  }, []);
+  }, [handleAuthError]);
 
   useEffect(() => {
     if (!isAddStudyDialogOpen) return;
@@ -1044,7 +1044,7 @@ export default function RadiologyOrdersPage() {
         setExternalClinics([]);
       }
     })();
-  }, [isExternalOrderDialogOpen, loadTemplates, templates.length]);
+  }, [isExternalOrderDialogOpen, loadTemplates, templates.length, handleAuthError]);
 
   useEffect(() => {
     if (!isExternalOrderDialogOpen) return;

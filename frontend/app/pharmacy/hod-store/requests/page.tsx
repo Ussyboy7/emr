@@ -137,7 +137,7 @@ export default function HodStoreRequestsPage() {
     return params;
   }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, buildDateParams, requestTab]);
 
-  const loadRequests = async () => {
+  const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       const response = await pharmacyService.getStockRequests(listParams());
@@ -152,9 +152,9 @@ export default function HodStoreRequestsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [handleAuthError, listParams]);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       const s = await pharmacyService.getStockRequestListStats(statsParams());
       setStats({
@@ -167,17 +167,17 @@ export default function HodStoreRequestsPage() {
     } catch (err) {
       handleAuthError(err);
     }
-  };
+  }, [handleAuthError, statsParams]);
 
   useEffect(() => {
     if (!ready) return;
     void loadStats();
-  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, ready]);
+  }, [loadStats, ready]);
 
   useEffect(() => {
     if (!ready) return;
     void loadRequests();
-  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, requestTab, ready]);
+  }, [loadRequests, ready]);
 
   const handleCreateRequest = async () => {
     if (requestItems.length === 0) {

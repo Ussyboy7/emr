@@ -300,7 +300,7 @@ export default function NewPatientPage() {
     if (photoPreview) completed++;
 
     return Math.round((completed / total) * 100);
-  }, [formData, showWorkInfo, photoPreview]);
+  }, [formData, showEmployeeWorkFields, photoPreview]);
 
   // Validation functions
   const validateEmail = (email: string): boolean => {

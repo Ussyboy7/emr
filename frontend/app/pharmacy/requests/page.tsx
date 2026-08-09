@@ -109,17 +109,7 @@ function DispensaryRequestsPageContent() {
     void bootstrap();
   }, [ready, searchParams, handleAuthError, learnMedication]);
 
-  useEffect(() => {
-    if (!ready) return;
-    void loadStats();
-  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab, ready]);
-
-  useEffect(() => {
-    if (!ready) return;
-    void loadRequests();
-  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter, requestTab, ready]);
-
-  const loadRequests = async () => {
+  const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       const params: Record<string, string | number> = { page: currentPage, page_size: itemsPerPage };
@@ -141,9 +131,9 @@ function DispensaryRequestsPageContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [buildDateParams, currentPage, debouncedSearchQuery, handleAuthError, itemsPerPage, requestTab, statusFilter]);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       const baseParams: Record<string, string> = {};
       if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
@@ -160,7 +150,17 @@ function DispensaryRequestsPageContent() {
     } catch (err) {
       handleAuthError(err);
     }
-  };
+  }, [buildDateParams, debouncedSearchQuery, handleAuthError, requestTab]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadStats();
+  }, [loadStats, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadRequests();
+  }, [loadRequests, ready]);
 
   const closeNewRequestModal = () => {
     setShowNewRequestModal(false);

@@ -41,6 +41,7 @@ class ConsultationSessionLifecycleTests(APITestCase):
             name="Consult Room 1",
             room_number="CS-R1",
         )
+        self.client.post(f"/api/v1/consultation/rooms/{self.room.pk}/check-in/")
 
     def _session_payload(self):
         return {

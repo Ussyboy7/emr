@@ -107,7 +107,7 @@ export default function PhysioCompletedPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange.from, dateRange.to, handleAuthError]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, dateRange, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;

@@ -98,7 +98,7 @@ export function StockRequestItemsBuilder({
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch, filterMedication]);
+  }, [debouncedSearch, filterMedication, onMedicationLearned]);
 
   const resetPicker = () => {
     setSelectedMedication(null);

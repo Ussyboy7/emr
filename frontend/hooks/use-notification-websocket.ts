@@ -249,7 +249,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       logWarn('Failed to create WebSocket connection; continuing with polling only.', error);
       setIsConnected(false);
     }
-  }, [isWsEnabled, currentUser, onNotification, onUnreadCountChange, maxReconnectAttempts, reconnectDelay]);
+  }, [getWebSocketUrl, isWsEnabled, currentUser, onNotification, onUnreadCountChange, maxReconnectAttempts, reconnectDelay]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -302,7 +302,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
     return () => {
       disconnect();
     };
-  }, [isWsEnabled, enabled, currentUser]);
+  }, [WS_DISABLED, isWsEnabled, enabled, currentUser, connect, disconnect]);
 
   // Load initial unread count
   useEffect(() => {

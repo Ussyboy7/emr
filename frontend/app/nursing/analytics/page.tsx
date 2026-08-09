@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
@@ -67,7 +67,7 @@ export default function NursingAnalyticsPage() {
     setViewMode("year");
   };
 
-  const loadAnalytics = async () => {
+  const loadAnalytics = useCallback(async () => {
     const params = buildReportPeriodQuery(viewMode, reportRange, "start");
     if (!params) {
       toast.error("Please select a valid date range");
@@ -86,14 +86,14 @@ export default function NursingAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [handleAuthError, reportRange, viewMode]);
 
   useEffect(() => {
     if (!ready) return;
     if (canFetchReportPeriod(viewMode, reportRange)) {
       void loadAnalytics();
     }
-  }, [ready, reportRange, viewMode]);
+  }, [loadAnalytics, ready, reportRange, viewMode]);
 
   const periodBreakdown = useMemo(() => {
     if (!analyticsData) return [];

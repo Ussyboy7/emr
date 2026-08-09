@@ -85,7 +85,7 @@ export default function HodDispenseHistoryPage() {
     } finally {
       setSummaryLoading(false);
     }
-  }, [debouncedSearch, datePreset]);
+  }, [debouncedSearch, datePreset, handleAuthError]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -108,7 +108,7 @@ export default function HodDispenseHistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, datePreset]);
+  }, [currentPage, itemsPerPage, debouncedSearch, datePreset, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;
