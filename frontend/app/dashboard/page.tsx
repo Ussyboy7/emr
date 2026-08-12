@@ -6,16 +6,16 @@ import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
 import { toast } from 'sonner';
 import {
   Users, Stethoscope, TestTube, Pill, Calendar, Clock, Activity,
-  TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, UserPlus,
-  Play, ClipboardList, Bell, ArrowRight, Heart, Building2, Bed,
-  FileText, Syringe, ScanLine, Loader2
+  AlertTriangle, UserPlus,
+  Play, ArrowRight,
+  FileText, Loader2
 } from 'lucide-react';
-import { getOperationalDashboard } from '@/lib/services/dashboard-service';
+import { getOperationalDashboard, type OperationalDashboardPayload } from '@/lib/services/dashboard-service';
+import { formatFacilityMetric } from './facility-performance';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
@@ -57,16 +57,9 @@ export default function DashboardPage() {
     prescriptions: 0,
     prescriptionsChange: 0,
   });
-  const [queueStatus, setQueueStatus] = useState({
-    nursingPool: 0,
-    consultationWaiting: 0,
-    labPending: 0,
-    pharmacyQueue: 0,
-  });
   const [recentPatients, setRecentPatients] = useState<any[]>([]);
-  const [criticalAlerts, setCriticalAlerts] = useState<any[]>([]);
-  const [clinicPerformance, setClinicPerformance] = useState<any[]>([]);
   const [upcomingAppointments, setUpcomingAppointments] = useState<any[]>([]);
+  const [facilityPerformance, setFacilityPerformance] = useState<OperationalDashboardPayload['facilityPerformance']>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,16 +83,14 @@ export default function DashboardPage() {
       );
 
       setTodayStats(data.todayStats);
-      setQueueStatus(data.queueStatus);
       setRecentPatients(
         data.recentPatients.map((patient) => ({
           ...patient,
           time: formatDisplayTime(patient.time),
         })),
       );
-      setCriticalAlerts(data.criticalAlerts);
-      setClinicPerformance(data.clinicPerformance);
       setUpcomingAppointments(data.upcomingAppointments);
+      setFacilityPerformance(data.facilityPerformance);
     } catch (err: any) {
       if (!opts.silent) {
         setError(err.message || 'Failed to load dashboard data');
@@ -177,260 +168,80 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Critical Alerts */}
-        {criticalAlerts.length > 0 && (
-          <Card className="border-amber-500/50 bg-amber-500/5">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle className="h-5 w-5 text-amber-500" />
-                <span className="font-semibold text-amber-700 dark:text-amber-400">Alerts Requiring Attention</span>
-                <Badge variant="secondary" className="ml-auto">{criticalAlerts.length} new</Badge>
-              </div>
-              <div className="space-y-2">
-                {criticalAlerts.map((alert, i) => (
-                  <div key={i} className="flex items-center justify-between p-2 bg-background rounded-lg">
-                    <div className="flex items-center gap-2">
-                      {alert.type === 'lab' && <TestTube className="h-4 w-4 text-rose-500" />}
-                      {alert.type === 'stock' && <Pill className="h-4 w-4 text-violet-500" />}
-                      {alert.type === 'license' && <FileText className="h-4 w-4 text-blue-500" />}
-                      <span className="text-sm">{alert.message}</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{alert.time}</span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Today's Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-blue-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Patients Today</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{todayStats.patientsToday}</p>
-                  <p className={`text-sm flex items-center gap-1 ${todayStats.patientsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {todayStats.patientsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                    {Math.abs(todayStats.patientsChange)}% vs yesterday
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Consultations</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{todayStats.consultations}</p>
-                  <p className={`text-sm flex items-center gap-1 ${todayStats.consultationsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {todayStats.consultationsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                    {Math.abs(todayStats.consultationsChange)}% vs yesterday
-                  </p>
-                </div>
-                <Stethoscope className="h-10 w-10 text-emerald-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Lab Tests</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{todayStats.labTests}</p>
-                  <p className={`text-sm flex items-center gap-1 ${todayStats.labTestsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {todayStats.labTestsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                    {Math.abs(todayStats.labTestsChange)}% vs yesterday
-                  </p>
-                </div>
-                <TestTube className="h-10 w-10 text-amber-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-violet-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Prescriptions</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">{todayStats.prescriptions}</p>
-                  <p className={`text-sm flex items-center gap-1 ${todayStats.prescriptionsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {todayStats.prescriptionsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                    {Math.abs(todayStats.prescriptionsChange)}% vs yesterday
-                  </p>
-                </div>
-                <Pill className="h-10 w-10 text-violet-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Queue Status */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Link href="/nursing/pool-queue">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer group">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Nursing Pool</p>
-                    <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{queueStatus.nursingPool}</p>
-                    <p className="text-xs text-muted-foreground">patients waiting</p>
-                  </div>
-                  <Heart className="h-8 w-8 text-rose-500 opacity-50 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/consultation/start">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer group">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Consultation</p>
-                    <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{queueStatus.consultationWaiting}</p>
-                    <p className="text-xs text-muted-foreground">awaiting doctor</p>
-                  </div>
-                  <Stethoscope className="h-8 w-8 text-emerald-500 opacity-50 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/laboratory/orders">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer group">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Lab Queue</p>
-                    <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{queueStatus.labPending}</p>
-                    <p className="text-xs text-muted-foreground">pending tests</p>
-                  </div>
-                  <TestTube className="h-8 w-8 text-amber-500 opacity-50 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/pharmacy/prescriptions">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer group">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Pharmacy</p>
-                    <p className="text-2xl font-bold text-violet-600 dark:text-violet-400">{queueStatus.pharmacyQueue}</p>
-                    <p className="text-xs text-muted-foreground">to dispense</p>
-                  </div>
-                  <Pill className="h-8 w-8 text-violet-500 opacity-50 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Recent Patients */}
-          <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-blue-500" />Recent Patients</CardTitle>
-                <CardDescription>Patients seen today</CardDescription>
-              </div>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/medical-records/patients">View All <ArrowRight className="h-4 w-4 ml-1" /></Link>
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {recentPatients.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>No patients seen today</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {recentPatients.map((patient, index) => {
-                    const guardClass = clinicGuardRowClass(patient, guardActiveClinicId);
-                    return (
-                      <div key={patient.visitId ?? `${patient.id}-${index}`} className={`flex items-center justify-between p-3 rounded-lg hover:bg-muted transition-colors ${guardClass || 'bg-muted/50'}`}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
-                            {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
-                          </div>
-                          <div>
-                            <p className="font-medium">{patient.name}</p>
-                            <p className="text-xs text-muted-foreground">{joinDisplayParts([patient.id, patient.clinic, patient.time])}</p>
-                          </div>
-                        </div>
-                        <Badge variant={
-                          patient.status === 'Completed' ? 'default' :
-                          patient.status === 'In Consultation' ? 'secondary' :
-                          'outline'
-                        }>{patient.status}</Badge>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Upcoming Appointments */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Calendar className="h-5 w-5 text-teal-500" />Upcoming</CardTitle>
-              <CardDescription>Next appointments</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {upcomingAppointments.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>No upcoming appointments</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {upcomingAppointments.map((apt, i) => (
-                    <div key={i} className="p-3 border rounded-lg">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium text-sm">{apt.patient}</span>
-                        <Badge variant="outline" className="text-xs">{apt.type}</Badge>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" />
-                        <span>{apt.time}</span>
-                        <span>•</span>
-                        <span>{apt.clinic}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Clinic Performance */}
+        {/* Today's Activity */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-indigo-500" />Clinic Performance Today</CardTitle>
-            <CardDescription>Patient volume and wait times by clinic</CardDescription>
+            <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />Today's Activity</CardTitle>
+            <CardDescription>Completed and recorded work today</CardDescription>
           </CardHeader>
           <CardContent>
-            {clinicPerformance.length === 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                <Users className="h-6 w-6 text-blue-500" />
+                <div>
+                  <p className="text-xl font-bold">{todayStats.patientsToday}</p>
+                  <p className="text-xs text-muted-foreground">Patients seen</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                <Stethoscope className="h-6 w-6 text-emerald-500" />
+                <div>
+                  <p className="text-xl font-bold">{todayStats.consultations}</p>
+                  <p className="text-xs text-muted-foreground">Consultations</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                <TestTube className="h-6 w-6 text-amber-500" />
+                <div>
+                  <p className="text-xl font-bold">{todayStats.labTests}</p>
+                  <p className="text-xs text-muted-foreground">Lab tests</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                <Pill className="h-6 w-6 text-violet-500" />
+                <div>
+                  <p className="text-xl font-bold">{todayStats.prescriptions}</p>
+                  <p className="text-xs text-muted-foreground">Prescriptions dispensed</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Facility Performance */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-indigo-500" />Facility Performance</CardTitle>
+            <CardDescription>How each facility performed today</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {facilityPerformance.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <Building2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>No clinic performance data available</p>
+                <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No data for this period</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                {clinicPerformance.map(clinic => (
-                  <div key={clinic.name} className="p-4 bg-muted/50 rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">{clinic.name}</span>
-                      <span className="text-lg font-bold text-foreground">{clinic.patients}</span>
-                    </div>
-                    <Progress value={(clinic.patients / clinic.target) * 100} className="h-2 mb-2" />
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Target: {clinic.target}</span>
-                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{clinic.avgWait} min wait</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {facilityPerformance.map((f) => (
+                  <div key={f.name} className="p-3 rounded-lg bg-muted/50">
+                    <p className="font-medium text-sm mb-2">{f.name}</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <p className="text-muted-foreground">Visits</p>
+                        <p className="text-lg font-bold">{f.visits}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Completion</p>
+                        <p className="text-lg font-bold">{formatFacilityMetric(f.completionRate, 'percent')}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Avg consult</p>
+                        <p className="text-lg font-bold">{formatFacilityMetric(f.avgConsultationTime)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Lab / Rx</p>
+                        <p className="text-lg font-bold">{f.labTestsProcessed} / {f.prescriptionsDispensed}</p>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -439,56 +250,84 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          <Link href="/medical-records/patients/new">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-              <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
-                <UserPlus className="h-8 w-8 text-blue-500 mb-2" />
-                <span className="text-sm font-medium">Register Patient</span>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/medical-records/visits/new">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-              <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
-                <Calendar className="h-8 w-8 text-emerald-500 mb-2" />
-                <span className="text-sm font-medium">Create Visit</span>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/consultation/start">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-              <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
-                <Stethoscope className="h-8 w-8 text-teal-500 mb-2" />
-                <span className="text-sm font-medium">Start Consultation</span>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/laboratory/orders">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-              <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
-                <TestTube className="h-8 w-8 text-amber-500 mb-2" />
-                <span className="text-sm font-medium">Lab Orders</span>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/pharmacy/prescriptions">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-              <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
-                <Pill className="h-8 w-8 text-violet-500 mb-2" />
-                <span className="text-sm font-medium">Prescriptions</span>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/analytics">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-              <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
-                <Activity className="h-8 w-8 text-indigo-500 mb-2" />
-                <span className="text-sm font-medium">Analytics</span>
-              </CardContent>
-            </Card>
-          </Link>
+        {/* Recent Patients */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-blue-500" />Recent Patients</CardTitle>
+              <CardDescription>Patients seen today</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/medical-records/patients">View All <ArrowRight className="h-4 w-4 ml-1" /></Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {recentPatients.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No patients seen today</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentPatients.map((patient, index) => {
+                  const guardClass = clinicGuardRowClass(patient, guardActiveClinicId);
+                  return (
+                    <div key={patient.visitId ?? `${patient.id}-${index}`} className={`flex items-center justify-between p-3 rounded-lg hover:bg-muted transition-colors ${guardClass || 'bg-muted/50'}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
+                          {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                        </div>
+                        <div>
+                          <p className="font-medium">{patient.name}</p>
+                          <p className="text-xs text-muted-foreground">{joinDisplayParts([patient.id, patient.clinic, patient.time])}</p>
+                        </div>
+                      </div>
+                      <Badge variant={
+                        patient.status === 'Completed' ? 'default' :
+                        patient.status === 'In Consultation' ? 'secondary' :
+                        'outline'
+                      }>{patient.status}</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Upcoming Appointments */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Calendar className="h-5 w-5 text-teal-500" />Upcoming</CardTitle>
+            <CardDescription>Next appointments</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {upcomingAppointments.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No upcoming appointments</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {upcomingAppointments.map((apt, i) => (
+                  <div key={i} className="p-3 border rounded-lg">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-sm">{apt.patient}</span>
+                      <Badge variant="outline" className="text-xs">{apt.type}</Badge>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" />
+                      <span>{apt.time}</span>
+                      <span>•</span>
+                      <span>{apt.clinic}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
         </div>
       </div>
     </DashboardLayout>
