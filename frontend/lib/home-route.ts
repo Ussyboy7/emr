@@ -49,8 +49,10 @@ export function userHasExactPageGrant(
   allowedPages: string[],
   deniedPages: string[] = [],
 ): boolean {
-  if (!pathname || isPathDeniedByPages(pathname, deniedPages)) return false;
+  if (!pathname) return false;
   const normalizedPath = normalizeRolePagePath(pathname);
+  const normalizedDenied = (Array.isArray(deniedPages) ? deniedPages : []).map(normalizeRolePagePath);
+  if (normalizedDenied.includes(normalizedPath)) return false;
   const normalizedAllowed = (Array.isArray(allowedPages) ? allowedPages : []).map(normalizeRolePagePath);
   return normalizedAllowed.includes(normalizedPath);
 }
@@ -74,48 +76,57 @@ export function isPathAllowedByPages(
   deniedPages: string[] = [],
 ): boolean {
   if (!pathname || pathname === "/") return false;
-  if (isPathDeniedByPages(pathname, deniedPages)) return false;
 
-  const allowed = Array.isArray(allowedPages) ? allowedPages : [];
   const normalizedPath = normalizeRolePagePath(pathname);
-  const normalizedAllowed = allowed.map(normalizeRolePagePath);
+  const allowed = Array.isArray(allowedPages) ? allowedPages.map(normalizeRolePagePath) : [];
+  const denied = (Array.isArray(deniedPages) ? deniedPages : []).map(normalizeRolePagePath);
 
-  // Exact match
-  if (normalizedAllowed.includes(normalizedPath)) return true;
+  // Exact deny always wins (fail closed).
+  if (denied.includes(normalizedPath)) return false;
 
-  // Prefix match: parent grant allows child routes; child grant allows module dashboard (mirrors backend page_paths.py)
-  if (normalizedAllowed.some((p) => {
-    if (!p || p === "/") return false;
-    if (normalizedPath === p || normalizedPath.startsWith(p + "/")) return true;
-    if (childGrantAllowsParentPath(normalizedPath, p)) return true;
-    return false;
-  })) {
-    return true;
+  // Exact allow (an explicitly ticked page) wins over an ancestor deny.
+  if (allowed.includes(normalizedPath)) return true;
+
+  let denyDepth = 0;
+  for (const deniedPath of denied) {
+    if (!deniedPath) continue;
+    if (normalizedPath.startsWith(deniedPath + "/")) {
+      denyDepth = Math.max(denyDepth, deniedPath.length);
+    }
   }
 
-  // Special case: allow /medical-records/patients/* if user has /medical-records/patient-records
+  let allowDepth = 0;
+  for (const allowedPath of allowed) {
+    if (!allowedPath || allowedPath === "/") continue;
+    if (normalizedPath.startsWith(allowedPath + "/")) {
+      allowDepth = Math.max(allowDepth, allowedPath.length);
+    } else if (childGrantAllowsParentPath(normalizedPath, allowedPath)) {
+      allowDepth = Math.max(allowDepth, normalizedPath.length);
+    }
+  }
+
+  // Special-case grants: a patient-records holder may view patient detail pages;
+  // a consultation grant opens the consultation room workspace.
   if (
     normalizedPath.startsWith("/medical-records/patients/") &&
-    normalizedAllowed.includes("/medical-records/patient-records")
+    allowed.includes("/medical-records/patient-records")
   ) {
-    return true;
+    allowDepth = Math.max(allowDepth, normalizedPath.length);
   }
 
-  // Consultation room workspace: /consultation/start implies access to /consultation/room/[id]
+  const isConsultationRoom =
+    normalizedPath === "/consultation/room" || normalizedPath.startsWith("/consultation/room/");
   if (
-    (normalizedPath === "/consultation/room" || normalizedPath.startsWith("/consultation/room/")) &&
-    normalizedAllowed.some(
-      (p) =>
-        p === "/consultation" ||
-        p === "/consultation/start" ||
-        p === "/consultation/room" ||
-        p.startsWith("/consultation/room/"),
-    )
+    isConsultationRoom &&
+    (allowed.includes("/consultation") ||
+      allowed.includes("/consultation/start") ||
+      allowed.includes("/consultation/room") ||
+      allowed.some((p) => p.startsWith("/consultation/room/")))
   ) {
-    return true;
+    allowDepth = Math.max(allowDepth, normalizedPath.length);
   }
 
-  return false;
+  return allowDepth > denyDepth && allowDepth > 0;
 }
 
 export function getHomeRouteFromAllowedPages(allowedPages: string[]): string | null {

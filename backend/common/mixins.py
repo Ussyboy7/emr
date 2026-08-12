@@ -9,6 +9,7 @@ themselves are still named `location_clinic_id` / `processing_clinic_id` for
 backward compatibility; treat them as facility FKs.
 """
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
@@ -59,7 +60,14 @@ def resolve_facility_scope(request):
             raise PermissionDenied("You are not allowed to view all facilities.")
         return SCOPE_ALL
     if requested:
-        return get_object_or_404(Clinic, pk=requested)
+        clinic = get_object_or_404(Clinic, pk=requested)
+        if not getattr(request.user, "is_superuser", False) and not _can_view_all_facilities(request.user):
+            assigned = set(request.user.location_clinics.values_list("id", flat=True))
+            if not assigned and request.user.location_clinic_id:
+                assigned = {request.user.location_clinic_id}
+            if clinic.pk not in assigned:
+                raise PermissionDenied("You are not assigned to this facility.")
+        return clinic
 
     # Cleared facility selection (active_clinic null) on an aggregate-capable
     # user switches the session to an all-facilities view.
@@ -106,12 +114,36 @@ class FacilityScopedMixin:
     """
 
     facility_filter_field = 'location_clinic'
+    facility_scope_fields = None
 
     def scope_queryset(self, qs):
         """Apply facility filtering to a queryset from query param or session scope."""
         scope = resolve_facility_scope(self.request)
         if scope is None or scope == SCOPE_ALL:
             return qs
+        if self.facility_scope_fields:
+            facility_filter = Q(**{self.facility_scope_fields[0]: scope})
+            for field in self.facility_scope_fields[1:]:
+                facility_filter |= Q(**{field: scope})
+            requested_processing = self.request.query_params.get('processing_clinic')
+            if requested_processing:
+                try:
+                    requested_id = int(requested_processing)
+                except (TypeError, ValueError):
+                    raise PermissionDenied('Invalid processing facility.')
+                if not _can_view_all_facilities(self.request.user):
+                    assigned = set(self.request.user.location_clinics.values_list('id', flat=True))
+                    if not assigned and self.request.user.location_clinic_id:
+                        assigned = {self.request.user.location_clinic_id}
+                    if requested_id not in assigned:
+                        raise PermissionDenied('You are not assigned to this facility.')
+                for field in self.facility_scope_fields:
+                    facility_filter |= Q(**{field: requested_id})
+            if getattr(self, 'include_unassigned_scope', False):
+                null_fields = [field for field in self.facility_scope_fields if field.endswith('location_clinic') or field.endswith('processing_clinic')]
+                if len(null_fields) >= 2:
+                    facility_filter |= Q(**{f'{null_fields[0]}__isnull': True, f'{null_fields[1]}__isnull': True})
+            return qs.filter(facility_filter).distinct()
         return qs.filter(**{self.facility_filter_field: scope})
 
     def filter_queryset(self, queryset):

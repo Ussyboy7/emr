@@ -60,39 +60,56 @@ def is_path_allowed_by_pages(
     allowed_pages: set[str],
     denied_pages: set[str] | None = None,
 ) -> bool:
-    """Return True when ``pathname`` is allowed by any entry in ``allowed_pages``."""
+    """Return True when ``pathname`` is allowed by any entry in ``allowed_pages``.
+
+    Deny resolution ("ticked page wins"):
+    - An exact deny of ``pathname`` always wins (fail closed).
+    - An exact allow (an explicitly ticked page) wins over an ancestor deny.
+    - Otherwise the most-specific match decides; a deny wins ties.
+    """
     if not pathname or pathname == "/":
         return False
 
-    if is_path_denied_by_pages(pathname, denied_pages or set()):
+    normalized_path = normalize_role_page_path(pathname)
+    normalized_allowed = {normalize_role_page_path(p) for p in allowed_pages if p}
+    denied = {normalize_role_page_path(p) for p in (denied_pages or set()) if p}
+
+    # Exact deny always wins (fail closed).
+    if normalized_path in denied:
         return False
 
-    normalized_path = normalize_role_page_path(pathname)
-    normalized_allowed = {normalize_role_page_path(p) for p in allowed_pages}
-
+    # Exact allow wins over any ancestor deny.
     if normalized_path in normalized_allowed:
         return True
 
+    deny_depth = 0
+    for d in denied:
+        if normalized_path.startswith(d + "/"):
+            deny_depth = max(deny_depth, len(d))
+
+    allow_depth = 0
     for allowed in normalized_allowed:
         if not allowed or allowed == "/":
             continue
-        if normalized_path == allowed or normalized_path.startswith(allowed + "/"):
-            return True
-        if allowed.startswith(normalized_path + "/"):
+        if normalized_path.startswith(allowed + "/"):
+            allow_depth = max(allow_depth, len(allowed))
+        elif allowed.startswith(normalized_path + "/"):
             if normalized_path == "/admin" and allowed in ADMIN_SCOPED_CHILD_PAGES:
                 continue
-            return True
+            allow_depth = max(allow_depth, len(normalized_path))
 
+    # Special-case grants: a patient-records holder may view patient detail pages;
+    # a consultation grant opens the consultation room workspace.
     if normalized_path.startswith("/medical-records/patients/") and "/medical-records/patient-records" in normalized_allowed:
-        return True
+        allow_depth = max(allow_depth, len(normalized_path))
 
     if normalized_path == "/consultation/room" or normalized_path.startswith("/consultation/room/"):
         if normalized_allowed & {"/consultation", "/consultation/start", "/consultation/room"}:
-            return True
+            allow_depth = max(allow_depth, len(normalized_path))
         if any(p.startswith("/consultation/room/") for p in normalized_allowed):
-            return True
+            allow_depth = max(allow_depth, len(normalized_path))
 
-    return False
+    return allow_depth > deny_depth
 
 
 def user_has_exact_page(allowed_pages: set[str], required_page: str) -> bool:

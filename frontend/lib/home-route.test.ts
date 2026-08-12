@@ -24,7 +24,7 @@ const SIDEBAR_NAV_HREFS = [
   "/eyecare", "/eyecare/orders", "/eyecare/completed", "/eyecare/analytics",
   "/hr", "/hr/annual-checkups", "/hr/exemptions",
   "/analytics", "/analytics/executive",
-  "/admin", "/admin/users", "/admin/roles", "/admin/clinics", "/admin/rooms", "/admin/settings",
+  "/admin", "/admin/users", "/admin/roles", "/admin/clinics", "/admin/settings",
   "/admin/health", "/admin/annual-checkup-programme", "/admin/audit",
 ] as const;
 
@@ -52,10 +52,36 @@ describe('isPathAllowedByPages', () => {
     ).toBe(true);
   });
 
-  it('denying a parent blocks all child routes', () => {
+  it('denying a parent blocks children without an explicit grant', () => {
+    expect(
+      isPathAllowedByPages('/nursing/procedures', ['/nursing'], ['/nursing']),
+    ).toBe(false);
+  });
+
+  it('explicit allow wins over a denied parent', () => {
     expect(
       isPathAllowedByPages('/nursing/procedures', ['/nursing', '/nursing/procedures'], ['/nursing']),
+    ).toBe(true);
+    expect(
+      isPathAllowedByPages('/nursing/procedures/123', ['/nursing', '/nursing/procedures'], ['/nursing']),
+    ).toBe(true);
+  });
+
+  it('ticked page stays reachable when its module dashboard is denied', () => {
+    const allowed = ['/medical-records/patient-records'];
+    const denied = ['/medical-records', '/medical-records/patients', '/medical-records/coding'];
+    expect(isPathAllowedByPages('/medical-records/patient-records', allowed, denied)).toBe(true);
+    expect(isPathAllowedByPages('/medical-records', allowed, denied)).toBe(false);
+    expect(isPathAllowedByPages('/medical-records/patients', allowed, denied)).toBe(false);
+  });
+
+  it('deeper deny beats a shallower allow prefix', () => {
+    expect(
+      isPathAllowedByPages('/nursing/pool-queue/123', ['/nursing'], ['/nursing/pool-queue']),
     ).toBe(false);
+    expect(
+      isPathAllowedByPages('/nursing/procedures', ['/nursing'], ['/nursing/pool-queue']),
+    ).toBe(true);
   });
 
   it('allows module dashboard when a child page is granted', () => {

@@ -28,10 +28,34 @@ class PagePathMatchingTests(SimpleTestCase):
         self.assertFalse(is_path_allowed_by_pages("/nursing/pool-queue", allowed, denied))
         self.assertTrue(is_path_allowed_by_pages("/nursing/procedures", allowed, denied))
 
-    def test_deny_parent_blocks_children(self):
-        allowed = {"/nursing", "/nursing/pool-queue", "/nursing/procedures"}
+    def test_deny_parent_blocks_children_without_explicit_grant(self):
+        allowed = {"/nursing"}
         denied = {"/nursing"}
         self.assertFalse(is_path_allowed_by_pages("/nursing/procedures", allowed, denied))
+
+    def test_explicit_child_allow_wins_over_denied_parent(self):
+        allowed = {"/nursing", "/nursing/procedures"}
+        denied = {"/nursing"}
+        self.assertTrue(is_path_allowed_by_pages("/nursing/procedures", allowed, denied))
+        self.assertTrue(is_path_allowed_by_pages("/nursing/procedures/123", allowed, denied))
+
+    def test_exact_allow_wins_over_denied_module_dashboard(self):
+        allowed = {"/medical-records/patient-records"}
+        denied = {"/medical-records", "/medical-records/patients", "/medical-records/coding"}
+        self.assertTrue(is_path_allowed_by_pages("/medical-records/patient-records", allowed, denied))
+        self.assertFalse(is_path_allowed_by_pages("/medical-records", allowed, denied))
+        self.assertFalse(is_path_allowed_by_pages("/medical-records/patients", allowed, denied))
+
+    def test_exact_deny_still_wins_longer_than_allow(self):
+        allowed = {"/medical-records/patient-records"}
+        denied = {"/medical-records/patient-records"}
+        self.assertFalse(is_path_allowed_by_pages("/medical-records/patient-records", allowed, denied))
+
+    def test_deeper_deny_beats_shallower_allow_prefix(self):
+        allowed = {"/nursing"}
+        denied = {"/nursing/pool-queue"}
+        self.assertFalse(is_path_allowed_by_pages("/nursing/pool-queue/123", allowed, denied))
+        self.assertTrue(is_path_allowed_by_pages("/nursing/procedures", allowed, denied))
 
     def test_user_management_does_not_unlock_admin_dashboard(self):
         allowed = {"/admin/users"}
@@ -59,8 +83,8 @@ class ApiAccessTests(SimpleTestCase):
         allowed = {"/nursing/procedures"}
         self.assertTrue(check_api_page_access("nursing/procedures/", "GET", allowed))
 
-    def test_consultation_api_allowed_for_admin_rooms_page(self):
-        allowed = {"/admin/rooms"}
+    def test_consultation_api_allowed_for_admin_clinics_page(self):
+        allowed = {"/admin/clinics"}
         self.assertTrue(check_api_page_access("consultation/rooms/", "GET", allowed))
         self.assertTrue(check_api_page_access("consultation/rooms/", "POST", allowed))
 

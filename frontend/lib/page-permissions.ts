@@ -130,7 +130,6 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/admin/users", name: "User Management", description: "Manage staff accounts", module: "Administration" },
   { id: "/admin/roles", name: "Roles & Permissions", description: "Manage roles and permissions", module: "Administration" },
   { id: "/admin/clinics", name: "Clinics & Departments", description: "Manage clinics and departments", module: "Administration" },
-  { id: "/admin/rooms", name: "Room Management", description: "Manage rooms", module: "Administration" },
   { id: "/admin/settings", name: "System Settings", description: "System settings", module: "Administration" },
   { id: "/admin/health", name: "System Health", description: "Infrastructure status, storage, and backups", module: "Administration" },
   { id: "/admin/annual-checkup-programme", name: "Annual Check-up Programme", description: "Default pre-ticked annual check-up investigations", module: "Administration" },

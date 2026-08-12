@@ -1,5 +1,5 @@
 import type { User } from "@/lib/npa-structure";
-import { isPathAllowedByPages, isPathDeniedByPages, userHasExactPageGrant } from "@/lib/home-route";
+import { isPathAllowedByPages, userHasExactPageGrant } from "@/lib/home-route";
 
 const HOD_STORE_PAGES = [
   "/pharmacy/hod-store",
@@ -24,7 +24,6 @@ export function canShowHodStoreNav(user?: User | null): boolean {
   const deniedPages = user.deniedPages ?? [];
 
   const hodPageVisible = (page: string) => {
-    if (isPathDeniedByPages(page, deniedPages)) return false;
     if (userHasExactPageGrant(page, pages, deniedPages)) return true;
     if (user.isPharmacyHod && isPathAllowedByPages(page, pages, deniedPages)) return true;
     return false;
