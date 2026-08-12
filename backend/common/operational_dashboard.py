@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-from django.db.models import Count, F, Q
+from django.db.models import Avg, Count, F, Q
 from django.utils import timezone
 
 from appointments.models import Appointment
@@ -13,8 +12,10 @@ from common.cache_helpers import cache_get_or_set
 from common.mixins import SCOPE_ALL
 from consultation.models import ConsultationQueue, ConsultationSession
 from laboratory.models import LabTest
+from organization.models import Clinic
 from patients.models import Visit
-from pharmacy.models import MedicationInventory, Prescription
+from pharmacy.models import Prescription
+from wards.models import Bed, PatientAdmission
 
 
 def _parse_api_date(raw: str | None) -> date:
@@ -38,7 +39,7 @@ def build_operational_dashboard(
     today = target_date or timezone.localdate()
     yesterday = today - timedelta(days=1)
     scope_id = getattr(clinic_scope, "id", None) if clinic_scope not in (None, SCOPE_ALL) else clinic_scope
-    cache_key = f"operational_dashboard:{today.isoformat()}:{scope_id or 'all'}"
+    cache_key = f"operational_dashboard:v2:{today.isoformat()}:{scope_id or 'all'}"
 
     def _build() -> dict:
         day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
@@ -83,7 +84,6 @@ def build_operational_dashboard(
                 "id",
                 filter=Q(status__in=["sample_collected", "processing", "results_ready"]),
             ),
-            critical=Count("id", filter=Q(status="results_ready")),
         )
         lab_pending = lab_agg["pending"] or 0
         lab_tests_today = lab_pending + (lab_agg["in_progress"] or 0)
@@ -109,6 +109,27 @@ def build_operational_dashboard(
             .exclude(status__in=["cancelled", "completed"])
             .count()
         )
+
+        admissions_qs = scoped(
+            PatientAdmission.objects.all(),
+            field="visit__location_clinic_id",
+        )
+        active_admissions = admissions_qs.filter(
+            status__in=["admitted", "pending_discharge"]
+        ).count()
+        pending_discharges = admissions_qs.filter(status="pending_discharge").count()
+        escalated_q = (
+            Q(current_condition__icontains="needs doctor review")
+            | Q(current_condition__icontains="escalat")
+            | Q(current_condition__icontains="critical")
+            | Q(current_condition__icontains="serious")
+        )
+        escalated_admissions = admissions_qs.filter(
+            status__in=["admitted", "pending_discharge"]
+        ).filter(escalated_q).count()
+
+        beds_qs = scoped(Bed.objects.all(), field="ward__location_clinic_id")
+        available_beds = beds_qs.filter(status="available").count()
 
         recent_visits = (
             visits_today_qs.select_related("patient", "location_clinic")
@@ -136,44 +157,80 @@ def build_operational_dashboard(
                 }
             )
 
-        critical_alerts: list[dict] = []
-        lab_critical = lab_agg["critical"] or 0
-        if lab_critical:
-            critical_alerts.append(
-                {
-                    "type": "lab",
-                    "message": f"{lab_critical} critical lab result{'s' if lab_critical != 1 else ''} require attention",
-                    "time": "Just now",
-                }
-            )
-        low_stock = (
-            scoped(MedicationInventory.objects.filter(quantity__lte=F("min_stock_level")))
-            .exclude(quantity=0)
-            .count()
+        # ---- Facility performance -------------------------------------------------
+        # Aggregate every domain keyed by the stable facility FK (location_clinic_id),
+        # never by facility name. Names are resolved once and joined by ID.
+        visit_rows = visits_today_qs.values("location_clinic_id").annotate(
+            visits=Count("id"),
+            completed=Count("id", filter=Q(status="completed")),
         )
-        if low_stock:
-            critical_alerts.append(
+
+        session_agg = (
+            scoped(
+                ConsultationSession.objects.filter(
+                    status="completed",
+                    started_at__date=today,
+                    ended_at__isnull=False,
+                )
+            )
+            .values("location_clinic_id")
+            .annotate(avg_dur=Avg(F("ended_at") - F("started_at")))
+        )
+        session_minutes = {
+            row["location_clinic_id"]: (
+                round(row["avg_dur"].total_seconds() / 60, 1)
+                if row["avg_dur"] is not None
+                else None
+            )
+            for row in session_agg
+        }
+
+        lab_rows = (
+            scoped(
+                LabTest.objects.filter(processed_at__date=today),
+                field="order__location_clinic_id",
+            )
+            .values("order__location_clinic_id")
+            .annotate(n=Count("id", distinct=True))
+        )
+        lab_counts = {
+            row["order__location_clinic_id"]: row["n"] for row in lab_rows
+        }
+
+        rx_rows = scoped(
+            Prescription.objects.filter(
+                status="dispensed",
+                dispensed_at__date=today,
+            )
+        ).values("location_clinic_id").annotate(n=Count("id"))
+        rx_counts = {row["location_clinic_id"]: row["n"] for row in rx_rows}
+
+        facility_ids = (
+            {row["location_clinic_id"] for row in visit_rows if row["location_clinic_id"]}
+            | set(session_minutes)
+            | set(lab_counts)
+            | set(rx_counts)
+        )
+        name_map = dict(
+            Clinic.objects.filter(id__in=facility_ids).values_list("id", "name")
+        )
+
+        facility_rows = []
+        for fid in sorted(facility_ids):
+            visit_row = next((r for r in visit_rows if r["location_clinic_id"] == fid), None)
+            visits = visit_row["visits"] if visit_row else 0
+            completed = visit_row["completed"] if visit_row else 0
+            facility_rows.append(
                 {
-                    "type": "stock",
-                    "message": f"{low_stock} medication{'s' if low_stock != 1 else ''} running low on stock",
-                    "time": "Just now",
+                    "name": (name_map.get(fid) or "Unassigned").strip() or "Unassigned",
+                    "visits": visits,
+                    "completionRate": round((completed / visits) * 100, 1) if visits else 0.0,
+                    "avgConsultationTime": session_minutes.get(fid),
+                    "labTestsProcessed": lab_counts.get(fid, 0),
+                    "prescriptionsDispensed": rx_counts.get(fid, 0),
                 }
             )
-
-        # Per-organization-clinic breakdown (location_clinic FK, not the legacy string).
-        clinic_counts: dict[str, int] = defaultdict(int)
-        for row in visits_today_qs.values("location_clinic__name").annotate(c=Count("id")):
-            label = (row.get("location_clinic__name") or "Unassigned").strip() or "Unassigned"
-            clinic_counts[label] += row["c"]
-        clinic_rows = [
-            {
-                "name": name,
-                "patients": count,
-                "target": round(count * 1.2),
-                "avgWait": 0,
-            }
-            for name, count in sorted(clinic_counts.items(), key=lambda x: -x[1])[:5]
-        ]
+        facility_rows.sort(key=lambda r: -r["visits"])
 
         upcoming = (
             scoped(
@@ -214,9 +271,14 @@ def build_operational_dashboard(
                 "labPending": lab_pending,
                 "pharmacyQueue": pharmacy_queue,
             },
+            "wardStatus": {
+                "activeAdmissions": active_admissions,
+                "pendingDischarges": pending_discharges,
+                "escalated": escalated_admissions,
+                "availableBeds": available_beds,
+            },
             "recentPatients": recent_patients,
-            "criticalAlerts": critical_alerts,
-            "clinicPerformance": clinic_rows,
+            "facilityPerformance": facility_rows,
             "upcomingAppointments": upcoming_rows,
         }
 
