@@ -25,9 +25,10 @@ describe('dashboardService', () => {
         date: '2025-01-15',
         todayStats: { patientsToday: 50, consultations: 30, labTests: 20, prescriptions: 15 },
         queueStatus: { nursingPool: 5, consultationWaiting: 3, labPending: 2, pharmacyQueue: 1 },
+        wardStatus: { activeAdmissions: 4, pendingDischarges: 1, escalated: 2, availableBeds: 6 },
         recentPatients: [],
         criticalAlerts: [],
-        clinicPerformance: [],
+        facilityPerformance: [],
         upcomingAppointments: [],
       };
       mockApiFetch.mockResolvedValue(payload);
@@ -35,6 +36,7 @@ describe('dashboardService', () => {
       const res = await getOperationalDashboard();
       expect(res.date).toBe('2025-01-15');
       expect(res.todayStats.patientsToday).toBe(50);
+      expect(Array.isArray(res.facilityPerformance)).toBe(true);
       const url = mockApiFetch.mock.calls[0][0] as string;
       expect(url).toContain('/common/dashboard/operational');
     });

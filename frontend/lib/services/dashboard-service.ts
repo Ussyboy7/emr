@@ -21,6 +21,12 @@ export interface OperationalDashboardPayload {
     labPending: number;
     pharmacyQueue: number;
   };
+  wardStatus: {
+    activeAdmissions: number;
+    pendingDischarges: number;
+    escalated: number;
+    availableBeds: number;
+  };
   recentPatients: Array<{
     visitId: number;
     id: string;
@@ -31,11 +37,13 @@ export interface OperationalDashboardPayload {
     status: string;
   }>;
   criticalAlerts: Array<{ type: string; message: string; time: string }>;
-  clinicPerformance: Array<{
+  facilityPerformance: Array<{
     name: string;
-    patients: number;
-    target: number;
-    avgWait: number;
+    visits: number;
+    completionRate: number;
+    avgConsultationTime: number | null;
+    labTestsProcessed: number;
+    prescriptionsDispensed: number;
   }>;
   upcomingAppointments: Array<{
     patient: string;
