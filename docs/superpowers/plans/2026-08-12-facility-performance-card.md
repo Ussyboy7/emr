@@ -15,7 +15,8 @@
 - `avgConsultationTime` = mean `ended_at - started_at` (minutes) over `ConsultationSession` where `status="completed"` and `started_at` is the target date; `null` (not `0`) when no such sessions.
 - `labTestsProcessed` = count of distinct `LabTest` where `processed_at__date = today` (results-entry event), grouped via `order__location_clinic_id`. Do NOT filter on current `status`.
 - `prescriptionsDispensed` = `Prescription` where `status="dispensed"` and `dispensed_at__date = today`, grouped via `location_clinic_id`.
-- Remove the keys `clinicPerformance`, `target`, `avgWait`, and `criticalAlerts` from the response.
+- Remove the keys `clinicPerformance`, `target`, and `avgWait` from the response.
+- Leave all unrelated existing dashboard fields untouched, including `criticalAlerts` (removal of that field is out of scope and already handled separately).
 - Scope behavior is unchanged: `resolve_facility_scope` → `clinic_scope` → `scoped(qs, field=...)`.
 - No new API endpoint; the card rides the existing `/common/dashboard/operational` request and its 45s cache.
 
@@ -152,7 +153,6 @@ class FacilityPerformanceTests(TestCase):
         rows = {r["name"]: r for r in data["facilityPerformance"]}
 
         self.assertNotIn("clinicPerformance", data)
-        self.assertNotIn("criticalAlerts", data)
 
         a = rows["Facility A"]
         self.assertEqual(a["visits"], 2)
@@ -354,7 +354,7 @@ git commit -m "feat: real per-facility performance in operational dashboard"
 - Consumes: the backend `facilityPerformance` array shape from Task 1.
 - Produces: `OperationalDashboardPayload.facilityPerformance` typed as
   `Array<{ name: string; visits: number; completionRate: number; avgConsultationTime: number | null; labTestsProcessed: number; prescriptionsDispensed: number }>`.
-  Also removes `clinicPerformance` and `criticalAlerts` from the type.
+  Also removes `clinicPerformance` from the type (its fake `target`/`avgWait` fields). `criticalAlerts` stays in the type, untouched.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -371,6 +371,7 @@ with:
 
 ```ts
         recentPatients: [],
+        criticalAlerts: [],
         facilityPerformance: [],
         upcomingAppointments: [],
 ```
@@ -404,6 +405,7 @@ In `frontend/lib/services/dashboard-service.ts`, replace:
 with:
 
 ```ts
+  criticalAlerts: Array<{ type: string; message: string; time: string }>;
   facilityPerformance: Array<{
     name: string;
     visits: number;
@@ -619,7 +621,7 @@ print([ (x['name'], x['visits'], x['completionRate'], x['avgConsultationTime'], 
 ```
 
 Run as: `docker exec emr-backend-local python manage.py shell -c "<above>"`
-Expected: `200` and a list of facility rows with numeric values; `clinicPerformance` and `criticalAlerts` absent.
+Expected: `200` and a list of facility rows with numeric values; `clinicPerformance` absent (and `criticalAlerts` still absent from the earlier alerts removal, untouched by this work).
 
 - [ ] **Step 4: Docs check (only if page permissions/capabilities changed — they did not)**
 
