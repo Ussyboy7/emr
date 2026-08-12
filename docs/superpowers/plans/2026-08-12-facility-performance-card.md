@@ -52,6 +52,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
@@ -68,6 +69,7 @@ User = get_user_model()
 
 class FacilityPerformanceTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.fac_a = Clinic.objects.create(name="Facility A", code="A-01")
         self.fac_b = Clinic.objects.create(name="Facility B", code="B-01")
         self.room_a = ConsultationRoom.objects.create(
