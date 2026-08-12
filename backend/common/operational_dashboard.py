@@ -206,7 +206,7 @@ def build_operational_dashboard(
         rx_counts = {row["location_clinic_id"]: row["n"] for row in rx_rows}
 
         facility_ids = (
-            {row["location_clinic_id"] for row in visit_rows if row["location_clinic_id"]}
+            {row["location_clinic_id"] for row in visit_rows}
             | set(session_minutes)
             | set(lab_counts)
             | set(rx_counts)
@@ -216,7 +216,7 @@ def build_operational_dashboard(
         )
 
         facility_rows = []
-        for fid in sorted(facility_ids):
+        for fid in facility_ids:
             visit_row = next((r for r in visit_rows if r["location_clinic_id"] == fid), None)
             visits = visit_row["visits"] if visit_row else 0
             completed = visit_row["completed"] if visit_row else 0

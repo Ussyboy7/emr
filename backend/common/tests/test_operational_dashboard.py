@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
@@ -15,8 +14,6 @@ from laboratory.models import LabOrder, LabTest
 from organization.models import Clinic
 from patients.models import Patient, Visit
 from pharmacy.models import Prescription
-
-User = get_user_model()
 
 
 class FacilityPerformanceTests(TestCase):
@@ -154,3 +151,15 @@ class FacilityPerformanceTests(TestCase):
         self._completed_session(self.pa, self.room_a, self.fac_a)
         data = build_operational_dashboard(self.today, clinic_scope=self.fac_a)
         self.assertEqual(data["facilityPerformance"][0]["completionRate"], 50.0)
+
+    def test_null_clinic_visits_roll_up_as_unassigned(self):
+        self._visit(self.pa, None, status="completed")
+        self._visit(self.pb, None, status="in_progress")
+        data = build_operational_dashboard(self.today, clinic_scope=SCOPE_ALL)
+        unassigned = [r for r in data["facilityPerformance"] if r["name"] == "Unassigned"]
+        self.assertEqual(len(unassigned), 1)
+        self.assertEqual(unassigned[0]["visits"], 2)
+        self.assertEqual(unassigned[0]["completionRate"], 50.0)
+        self.assertEqual(unassigned[0]["avgConsultationTime"], None)
+        self.assertEqual(unassigned[0]["labTestsProcessed"], 0)
+        self.assertEqual(unassigned[0]["prescriptionsDispensed"], 0)

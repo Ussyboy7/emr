@@ -456,12 +456,12 @@ import { formatFacilityMetric } from './facility-performance';
 describe('formatFacilityMetric', () => {
   it('renders minutes, hiding null as an em dash', () => {
     expect(formatFacilityMetric(null)).toBe('—');
-    expect(formatFacilityMetric(30.0)).toBe('30.0 min');
-    expect(formatFacilityMetric(0)).toBe('0.0 min');
+    expect(formatFacilityMetric(30.0)).toBe('30 min');
+    expect(formatFacilityMetric(0)).toBe('0 min');
   });
 
   it('renders completion rate as a percentage', () => {
-    expect(formatFacilityMetric(50.0, 'percent')).toBe('50.0%');
+    expect(formatFacilityMetric(50.0, 'percent')).toBe('50%');
     expect(formatFacilityMetric(0, 'percent')).toBe('0%');
   });
 });
@@ -494,7 +494,7 @@ export function formatFacilityMetric(
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run app/dashboard/facility-performance.test.ts`
-Expected: 4 tests pass.
+Expected: 2 tests pass (5 assertions).
 
 - [ ] **Step 5: Add state and load the data**
 
@@ -615,7 +615,7 @@ from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
 admin = get_user_model().objects.filter(is_superuser=True).first()
 c = APIClient(); c.force_authenticate(user=admin)
-r = c.get('/common/dashboard/operational/', HTTP_HOST='localhost')
+r = c.get('/api/v1/common/dashboard/operational/', HTTP_HOST='localhost')
 print(r.status_code)
 print([ (x['name'], x['visits'], x['completionRate'], x['avgConsultationTime'], x['labTestsProcessed'], x['prescriptionsDispensed']) for x in r.data.get('facilityPerformance', []) ])
 ```

@@ -12,7 +12,7 @@ import {
   Users, Stethoscope, TestTube, Pill, Calendar, Clock, Activity,
   AlertTriangle, UserPlus,
   Play, ArrowRight,
-  FileText, Loader2
+  Loader2
 } from 'lucide-react';
 import { getOperationalDashboard, type OperationalDashboardPayload } from '@/lib/services/dashboard-service';
 import { formatFacilityMetric } from './facility-performance';
