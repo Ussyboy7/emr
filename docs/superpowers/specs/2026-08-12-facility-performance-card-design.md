@@ -47,7 +47,7 @@ Field semantics:
 | `visits` | All visits in the scoped facility for the target date | no |
 | `completionRate` | `completed visits / all visits` × 100 (1 decimal), `0.0` if no visits | no |
 | `avgConsultationTime` | Mean `ended_at - started_at` (minutes) over completed `ConsultationSession`s scoped to the facility **today**; `null` when there are no completed sessions (0 would wrongly imply zero-duration consultations) | yes |
-| `labTestsProcessed` | Count of `LabTest`s with status `results_ready` or `verified`, grouped via `order__location_clinic_id`, for the target date | no |
+| `labTestsProcessed` | Count of distinct `LabTest`s whose results were entered today, i.e. `processed_at__date = today`, grouped via `order__location_clinic_id`. `processed_at` is the results-entry timestamp (set when results are submitted; not `created_at`, not `verified_at`). This is an event metric — "results processed today" — not a current-status snapshot. | no |
 | `prescriptionsDispensed` | Count of `Prescription`s dispensed (`status="dispensed"`, `dispensed_at` on target date), grouped via `location_clinic_id` | no |
 
 Grouping is keyed by the stable `location_clinic_id` across all four domains. Facility
@@ -81,8 +81,10 @@ request
      `Count("id", filter=Q(status="completed"))` over the same scoped today queryset.
    - `avgConsultationTime`: group completed sessions scoped to facility for today by
      `location_clinic_id`; compute mean `ended_at - started_at` per group (guard nulls).
-   - `labTestsProcessed`: `LabTest` grouped by `order__location_clinic_id`, filter
-     status in (`results_ready`, `verified`) and order date = target date.
+   - `labTestsProcessed`: count distinct `LabTest` ids where
+     `processed_at__date = today`, grouped by `order__location_clinic_id`. Do NOT filter
+     on current `status` — status transitions (`results_ready` → `verified`) make a
+     status snapshot misrepresent "processed today".
    - `prescriptionsDispensed`: `Prescription` grouped by `location_clinic_id`, filter
      `status="dispensed"` and `dispensed_at__date = today`.
 2. Merge all domains by `location_clinic_id`; fall back to `"Unassigned"` when the FK is
@@ -109,6 +111,8 @@ request
     sees all).
   - `completionRate` = completed/all (denominator is all visits, not sessions).
   - `avgConsultationTime` is `null` with no completed sessions, and correct mean with data.
+  - `labTestsProcessed` counts by `processed_at` date, not by current status (a test moved
+    from `results_ready` to `verified` still counts once via its `processed_at`).
   - Grouping is by facility ID (two facilities, same row join integrity).
   - No `target` / `avgWait` / `clinicPerformance` keys present.
 - Frontend: update `dashboard-service.test.ts` fixture to the new shape.
