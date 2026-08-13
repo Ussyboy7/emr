@@ -83,6 +83,7 @@ services:
     volumes:
       - static_files_prod:/app/staticfiles
       - media_files_prod:/app/media
+      - ./docs:/docs:ro
       - ./backups:/backups:ro
       - ./logs/production:/app/logs
       - ./backend/env/prod.env:/app/env/prod.env:ro

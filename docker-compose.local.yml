@@ -51,6 +51,7 @@ services:
       ENABLE_API_DOCS: "true"
     volumes:
       - ./backend:/app
+      - ./docs:/docs:ro
       - media-data:/app/media
       - static-data:/app/staticfiles
     command: >

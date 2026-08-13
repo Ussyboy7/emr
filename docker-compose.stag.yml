@@ -87,6 +87,7 @@ services:
     volumes:
       - static_files_stag:/app/staticfiles
       - media_files_stag:/app/media
+      - ./docs:/docs:ro
       - ./logs/staging:/app/logs
       - backups_stag:/backups
       - ./backend/env/stag.env:/app/env/stag.env:ro

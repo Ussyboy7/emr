@@ -100,10 +100,12 @@ class ApiAccessTests(SimpleTestCase):
         self.assertTrue(check_api_page_access("consultation/sessions/", "GET", allowed))
         self.assertTrue(check_api_page_access("consultation/queue/", "GET", allowed))
 
-    def test_consultation_api_denied_when_pool_queue_restricted_per_user(self):
+    def test_consultation_api_stays_allowed_when_pool_queue_restricted_per_user(self):
         allowed = {"/nursing", "/nursing/procedures"}
         denied = {"/nursing/pool-queue"}
-        self.assertFalse(check_api_page_access("consultation/queue/", "GET", allowed, denied))
+        # The deny blocks the pool-queue page itself, but consultation/queue is
+        # shared with the room-queue page, which stays reachable via /nursing.
+        self.assertTrue(check_api_page_access("consultation/queue/", "GET", allowed, denied))
         self.assertTrue(check_api_page_access("nursing/procedures/", "GET", allowed, denied))
 
     def test_physio_checkin_api_allowed_for_nursing_pool_queue_page(self):
