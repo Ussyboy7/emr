@@ -147,7 +147,7 @@ class ProcedureAPITest(TestCase):
             last_name="API",
             system_role="Nursing Officer",
         )
-        grant_pages(self.nurse, ["/nursing", "/nursing/procedures"])
+        grant_pages(self.nurse, ["/nursing", "/nursing/procedures", "/nursing/wards"])
         self.client = APIClient()
         self.client.force_authenticate(user=self.nurse)
 

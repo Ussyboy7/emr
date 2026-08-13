@@ -31,7 +31,7 @@ class NursingOrderAPITestCase(TestCase):
             last_name="Doctor",
             system_role="Medical Doctor",
         )
-        grant_pages(self.doctor, ["/nursing", "/nursing/procedures", "/consultation"])
+        grant_pages(self.doctor, ["/nursing", "/nursing/procedures", "/consultation", "/consultation/wards", "/nursing/wards"])
 
         self.nurse = User.objects.create_user(
             username="order_nurse",
