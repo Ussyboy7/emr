@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { resolvePatientPhoto } from '@/lib/patient-photo';
@@ -37,13 +36,9 @@ import {
 } from '@/lib/services/ward-service';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
-import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSection';
-import { userCanPerformWardOrders } from '@/lib/ward-order-permissions';
 import { useWardAdmissionDateParams } from '@/hooks/use-ward-admission-date-params';
 import { WARD_ACTIVE_STATUS_IN } from '@/lib/ward/ward-admission-list-params';
-import { WardVitalsHistory } from '@/components/ward/WardVitalsHistory';
 import { WardLatestHandoverCard } from '@/components/ward/WardLatestHandoverCard';
-import { WardHandoverNotesSection } from '@/components/ward/WardHandoverNotesSection';
 import {
   WardQuickObservationForm,
   emptyWardObservationForm,
@@ -51,10 +46,10 @@ import {
 } from '@/components/ward/WardQuickObservationForm';
 import { WardAdmissionDocumentsMenu } from '@/components/ward/WardAdmissionDocumentsMenu';
 import {
-  type WardDetailsTab,
   buildNurseObservationNotePayload,
   isObservationAdmission,
   isEscalatedCondition,
+  resolveWardHandoffInstructions,
 } from '@/lib/ward-admission-ui';
 import {
   hasAnyVitalsEntry,
@@ -140,7 +135,6 @@ export default function WardCarePage() {
 
   // Dialog states
   const [showAdmissionDetails, setShowAdmissionDetails] = useState(false);
-  const [detailsTab, setDetailsTab] = useState<WardDetailsTab>('overview');
   const [showAssignBedDialog, setShowAssignBedDialog] = useState(false);
   const [showCompleteDischargeDialog, setShowCompleteDischargeDialog] = useState(false);
   const [showRemoveBedDialog, setShowRemoveBedDialog] = useState(false);
@@ -346,15 +340,13 @@ export default function WardCarePage() {
     };
   }, [admissions, handleAuthError]);
 
-  const handleViewAdmission = (
-    admission: PatientAdmission,
-    tab?: WardDetailsTab,
-  ) => {
+  const handleViewAdmission = (admission: PatientAdmission) => {
     setSelectedAdmission(admission);
-    setDetailsTab(tab ?? 'overview');
     setObservationData(emptyWardObservationForm());
     setShowAdmissionDetails(true);
   };
+
+  const openCareSession = (admissionId: number) => `/wards/admissions/${admissionId}?source=nursing`;
 
   const handleSaveObservation = async () => {
     if (!selectedAdmission) return;
@@ -1376,102 +1368,90 @@ export default function WardCarePage() {
                 </div>
               </DialogHeader>
 
-              <Tabs value={detailsTab} onValueChange={(v) => setDetailsTab(v as WardDetailsTab)} className="w-full flex-1 min-h-0 flex flex-col">
-                <div className="px-5 pt-3">
-                  <TabsList className="grid w-full grid-cols-3 h-9">
-                    <TabsTrigger value="overview" className="text-xs">Care</TabsTrigger>
-                    <TabsTrigger value="orders" className="text-xs">Tasks</TabsTrigger>
-                    <TabsTrigger value="nursing" className="text-xs">Timeline</TabsTrigger>
-                  </TabsList>
-                </div>
+              <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+                {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-600" />
+                    <div>
+                      <p className="text-xs font-semibold text-orange-800 dark:text-orange-200">Needs doctor review</p>
+                      <p className="text-orange-700 dark:text-orange-300">{selectedAdmission.current_condition}</p>
+                    </div>
+                  </div>
+                )}
 
-                <TabsContent value="overview" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
-                  {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
-                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700">
-                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-600" />
+                <section className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-xs font-semibold">Clinical snapshot</h3>
+                    {selectedAdmission.current_condition && !isEscalatedCondition(selectedAdmission.current_condition) && (
+                      <Badge variant="outline" className={getConditionBadgeClass(selectedAdmission.current_condition)}>
+                        {selectedAdmission.current_condition}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="space-y-1.5 text-sm">
+                    <p><span className="text-muted-foreground">Diagnosis · </span>{selectedAdmission.admission_diagnosis || '—'}</p>
+                    {selectedAdmission.presenting_complaint && (
+                      <p><span className="text-muted-foreground">Complaint · </span>{selectedAdmission.presenting_complaint}</p>
+                    )}
+                    {(() => {
+                      const latestInstruction = resolveWardHandoffInstructions({
+                        admissionNotes: selectedAdmission.admission_notes,
+                        orderDescription: null,
+                      });
+                      const instructionText = latestInstruction || selectedAdmission.admission_instructions;
+                      return instructionText?.trim() ? (
+                        <p><span className="text-muted-foreground">Instructions · </span><span className="whitespace-pre-wrap">{instructionText}</span></p>
+                      ) : null;
+                    })()}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border bg-card p-3 space-y-2">
+                  <h3 className="text-xs font-semibold">Admission details</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Ward and bed</p>
+                      <p className="font-medium">{selectedAdmission.ward_name}{selectedAdmission.bed_number ? ` · Bed ${selectedAdmission.bed_number}` : ''}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Stay</p>
+                      <p className="font-medium">{selectedAdmission.length_of_stay === 0 ? 'Same day' : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Nurse</p>
+                      <p className="font-medium">{getPatientAssignments(selectedAdmission.id).map((a) => a.nurse_name).join(', ') || 'Unassigned'}</p>
+                    </div>
+                    {selectedAdmission.admitting_doctor_name && (
                       <div>
-                        <p className="text-xs font-semibold text-orange-800 dark:text-orange-200">Needs doctor review</p>
-                        <p className="text-orange-700 dark:text-orange-300">{selectedAdmission.current_condition}</p>
+                        <p className="text-muted-foreground text-xs">Admitting doctor</p>
+                        <p className="font-medium">Dr {selectedAdmission.admitting_doctor_name}</p>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                </section>
 
-                  <section className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-xs font-semibold">Clinical snapshot</h3>
-                      {selectedAdmission.current_condition && !isEscalatedCondition(selectedAdmission.current_condition) && (
-                        <Badge variant="outline" className={getConditionBadgeClass(selectedAdmission.current_condition)}>
-                          {selectedAdmission.current_condition}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="space-y-1.5 text-sm">
-                      <p><span className="text-muted-foreground">Diagnosis · </span>{selectedAdmission.admission_diagnosis || '—'}</p>
-                      {selectedAdmission.presenting_complaint && (
-                        <p><span className="text-muted-foreground">Complaint · </span>{selectedAdmission.presenting_complaint}</p>
-                      )}
-                      {selectedAdmission.admission_instructions?.trim() && (
-                        <p><span className="text-muted-foreground">Instructions · </span><span className="whitespace-pre-wrap">{selectedAdmission.admission_instructions}</span></p>
-                      )}
-                    </div>
-                  </section>
+                <WardLatestHandoverCard
+                  key={`handover-${notesRefreshKey}`}
+                  admissionNotes={selectedAdmission.admission_notes}
+                />
 
-                  <WardLatestHandoverCard
-                    key={`handover-${notesRefreshKey}`}
-                    admissionNotes={selectedAdmission.admission_notes}
-                  />
-
-                  {selectedAdmission.status === 'admitted' && (
-                    <WardQuickObservationForm
-                      admission={selectedAdmission}
-                      value={observationData}
-                      onChange={setObservationData}
-                      onSubmit={() => void handleSaveObservation()}
-                      isSaving={isSavingObservation}
-                    />
-                  )}
-                </TabsContent>
-
-                <TabsContent value="orders" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2">
-                  <WardDoctorOrdersSection
+                {selectedAdmission.status === 'admitted' && (
+                  <WardQuickObservationForm
                     admission={selectedAdmission}
-                    allowAddOrders={false}
-                    allowEditCancelOrders={false}
-                    allowPerformOrders={
-                      !!currentUser?.isSuperuser ||
-                      userCanPerformWardOrders(currentUser)
-                    }
-                    showRoutingInfo={false}
-                    historyDisplay="hidden"
-                    excludeHandoffFromList
-                    currentUserId={currentUser?.id != null ? Number(currentUser.id) : undefined}
+                    value={observationData}
+                    onChange={setObservationData}
+                    onSubmit={() => void handleSaveObservation()}
+                    isSaving={isSavingObservation}
                   />
-                </TabsContent>
+                )}
 
-                <TabsContent value="nursing" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
-                  <WardHandoverNotesSection
-                    key={notesRefreshKey}
-                    admissionNotes={selectedAdmission.admission_notes}
-                    canAdd={selectedAdmission.status === 'admitted'}
-                    onAddNote={handleSaveHandoverNote}
-                    isSaving={isSavingHandover}
-                  />
-
-                  <WardVitalsHistory
-                    admission={selectedAdmission}
-                    refreshKey={chartRefreshKey}
-                  />
-
-                  <WardDoctorOrdersSection
-                    admission={selectedAdmission}
-                    allowAddOrders={false}
-                    allowEditCancelOrders={false}
-                    showRoutingInfo={false}
-                    historyDisplay="history-only"
-                    excludeHandoffFromList
-                  />
-                </TabsContent>
-              </Tabs>
+                <Button asChild className="w-full h-9">
+                  <Link href={openCareSession(selectedAdmission.id)}>
+                    Open full session
+                    <Eye className="h-4 w-4 ml-1" />
+                  </Link>
+                </Button>
+              </div>
             </DialogContent>
           </Dialog>
         )}

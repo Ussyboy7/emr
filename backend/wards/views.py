@@ -4,6 +4,7 @@ Views for the Wards app.
 import logging
 
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from django.http import HttpResponse
@@ -315,6 +316,35 @@ class PatientAdmissionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             'unassigned_bed': admitted_qs.filter(bed__isnull=True).count(),
         })
 
+    def perform_update(self, serializer):
+        previous_condition = (self.get_object().current_condition or '').lower()
+        admission = serializer.save()
+        current_condition = (admission.current_condition or '').lower()
+        was_escalated = 'needs doctor review' in previous_condition or 'escalat' in previous_condition
+        is_escalated = 'needs doctor review' in current_condition or 'escalat' in current_condition
+
+        if is_escalated and not was_escalated and admission.admitting_doctor_id:
+            try:
+                from notifications.services import NotificationService
+
+                NotificationService.create_notification(
+                    user=admission.admitting_doctor,
+                    title='Urgent ward review requested',
+                    message=(
+                        f'{admission.patient.get_full_name()} needs doctor review in '
+                        f'{admission.ward.name} ({admission.admission_id}).'
+                    ),
+                    notification_type='alert',
+                    priority='urgent',
+                    action_url=f'/wards/admissions/{admission.id}',
+                    object_type='ward_admission',
+                    object_id=str(admission.id),
+                    metadata={'reason': 'nurse_escalation', 'admission_id': admission.id},
+                )
+            except Exception:
+                # Escalation persistence must not fail because notifications are unavailable.
+                pass
+
     def perform_create(self, serializer):
         ensure_doctor_action(self.request.user)
         # Default admitting_doctor to the authenticated user when the client
@@ -325,10 +355,19 @@ class PatientAdmissionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         if not serializer.validated_data.get('admitting_doctor'):
             serializer.validated_data['admitting_doctor'] = self.request.user
 
-        admission = serializer.save(created_by=self.request.user)
+        with transaction.atomic():
+            ward = Ward.objects.select_for_update().get(pk=serializer.validated_data['ward'].pk)
+            if ward.status != 'active':
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'ward': 'Selected ward is not active.'})
+            if not ward.is_bed_available():
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'ward': 'Selected ward has no available beds.'})
+            serializer.validated_data['ward'] = ward
+            admission = serializer.save(created_by=self.request.user)
 
-        link_nursing_orders_to_admission(admission)
-        sync_bed_occupancy_after_admission_create(admission)
+            link_nursing_orders_to_admission(admission)
+            sync_bed_occupancy_after_admission_create(admission)
 
         # Log audit
         AuditService.log_activity(

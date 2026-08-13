@@ -162,6 +162,13 @@ class PatientAdmissionSerializer(serializers.ModelSerializer):
     def get_patient_photo(self, obj):
         return patient_photo_url(getattr(obj, 'patient', None))
 
+    def validate_ward(self, ward):
+        if ward.status != 'active':
+            raise serializers.ValidationError('Selected ward is not active.')
+        if not ward.is_bed_available():
+            raise serializers.ValidationError('Selected ward has no available beds.')
+        return ward
+
     class Meta:
         model = PatientAdmission
         fields = '__all__'

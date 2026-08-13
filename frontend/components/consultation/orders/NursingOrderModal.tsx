@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Activity, AlertTriangle, DoorOpen, Loader2, Syringe } from "lucide-react";
 import { toast } from "sonner";
+import wardService, { type Ward } from "@/lib/services/ward-service";
 import { MedicationGenericPicker } from "@/components/pharmacy/MedicationGenericPicker";
 import {
   MedicationSelectionConfigList,
@@ -73,6 +74,7 @@ export function NursingOrderModal({
   completeNowLabel,
   allowedTypes,
   initialPayload,
+  observationDefaults,
   descriptionExtra,
   onSubmitCompleteNow,
 }: {
@@ -84,6 +86,7 @@ export function NursingOrderModal({
   /** When set, only these procedure types appear in the picker (e.g. nurse repeat flow). */
   allowedTypes?: Array<"Injection" | "Dressing">;
   initialPayload?: Partial<NursingOrderSubmitInput>;
+  observationDefaults?: Pick<NursingOrderSubmitInput, "admissionDiagnosis" | "presentingComplaint">;
   descriptionExtra?: React.ReactNode;
   onSubmitCompleteNow?: (payload: NursingOrderSubmitInput) => Promise<void>;
 }) {
@@ -97,6 +100,8 @@ export function NursingOrderModal({
   const [selectedGenerics, setSelectedGenerics] = useState<Map<string, GenericMedicationLike>>(new Map());
   const [medConfigs, setMedConfigs] = useState<Map<string, MedConfig>>(new Map());
   const [submitting, setSubmitting] = useState(false);
+  const [wards, setWards] = useState<Ward[]>([]);
+  const [loadingWards, setLoadingWards] = useState(false);
   const [form, setForm] = useState<NursingOrderSubmitInput>({
     type: "Injection",
     medication: "",
@@ -123,14 +128,18 @@ export function NursingOrderModal({
       instructions: initialPayload?.instructions || "",
       priority: initialPayload?.priority || "Routine",
       ward: initialPayload?.ward || "",
-      admissionDiagnosis: initialPayload?.admissionDiagnosis || "",
-      presentingComplaint: initialPayload?.presentingComplaint || "",
+      admissionDiagnosis: initialPayload?.admissionDiagnosis || (defaultType === "Observation Admission" ? observationDefaults?.admissionDiagnosis || "" : ""),
+      presentingComplaint: initialPayload?.presentingComplaint || (defaultType === "Observation Admission" ? observationDefaults?.presentingComplaint || "" : ""),
     });
     setSelectedIds(new Set());
     setSelectedGenerics(new Map());
     setMedConfigs(new Map());
     setSubmitting(false);
-  }, [initialPayload, procedureTypeOptions]);
+  }, [initialPayload, observationDefaults, procedureTypeOptions]);
+
+  const observationNotesComplete = Boolean(
+    observationDefaults?.admissionDiagnosis?.trim() && observationDefaults?.presentingComplaint?.trim(),
+  );
 
   useEffect(() => {
     if (open && initialPayload) {
@@ -145,6 +154,15 @@ export function NursingOrderModal({
   useEffect(() => {
     if (open) reset();
   }, [open, reset]);
+
+  useEffect(() => {
+    if (!open || allowedTypes?.length) return;
+    setLoadingWards(true);
+    wardService.getWards({ status: "active", page_size: 200 })
+      .then((response) => setWards(response.results.filter((ward) => ward.status === "active" && ward.available_beds > 0)))
+      .catch(() => toast.error("Unable to load active observation wards."))
+      .finally(() => setLoadingWards(false));
+  }, [open, allowedTypes]);
 
   const toggleMedication = useCallback((med: GenericMedicationLike, selected: boolean) => {
     const id = (med.id ?? "").toString();
@@ -319,9 +337,9 @@ export function NursingOrderModal({
                   dosage: "",
                   woundLocation: "",
                   woundType: "",
-                  ward: "",
-                  admissionDiagnosis: "",
-                  presentingComplaint: "",
+                   ward: "",
+                   admissionDiagnosis: v === "Observation Admission" ? observationDefaults?.admissionDiagnosis || "" : "",
+                   presentingComplaint: v === "Observation Admission" ? observationDefaults?.presentingComplaint || "" : "",
                 }));
                 setSelectedIds(new Set());
                 setSelectedGenerics(new Map());
@@ -353,30 +371,29 @@ export function NursingOrderModal({
                   <SelectTrigger>
                     <SelectValue placeholder="Select ward for observation" />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="FEMALE-MED">Female Medical Ward</SelectItem>
-                    <SelectItem value="MALE-MED">Male Medical Ward</SelectItem>
-                  </SelectContent>
+                   <SelectContent>
+                     {wards.map((ward) => (
+                       <SelectItem key={ward.id} value={String(ward.id)}>
+                         {ward.name} ({ward.available_beds} bed{ward.available_beds === 1 ? "" : "s"} available)
+                       </SelectItem>
+                     ))}
+                     {!loadingWards && wards.length === 0 && (
+                       <SelectItem value="none" disabled>No active ward has an available bed</SelectItem>
+                     )}
+                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>Observation Diagnosis *</Label>
-                <Textarea
-                  value={form.admissionDiagnosis || ""}
-                  onChange={(e) => setForm((prev) => ({ ...prev, admissionDiagnosis: e.target.value }))}
-                  placeholder="Primary diagnosis for observation"
-                  rows={3}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Presenting Complaint *</Label>
-                <Textarea
-                  value={form.presentingComplaint || ""}
-                  onChange={(e) => setForm((prev) => ({ ...prev, presentingComplaint: e.target.value }))}
-                  placeholder="Patient's presenting complaint"
-                  rows={2}
-                />
-              </div>
+               {observationNotesComplete ? (
+                 <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-3 dark:border-cyan-900 dark:bg-cyan-950/20">
+                   <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">From consultation notes</p>
+                   <p className="mt-2 text-sm"><span className="font-medium">Diagnosis:</span> {observationDefaults?.admissionDiagnosis}</p>
+                   <p className="mt-1 text-sm"><span className="font-medium">Presenting complaint:</span> {observationDefaults?.presentingComplaint}</p>
+                 </div>
+               ) : (
+                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                   Complete Medical Notes first: a primary diagnosis and presenting complaint are required before creating an observation admission.
+                 </div>
+               )}
             </>
           )}
 
@@ -494,7 +511,7 @@ export function NursingOrderModal({
             <Button
               variant="outline"
               onClick={() => void handleConfirm(undefined, onSubmitCompleteNow)}
-              disabled={submitting || (form.type === "Injection" && selectedIds.size === 0)}
+              disabled={submitting || (form.type === "Injection" && selectedIds.size === 0) || (form.type === "Observation Admission" && !observationNotesComplete)}
               className="border-violet-500/50 text-violet-700 dark:text-violet-300"
             >
               {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
@@ -503,7 +520,7 @@ export function NursingOrderModal({
           ) : null}
           <Button
             onClick={() => void handleConfirm()}
-            disabled={submitting || (form.type === "Injection" && selectedIds.size === 0)}
+            disabled={submitting || (form.type === "Injection" && selectedIds.size === 0) || (form.type === "Observation Admission" && !observationNotesComplete)}
             className="bg-cyan-600 hover:bg-cyan-700"
           >
             {submitting ? (

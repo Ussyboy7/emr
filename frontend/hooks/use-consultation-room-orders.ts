@@ -49,6 +49,7 @@ import {
   buildPhysioCreateOrderPayloads,
   buildEyeCreateOrderPayloads,
 } from "@/lib/consultation/orders-utils";
+import { getObservationAdmissionDefaults } from "@/lib/consultation/history-nursing-order";
 import {
   DEFAULT_INJECTION_ROUTE,
   REFERRAL_REASONS,
@@ -79,6 +80,7 @@ export type UseConsultationRoomOrdersArgs = {
   opdClinicNames: string[];
   onReferralCreated?: () => void;
   medicalNotesAssessment?: string;
+  medicalNotesComplaint?: string;
   loadPatientOverview?: (patientId: number) => void;
 };
 
@@ -90,6 +92,7 @@ export function useConsultationRoomOrders({
   opdClinicNames,
   onReferralCreated,
   medicalNotesAssessment = "",
+  medicalNotesComplaint = "",
   loadPatientOverview,
 }: UseConsultationRoomOrdersArgs) {
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
@@ -199,6 +202,27 @@ export function useConsultationRoomOrders({
   const draftObservationCount = nursingOrders.filter(
     (order) => order.status === 'Draft' && order.type === 'Observation Admission'
   ).length;
+  const observationDefaults = useMemo(
+    () =>
+      getObservationAdmissionDefaults({
+        presentationComplaint: medicalNotesComplaint,
+        diagnosisCodes: diagnoses.map((dx) => ({
+          code: dx.icd10_code_details?.code || '',
+          description: dx.icd10_code_details?.description || dx.diagnosis_text || '',
+          type:
+            dx.certainty === 'confirmed'
+              ? ('Primary' as const)
+              : dx.certainty === 'probable'
+                ? ('Secondary' as const)
+                : ('Differential' as const),
+        })),
+      }),
+    [diagnoses, medicalNotesComplaint],
+  );
+  const observationNotesComplete = Boolean(
+    observationDefaults.admissionDiagnosis.trim() &&
+      observationDefaults.presentingComplaint.trim(),
+  );
   const [injectionMedicationSearch, setInjectionMedicationSearch] = useState("");
   const [injectionMedicationResults, setInjectionMedicationResults] = useState<
     Array<{
@@ -1107,13 +1131,8 @@ export function useConsultationRoomOrders({
         toast.error('Please select an observation ward');
         return;
       }
-      const diagnosisError = validateOrderDiagnoses(newNursingOrder.admissionDiagnoses);
-      if (diagnosisError) {
-        toast.error(diagnosisError);
-        return;
-      }
-      if (!newNursingOrder.presentingComplaint) {
-        toast.error('Please enter presenting complaint');
+      if (!observationNotesComplete) {
+        toast.error('Complete Medical Notes first: a primary diagnosis and presenting complaint are required before creating an observation admission.');
         return;
       }
 
@@ -1128,6 +1147,20 @@ export function useConsultationRoomOrders({
     }
     
     const orderId = `NO-${Date.now()}`;
+
+    const primaryDiagnosis =
+      diagnoses.find((d) => d.certainty === 'confirmed') ??
+      (diagnoses.length === 1 ? diagnoses[0] : undefined);
+    const observationAdmissionEntries: OrderDiagnosisEntry[] = primaryDiagnosis
+      ? [
+          {
+            type: 'Primary',
+            code: primaryDiagnosis.icd10_code_details?.code || '',
+            description:
+              primaryDiagnosis.icd10_code_details?.description || primaryDiagnosis.diagnosis_text || '',
+          },
+        ]
+      : [];
 
     let medication: string | undefined = newNursingOrder.medication;
     let dosage: string | undefined = newNursingOrder.dosage;
@@ -1162,10 +1195,8 @@ export function useConsultationRoomOrders({
       status: 'Draft',
       // Observation admission fields
       ward: newNursingOrder.ward || undefined,
-      admissionDiagnoses: newNursingOrder.admissionDiagnoses.length
-        ? [...newNursingOrder.admissionDiagnoses]
-        : undefined,
-      presentingComplaint: newNursingOrder.presentingComplaint || undefined
+      admissionDiagnoses: observationAdmissionEntries,
+      presentingComplaint: observationDefaults.presentingComplaint || undefined
     }]);
     
     setNewNursingOrder({ type: "", medication: "", dosage: "", route: DEFAULT_INJECTION_ROUTE, woundLocation: "", woundType: "", instructions: "", priority: "Routine", ward: "", admissionDiagnoses: [], presentingComplaint: "" });
@@ -1179,7 +1210,7 @@ export function useConsultationRoomOrders({
     } else {
       toast.success("Nursing order added to draft");
     }
-  }, [injectionConfigs, injectionMedicationResults, injectionSelectedIds, newNursingOrder, nursingOrders]);
+  }, [diagnoses, injectionConfigs, injectionMedicationResults, injectionSelectedIds, newNursingOrder, nursingOrders, observationDefaults, observationNotesComplete]);
 
   // Send all draft nursing orders to nursing (like sendPrescriptionsToPharmacy, sendLabOrdersToLab, sendRadiologyOrders)
   const sendNursingOrdersToNursing = async (options?: { silentIfNoDraft?: boolean }): Promise<number> => {
@@ -1251,9 +1282,10 @@ export function useConsultationRoomOrders({
             visit: numericVisitId,
             ward: Number(selectedWard.id),
             admission_type: 'observation',
-            admission_diagnosis: `${primaryDx.code} - ${primaryDx.description}`,
+            admission_diagnosis: primaryDx.description,
             presenting_complaint: order.presentingComplaint || '',
             admission_instructions: order.instructions || '',
+            consultation_session: sessionId,
           });
 
           return null;
@@ -1860,6 +1892,7 @@ export function useConsultationRoomOrders({
       newReferral,
       otherLabPinnedTemplate,
       otherRadiologyPinnedTemplate,
+      observationDefaults,
       prescriptionModalInitialItems,
       prescriptionModalInitialPriority,
       prescriptionModalIntent,
@@ -1967,6 +2000,7 @@ export function useConsultationRoomOrders({
       newReferral,
       otherLabPinnedTemplate,
       otherRadiologyPinnedTemplate,
+      observationDefaults,
       prescriptionModalInitialItems,
       prescriptionModalInitialPriority,
       prescriptionModalIntent,

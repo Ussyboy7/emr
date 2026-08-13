@@ -280,6 +280,16 @@ class PatientAdmission(models.Model):
         related_name='admissions'
     )
 
+    # Consultation session that motivated this admission (if applicable)
+    consultation_session = models.ForeignKey(
+        'consultation.ConsultationSession',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='admissions',
+        help_text='Consultation session that motivated this admission.',
+    )
+
     # Admission information
     admission_date = models.DateTimeField(default=timezone.now)
     admission_diagnosis = models.TextField(help_text="Primary diagnosis for admission")

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from 'next/navigation';
-import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService, nursingService } from '@/lib/services';
+import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService, nursingService, wardService } from '@/lib/services';
 import type { Diagnosis, ICD10Code } from '@/lib/services/consultation-service';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
@@ -51,7 +51,7 @@ import { LabOrderModal, type LabOrderSubmitInput } from "@/components/consultati
 import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from "@/components/consultation/orders/RadiologyOrderModal";
 import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/consultation/orders/PhysioOrderModal";
 import { NursingOrderModal, type NursingOrderSubmitInput } from "@/components/consultation/orders/NursingOrderModal";
-import { buildObservationAdmissionOrderDescription } from '@/lib/ward-admission-ui';
+import { buildHistoryNursingSubmission, getObservationAdmissionDefaults } from '@/lib/consultation/history-nursing-order';
 import { extractSessionEditState } from '@/lib/consultation/workspace-bundle-enrichment';
 
 // NOTE: doctor name is now taken directly from the session serializer (doctor_name)
@@ -231,6 +231,10 @@ export default function ConsultationHistoryPage() {
   const [showAddPhysioOrder, setShowAddPhysioOrder] = useState(false);
   const [showAddNursingOrder, setShowAddNursingOrder] = useState(false);
   const [editOrderAllergies, setEditOrderAllergies] = useState<string[]>([]);
+  const observationDefaults = useMemo(
+    () => selectedConsultation ? getObservationAdmissionDefaults(selectedConsultation) : undefined,
+    [selectedConsultation],
+  );
   const [editForm, setEditForm] = useState<{
     diagnosis: string;
     presentationComplaint: string;
@@ -670,6 +674,10 @@ export default function ConsultationHistoryPage() {
       toast.error("Invalid consultation/patient");
       return;
     }
+    if (!selectedConsultation.visitId || Number.isNaN(Number(selectedConsultation.visitId))) {
+      toast.error("Patient has no active visit. Cannot submit nursing order or observation admission.");
+      return;
+    }
 
     if (payload.items.length === 0) {
       toast.error('Please select at least one medication');
@@ -948,43 +956,21 @@ export default function ConsultationHistoryPage() {
       return;
     }
 
-    const priorityMap: Record<string, "low" | "medium" | "high" | "urgent"> = {
-      Routine: "low",
-      Urgent: "high",
-      STAT: "urgent",
-    };
-
-    let description = payload.instructions;
-    let orderTypeForApi: string = payload.type;
-
-    if (payload.type === "Observation Admission") {
-      orderTypeForApi = "observation admission";
-      description = buildObservationAdmissionOrderDescription({
-        ward: payload.ward,
-        instructions: payload.instructions,
-      });
-    } else if (payload.type === "Injection" && payload.medication) {
-      description = `${payload.medication} - ${payload.dosage || ""} via ${payload.route || ""}. ${payload.instructions}`;
-    } else if (payload.type === "Dressing") {
-      description = `${payload.woundType || "Wound"} dressing at ${payload.woundLocation || "site"}. ${payload.instructions}`;
-    } else if (payload.type === "IV Infusion" && payload.medication) {
-      description = `IV Infusion: ${payload.medication}${payload.dosage ? ` — ${payload.dosage}` : ""}. ${payload.instructions}`;
-    }
-
-    await nursingService.createNursingOrder({
-      patient: patientId,
-      visit: selectedConsultation.visitId,
+    const submission = buildHistoryNursingSubmission(payload, {
+      patient: Number(patientId),
+      visit: Number(selectedConsultation.visitId),
       consultation_session: sessionId,
-      ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
-      order_type: orderTypeForApi,
-      description,
-      frequency: payload.type === "Injection" ? "As ordered" : "",
-      duration: "",
-      status: "pending",
-      priority: priorityMap[payload.priority] || "medium",
     });
-
-    toast.success("Nursing order added");
+    if (submission.kind === "admission") {
+      await wardService.createAdmission(submission.payload);
+      toast.success("Observation admission created");
+    } else {
+      await nursingService.createNursingOrder({
+        ...submission.payload,
+        ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
+      });
+      toast.success("Nursing order added");
+    }
     await loadEditOrdersRefetch();
   };
 
@@ -1509,7 +1495,7 @@ export default function ConsultationHistoryPage() {
 
                       <div className="space-y-3 pt-2 border-t">
                         <div className="flex items-center justify-between">
-                          <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
+                           <Label className="text-base font-semibold">Consultation Diagnoses (ICD-10)</Label>
                           <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosisInEdit(true)}>
                             <Plus className="h-4 w-4 mr-1" />Add Diagnosis
                           </Button>
@@ -2286,6 +2272,7 @@ export default function ConsultationHistoryPage() {
           open={showAddNursingOrder}
           onOpenChange={setShowAddNursingOrder}
           onSubmit={handleSubmitNursingOrder}
+          observationDefaults={observationDefaults}
         />
       </div>
     </DashboardLayout>

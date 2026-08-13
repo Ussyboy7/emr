@@ -260,6 +260,8 @@ export function WardDoctorOrdersSection({
   showRoutingInfo = true,
   excludeHandoffFromList = true,
   historyDisplay = 'tabs',
+  openAddInstruction = false,
+  onAddInstructionOpened,
 }: {
   admission: PatientAdmission;
   allowAddOrders: boolean;
@@ -280,6 +282,9 @@ export function WardDoctorOrdersSection({
    * - history-only: completed/cancelled only (e.g. nurse Timeline)
    */
   historyDisplay?: HistoryDisplay;
+  /** Opens the existing add-order dialog directly on Nursing instruction. */
+  openAddInstruction?: boolean;
+  onAddInstructionOpened?: () => void;
 }) {
   const [orders, setOrders] = useState<WardNursingOrderRow[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
@@ -311,6 +316,15 @@ export function WardDoctorOrdersSection({
   // and submit them as a batch — one nursing order per medication.
   const [selectedMedKeys, setSelectedMedKeys] = useState<string[]>([]);
   const [medConfigs, setMedConfigs] = useState<Map<string, MedConfig>>(new Map());
+
+  useEffect(() => {
+    if (!openAddInstruction || !allowAddOrders || admission.status !== 'admitted') return;
+    setOrderKind('instruction');
+    setAddStep(1);
+    setInstructionText('');
+    setAddOpen(true);
+    onAddInstructionOpened?.();
+  }, [openAddInstruction, allowAddOrders, admission.status, onAddInstructionOpened]);
 
   const selectedGenerics = useMemo(() => {
     const map = new Map<string, GenericMedicationLike>();

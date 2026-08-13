@@ -201,6 +201,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   newReferral,
   otherLabPinnedTemplate,
   otherRadiologyPinnedTemplate,
+  observationDefaults,
   prescriptionModalInitialItems,
   prescriptionModalInitialPriority,
   prescriptionModalIntent,
@@ -271,6 +272,11 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
   toggleRadiologyTemplateSelection,
   wards,
 } = workspace;
+
+  const observationNotesComplete = Boolean(
+    observationDefaults?.admissionDiagnosis?.trim() &&
+      observationDefaults?.presentingComplaint?.trim(),
+  );
 
   const selectedInjectionGenerics = useMemo(() => {
     const map = new Map<string, GenericMedicationLike>();
@@ -721,21 +727,17 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                     </SelectContent>
                   </Select>
                 </div>
-                <Icd10DiagnosisMultiPicker
-                  diagnoses={newNursingOrder.admissionDiagnoses}
-                  onChange={(admissionDiagnoses) =>
-                    setNewNursingOrder({ ...newNursingOrder, admissionDiagnoses })
-                  }
-                />
-                <div className="space-y-2">
-                  <Label>Presenting Complaint *</Label>
-                  <Textarea
-                    value={newNursingOrder.presentingComplaint || ''}
-                    onChange={(e) => setNewNursingOrder({ ...newNursingOrder, presentingComplaint: e.target.value })}
-                    placeholder="Patient's presenting complaint"
-                    rows={2}
-                  />
-                </div>
+                {observationNotesComplete ? (
+                  <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-3 dark:border-cyan-900 dark:bg-cyan-950/20">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">From consultation notes</p>
+                    <p className="mt-2 text-sm"><span className="font-medium">Diagnosis:</span> {observationDefaults?.admissionDiagnosis}</p>
+                    <p className="mt-1 text-sm"><span className="font-medium">Presenting complaint:</span> {observationDefaults?.presentingComplaint}</p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                    Complete Medical Notes first: a primary diagnosis and presenting complaint are required before creating an observation admission.
+                  </div>
+                )}
               </>
             )}
 
@@ -897,7 +899,7 @@ export function ConsultationRoomOrderDialogs({ workspace }: ConsultationRoomOrde
                 !newNursingOrder.instructions ||
                 (newNursingOrder.type === 'Injection' && !newNursingOrder.medication && injectionSelectedIds.size === 0) ||
                 (newNursingOrder.type === 'Dressing' && (!newNursingOrder.woundLocation || !newNursingOrder.woundType)) ||
-                (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || validateOrderDiagnoses(newNursingOrder.admissionDiagnoses) !== null || !newNursingOrder.presentingComplaint))
+                (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || !observationNotesComplete))
               }
               className="bg-cyan-600 hover:bg-cyan-700"
             >

@@ -26,11 +26,12 @@ import { WardVitalsHistory } from '@/components/ward/WardVitalsHistory';
 import {
   type WardDoctorDetailsTab,
   isEscalatedCondition,
+  resolveWardHandoffInstructions,
 } from '@/lib/ward-admission-ui';
 import {
   Users, Search, Eye, AlertTriangle, CheckCircle,
   Bed, Loader2, FileText, Send, History,
-  TestTube, ScanLine, Activity,
+  TestTube, ScanLine, Activity, ArrowUpRight,
 } from 'lucide-react';
 import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultation/orders/LabOrderModal';
 import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from '@/components/consultation/orders/RadiologyOrderModal';
@@ -52,6 +53,7 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
 import { useServerToday } from '@/hooks/use-server-today';
 import { MODAL_SIZES, modalNoOverflow } from '@/components/ui/modal-sizes';
+import { useRouter } from 'next/navigation';
 
 const formatAdmissionTypeLabel = (type?: string | null): string | null => {
   if (!type) return null;
@@ -374,6 +376,11 @@ export default function WardRoundsPage() {
     setSelectedAdmission(admission);
     setDetailsTab(initialTab ?? 'overview');
     setShowAdmissionDetails(true);
+  };
+
+  const router = useRouter();
+  const openCareSession = (admissionId: number) => {
+    router.push(`/wards/admissions/${admissionId}`);
   };
 
   const downloadBlob = (blob: Blob, filename: string) => {
@@ -926,26 +933,11 @@ export default function WardRoundsPage() {
                                   size="icon"
                                   variant="outline"
                                   className="h-7 w-7"
-                                  onClick={() => handleViewAdmission(admission, 'overview')}
+                                   onClick={() => handleViewAdmission(admission)}
                                   title="View patient details"
                                 >
                                   <Eye className="h-3.5 w-3.5" />
                                 </Button>
-                                {admission.status === 'admitted' && (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 px-2 text-xs border-amber-500/50 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
-                                    onClick={() => {
-                                      resetDischargeForm();
-                                      setSelectedAdmission(admission);
-                                      setShowDischargeDialog(true);
-                                    }}
-                                    title="Initiate Discharge"
-                                  >
-                                    <CheckCircle className="h-3 w-3 mr-1" />Discharge
-                                  </Button>
-                                )}
                                 {admission.status === 'pending_discharge' && (
                                   <Badge variant="outline" className="text-[10px] px-1.5 h-5 border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
                                     Awaiting nurse
@@ -1091,314 +1083,123 @@ export default function WardRoundsPage() {
                   />
                 </div>
               </DialogHeader>
-              <Tabs value={detailsTab} onValueChange={(v) => setDetailsTab(v as WardDoctorDetailsTab)} className="flex-1 min-h-0 flex flex-col">
-                <TabsList className="mx-5 mt-3 grid grid-cols-4 h-9 shrink-0">
-                  <TabsTrigger value="overview" className="text-xs">Round</TabsTrigger>
-                  <TabsTrigger value="orders" className="text-xs">Orders</TabsTrigger>
-                  <TabsTrigger value="notes" className="text-xs">
-                    <FileText className="h-3 w-3 mr-1 hidden sm:inline" />
-                    Timeline
-                  </TabsTrigger>
-                  <TabsTrigger value="patient" className="text-xs">
-                    <History className="h-3 w-3 mr-1 hidden sm:inline" />
-                    Patient History
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value="overview" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
-                  {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
-                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300">
-                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-600" />
+              {/* Quick snapshot — full record lives on the Care Session page */}
+              <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-4">
+                {selectedAdmission.current_condition && isEscalatedCondition(selectedAdmission.current_condition) && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border text-sm bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-600" />
+                    <div>
+                      <p className="font-semibold text-xs">Nurse escalation</p>
+                      <p>{selectedAdmission.current_condition}</p>
+                    </div>
+                  </div>
+                )}
+
+                <section className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-xs font-semibold">Clinical snapshot</h3>
+                    {selectedAdmission.current_condition && !isEscalatedCondition(selectedAdmission.current_condition) && (
+                      <Badge variant="outline" className={getConditionBadgeClass(selectedAdmission.current_condition)}>
+                        {selectedAdmission.current_condition}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="space-y-1.5 text-sm">
+                    <p><span className="text-muted-foreground">Diagnosis · </span>{selectedAdmission.admission_diagnosis || '—'}</p>
+                    {selectedAdmission.presenting_complaint && (
+                      <p><span className="text-muted-foreground">Complaint · </span>{selectedAdmission.presenting_complaint}</p>
+                    )}
+                    {(() => {
+                      const latestInstruction = resolveWardHandoffInstructions({
+                        admissionNotes: selectedAdmission.admission_notes,
+                        orderDescription: null,
+                      });
+                      const instructionText = latestInstruction || selectedAdmission.admission_instructions;
+                      return instructionText?.trim() ? (
+                        <p><span className="text-muted-foreground">Instructions · </span><span className="whitespace-pre-wrap">{instructionText}</span></p>
+                      ) : null;
+                    })()}
+                  </div>
+                </section>
+
+                {/* Quick facts */}
+                <section className="rounded-lg border bg-card p-3 space-y-2">
+                  <h3 className="text-xs font-semibold">Admission details</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {selectedAdmission.ward_name && (
                       <div>
-                        <p className="font-semibold text-xs">Nurse escalation</p>
-                        <p>{selectedAdmission.current_condition}</p>
+                        <p className="text-muted-foreground text-xs">Ward</p>
+                        <p className="font-medium">{selectedAdmission.ward_name}{selectedAdmission.bed_number ? ` · Bed ${selectedAdmission.bed_number}` : ''}</p>
                       </div>
+                    )}
+                    <div>
+                      <p className="text-muted-foreground text-xs">Stay</p>
+                      <p className="font-medium">{selectedAdmission.length_of_stay === 0 ? 'Same day' : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}</p>
                     </div>
-                  )}
-
-                  <section className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-xs font-semibold">Clinical snapshot</h3>
-                      {selectedAdmission.current_condition && !isEscalatedCondition(selectedAdmission.current_condition) && (
-                        <Badge variant="outline" className={getConditionBadgeClass(selectedAdmission.current_condition)}>
-                          {selectedAdmission.current_condition}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="space-y-1.5 text-sm">
-                      <p><span className="text-muted-foreground">Diagnosis · </span>{selectedAdmission.admission_diagnosis || '—'}</p>
-                      {selectedAdmission.presenting_complaint && (
-                        <p><span className="text-muted-foreground">Complaint · </span>{selectedAdmission.presenting_complaint}</p>
-                      )}
-                      {selectedAdmission.admission_instructions?.trim() && (
-                        <p><span className="text-muted-foreground">Instructions · </span><span className="whitespace-pre-wrap">{selectedAdmission.admission_instructions}</span></p>
-                      )}
-                    </div>
-                  </section>
-
-                  <WardLatestHandoverCard admissionNotes={selectedAdmission.admission_notes} />
-
-                  <WardVitalsHistory admission={selectedAdmission} />
-
-                  {selectedAdmission.status === 'admitted' && (
-                    <section className="rounded-lg border bg-card p-3 space-y-2">
-                      <Label className="text-sm font-medium">Assessment and plan</Label>
-                      <Textarea
-                        value={progressNote}
-                        onChange={(e) => setProgressNote(e.target.value)}
-                        placeholder="Clinical findings, progress and plan…"
-                        rows={4}
-                        className="resize-y"
-                      />
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          onClick={handleSaveProgressNote}
-                          disabled={isSavingNote || !progressNote.trim()}
-                        >
-                          {isSavingNote ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-                          Save note
-                        </Button>
+                    {selectedAdmission.admitting_doctor_name && (
+                      <div>
+                        <p className="text-muted-foreground text-xs">Admitting doctor</p>
+                        <p className="font-medium">Dr {selectedAdmission.admitting_doctor_name}</p>
                       </div>
-                    </section>
-                  )}
-
-                  {/* Discharge plan — surfaces what the doctor configured in the
-                      Initiate Discharge dialog, plus any linked external referral,
-                      so it's visible without re-opening the discharge form. */}
-                  {(selectedAdmission.status === 'pending_discharge' || selectedAdmission.status === 'discharged') && (
-                    <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 p-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                        <Label className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-400 font-semibold">
-                          Discharge Plan
-                        </Label>
-                        {selectedAdmission.status === 'pending_discharge' && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 h-5 border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
-                            Awaiting nurse sign-out
-                          </Badge>
-                        )}
+                    )}
+                    {selectedAdmission.admission_type && (
+                      <div>
+                        <p className="text-muted-foreground text-xs">Type</p>
+                        <p className="font-medium capitalize">{selectedAdmission.admission_type.replace(/_/g, ' ')}</p>
                       </div>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        {selectedAdmission.discharge_type && (
-                          <div>
-                            <Label className="text-muted-foreground text-xs">Discharge type</Label>
-                            <p className="font-medium capitalize">{selectedAdmission.discharge_type.replace(/_/g, ' ')}</p>
-                          </div>
-                        )}
-                        {selectedAdmission.discharge_date && (
-                          <div>
-                            <Label className="text-muted-foreground text-xs">
-                              {selectedAdmission.status === 'discharged' ? 'Discharged on' : 'Initiated on'}
-                            </Label>
-                            <p className="font-medium">
-                              {formatDisplayDateTime(selectedAdmission.discharge_date)}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                      {selectedAdmission.discharge_diagnosis && (
-                        <div>
-                          <Label className="text-muted-foreground text-xs">Final diagnosis</Label>
-                          <p className="text-sm bg-background border border-border/60 p-2 rounded mt-1">{selectedAdmission.discharge_diagnosis}</p>
-                        </div>
-                      )}
-                      {selectedAdmission.discharge_summary && (
-                        <div>
-                          <Label className="text-muted-foreground text-xs">Discharge summary</Label>
-                          <p className="text-sm bg-background border border-border/60 p-2 rounded mt-1 whitespace-pre-wrap">{selectedAdmission.discharge_summary}</p>
-                        </div>
-                      )}
-                      {selectedAdmission.follow_up_instructions && (
-                        <div>
-                          <Label className="text-muted-foreground text-xs">Follow-up instructions</Label>
-                          <p className="text-sm bg-background border border-border/60 p-2 rounded mt-1 whitespace-pre-wrap">{selectedAdmission.follow_up_instructions}</p>
-                        </div>
-                      )}
+                    )}
+                  </div>
+                </section>
 
-                      {/* External referral / escort */}
-                      {selectedAdmission.escort && (
-                        <div className="mt-2 rounded-md border border-cyan-200 dark:border-cyan-900/50 bg-cyan-50/50 dark:bg-cyan-950/20 p-3 space-y-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Send className="h-3.5 w-3.5 text-cyan-700 dark:text-cyan-400" />
-                            <Label className="text-xs uppercase tracking-wide text-cyan-700 dark:text-cyan-400 font-semibold">
-                              External Referral Linked
-                            </Label>
-                            {selectedAdmission.escort.referral_id_display && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 h-5 font-mono">
-                                {selectedAdmission.escort.referral_id_display}
-                              </Badge>
-                            )}
-                            {selectedAdmission.escort.referral_urgency && (
-                              <Badge variant="outline" className={`text-[10px] px-1.5 h-5 ${
-                                selectedAdmission.escort.referral_urgency === 'emergency'
-                                  ? 'border-red-500/50 text-red-600 dark:text-red-400 bg-red-500/10'
-                                  : selectedAdmission.escort.referral_urgency === 'urgent'
-                                  ? 'border-orange-500/50 text-orange-600 dark:text-orange-400 bg-orange-500/10'
-                                  : 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10'
-                              }`}>
-                                {selectedAdmission.escort.referral_urgency}
-                              </Badge>
-                            )}
-                            {selectedAdmission.escort.is_arrival_confirmed ? (
-                              <Badge variant="outline" className="text-[10px] px-1.5 h-5 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
-                                Arrival confirmed
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[10px] px-1.5 h-5 border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
-                                Arrival pending
-                              </Badge>
-                            )}
-                            {/* Edit / Cancel — only while still pending nurse sign-out
-                                AND arrival not yet confirmed. After patient leaves the
-                                ward, changes belong in the consultation referrals
-                                module (the backend rejects them anyway). */}
-                            {selectedAdmission.status === 'pending_discharge'
-                              && !selectedAdmission.escort.is_arrival_confirmed && (
-                              <div className="ml-auto flex items-center gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 px-2 text-xs text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/40"
-                                  onClick={() => openEditReferral(selectedAdmission)}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 px-2 text-xs text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40"
-                                  onClick={() => { setCancelReferralReason(''); setCancelReferralOpen(true); }}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-sm">
-                            <div>
-                              <Label className="text-muted-foreground text-xs">Receiving facility</Label>
-                              <p className="font-medium text-sm">
-                                {selectedAdmission.escort.facility_name_snapshot || selectedAdmission.escort.facility_name || '—'}
-                              </p>
-                            </div>
-                            {selectedAdmission.escort.transport_mode && (
-                              <div>
-                                <Label className="text-muted-foreground text-xs">Transport</Label>
-                                <p className="font-medium text-sm capitalize">{selectedAdmission.escort.transport_mode.replace(/_/g, ' ')}</p>
-                              </div>
-                            )}
-                            {selectedAdmission.escort.primary_nurse_name && (
-                              <div>
-                                <Label className="text-muted-foreground text-xs">Primary escort nurse</Label>
-                                <p className="font-medium text-sm">{selectedAdmission.escort.primary_nurse_name}</p>
-                              </div>
-                            )}
-                            {selectedAdmission.escort.additional_nurse_names && selectedAdmission.escort.additional_nurse_names.length > 0 && (
-                              <div>
-                                <Label className="text-muted-foreground text-xs">Additional escorts</Label>
-                                <p className="font-medium text-sm">{selectedAdmission.escort.additional_nurse_names.join(', ')}</p>
-                              </div>
-                            )}
-                            {selectedAdmission.escort.departure_at && (
-                              <div>
-                                <Label className="text-muted-foreground text-xs">Departed</Label>
-                                <p className="font-medium text-sm">
-                                  {formatDisplayDateTime(selectedAdmission.escort.departure_at)}
-                                </p>
-                              </div>
-                            )}
-                            {selectedAdmission.escort.arrival_confirmed_at && (
-                              <div>
-                                <Label className="text-muted-foreground text-xs">Arrived</Label>
-                                <p className="font-medium text-sm">
-                                  {formatDisplayDateTime(selectedAdmission.escort.arrival_confirmed_at)}
-                                  {selectedAdmission.escort.arrival_call_outcome && (
-                                    <span className="text-muted-foreground ml-1 capitalize">· {selectedAdmission.escort.arrival_call_outcome.replace(/_/g, ' ')}</span>
-                                  )}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                          {selectedAdmission.escort.handover_summary && (
-                            <div>
-                              <Label className="text-muted-foreground text-xs">Handover summary</Label>
-                              <p className="text-sm bg-background border border-border/60 p-2 rounded mt-1 whitespace-pre-wrap">
-                                {selectedAdmission.escort.handover_summary}
-                              </p>
-                            </div>
-                          )}
-                          {selectedAdmission.escort.arrival_notes && (
-                            <div>
-                              <Label className="text-muted-foreground text-xs">Arrival notes</Label>
-                              <p className="text-sm bg-background border border-border/60 p-2 rounded mt-1 whitespace-pre-wrap">
-                                {selectedAdmission.escort.arrival_notes}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </TabsContent>
-                <TabsContent value="orders" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-3">
-                  {userCanAddWardDoctorOrders(currentUser) && selectedAdmission.status === 'admitted' && (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mr-1">
-                        New order
-                      </span>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setLabOrderOpen(true)}>
-                        <TestTube className="h-3 w-3 mr-1 text-amber-500" /> Lab
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setRadiologyOrderOpen(true)}>
-                        <ScanLine className="h-3 w-3 mr-1 text-indigo-500" /> Imaging
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setPhysioOrderOpen(true)}>
-                        <Activity className="h-3 w-3 mr-1 text-emerald-500" /> Physio
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setEyeOrderOpen(true)}>
-                        <Eye className="h-3 w-3 mr-1 text-cyan-600" /> Eye
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setReferralOrderOpen(true)}>
-                        <Send className="h-3 w-3 mr-1 text-teal-500" /> Referral
-                      </Button>
-                    </div>
-                  )}
-                  <WardDoctorOrdersSection
-                    admission={selectedAdmission}
-                    allowAddOrders={userCanAddWardDoctorOrders(currentUser)}
-                    allowEditCancelOrders={userCanEditCancelWardOrders(currentUser)}
-                    historyDisplay="collapsed"
-                    excludeHandoffFromList
-                    currentUserId={currentUser?.id != null ? Number(currentUser.id) : undefined}
-                  />
-                </TabsContent>
+                <WardLatestHandoverCard admissionNotes={selectedAdmission.admission_notes} />
 
-                <TabsContent value="notes" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2 space-y-5">
-                  {selectedAdmission.admission_notes ? (
-                    <section>
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-                        Clinical timeline
-                      </h3>
-                      <ProgressNotesTimeline
-                        notes={selectedAdmission.admission_notes}
-                        excludeHandoff
-                      />
-                    </section>
-                  ) : (
-                    <div className="rounded-lg border border-dashed p-6 text-center">
-                      <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                      <p className="text-sm text-muted-foreground">No timeline entries yet.</p>
-                    </div>
-                  )}
-                </TabsContent>
-                <TabsContent value="patient" className="flex-1 min-h-0 overflow-y-auto px-5 py-4 mt-2">
-                  {selectedAdmission?.patient ? (
-                    <PatientHistoryTabs patientId={selectedAdmission.patient} />
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No patient selected.</p>
-                  )}
-                </TabsContent>
-              </Tabs>
+                {/* Doctor quick actions — order suite + discharge stay here; the
+                    full clinical record lives on the Care Session page. */}
+                {(userCanAddWardDoctorOrders(currentUser) && selectedAdmission.status === 'admitted') && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mr-1">
+                      Quick order
+                    </span>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setLabOrderOpen(true)}>
+                      <TestTube className="h-3 w-3 mr-1 text-amber-500" /> Lab
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setRadiologyOrderOpen(true)}>
+                      <ScanLine className="h-3 w-3 mr-1 text-indigo-500" /> Imaging
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setPhysioOrderOpen(true)}>
+                      <Activity className="h-3 w-3 mr-1 text-emerald-500" /> Physio
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setEyeOrderOpen(true)}>
+                      <Eye className="h-3 w-3 mr-1 text-cyan-600" /> Eye
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setReferralOrderOpen(true)}>
+                      <Send className="h-3 w-3 mr-1 text-teal-500" /> Referral
+                    </Button>
+                    {selectedAdmission.status === 'admitted' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs border-amber-500/50 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                        onClick={() => {
+                          resetDischargeForm();
+                          setShowDischargeDialog(true);
+                        }}
+                      >
+                        <CheckCircle className="h-3 w-3 mr-1" /> Discharge
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                <Button
+                  size="sm"
+                  className="w-full h-9"
+                  onClick={() => openCareSession(selectedAdmission.id)}
+                >
+                  Open full session
+                  <ArrowUpRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
             </DialogContent>
           </Dialog>
         )}

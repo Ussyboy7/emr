@@ -73,7 +73,7 @@ export function WardQuickObservationForm({ admission, value, onChange, onSubmit,
       ) : (
         <Thermometer className="h-4 w-4 mr-2" />
       )}
-      {value.escalate ? 'Escalate & save' : 'Save'}
+      {value.escalate ? 'Escalate & save' : 'Save observation'}
     </Button>
   );
 
@@ -91,16 +91,15 @@ export function WardQuickObservationForm({ admission, value, onChange, onSubmit,
           <Thermometer className="h-4 w-4 text-teal-500 shrink-0" />
           Record observation
         </h3>
-        {saveButton}
       </div>
 
       <div className="space-y-2">
         <div className="space-y-1.5">
           <div className="flex items-baseline justify-between gap-2">
-            <Label className="text-xs text-muted-foreground">Condition</Label>
+            <Label className="text-xs text-muted-foreground">Update condition</Label>
             {showLastCondition && (
               <span className="text-[11px] text-muted-foreground truncate">
-                Last: <span className="font-medium text-foreground">{admission.current_condition}</span>
+                Current: <span className="font-medium text-foreground">{admission.current_condition}</span>
               </span>
             )}
           </div>
@@ -113,7 +112,7 @@ export function WardQuickObservationForm({ admission, value, onChange, onSubmit,
             })}
           >
             <SelectTrigger className="h-9">
-              <SelectValue placeholder={admission.current_condition ? `Update (was ${admission.current_condition})` : 'Select condition'} />
+              <SelectValue placeholder="Select a condition" />
             </SelectTrigger>
             <SelectContent>
               {WARD_CONDITION_PRESETS.map((opt) => (
@@ -176,6 +175,10 @@ export function WardQuickObservationForm({ admission, value, onChange, onSubmit,
             disabled={!hasVitals}
           />
         </div>
+      </div>
+
+      <div className="flex justify-end pt-1">
+        {saveButton}
       </div>
     </form>
   );

@@ -39,6 +39,7 @@ import {
 import { useConsultationRoomPatientOverview } from '@/hooks/use-consultation-room-patient-overview';
 import { useConsultationRoomQueue } from '@/hooks/use-consultation-room-queue';
 import { useConsultationRoomSession } from '@/hooks/use-consultation-room-session';
+import { useConsultationRoomSessionCallbacks } from '@/hooks/use-consultation-room-session-callbacks';
 import { useConsultationRoomOrders } from '@/hooks/use-consultation-room-orders';
 import { ConsultationRoomQueueDialog } from '@/components/consultation/room/ConsultationRoomQueueDialog';
 import { ConsultationRoomIdleView } from '@/components/consultation/room/ConsultationRoomIdleView';
@@ -355,6 +356,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   }, []);
 
   const [historyReloadToken, setHistoryReloadToken] = useState(0);
+  const sessionCallbacks = useConsultationRoomSessionCallbacks({
+    setSelectedSession,
+    ordersRef,
+  });
 
   const {
     sessionActive,
@@ -395,13 +400,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setActiveTab,
     clearSessionWorkspace,
     setMedicalNotes,
-    setSelectedSession: (session) => setSelectedSession(session as ExtendedConsultationSession),
-    setDiagnoses: (value) => ordersRef.current?.setDiagnoses(value),
-    setPrescriptions: (prescriptions) => ordersRef.current?.setPrescriptions(prescriptions),
-    setLabOrders: (orders) => ordersRef.current?.setLabOrders(orders),
-    setNursingOrders: (orders) => ordersRef.current?.setNursingOrders(orders),
-    setRadiologyOrders: (orders) => ordersRef.current?.setRadiologyOrders(orders),
-    setPhysioOrders: (orders) => ordersRef.current?.setPhysioOrders(orders),
+    ...sessionCallbacks,
     applyPatientOverview,
     loadPatientOverview,
     loadPausedSessions,
@@ -423,6 +422,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     opdClinicNames,
     onReferralCreated: bumpReferralHistory,
     medicalNotesAssessment: medicalNotes.assessment,
+    medicalNotesComplaint: medicalNotes.presentationComplaint,
     loadPatientOverview,
   });
   ordersRef.current = orders;

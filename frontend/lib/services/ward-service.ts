@@ -92,6 +92,7 @@ export interface PatientAdmission {
   admission_type: string;
   admitting_doctor?: number;
   admitting_doctor_name?: string;
+  consultation_session?: number | null;
   admission_date: string;
   admission_diagnosis: string;
   presenting_complaint?: string;
@@ -348,13 +349,14 @@ class WardService {
     visit: number;
     ward: number;
     bed?: number;
-    admission_type: string;
-    admitting_doctor?: number;
-    nursing_order?: number;
-    admission_diagnosis: string;
-    presenting_complaint?: string;
-    admission_instructions?: string;
-    admission_notes?: string;
+admission_type: string;
+  admitting_doctor?: number;
+  nursing_order?: number;
+  consultation_session?: number | null;
+  admission_diagnosis: string;
+  presenting_complaint?: string;
+  admission_instructions?: string;
+  admission_notes?: string;
   }): Promise<PatientAdmission> {
     return apiFetch<PatientAdmission>('/admissions/', {
       method: 'POST',

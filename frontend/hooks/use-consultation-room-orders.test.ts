@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
 vi.mock('@/lib/api-client', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/lib/consultation/room-helpers', () => ({ debugConsultationRoom: vi.fn() }));
 vi.mock('@/lib/consultation/prescription-refill', () => ({
@@ -64,6 +64,7 @@ vi.mock('@/lib/services', () => ({
   wardService: {
     getWards: vi.fn(() => Promise.resolve({ results: [] })),
     getAdmissions: vi.fn(() => Promise.resolve({ results: [] })),
+    createAdmission: vi.fn(() => Promise.resolve({})),
   },
   physioService: {
     getOrders: vi.fn(() => Promise.resolve({ results: [] })),
@@ -124,5 +125,104 @@ describe('useConsultationRoomOrders', () => {
     const { result } = renderHook(() => useConsultationRoomOrders(baseArgs));
     await act(async () => { await result.current.sendRadiologyOrders(); });
     expect(toast.info).toHaveBeenCalledWith('No draft radiology orders to send');
+  });
+
+  it('exposes observation defaults derived from session notes', () => {
+    const { result } = renderHook(() =>
+      useConsultationRoomOrders({ ...baseArgs, medicalNotesComplaint: 'Fever' })
+    );
+    act(() => {
+      result.current.setDiagnoses([
+        {
+          id: 1,
+          certainty: 'confirmed',
+          icd10_code_details: { code: 'R50', description: 'Fever' },
+          diagnosis_text: 'Fever',
+        } as any,
+        {
+          id: 2,
+          certainty: 'possible',
+          icd10_code_details: { code: 'B34', description: 'Viral infection' },
+          diagnosis_text: '',
+        } as any,
+      ]);
+    });
+    expect(result.current.orderDialogsWorkspace.observationDefaults).toEqual({
+      admissionDiagnosis: 'Fever',
+      presentingComplaint: 'Fever',
+    });
+  });
+
+  it('blocks observation admission when diagnosis/complaint notes are incomplete', () => {
+    const { result } = renderHook(() =>
+      useConsultationRoomOrders({
+        ...baseArgs,
+        currentPatient: { id: '1', visitId: '1', name: 'Ada' } as any,
+        sessionId: 1,
+        medicalNotesComplaint: '',
+      })
+    );
+    act(() => {
+      result.current.orderDialogsWorkspace.setNewNursingOrder({
+        type: 'Observation Admission',
+        medication: '',
+        dosage: '',
+        route: 'IM',
+        woundLocation: '',
+        woundType: '',
+        instructions: 'Observe vitals hourly',
+        priority: 'Routine',
+        ward: '1',
+        admissionDiagnoses: [],
+        presentingComplaint: '',
+      });
+    });
+    act(() => { result.current.orderDialogsWorkspace.addNursingOrder(); });
+    expect(toast.error).toHaveBeenCalledWith(
+      'Complete Medical Notes first: a primary diagnosis and presenting complaint are required before creating an observation admission.'
+    );
+    expect(result.current.nursingOrders).toEqual([]);
+  });
+
+  it('builds observation admission draft from complete session notes', () => {
+    const { result } = renderHook(() =>
+      useConsultationRoomOrders({
+        ...baseArgs,
+        currentPatient: { id: '1', visitId: '1', name: 'Ada' } as any,
+        sessionId: 1,
+        medicalNotesComplaint: 'Chest pain',
+      })
+    );
+    act(() => {
+      result.current.setDiagnoses([
+        {
+          id: 1,
+          certainty: 'confirmed',
+          icd10_code_details: { code: 'I10', description: 'Hypertension' },
+          diagnosis_text: 'Hypertension',
+        } as any,
+      ]);
+      result.current.orderDialogsWorkspace.setNewNursingOrder({
+        type: 'Observation Admission',
+        medication: '',
+        dosage: '',
+        route: 'IM',
+        woundLocation: '',
+        woundType: '',
+        instructions: 'Monitor and reassess',
+        priority: 'Routine',
+        ward: '2',
+        admissionDiagnoses: [],
+        presentingComplaint: '',
+      });
+    });
+    act(() => { result.current.orderDialogsWorkspace.addNursingOrder(); });
+    expect(result.current.nursingOrders).toHaveLength(1);
+    expect(result.current.nursingOrders[0].type).toBe('Observation Admission');
+    expect(result.current.nursingOrders[0].ward).toBe('2');
+    expect(result.current.nursingOrders[0].admissionDiagnoses).toEqual([
+      { type: 'Primary', code: 'I10', description: 'Hypertension' },
+    ]);
+    expect(result.current.nursingOrders[0].presentingComplaint).toBe('Chest pain');
   });
 });
