@@ -209,7 +209,6 @@ class Command(BaseCommand):
             # Administration
             'admin_users': ('Administration', 'users'),
             'admin_roles': ('Administration', 'roles'),
-            'admin_rooms': ('Administration', 'rooms'),
             'admin_clinics': ('Administration', 'clinics'),
             'admin_settings': ('Administration', 'settings'),
             'admin_audit': ('Administration', 'audit'),
@@ -234,7 +233,7 @@ class Command(BaseCommand):
                 'type': 'admin',
                 'description': 'Full system access with all permissions',
                 'permissions': [
-                    "/admin", "/admin/annual-checkup-programme", "/admin/audit", "/admin/support-tickets", "/admin/clinics", "/admin/health", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
+                    "/admin", "/admin/annual-checkup-programme", "/admin/audit", "/admin/support-tickets", "/admin/clinics", "/admin/health", "/admin/roles", "/admin/settings", "/admin/users",
                     "/analytics", "/analytics/executive",
                     "/hr", "/hr/annual-checkups", "/hr/exemptions",
                     "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/room", "/consultation/start", "/consultation/wards",

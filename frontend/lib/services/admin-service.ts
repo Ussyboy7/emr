@@ -540,10 +540,10 @@ class AdminService {
    * Get all rooms.
    *
    * Hits ``/consultation/rooms/`` (``ConsultationRoom`` — the model the
-   * Room Management page at ``/admin/rooms`` actually manages). The
-   * older ``/organization/rooms/`` endpoint exposes a *different*
-   * ``organization.Room`` table that has no UI today and is typically
-   * empty, which is what caused the admin dashboard to show
+   * Rooms tab on the Clinics & Departments page (``/admin/clinics``)
+   * manages). The older ``/organization/rooms/`` endpoint exposes a
+   * *different* ``organization.Room`` table that has no UI today and is
+   * typically empty, which is what caused the admin dashboard to show
    * ``Rooms: 0`` while the management page listed 11 rows.
    */
   async getRooms(params?: {
@@ -745,4 +745,3 @@ class AdminService {
 }
 
 export const adminService = new AdminService();
-

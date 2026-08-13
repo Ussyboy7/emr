@@ -96,7 +96,6 @@ ALL_PAGE_IDS: tuple[str, ...] = (
     "/admin/users",
     "/admin/roles",
     "/admin/clinics",
-    "/admin/rooms",
     "/admin/settings",
     "/admin/health",
     "/admin/annual-checkup-programme",

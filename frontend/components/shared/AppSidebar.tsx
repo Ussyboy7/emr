@@ -260,7 +260,6 @@ export const menuSections: MenuSection[] = [
       { label: "User Management", href: "/admin/users", icon: UserCog },
       { label: "Roles & Permissions", href: "/admin/roles", icon: Shield },
       { label: "Clinics & Departments", href: "/admin/clinics", icon: Building2 },
-      { label: "Room Management", href: "/admin/rooms", icon: DoorOpen },
       { label: "System Settings", href: "/admin/settings", icon: Settings },
       { label: "System Health", href: "/admin/health", icon: Activity },
       { label: "Annual Check-up", href: "/admin/annual-checkup-programme", icon: ClipboardCheck },

@@ -37,7 +37,6 @@ SUPPORT_EXCLUDED_PAGES: frozenset[str] = frozenset(
         "/admin/audit",
         "/admin/clinics",
         "/admin/roles",
-        "/admin/rooms",
         "/admin/settings",
         "/admin/users",
         "/admin/health",

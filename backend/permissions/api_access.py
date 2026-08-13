@@ -68,8 +68,9 @@ MODULE_API_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "/medical-records/referrals",
             "/medical-records/coding",
             "/medical-records/diagnosis-review",
-            # Admin room management uses consultation/rooms/ (ConsultationRoom model).
-            "/admin/rooms",
+            # Admin room management lives in the Clinics & Departments page
+            # (Rooms tab) and uses consultation/rooms/ (ConsultationRoom model).
+            "/admin/clinics",
             # Nursing room queue page fetches consultation rooms/sessions/queue APIs.
             "/nursing/room-queue",
             # Nursing pool queue also fetches consultation queue/session APIs.
@@ -199,8 +200,8 @@ def check_api_page_access(
 
     if api_path.startswith(ORGANIZATION_ROOM_PREFIXES):
         if method in ("GET", "HEAD", "OPTIONS"):
-            return has_any( ("/admin/rooms", "/admin", "/consultation"))
-        return has_any( ("/admin/rooms", "/admin"))
+            return has_any( ("/admin/clinics", "/admin", "/consultation"))
+        return has_any( ("/admin/clinics", "/admin"))
 
     if api_path.startswith(ORGANIZATION_READ_PREFIXES):
         if method in ("GET", "HEAD", "OPTIONS"):

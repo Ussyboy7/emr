@@ -506,7 +506,7 @@ export default function AdminDashboardPage() {
               </div>
               <div className="mt-2 text-xs">
                 {systemStats.totalRooms === 0 ? (
-                  <Link href="/admin/rooms" className="text-cyan-600 hover:underline">
+                  <Link href="/admin/clinics?tab=rooms" className="text-cyan-600 hover:underline">
                     Configure rooms →
                   </Link>
                 ) : (
@@ -908,7 +908,7 @@ export default function AdminDashboardPage() {
                   <div>
                     <h4 className="text-sm font-medium text-muted-foreground mb-2">System Management</h4>
                     <div className="grid grid-cols-2 gap-2">
-                      <Link href="/admin/rooms">
+                      <Link href="/admin/clinics?tab=rooms">
                         <Button variant="outline" className="w-full h-auto py-3 flex flex-col items-center gap-1">
                           <DoorOpen className="h-5 w-5 text-cyan-500" />
                           <span className="text-xs">Rooms</span>

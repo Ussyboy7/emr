@@ -1090,7 +1090,7 @@ export default function ClinicDepartmentPage() {
           </TabsContent>
 
           <TabsContent value="rooms" className="mt-4">
-            <RoomsAdminManager ref={roomsAdminRef} showHeader={false} />
+            <RoomsAdminManager ref={roomsAdminRef} showHeader={false} showStats />
           </TabsContent>
 
           <TabsContent value="wards" className="mt-4">
