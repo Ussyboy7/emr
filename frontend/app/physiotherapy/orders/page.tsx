@@ -548,18 +548,12 @@ export default function PhysiotherapyOrdersPage() {
       const sessionsResponse = await physioService.getSessions({ order: order.id });
       for (const session of sessionsResponse.results) {
         if (session.status !== 'completed') {
-          await physioService.updateSession(session.id, {
-            status: 'completed',
-            completed_at: new Date().toISOString()
-          });
+          await physioService.completeSession(session.id);
         }
       }
 
       // Then complete the order
-      await physioService.updateOrder(order.id, {
-        status: 'completed',
-        completed_at: new Date().toISOString()
-      });
+      await physioService.completeOrder(order.id);
       toast.success('Treatment ended successfully');
       setIsViewDialogOpen(false);
       setSelectedOrder(null);
@@ -585,18 +579,13 @@ export default function PhysiotherapyOrdersPage() {
   const handleCompleteIndividualSession = async (sessionId: number, form: PhysioSessionFormData) => {
     setIsSubmitting(true);
     try {
-      await physioService.updateSession(sessionId, {
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        ...physioSessionFormToCompletionPayload(form),
-      });
-
-      // Update order's sessions_completed count
-      const sessionsResponse = await physioService.getSessions({ order: selectedOrder?.id });
-      const completedCount = sessionsResponse.results.filter((s: any) => s.status === 'completed').length;
-
-      await physioService.updateOrder(selectedOrder!.id, {
-        sessions_completed: completedCount
+      await physioService.updateSession(
+        sessionId,
+        physioSessionFormToCompletionPayload(form),
+      );
+      await physioService.completeSession(sessionId, {
+        pain_level_before: form.pain_level_before ?? undefined,
+        pain_level_after: form.pain_level_after ?? undefined,
       });
 
       // No longer auto-creating next session. Use Continue Session/Add Session when more sessions are needed.

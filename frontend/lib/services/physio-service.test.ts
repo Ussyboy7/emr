@@ -140,6 +140,20 @@ describe('physioService', () => {
     });
   });
 
+  describe('completeOrder', () => {
+    it('posts the canonical complete-order action', async () => {
+      mockApiFetch.mockResolvedValue({ id: 5, status: 'completed' });
+
+      const res = await physioService.completeOrder(5);
+
+      expect(res.status).toBe('completed');
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/orders/5/complete/',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+  });
+
   describe('getStats', () => {
     it('fetches physio statistics', async () => {
       const stats = { total_orders: 50, pending_orders: 10, completed_sessions: 30, active_sessions: 5, total_sessions: 40 };
