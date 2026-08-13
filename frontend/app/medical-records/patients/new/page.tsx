@@ -1022,7 +1022,7 @@ export default function NewPatientPage() {
 
                     <div className="flex justify-end pt-4">
                       <Button type="button" onClick={goToNextStep}>
-                        Next: Work Info
+                        Next
                         <ArrowRight className="h-4 w-4 ml-2" />
                       </Button>
                     </div>
@@ -1149,7 +1149,7 @@ export default function NewPatientPage() {
                         Back
                       </Button>
                       <Button type="button" onClick={goToNextStep}>
-                        Next: Contact
+                        Next
                         <ArrowRight className="h-4 w-4 ml-2" />
                       </Button>
                     </div>
@@ -1220,7 +1220,7 @@ export default function NewPatientPage() {
                         Back
                       </Button>
                       <Button type="button" onClick={goToNextStep}>
-                        Next: Medical & NOK
+                        Next
                         <ArrowRight className="h-4 w-4 ml-2" />
                       </Button>
                     </div>

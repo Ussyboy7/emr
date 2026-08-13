@@ -43,6 +43,7 @@ import { PrincipalDependentsModal } from '@/components/shared/PrincipalDependent
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { EditPatientDialog } from '@/components/medical-records/EditPatientDialog';
 import { useWorkLocationOptions } from '@/hooks/use-work-location-options';
+import { useReloadOnFocus } from '@/hooks/use-reload-on-focus';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedFiltersButton } from '@/components/shared/AdvancedFiltersButton';
 import { MergePatientDialog } from './merge-patient-dialog';
@@ -293,7 +294,6 @@ function PatientsListPageContent() {
     principalDisplayName: string;
     principalPatientId: string;
     principalCategory: 'employee' | 'retiree';
-    defaultTab: 'list' | 'add';
   } | null>(null);
 
   const principalIdFromUrl = useMemo(() => {
@@ -455,6 +455,8 @@ function PatientsListPageContent() {
     if (!ready) return;
     void loadPatients();
   }, [ready, loadPatients]);
+
+  useReloadOnFocus(() => loadPatients(), { minIntervalMs: 0 });
 
   const stats = useMemo(() => [
     { label: 'Total Patients', value: counts?.total ?? 0, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
@@ -1192,7 +1194,6 @@ function PatientsListPageContent() {
                                     principalDisplayName: patient.name,
                                     principalPatientId: patient.id,
                                     principalCategory: patient.category === 'Retiree' ? 'retiree' : 'employee',
-                                    defaultTab: 'list',
                                   })
                                 }
                               >
@@ -1340,7 +1341,6 @@ function PatientsListPageContent() {
           principalDisplayName={principalDepsOpen?.principalDisplayName ?? ''}
           principalPatientId={principalDepsOpen?.principalPatientId ?? ''}
           principalCategory={principalDepsOpen?.principalCategory ?? 'employee'}
-          defaultTab={principalDepsOpen?.defaultTab ?? 'list'}
           onAfterChange={() => void loadPatients()}
           onEditDependent={async (api) => {
             setPrincipalDepsOpen(null);
