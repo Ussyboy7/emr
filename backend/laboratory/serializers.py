@@ -11,6 +11,8 @@ from .models import (
     LabPartner,
     LabOrder,
     LabTest,
+    LabSampleBatch,
+    LabTestRoutingEvent,
     LabTestResultAttachment,
     LabReferralDispatch,
     LabResult,
@@ -116,6 +118,13 @@ class LabTestSerializer(serializers.ModelSerializer):
     overall_status = serializers.SerializerMethodField()
     result_attachments = LabTestResultAttachmentSerializer(many=True, read_only=True)
     location_clinic_name = serializers.SerializerMethodField()
+    processing_clinic_name = serializers.SerializerMethodField()
+    accession_number = serializers.SerializerMethodField()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_accession_number(self, obj):
+        batch = getattr(obj, 'sample_batch', None)
+        return (batch.accession_number if batch else None) or obj.lab_number
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
@@ -123,6 +132,13 @@ class LabTestSerializer(serializers.ModelSerializer):
 
         order = getattr(obj, "order", None)
         return order_location_clinic_name(order)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_processing_clinic_name(self, obj):
+        clinic = getattr(obj, 'processing_clinic', None) or getattr(
+            getattr(obj, 'order', None), 'processing_clinic', None
+        )
+        return clinic.name if clinic else None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_overall_status(self, obj):
@@ -293,7 +309,23 @@ class LabTestSerializer(serializers.ModelSerializer):
     class Meta:
         model = LabTest
         fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = [
+            'created_at', 'updated_at', 'processing_clinic', 'routing_status',
+        ]
+
+
+class LabSampleBatchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LabSampleBatch
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'collected_by', 'collected_at']
+
+
+class LabTestRoutingEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LabTestRoutingEvent
+        fields = '__all__'
+        read_only_fields = ['id', 'changed_by', 'changed_at']
 
 
 class LabTestCreateSerializer(serializers.ModelSerializer):
@@ -321,6 +353,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
     doctor_details = serializers.SerializerMethodField()
     external_clinic_details = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
+    processing_clinic_name = serializers.SerializerMethodField()
     tests = LabTestSerializer(many=True, read_only=True)
     # Allow tests to be written during creation (using nested serializer without order field)
     tests_data = LabTestCreateSerializer(many=True, write_only=True, required=False)
@@ -379,6 +412,11 @@ class LabOrderSerializer(serializers.ModelSerializer):
         from common.order_location import order_location_clinic_name
 
         return order_location_clinic_name(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_processing_clinic_name(self, obj):
+        clinic = getattr(obj, 'processing_clinic', None)
+        return clinic.name if clinic else None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_external_clinic_details(self, obj):
@@ -470,7 +508,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 validated_data['doctor'] = consultation_session.doctor
         request = self.context.get('request')
         user = getattr(request, 'user', None) if request else None
-        validated_data = apply_order_location_clinic(validated_data, user=user)
+        validated_data = apply_order_location_clinic(validated_data, user=None)
         order = LabOrder.objects.create(**validated_data)
 
         # Create lab tests
@@ -545,7 +583,9 @@ class LabOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = LabOrder
         fields = '__all__'
-        read_only_fields = ['order_id', 'ordered_at', 'created_at']
+        read_only_fields = [
+            'order_id', 'ordered_at', 'created_at', 'location_clinic', 'processing_clinic',
+        ]
 
 
 class LabReferralDispatchSerializer(serializers.ModelSerializer):
@@ -585,6 +625,11 @@ class LabReferralDispatchSerializer(serializers.ModelSerializer):
                 'sample_type': t.sample_type,
                 'status': t.status,
                 'lab_number': t.lab_number,
+                'accession_number': (
+                    t.sample_batch.accession_number
+                    if t.sample_batch_id
+                    else t.lab_number
+                ),
             }
             for t in obj.tests.all()
         ]

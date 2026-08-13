@@ -290,6 +290,20 @@ class LabSampleCollectionTests(APITestCase):
         self.assertIsNotNone(self.test1.lab_number)
         self.assertEqual(self.test1.lab_number, self.test2.lab_number,
                          "All tests in one order share a single lab number")
+        self.assertIsInstance(resp.data, list)
+        self.assertEqual({test["id"] for test in resp.data}, {self.test1.pk, self.test2.pk})
+
+    def test_hyphenated_collect_samples_returns_batch_and_tests(self):
+        resp = self.client.post(
+            f"{BASE}/orders/{self.order.pk}/collect-samples/",
+            {"test_ids": [self.test1.pk, self.test2.pk]},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("sample_batch", resp.data)
+        self.assertIn("tests", resp.data)
+        self.assertEqual({test["id"] for test in resp.data["tests"]}, {self.test1.pk, self.test2.pk})
 
     def test_collect_samples_empty_ids_returns_400(self):
         resp = self.client.post(

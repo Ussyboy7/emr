@@ -10,6 +10,7 @@ from .models import (
     RadiologyTemplate,
     RadiologyOrder,
     RadiologyStudy,
+    RadiologyStudyRoutingEvent,
     RadiologyStudyReportAttachment,
     RadiologyReport,
     ImagingPartner,
@@ -154,6 +155,7 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
     report_attachments = RadiologyStudyReportAttachmentSerializer(many=True, read_only=True)
 
     location_clinic_name = serializers.SerializerMethodField()
+    processing_clinic_name = serializers.SerializerMethodField()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
@@ -161,6 +163,13 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
 
         order = getattr(obj, "order", None)
         return order_location_clinic_name(order)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_processing_clinic_name(self, obj):
+        clinic = getattr(obj, 'processing_clinic', None) or getattr(
+            getattr(obj, 'order', None), 'processing_clinic', None
+        )
+        return clinic.name if clinic else None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_report_file_url(self, obj):
@@ -172,7 +181,16 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
     class Meta:
         model = RadiologyStudy
         fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = [
+            'created_at', 'updated_at', 'processing_clinic', 'routing_status',
+        ]
+
+
+class RadiologyStudyRoutingEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RadiologyStudyRoutingEvent
+        fields = '__all__'
+        read_only_fields = ['id', 'changed_by', 'changed_at']
 
 
 class RadiologyOrderSerializer(serializers.ModelSerializer):
@@ -185,6 +203,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
     doctor_details = serializers.SerializerMethodField()
     external_clinic_details = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
+    processing_clinic_name = serializers.SerializerMethodField()
     studies = RadiologyStudySerializer(many=True, read_only=True)
     icd10_diagnoses = serializers.SerializerMethodField()
 
@@ -242,6 +261,11 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
         from common.order_location import order_location_clinic_name
 
         return order_location_clinic_name(obj)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_processing_clinic_name(self, obj):
+        clinic = getattr(obj, 'processing_clinic', None)
+        return clinic.name if clinic else None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_external_clinic_details(self, obj):
@@ -304,7 +328,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
 
         request = self.context.get('request')
         user = getattr(request, 'user', None) if request else None
-        validated_data = apply_order_location_clinic(validated_data, user=user)
+        validated_data = apply_order_location_clinic(validated_data, user=None)
         order = RadiologyOrder.objects.create(**validated_data)
 
         # Create studies if provided
@@ -394,7 +418,9 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = RadiologyOrder
         fields = '__all__'
-        read_only_fields = ['order_id', 'ordered_at', 'created_at']
+        read_only_fields = [
+            'order_id', 'ordered_at', 'created_at', 'location_clinic', 'processing_clinic',
+        ]
 
 
 class RadiologyReportSerializer(serializers.ModelSerializer):

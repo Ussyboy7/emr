@@ -29,6 +29,8 @@ import { useServerToday } from '@/hooks/use-server-today';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useLabUrlSync } from '@/hooks/use-lab-url-sync';
 import { useLabPageAuth } from '@/hooks/use-lab-page-auth';
+import { useCurrentUser } from '@/hooks/use-current-user';
+import { useAnyCapability } from '@/hooks/use-capability';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   findLabOrdersTabForOrders,
@@ -55,6 +57,7 @@ import {
   Send, Printer, FileSignature, Mail, History, Hash
 } from 'lucide-react';
 import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, formatDisplayTime } from '@/lib/dates';
+import { OrderRoutingDialog } from '@/components/laboratory/OrderRoutingDialog';
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -84,6 +87,12 @@ const formatOrderedAtDisplay = (isoString: string | undefined): string => {
 
 const getLabResultFileUrl = (filePath?: string | null) => getMediaUrl(filePath ?? '') ?? '';
 
+const formatRoutingStatus = (status?: string | null): string | null => {
+  const normalized = status?.trim().toLowerCase();
+  if (!normalized || normalized === 'pending_triage') return null;
+  return normalized.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
 // Enhanced Test interface - each test is independent
 interface LabTest {
   id: string;
@@ -107,6 +116,11 @@ interface LabTest {
   rejectedAt?: string;
   verificationNotes?: string;
   notes?: string;
+  routing_status?: string;
+  processing_clinic_name?: string | null;
+  processing_clinic?: number | null;
+  accession_number?: string | null;
+  sample_accession?: string | null;
 }
 
 interface LabOrder {
@@ -133,6 +147,7 @@ interface LabOrder {
   orderedAt: string;
   clinic: string;
   location_clinic_name?: string;
+  processing_clinic_name?: string;
   clinicalNotes?: string;
   sourceType?: 'internal_emr' | 'external_manual';
   externalClinic?: { id: number; name: string; code?: string } | null;
@@ -217,6 +232,7 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
     orderedAt: apiOrder.ordered_at,
     clinic: apiOrder.clinic || '',
     location_clinic_name: apiOrder.location_clinic_name || undefined,
+    processing_clinic_name: apiOrder.processing_clinic_name || undefined,
     sourceType: ((apiOrder as any).source_type || 'internal_emr') as 'internal_emr' | 'external_manual',
     externalClinic: (apiOrder as any).external_clinic_details || null,
     externalRequestingDoctorName: (apiOrder as any).external_requesting_doctor_name || '',
@@ -276,6 +292,11 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
     rejectedAt: apiTest.rejected_at,
     verificationNotes: apiTest.verification_notes,
     notes: apiTest.notes,
+    routing_status: (apiTest as any).routing_status,
+    processing_clinic_name: apiTest.processing_clinic_name,
+    processing_clinic: (apiTest as any).processing_clinic,
+    accession_number: (apiTest as any).accession_number,
+    sample_accession: (apiTest as any).accession_number,
   };
 };
 
@@ -340,6 +361,10 @@ const OUTSOURCED_LAB_OTHER = '__other__';
 export default function LabOrdersPage() {
   const serverToday = useServerToday();
   const { ready, handleAuthError } = useLabPageAuth();
+  const { currentUser } = useCurrentUser();
+  const canCollect = useAnyCapability(['lab_collect']);
+  const canProcess = useAnyCapability(['lab_process']);
+  const canRoute = useAnyCapability(['lab_collect', 'lab_process']);
   const [orders, setOrders] = useState<LabOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -349,6 +374,7 @@ export default function LabOrdersPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [facilityFilter, setFacilityFilter] = useState('all');
+  const [processingFacilityFilter, setProcessingFacilityFilter] = useState('all');
   const [facilities, setFacilities] = useState<Clinic[]>([]);
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
@@ -380,9 +406,14 @@ export default function LabOrdersPage() {
 
   // Dialog states
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
+  const canRouteSelectedOrder = canRoute && Boolean(
+    facilities.find((facility) => facility.name === selectedOrder?.location_clinic_name)?.default_processing_clinic
+    || /tincan|tin can|apapa|lagos port complex|\blpc\b/i.test(selectedOrder?.location_clinic_name || ''),
+  );
   const [selectedPrincipalInfo, setSelectedPrincipalInfo] = useState<PrincipalInfo | null>(null);
   const [selectedTest, setSelectedTest] = useState<LabTest | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isRoutingDialogOpen, setIsRoutingDialogOpen] = useState(false);
   const [isCollectDialogOpen, setIsCollectDialogOpen] = useState(false);
   const [isProcessDialogOpen, setIsProcessDialogOpen] = useState(false);
   const [isResultsDialogOpen, setIsResultsDialogOpen] = useState(false);
@@ -393,6 +424,7 @@ export default function LabOrdersPage() {
   const [selectedTestsForCollection, setSelectedTestsForCollection] = useState<string[]>([]);
   const [selectedMethod, setSelectedMethod] = useState('');
   const [collectionNotes, setCollectionNotes] = useState('');
+  const [collectionClinicId, setCollectionClinicId] = useState('');
   const [processingMethod, setProcessingMethod] = useState<'In-house' | 'Outsourced'>('In-house');
   const [selectedOutsourcedLab, setSelectedOutsourcedLab] = useState('');
   const [customOutsourcedLab, setCustomOutsourcedLab] = useState('');
@@ -659,7 +691,7 @@ export default function LabOrdersPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, priorityFilter, dateFilter, genderFilter, facilityFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, priorityFilter, dateFilter, genderFilter, facilityFilter, processingFacilityFilter, processingFilter, sourceTypeFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
 
   useEffect(() => {
     if (!ready) return;
@@ -726,6 +758,7 @@ export default function LabOrdersPage() {
       if (facilityFilter !== 'all') {
         params.location_clinic = Number(facilityFilter);
       }
+      if (processingFacilityFilter !== 'all') params.processing_clinic = Number(processingFacilityFilter);
 
       const workflowTab = labOrdersTabToWorkflowParam(activeTab);
       if (workflowTab) {
@@ -741,6 +774,7 @@ export default function LabOrdersPage() {
           source_type: sourceTypeFilter !== 'all' ? sourceTypeFilter : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
           location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
+          processing_clinic: processingFacilityFilter !== 'all' ? Number(processingFacilityFilter) : undefined,
           ...(searching
             ? {}
             : {
@@ -799,7 +833,7 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, sourceTypeFilter, genderFilter, facilityFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab, handleAuthError]);
+  }, [currentPage, itemsPerPage, priorityFilter, debouncedSearchQuery, processingFilter, processingFacilityFilter, sourceTypeFilter, genderFilter, facilityFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab, handleAuthError]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
@@ -1014,9 +1048,10 @@ export default function LabOrdersPage() {
       // Collect all samples at once (assigns sequential lab numbers)
       await labService.collectSamples(
           parseInt(selectedOrder.id),
-        selectedTestsForCollection.map(id => parseInt(id)),
+          selectedTestsForCollection.map(id => parseInt(id)),
           selectedMethod,
-          collectionNotes
+          collectionNotes,
+          collectionClinicId ? Number(collectionClinicId) : undefined,
         );
 
       const count = selectedTestsForCollection.length;
@@ -1036,6 +1071,7 @@ export default function LabOrdersPage() {
       setSelectedTestsForCollection([]);
       setSelectedMethod('');
       setCollectionNotes('');
+      setCollectionClinicId('');
     } catch (err: any) {
       if (handleAuthError(err)) return;
       let errorMessage = 'Failed to collect samples. Please try again.';
@@ -1475,8 +1511,33 @@ export default function LabOrdersPage() {
     // Pre-select Venipuncture for blood samples
     setSelectedMethod(test.sampleType === 'Blood' ? 'Venipuncture' : '');
     setCollectionNotes('');
+    const processingFacility = facilities.find((facility) => facility.name === selectedOrder?.processing_clinic_name);
+    const originFacility = facilities.find((facility) => facility.name === selectedOrder?.location_clinic_name);
+    const policyFacility = originFacility?.default_processing_clinic
+      ? facilities.find((facility) => facility.id === originFacility.default_processing_clinic)
+      : undefined;
+    const activeFacility = currentUser?.active_clinic_id
+      ? facilities.find((facility) => facility.id === Number(currentUser.active_clinic_id))
+      : undefined;
+    const defaultCollectionFacility = activeFacility || processingFacility || policyFacility || originFacility;
+    setCollectionClinicId(defaultCollectionFacility ? String(defaultCollectionFacility.id) : '');
     // Lab ID is assigned only on Collect (one per order); reuse if order already has one
     setIsCollectDialogOpen(true);
+  };
+
+  const handleRouteTests = async (payload: Parameters<typeof labService.routeTests>[1]) => {
+    if (!selectedOrder) return;
+    try {
+      await labService.routeTests(Number(selectedOrder.id), payload);
+      toast.success('Selected tests routed');
+      setIsRoutingDialogOpen(false);
+      await loadOrders({ silent: true });
+      const updatedOrder = await labService.getOrder(Number(selectedOrder.id));
+      setSelectedOrder(transformOrder(updatedOrder));
+    } catch (error: any) {
+      if (handleAuthError(error)) return;
+      toast.error(error?.message || 'Could not route the selected tests. Please try again.');
+    }
   };
   
   /** Fetch the active lab-partner list. Used by the per-test process dialog,
@@ -1877,6 +1938,7 @@ export default function LabOrdersPage() {
                 <span>•</span>
                 <span>{order.tests.length} test{order.tests.length > 1 ? 's' : ''}</span>
                 <span>•</span>
+                <span>Origin: {order.location_clinic_name || '—'} · Processing: {order.processing_clinic_name || '—'}</span>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="font-medium text-foreground cursor-help">{orderProgressDisplay.text}</span>
@@ -2046,17 +2108,21 @@ export default function LabOrdersPage() {
                       <SelectItem value="female">Female</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Select value={facilityFilter} onValueChange={setFacilityFilter}>
-                    <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Facilities</SelectItem>
+                   <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                     <SelectTrigger className="w-[170px]"><SelectValue placeholder="Origin facility" /></SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="all">All origins</SelectItem>
                       {facilities.map((facility) => (
                         <SelectItem key={facility.id} value={String(facility.id)}>
                           {facility.name}
                         </SelectItem>
                       ))}
-                    </SelectContent>
-                  </Select>
+                     </SelectContent>
+                   </Select>
+                   <Select value={processingFacilityFilter} onValueChange={setProcessingFacilityFilter}>
+                     <SelectTrigger className="w-[180px]"><SelectValue placeholder="Processing facility" /></SelectTrigger>
+                     <SelectContent><SelectItem value="all">All processing facilities</SelectItem>{facilities.map((facility) => <SelectItem key={facility.id} value={String(facility.id)}>{facility.name}</SelectItem>)}</SelectContent>
+                   </Select>
                   <Select
                     value={processingFilter}
                     onValueChange={(v) => setProcessingFilter(v as 'all' | 'in_house' | 'outsourced')}
@@ -2439,7 +2505,8 @@ export default function LabOrdersPage() {
                     {(selectedOrder.patient as any).division && (
                       <p className="text-xs text-muted-foreground">Division: {(selectedOrder.patient as any).division}</p>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">Location: {selectedOrder.location_clinic_name || '—'}</p>
+                     <p className="text-xs text-muted-foreground mt-1">Origin: {selectedOrder.location_clinic_name || '—'}</p>
+                     <p className="text-xs text-muted-foreground">Processing: {selectedOrder.processing_clinic_name || '—'}</p>
                   </div>
                   <div>
                     {selectedOrder.sourceType === 'external_manual' ? (
@@ -2490,6 +2557,9 @@ export default function LabOrdersPage() {
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-medium">Tests ({selectedOrder.tests.length})</p>
+                     {canRouteSelectedOrder && <Button size="sm" variant="outline" onClick={() => setIsRoutingDialogOpen(true)} className="h-8 px-3 text-xs">
+                       Route tests
+                     </Button>}
                     {/* Only surface the order-level batch button when there's
                         a real batch opportunity (>= 2 eligible tests). For a
                         single test, the per-test "Start Processing" → Outsourced
@@ -2529,7 +2599,8 @@ export default function LabOrdersPage() {
                       {/* Test Details & Actions */}
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-muted-foreground">
-                          {test.lab_number && <span className="font-mono text-blue-600 dark:text-blue-400">Lab ID: {test.lab_number}</span>}
+                          {(test.sample_accession || test.accession_number || test.lab_number) && <span className="font-mono text-blue-600 dark:text-blue-400">Lab ID: {test.sample_accession || test.accession_number || test.lab_number}</span>}
+                          {formatRoutingStatus(test.routing_status) && <span className="ml-2">• {formatRoutingStatus(test.routing_status)}</span>}
                           {test.collectedBy && <span className={test.lab_number ? " ml-2" : ""}>Collected by {test.collectedBy} {test.collectedAt && `on ${formatDate(test.collectedAt)} at ${formatTime(test.collectedAt)}`}</span>}
                           {/* Extract collection method from notes if available */}
                           {(() => {
@@ -2545,12 +2616,12 @@ export default function LabOrdersPage() {
                         
                         {/* Action Buttons */}
                         <div className="flex gap-2">
-                          {test.status === LAB_TEST_STATUS.PENDING && (
+                          {canCollect && test.status === LAB_TEST_STATUS.PENDING && (
                             <Button size="sm" onClick={() => openCollectDialog(test)} className="h-7 px-3 bg-violet-500 hover:bg-violet-600 text-white text-xs">
                               <Beaker className="h-3 w-3 mr-1" />Collect Sample
                             </Button>
                           )}
-                          {test.status === LAB_TEST_STATUS.SAMPLE_COLLECTED && (
+                          {canProcess && test.status === LAB_TEST_STATUS.SAMPLE_COLLECTED && (
                             <Button size="sm" onClick={() => openProcessDialog(test)} className="h-7 px-3 bg-blue-500 hover:bg-blue-600 text-white text-xs">
                               <Play className="h-3 w-3 mr-1" />Start Processing
                             </Button>
@@ -2859,6 +2930,16 @@ export default function LabOrdersPage() {
           </DialogContent>
         </Dialog>
 
+        <OrderRoutingDialog
+          open={isRoutingDialogOpen}
+          onOpenChange={setIsRoutingDialogOpen}
+          orderId={Number(selectedOrder?.id || 0)}
+          tests={(selectedOrder?.tests || []).map((test) => ({ ...test, id: Number(test.id) }))}
+          facilities={facilities}
+          originName={selectedOrder?.location_clinic_name}
+          onRouted={handleRouteTests}
+        />
+
         {/* Collect Sample Dialog */}
         <Dialog open={isCollectDialogOpen} onOpenChange={setIsCollectDialogOpen}>
           <DialogContent className={MODAL_SIZES.md}>
@@ -3025,6 +3106,13 @@ export default function LabOrdersPage() {
 
                 {/* Additional Notes */}
                 <div className="space-y-2">
+                  <Label className="text-sm font-medium">Collection site *</Label>
+                  <Select value={collectionClinicId} onValueChange={setCollectionClinicId}>
+                    <SelectTrigger><SelectValue placeholder="Select where the sample is collected" /></SelectTrigger>
+                    <SelectContent>{facilities.map((facility) => <SelectItem key={facility.id} value={String(facility.id)}>{facility.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label className="text-sm font-medium">Additional Notes (Optional)</Label>
                   <Input 
                     value={collectionNotes} 
@@ -3038,7 +3126,7 @@ export default function LabOrdersPage() {
               <Button variant="outline" onClick={() => setIsCollectDialogOpen(false)}>Cancel</Button>
               <Button 
                 onClick={handleCollectSample} 
-                disabled={isSubmitting || selectedTestsForCollection.length === 0 || !selectedMethod} 
+                disabled={isSubmitting || selectedTestsForCollection.length === 0 || !selectedMethod || !collectionClinicId}
                 className="bg-violet-500 hover:bg-violet-600"
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Beaker className="h-4 w-4 mr-2" />}

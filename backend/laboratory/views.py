@@ -2,6 +2,7 @@
 Views for the Laboratory app.
 """
 from rest_framework import viewsets, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -10,9 +11,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.utils import timezone
-from django.db.models import Count, Q
+from django.db import transaction
+from django.db.models import Count, Q, Max
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from organization.models import Clinic, SystemConfig
+from organization.routing import ensure_internal_processing_destination
 from io import BytesIO
 import json
 import re
@@ -35,11 +39,80 @@ def _parse_location_clinic_id(request):
         return None
 
 
+def _ensure_route_facility_access(user, clinic):
+    if not clinic or not SystemConfig.is_enabled('multi_clinic_enabled') or user.is_superuser:
+        return
+    if user_has_capability(user, 'clinical_data_view_all'):
+        return
+    assigned = set(user.location_clinics.values_list('id', flat=True))
+    if not assigned and user.location_clinic_id:
+        assigned = {user.location_clinic_id}
+    if clinic.pk not in assigned:
+        raise PermissionDenied('You are not assigned to this facility.')
+
+
+def _ensure_order_facility_access(user, order):
+    """Allow order mutations from either its origin or current facility."""
+    if not SystemConfig.is_enabled('multi_clinic_enabled') or user.is_superuser:
+        return
+    assigned = set(user.location_clinics.values_list('id', flat=True))
+    if not assigned and user.location_clinic_id:
+        assigned = {user.location_clinic_id}
+    order_facility_ids = {order.location_clinic_id, order.processing_clinic_id} - {None}
+    if not assigned.intersection(order_facility_ids):
+        raise PermissionDenied('You are not assigned to this order facility.')
+
+
+def _resolve_collection_clinic(user, order):
+    """Resolve an omitted collection clinic consistently for legacy actions."""
+    return (
+        getattr(user, 'active_clinic', None)
+        or getattr(user, 'location_clinic', None)
+        or user.location_clinics.order_by('pk').first()
+        or order.location_clinic
+        or order.processing_clinic
+        or Clinic.objects.filter(is_active=True).first()
+    )
+
+
+def _collection_accession_prefix(clinic):
+    code = re.sub(r'[^A-Z0-9]+', '-', (clinic.code or '').upper()).strip('-')
+    canonical_prefixes = {
+        'BODE-THOMAS': 'BT',
+        'TINCAN': 'TCIN',
+        'APAPA': 'LPC',
+    }
+    if code in canonical_prefixes:
+        return canonical_prefixes[code]
+    # LabTest.lab_number is a legacy varchar(20): 12 code chars + -YY-NNNN.
+    return (code or 'CLINIC')[:12]
+
+
+def _next_collection_accession(clinic):
+    """Allocate a facility/year serial while the caller holds the clinic lock."""
+    current_year = timezone.now().year % 100
+    year_prefix = f'{_collection_accession_prefix(clinic)}-{current_year:02d}-'
+    last_accession = (
+        LabSampleBatch.objects
+        .filter(accession_number__startswith=year_prefix)
+        .order_by('-accession_number')
+        .values_list('accession_number', flat=True)
+        .first()
+    )
+    try:
+        serial = int(last_accession.rsplit('-', 1)[-1]) + 1 if last_accession else 1
+    except (TypeError, ValueError):
+        serial = 1
+    return f'{year_prefix}{serial:04d}'
+
+
 from .models import (
     LabTemplate,
     LabPartner,
     LabOrder,
     LabTest,
+    LabSampleBatch,
+    LabTestRoutingEvent,
     LabTestResultAttachment,
     LabReferralDispatch,
     LabResult,
@@ -50,6 +123,8 @@ from .serializers import (
     LabPartnerSerializer,
     LabOrderSerializer,
     LabTestSerializer,
+    LabSampleBatchSerializer,
+    LabTestRoutingEventSerializer,
     LabReferralDispatchSerializer,
     LabResultSerializer,
     TemplateFieldOptionSerializer,
@@ -57,7 +132,7 @@ from .serializers import (
 )
 from common.mixins import FacilityScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_ID_PARAMS, document_viewset
-from permissions.user_capabilities import ensure_capability
+from permissions.user_capabilities import ensure_capability, user_has_capability
 from .pagination import FlexiblePageNumberPagination, LabCatalogPagination
 from .result_display import dedupe_result_alias_rows, sort_lab_result_rows_for_pdf
 from audit.services import AuditService
@@ -197,7 +272,9 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     serializer_class = LabOrderSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic']
+    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic', 'location_clinic']
+    facility_scope_fields = ('location_clinic', 'processing_clinic', 'tests__processing_clinic')
+    include_unassigned_scope = True
     search_fields = [
         'order_id',
         'clinical_notes',
@@ -219,7 +296,10 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         
         qs = (
             LabOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
+            .select_related(
+                'patient', 'doctor', 'visit', 'consultation_session', 'created_by',
+                'external_clinic', 'location_clinic', 'processing_clinic',
+            )
             .prefetch_related(
                 'tests',
                 'consultation_session__diagnoses__icd10_code',
@@ -259,6 +339,12 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         source_type = self.request.query_params.get('source_type')
         if source_type in ('internal_emr', 'external_manual'):
             qs = qs.filter(source_type=source_type)
+        processing_clinic_id = self.request.query_params.get('processing_clinic')
+        if processing_clinic_id:
+            qs = qs.filter(
+                Q(processing_clinic_id=processing_clinic_id)
+                | Q(tests__processing_clinic_id=processing_clinic_id)
+            ).distinct()
 
         location_clinic_id = _parse_location_clinic_id(self.request)
         if location_clinic_id is not None:
@@ -301,7 +387,10 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         # date field applied, so we can fan it out into two scopes below.
         base_qs = (
             LabOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
+            .select_related(
+                'patient', 'doctor', 'visit', 'consultation_session', 'created_by',
+                'external_clinic', 'location_clinic', 'processing_clinic',
+            )
             .prefetch_related('tests')
         )
         pm = request.query_params.get('processing_method')
@@ -313,6 +402,12 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         source_type = request.query_params.get('source_type')
         if source_type in ('internal_emr', 'external_manual'):
             base_qs = base_qs.filter(source_type=source_type)
+        processing_clinic_id = request.query_params.get('processing_clinic')
+        if processing_clinic_id:
+            base_qs = base_qs.filter(
+                Q(processing_clinic_id=processing_clinic_id)
+                | Q(tests__processing_clinic_id=processing_clinic_id)
+            ).distinct()
         location_clinic_id = _parse_location_clinic_id(request)
         if location_clinic_id is not None:
             base_qs = base_qs.filter(location_clinic_id=location_clinic_id)
@@ -498,64 +593,61 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     def generate_lab_number(self, request, pk=None):
         """Generate Lab ID (BT-YY-NNNN) for a test. Used when patient comes to lab and sample is collected.
         One Lab ID per order: all tests in the order share the same Lab ID when collected together."""
-        from django.db.models import Max
-
         order = self.get_object()
         test_id = request.data.get('test_id')
 
         try:
             test = order.tests.get(id=test_id)
-
-            if not test.lab_number:
-                # Format: BT-YY-NNNN (BT = Bode Thomas, YY = year, NNNN = serial)
-                current_year = timezone.now().year % 100
-                clinic_code = 'BT'
-                year_prefix = f"{clinic_code}-{current_year:02d}-"
-                max_lab_number = LabTest.objects.filter(
-                    lab_number__startswith=year_prefix
-                ).aggregate(Max('lab_number'))['lab_number__max']
-
-                if max_lab_number:
-                    try:
-                        serial = int(max_lab_number.split('-')[-1]) + 1
-                    except (ValueError, IndexError):
-                        serial = 1
-                else:
-                    serial = 1
-
-                test.lab_number = f"{clinic_code}-{current_year:02d}-{serial:04d}"
-                test.save()
-
-                AuditService.log_activity(
-                    user=request.user,
-                    action='update',
-                    object_type='lab_test',
-                    object_id=str(test.id),
-                    module='laboratory',
-                    object_repr=f'Lab Test {test.template.name if test.template else "Unknown"}',
-                    description=f'Lab ID generated: {test.lab_number} (Order: {order.order_id})',
-                    old_values={},
-                    new_values={'lab_number': test.lab_number},
-                    metadata={'order_id': order.order_id},
-                    request=request,
-                )
-
-            return Response(LabTestSerializer(test).data)
+            collection_clinic_id = request.data.get('collection_clinic')
+            collection_clinic = (
+                get_object_or_404(Clinic, pk=collection_clinic_id)
+                if collection_clinic_id is not None
+                else None
+            )
+            collection_response = self._collect_samples(
+                request,
+                order,
+                test_ids=[test.pk],
+                collection_clinic=collection_clinic,
+                idempotent=True,
+                response_shape='batch',
+            )
+            if collection_response.status_code != status.HTTP_200_OK:
+                return collection_response
+            return Response(collection_response.data['tests'][0])
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    @extend_schema(tags=["Laboratory"], summary="Collect samples", description="Collect samples for multiple tests in the order. Generates ONE Lab ID (BT-YY-NNNN) and")
+    @extend_schema(tags=["Laboratory"], summary="Collect samples", description="Collect samples for selected tests and generate one facility accession per physical batch.")
     @action(detail=True, methods=['post'])
     def collect_samples(self, request, pk=None):
-        """Collect samples for multiple tests in the order. Generates ONE Lab ID (BT-YY-NNNN) and
-        assigns it to all tests in the order. When a patient comes to the lab, one Lab ID covers
-        all tests in that order."""
-        from django.db.models import Max
+        """Collect selected tests as one physical sample batch with a facility accession."""
+        return self._collect_samples(request, self.get_object(), response_shape='legacy')
 
-        order = self.get_object()
-        test_ids = request.data.get('test_ids', [])
+    @action(detail=True, methods=['post'], url_path='collect-samples')
+    def collect_samples_batch(self, request, pk=None):
+        return self._collect_samples(request, self.get_object(), response_shape='batch')
+
+    def _collect_samples(
+        self,
+        request,
+        order,
+        *,
+        test_ids=None,
+        collection_clinic=None,
+        idempotent=False,
+        response_shape='batch',
+    ):
+        ensure_capability(
+            request.user,
+            'lab_collect',
+            'Only authorised laboratory staff can collect samples.',
+        )
+        _ensure_order_facility_access(request.user, order)
+        test_ids = request.data.get('test_ids', []) if test_ids is None else test_ids
         collection_method = request.data.get('collection_method', '')
         notes = request.data.get('notes', '')
+        collection_clinic_id = request.data.get('collection_clinic')
 
         if not test_ids:
             return Response({'error': 'No tests specified'}, status=status.HTTP_400_BAD_REQUEST)
@@ -563,79 +655,289 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         try:
             # Ensure test_ids are integers
             test_ids = [int(tid) for tid in test_ids]
-            
-            # One Lab ID per order: refresh order from DB (single source of truth)
-            order.refresh_from_db()
-            tests = list(order.tests.filter(id__in=test_ids))
-            
-            if order.lab_number and order.lab_number.strip():
-                shared_lab_number = order.lab_number
-            else:
-                # Generate new BT-YY-NNNN and save on the order
-                current_year = timezone.now().year % 100
-                clinic_code = 'BT'
-                year_prefix = f"{clinic_code}-{current_year:02d}-"
-                max_lab_number = LabTest.objects.filter(
-                    lab_number__startswith=year_prefix
-                ).aggregate(Max('lab_number'))['lab_number__max']
+            if collection_clinic is None and collection_clinic_id is None:
+                collection_clinic = _resolve_collection_clinic(request.user, order)
+                if collection_clinic is None:
+                    collection_clinic, _ = Clinic.objects.get_or_create(
+                        code='DEFAULT-COLLECTION',
+                        defaults={'name': 'Default Collection Facility'},
+                    )
+            elif collection_clinic is None:
+                collection_clinic = get_object_or_404(Clinic, pk=collection_clinic_id)
+            _ensure_route_facility_access(request.user, collection_clinic)
 
-                if max_lab_number:
-                    try:
-                        next_serial = int(max_lab_number.split('-')[-1]) + 1
-                    except (ValueError, IndexError):
-                        next_serial = 1
-                else:
-                    next_serial = 1
-
-                shared_lab_number = f"{clinic_code}-{current_year:02d}-{next_serial:04d}"
-                order.lab_number = shared_lab_number
-                order.save(update_fields=['lab_number'])
-
-            updated_tests = []
-            for test in tests:
-                test.lab_number = shared_lab_number
-                test.status = 'sample_collected'
-                test.collected_by = request.user
-                test.collected_at = timezone.now()
-
-                # Store collection method and notes
-                collection_info = []
-                if test.lab_number:
-                    collection_info.append(f"Lab ID: {test.lab_number}")
-                if collection_method:
-                    collection_info.append(f"Method: {collection_method}")
-                if notes:
-                    collection_info.append(f"Notes: {notes}")
-                if collection_info:
-                    test.notes = '\n'.join(collection_info)
-
-                test.save()
-
-                # Log audit
-                AuditService.log_activity(
-                    user=request.user,
-                    action='update',
-                    object_type='lab_test',
-                    object_id=str(test.id),
-                    module='laboratory',
-                    object_repr=f'Lab Test {test.template.name if test.template else "Unknown"}',
-                    description=f'Sample collected for test: {test.template.name if test.template else "Unknown"} (Order: {order.order_id})',
-                    old_values={'status': 'pending'},
-                    new_values={'status': 'sample_collected'},
-                    metadata={'order_id': order.order_id, 'collection_method': collection_method, 'lab_number': test.lab_number},
-                    request=request,
+            with transaction.atomic():
+                order = LabOrder.objects.select_for_update().get(pk=order.pk)
+                tests = list(
+                    LabTest.objects.select_for_update().filter(order=order, id__in=test_ids)
+                )
+                if len(tests) != len(set(test_ids)):
+                    return Response({'error': 'Some tests are not part of this order'}, status=status.HTTP_400_BAD_REQUEST)
+                collection_clinic = Clinic.objects.select_for_update().get(
+                    pk=collection_clinic.pk
                 )
 
-                updated_tests.append(test)
+                already_collected = [test for test in tests if test.sample_batch_id]
+                if already_collected and not idempotent:
+                    return Response(
+                        {'error': 'One or more tests are already assigned to a sample batch.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
-            return Response(LabTestSerializer(updated_tests, many=True).data)
+                if idempotent and len(tests) == 1 and tests[0].sample_batch_id:
+                    batch = LabSampleBatch.objects.select_for_update().get(
+                        pk=tests[0].sample_batch_id
+                    )
+                    return self._collection_response(batch, tests, response_shape)
+
+                legacy_lab_number = (
+                    tests[0].lab_number
+                    if idempotent and len(tests) == 1 and not tests[0].sample_batch_id
+                    else None
+                )
+                if legacy_lab_number:
+                    batch = order.sample_batches.filter(
+                        accession_number=legacy_lab_number,
+                        collection_clinic=collection_clinic,
+                    ).first()
+                    if batch is None:
+                        batch = LabSampleBatch.objects.create(
+                            accession_number=legacy_lab_number,
+                            order=order,
+                            collection_clinic=collection_clinic,
+                            collected_by=request.user,
+                            collected_at=timezone.now(),
+                            notes=notes,
+                        )
+                    shared_lab_number = legacy_lab_number
+                else:
+                    shared_lab_number = _next_collection_accession(collection_clinic)
+                    batch = LabSampleBatch.objects.create(
+                        accession_number=shared_lab_number,
+                        order=order,
+                        collection_clinic=collection_clinic,
+                        collected_by=request.user,
+                        collected_at=timezone.now(),
+                        notes=notes,
+                    )
+                collected_at = timezone.now()
+
+                updated_tests = []
+                for test in tests:
+                    if not test.lab_number:
+                        test.lab_number = shared_lab_number
+                    test.sample_batch = batch
+                    test.status = 'sample_collected'
+                    test.collected_by = request.user
+                    test.collected_at = collected_at
+
+                    # Store collection method and notes
+                    collection_info = []
+                    collection_info.append(f"Lab ID: {shared_lab_number}")
+                    if collection_method:
+                        collection_info.append(f"Method: {collection_method}")
+                    if notes:
+                        collection_info.append(f"Notes: {notes}")
+                    if collection_info:
+                        test.notes = '\n'.join(collection_info)
+
+                    test.save()
+
+                    # Log audit
+                    AuditService.log_activity(
+                        user=request.user,
+                        action='update',
+                        object_type='lab_test',
+                        object_id=str(test.id),
+                        module='laboratory',
+                        object_repr=f'Lab Test {test.template.name if test.template else "Unknown"}',
+                        description=f'Sample collected for test: {test.template.name if test.template else "Unknown"} (Order: {order.order_id})',
+                        old_values={'status': 'pending'},
+                        new_values={'status': 'sample_collected'},
+                        metadata={'order_id': order.order_id, 'collection_method': collection_method, 'lab_number': test.lab_number},
+                        request=request,
+                    )
+
+                    updated_tests.append(test)
+
+            return self._collection_response(batch, updated_tests, response_shape)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @staticmethod
+    def _collection_response(batch, tests, response_shape):
+        serialized_tests = LabTestSerializer(tests, many=True).data
+        if response_shape == 'legacy':
+            return Response(serialized_tests)
+        return Response({
+            'sample_batch': LabSampleBatchSerializer(batch).data,
+            'tests': serialized_tests,
+        })
+
+    @action(detail=True, methods=['post'], url_path='route-tests')
+    def route_tests(self, request, pk=None):
+        if not (user_has_capability(request.user, 'lab_collect') or user_has_capability(request.user, 'lab_process')):
+            ensure_capability(request.user, 'lab_process', 'Only authorised laboratory staff can route tests.')
+        order = self.get_object()
+        test_ids = request.data.get('test_ids') or []
+        destination_type = request.data.get('destination_type')
+        if not isinstance(test_ids, list) or not test_ids:
+            return Response({'error': 'test_ids must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+        if destination_type not in ('internal', 'external'):
+            return Response({'error': 'destination_type must be internal or external'}, status=status.HTTP_400_BAD_REQUEST)
+
+        external_destination = (request.data.get('external_destination') or '').strip()
+        processing_clinic_id = request.data.get('processing_clinic')
+        if destination_type == 'external' and not external_destination:
+            return Response({'error': 'external_destination is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if destination_type == 'internal' and not processing_clinic_id:
+            return Response({'error': 'processing_clinic is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            test_ids = [int(test_id) for test_id in test_ids]
+            processing_clinic = None
+            if destination_type == 'internal':
+                processing_clinic = get_object_or_404(Clinic, pk=processing_clinic_id)
+                _ensure_route_facility_access(request.user, processing_clinic)
+            with transaction.atomic():
+                locked_order = LabOrder.objects.select_for_update().get(pk=order.pk)
+                if destination_type == 'internal':
+                    ensure_internal_processing_destination(locked_order.location_clinic, processing_clinic)
+                _ensure_route_facility_access(request.user, locked_order.location_clinic)
+                tests = list(LabTest.objects.select_for_update().filter(order=locked_order, id__in=test_ids))
+                if len(tests) != len(set(test_ids)):
+                    return Response({'error': 'Some tests are not part of this order'}, status=status.HTTP_400_BAD_REQUEST)
+                non_routeable = [
+                    test for test in tests
+                    if test.status in ('results_ready', 'verified', 'rejected')
+                    or test.routing_status == 'cancelled'
+                ]
+                if non_routeable:
+                    return Response(
+                        {'error': 'These tests can no longer be routed: ' + ', '.join(
+                            f'{test.code} ({test.status}/{test.routing_status})' for test in non_routeable
+                        )},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                reason = (request.data.get('reason') or '').strip()
+                if destination_type == 'external' and not reason:
+                    return Response(
+                        {'error': 'reason is required for external routing.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if destination_type == 'internal':
+                    issued_dispatch_ids = locked_order.dispatches.filter(
+                        status='issued', tests__in=tests,
+                    ).values_list('id', flat=True).distinct()
+                    issued_dispatches = list(
+                        locked_order.dispatches.select_for_update().filter(id__in=issued_dispatch_ids)
+                    )
+                    for dispatch in issued_dispatches:
+                        dispatch_test_ids = set(dispatch.tests.values_list('id', flat=True))
+                        remaining_test_ids = dispatch_test_ids - {test.id for test in tests}
+                        if remaining_test_ids:
+                            replacement = LabReferralDispatch.objects.create(
+                                order=locked_order,
+                                partner=dispatch.partner,
+                                partner_name=dispatch.partner_name,
+                                partner_address_snapshot=dispatch.partner_address_snapshot,
+                                notes=dispatch.notes,
+                                issued_by=dispatch.issued_by,
+                            )
+                            replacement.tests.set(LabTest.objects.filter(id__in=remaining_test_ids))
+                            dispatch.status = 'superseded'
+                            dispatch.superseded_by = replacement
+                            dispatch.save(update_fields=['status', 'superseded_by'])
+                            new_status = 'superseded'
+                        else:
+                            dispatch.status = 'cancelled'
+                            dispatch.cancellation_reason = reason or 'Superseded by internal reroute'
+                            dispatch.cancelled_at = timezone.now()
+                            dispatch.cancelled_by = request.user
+                            dispatch.save(update_fields=[
+                                'status', 'cancellation_reason', 'cancelled_at', 'cancelled_by',
+                            ])
+                            new_status = 'cancelled'
+                        AuditService.log_activity(
+                            user=request.user, action='update', object_type='lab_referral_dispatch',
+                            object_id=str(dispatch.id), module='laboratory',
+                            object_repr=dispatch.dispatch_id,
+                            description=f'{new_status.title()} dispatch {dispatch.dispatch_id} for internal reroute',
+                            new_values={
+                                'status': new_status,
+                                'cancellation_reason': dispatch.cancellation_reason,
+                            },
+                            metadata={'order_id': locked_order.order_id}, request=request,
+                        )
+                events = []
+                for test in tests:
+                    event = LabTestRoutingEvent.objects.create(
+                        test=test,
+                        from_clinic=test.processing_clinic,
+                        to_clinic=processing_clinic,
+                        destination_type=destination_type,
+                        external_destination=external_destination,
+                        reason=reason,
+                        changed_by=request.user,
+                    )
+                    test.processing_clinic = processing_clinic
+                    test.routing_status = 'referred_external' if destination_type == 'external' else 'sent_to_processing'
+                    if destination_type == 'external':
+                        test.processing_method = 'outsourced'
+                        test.outsourced_lab = external_destination
+                        test.status = 'processing'
+                        test.processed_by = request.user
+                        test.processed_at = timezone.now()
+                    else:
+                        test.processing_method = 'in_house'
+                        test.outsourced_lab = ''
+                        test.processed_by = None
+                        test.processed_at = None
+                    update_fields = ['processing_clinic', 'routing_status', 'updated_at']
+                    if destination_type == 'external':
+                        update_fields.extend([
+                            'processing_method', 'outsourced_lab', 'status',
+                            'processed_by', 'processed_at',
+                        ])
+                    else:
+                        update_fields.extend([
+                            'processing_method', 'outsourced_lab', 'processed_by', 'processed_at',
+                        ])
+                    test.save(update_fields=update_fields)
+                    events.append(event)
+
+                dispatch = None
+                if destination_type == 'external':
+                    dispatch = LabReferralDispatch.objects.create(
+                        order=locked_order,
+                        partner_name=external_destination,
+                        issued_by=request.user,
+                        notes=(request.data.get('reason') or '').strip(),
+                    )
+                    dispatch.tests.set(tests)
+                AuditService.log_activity(
+                    user=request.user, action='update', object_type='lab_test_routing',
+                    object_id=str(locked_order.pk), module='laboratory',
+                    object_repr=locked_order.order_id,
+                    description=f'Routed {len(tests)} test(s) from {locked_order.order_id}',
+                    new_values={'test_ids': test_ids, 'destination_type': destination_type},
+                    request=request,
+                )
+            payload = {
+                'lines': LabTestSerializer(tests, many=True).data,
+                'routing_events': LabTestRoutingEventSerializer(events, many=True).data,
+            }
+            if dispatch:
+                payload['dispatch'] = LabReferralDispatchSerializer(dispatch).data
+            return Response(payload)
+        except ValueError:
+            return Response({'error': 'test_ids must contain integers'}, status=status.HTTP_400_BAD_REQUEST)
     
     @extend_schema(tags=["Laboratory"], summary="Process", description="Mark test as processing.")
     @action(detail=True, methods=['post'])
     def process(self, request, pk=None):
         """Mark test as processing."""
+        ensure_capability(request.user, 'lab_process', 'Only authorised laboratory staff can process tests.')
         order = self.get_object()
         test_id = request.data.get('test_id')
         processing_method = request.data.get('processing_method')
@@ -683,6 +985,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
     @extend_schema(tags=["Laboratory"], summary="Dispatch outsourced", description="Send a batch of tests in this order to one external lab partner.")
     @action(detail=True, methods=['post'], url_path='dispatch_outsourced')
+    @transaction.atomic
     def dispatch_outsourced(self, request, pk=None):
         """
         Send a batch of tests in this order to one external lab partner.
@@ -696,7 +999,14 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
           supersede_dispatch_id?: number     # if re-routing, mark old dispatch superseded
         }
         """
+        ensure_capability(
+            request.user,
+            'lab_process',
+            'Only authorised laboratory staff can dispatch tests externally.',
+        )
         order = self.get_object()
+        _ensure_order_facility_access(request.user, order)
+        order = LabOrder.objects.select_for_update().get(pk=order.pk)
 
         test_ids = request.data.get('test_ids') or []
         if not isinstance(test_ids, list) or not test_ids:
@@ -708,6 +1018,9 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         partner_id = request.data.get('partner_id')
         partner_name_raw = (request.data.get('partner_name') or '').strip()
         notes = (request.data.get('notes') or '').strip()
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'error': 'reason is required for external dispatch.'}, status=status.HTTP_400_BAD_REQUEST)
         supersede_id = request.data.get('supersede_dispatch_id')
 
         partner = None
@@ -730,11 +1043,18 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             )
 
         # Resolve the tests; refuse to dispatch tests from another order.
-        tests = list(order.tests.filter(id__in=test_ids))
+        tests = list(order.tests.select_for_update().filter(id__in=test_ids))
         missing = set(test_ids) - {t.id for t in tests}
         if missing:
             return Response(
                 {'error': f'Some tests are not part of this order: {sorted(missing)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        active_overlap = order.dispatches.filter(status='issued', tests__in=tests).distinct()
+        if active_overlap.exists() and not supersede_id:
+            return Response(
+                {'error': 'One or more selected tests already have an active dispatch.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -756,10 +1076,17 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         prior = None
         if supersede_id:
             try:
-                prior = order.dispatches.get(id=supersede_id, status='issued')
+                prior = order.dispatches.select_for_update().get(id=supersede_id, status='issued')
             except LabReferralDispatch.DoesNotExist:
                 return Response(
                     {'error': 'Prior dispatch not found or not currently issued'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            selected_test_ids = {test.id for test in tests}
+            prior_test_ids = set(prior.tests.values_list('id', flat=True))
+            if not selected_test_ids.issubset(prior_test_ids):
+                return Response(
+                    {'error': 'Prior dispatch must cover all selected tests.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -773,19 +1100,32 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             partner=partner,
             partner_name=partner_name,
             partner_address_snapshot=partner_address_snapshot,
-            notes=notes,
+            notes=notes or reason,
             issued_by=request.user,
         )
         dispatch.tests.set(tests)
 
         # Flip each test to processing/outsourced.
         for test in tests:
+            LabTestRoutingEvent.objects.create(
+                test=test,
+                from_clinic=test.processing_clinic,
+                to_clinic=None,
+                destination_type='external',
+                external_destination=partner_name,
+                reason=reason,
+                changed_by=request.user,
+            )
+            test.routing_status = 'referred_external'
             test.processing_method = 'outsourced'
             test.outsourced_lab = partner_name
             test.status = 'processing'
             test.processed_by = request.user
             test.processed_at = timezone.now()
-            test.save()
+            test.save(update_fields=[
+                'routing_status', 'processing_method', 'outsourced_lab', 'status',
+                'processed_by', 'processed_at', 'updated_at',
+            ])
 
         if prior:
             prior.status = 'superseded'
@@ -819,6 +1159,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
     @extend_schema(tags=["Laboratory"], summary="Dispatches/(?P<dispatch id>[^/.]+)/cancel", description="Cancel a still-issued dispatch (e.g. wrong partner, withdrew sample).", parameters=ORDER_DISPATCH_ID_PARAMS)
     @action(detail=True, methods=['post'], url_path='dispatches/(?P<dispatch_id>[^/.]+)/cancel')
+    @transaction.atomic
     def cancel_dispatch(self, request, pk=None, dispatch_id=None):
         """
         Cancel a still-issued dispatch (e.g. wrong partner, withdrew sample).
@@ -831,8 +1172,9 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         verified) are left alone — those need clinical review.
         """
         order = self.get_object()
+        _ensure_order_facility_access(request.user, order)
         try:
-            dispatch = order.dispatches.get(id=dispatch_id)
+            dispatch = order.dispatches.select_for_update().get(id=dispatch_id)
         except LabReferralDispatch.DoesNotExist:
             return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -846,11 +1188,22 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
         reverted_test_codes: list[str] = []
         skipped_test_codes: list[str] = []
-        for test in dispatch.tests.all():
+        for test in dispatch.tests.select_for_update().all():
             # Only revert tests that are still in the outsourced 'processing'
             # bucket. If results were already entered or verified, untangling
             # them requires the verification UI, not a cancel button.
             if test.status == 'processing':
+                return_clinic = test.processing_clinic or order.processing_clinic or order.location_clinic
+                LabTestRoutingEvent.objects.create(
+                    test=test,
+                    from_clinic=test.processing_clinic,
+                    to_clinic=return_clinic,
+                    destination_type='internal' if return_clinic else 'external',
+                    external_destination='' if return_clinic else 'Cancelled external dispatch',
+                    reason=reason,
+                    changed_by=request.user,
+                )
+                test.routing_status = 'pending_triage'
                 test.status = 'sample_collected'
                 test.processing_method = ''
                 test.outsourced_lab = ''
@@ -858,7 +1211,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                 test.processed_at = None
                 test.save(update_fields=[
                     'status', 'processing_method', 'outsourced_lab',
-                    'processed_by', 'processed_at',
+                    'processed_by', 'processed_at', 'routing_status', 'updated_at',
                 ])
                 reverted_test_codes.append(test.code)
             else:
@@ -1115,6 +1468,7 @@ class LabTestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing lab tests."""
     serializer_class = LabTestSerializer
     facility_filter_field = 'order__location_clinic'
+    facility_scope_fields = ('order__location_clinic', 'order__processing_clinic', 'processing_clinic')
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['order', 'status', 'processing_method', 'order__patient']
     ordering_fields = ['created_at']
@@ -1127,6 +1481,7 @@ class LabTestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         queryset = LabTest.objects.all().select_related(
             'order',
             'order__location_clinic',
+            'processing_clinic',
             'order__visit',
             'order__visit__location_clinic',
             'order__consultation_session',
@@ -1221,6 +1576,7 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
         'order__lab_number',
         'test__lab_number',
         'patient__patient_id',
+        'patient__personal_number',
         'patient__surname',
         'patient__first_name',
         'patient__middle_name',

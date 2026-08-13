@@ -15,6 +15,9 @@ export interface RadiologyOrder {
   consultation_session?: number;
   priority: 'routine' | 'urgent' | 'stat';
   clinic?: string;
+  location_clinic_name?: string;
+  originating_clinic_name?: string;
+  processing_clinic_name?: string;
   clinical_notes?: string;
   provisional_diagnosis?: string;
   lmp?: string;
@@ -59,6 +62,10 @@ export interface RadiologyStudy {
   verified_by?: number;
   verified_at?: string;
   verification_notes?: string;
+  originating_clinic_name?: string;
+  processing_clinic_name?: string;
+  processing_clinic?: number | null;
+  routing_status?: 'pending_triage' | 'approved_local' | 'sent_to_processing' | 'referred_external' | 'cancelled';
 }
 
 export interface CustomRadiologyReportRow {
@@ -241,6 +248,7 @@ class RadiologyService {
     date_field?: 'ordered_at' | 'rejected_at';
     /** Filter by requesting facility (organization.Clinic id). */
     location_clinic?: number;
+    processing_clinic?: number;
     page?: number;
     page_size?: number;
     consultation_session?: number;
@@ -359,6 +367,19 @@ class RadiologyService {
     });
   }
 
+  async routeStudies(orderId: number, payload: {
+    study_ids: number[];
+    destination_type: 'internal' | 'external';
+    processing_clinic?: number;
+    external_destination?: string;
+    reason?: string;
+  }): Promise<{ lines: RadiologyStudy[]; routing_events?: unknown[]; dispatch?: RadiologyReferralDispatch }> {
+    return apiFetch(`/radiology/orders/${orderId}/route-studies/`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   /**
    * Create report for a study
    */
@@ -388,6 +409,7 @@ class RadiologyService {
     clinic?: string;
     /** Filter by requesting facility (organization.Clinic id). */
     location_clinic?: number;
+    processing_clinic?: number;
     gender?: string;
     processing_method?: 'in_house' | 'outsourced';
     category?: string;
@@ -745,13 +767,13 @@ class RadiologyService {
    */
   async dispatchOutsourced(
     orderId: number,
-    payload: { partner_id: number; study_ids: number[]; notes?: string; supersede_dispatch_id?: number }
+     payload: { partner_id: number; study_ids: number[]; notes?: string; reason?: string; supersede_dispatch_id?: number }
   ): Promise<RadiologyReferralDispatch> {
     return apiFetch<RadiologyReferralDispatch>(
       `/radiology/orders/${orderId}/dispatch_outsourced/`,
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+         body: JSON.stringify({ ...payload, reason: payload.reason ?? payload.notes ?? '' }),
       }
     );
   }

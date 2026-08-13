@@ -269,6 +269,18 @@ class RadiologyStudy(models.Model):
     body_part = models.CharField(max_length=100, blank=True)
     modality = models.CharField(max_length=50, blank=True, help_text="X-Ray, CT, MRI, Ultrasound, etc.")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    ROUTING_STATUS_CHOICES = [
+        ('pending_triage', 'Pending triage'),
+        ('approved_local', 'Approved local'),
+        ('sent_to_processing', 'Sent to processing'),
+        ('referred_external', 'Referred external'),
+        ('cancelled', 'Cancelled'),
+    ]
+    routing_status = models.CharField(
+        max_length=30,
+        choices=ROUTING_STATUS_CHOICES,
+        default='pending_triage',
+    )
     
     # Scheduling
     scheduled_date = models.DateField(null=True, blank=True)
@@ -276,6 +288,13 @@ class RadiologyStudy(models.Model):
     scheduled_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='scheduled_studies')
     
     # Acquisition
+    processing_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='radiology_studies_processed',
+    )
     processing_method = models.CharField(max_length=20, choices=PROCESSING_METHOD_CHOICES, blank=True, null=True)
     outsourced_facility = models.CharField(max_length=200, blank=True)
     images_count = models.IntegerField(default=0)
@@ -311,6 +330,50 @@ class RadiologyStudy(models.Model):
     
     def __str__(self):
         return f"{self.procedure} - {self.order.order_id}"
+
+
+class RadiologyStudyRoutingEvent(models.Model):
+    study = models.ForeignKey(RadiologyStudy, on_delete=models.CASCADE, related_name="routing_events")
+    from_clinic = models.ForeignKey(
+        "organization.Clinic",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="radiology_route_events_from",
+    )
+    to_clinic = models.ForeignKey(
+        "organization.Clinic",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="radiology_route_events_to",
+    )
+    destination_type = models.CharField(
+        max_length=20,
+        choices=[('internal', 'Internal'), ('external', 'External')],
+    )
+    external_destination = models.CharField(max_length=200, blank=True)
+    reason = models.TextField(blank=True)
+    changed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(destination_type='external')
+                    | (models.Q(to_clinic__isnull=False) & models.Q(external_destination=''))
+                ),
+                name='radiology_route_internal_requires_clinic',
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(destination_type='internal')
+                    | (models.Q(to_clinic__isnull=True) & ~models.Q(external_destination=''))
+                ),
+                name='radiology_route_external_requires_destination',
+            ),
+        ]
 
 
 class RadiologyStudyReportAttachment(models.Model):

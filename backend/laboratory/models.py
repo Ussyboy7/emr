@@ -2,6 +2,7 @@
 Laboratory models for the EMR system.
 """
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 
@@ -222,6 +223,16 @@ class LabOrder(models.Model):
         return f"{self.order_id} - {self.patient.get_full_name()}"
 
 
+class LabSampleBatch(models.Model):
+    accession_number = models.CharField(max_length=30, unique=True, db_index=True)
+    order = models.ForeignKey(LabOrder, on_delete=models.CASCADE, related_name="sample_batches")
+    collection_clinic = models.ForeignKey("organization.Clinic", on_delete=models.PROTECT)
+    collected_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True)
+    collected_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class LabTest(models.Model):
     """
     Individual test within a lab order.
@@ -243,11 +254,37 @@ class LabTest(models.Model):
     
     order = models.ForeignKey(LabOrder, on_delete=models.CASCADE, related_name='tests')
     template = models.ForeignKey(LabTemplate, on_delete=models.PROTECT, related_name='tests', null=True, blank=True)
+    sample_batch = models.ForeignKey(
+        LabSampleBatch,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tests',
+    )
+    processing_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lab_tests_processed',
+    )
     
     name = models.CharField(max_length=200)
     code = models.CharField(max_length=50)
     sample_type = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    ROUTING_STATUS_CHOICES = [
+        ('pending_triage', 'Pending triage'),
+        ('approved_local', 'Approved local'),
+        ('sent_to_processing', 'Sent to processing'),
+        ('referred_external', 'Referred external'),
+        ('cancelled', 'Cancelled'),
+    ]
+    routing_status = models.CharField(
+        max_length=30,
+        choices=ROUTING_STATUS_CHOICES,
+        default='pending_triage',
+    )
 
     # Lab ID (Lab #): BT-YY-NNNN, generated when sample is collected. Identifies the
     # patient/sample at the lab. One Lab ID per order: all tests in the order share it.
@@ -290,9 +327,62 @@ class LabTest(models.Model):
             models.Index(fields=['order', 'status']),
             models.Index(fields=['status']),
         ]
+
+    def clean(self):
+        super().clean()
+        if self.sample_batch_id and self.order_id:
+            batch_order_id = self.sample_batch.order_id
+            if batch_order_id != self.order_id:
+                raise ValidationError({
+                    'sample_batch': 'The sample batch must belong to this lab order.',
+                })
     
     def __str__(self):
         return f"{self.code} - {self.name} ({self.order.order_id})"
+
+
+class LabTestRoutingEvent(models.Model):
+    test = models.ForeignKey(LabTest, on_delete=models.CASCADE, related_name="routing_events")
+    from_clinic = models.ForeignKey(
+        "organization.Clinic",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lab_route_events_from",
+    )
+    to_clinic = models.ForeignKey(
+        "organization.Clinic",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lab_route_events_to",
+    )
+    destination_type = models.CharField(
+        max_length=20,
+        choices=[('internal', 'Internal'), ('external', 'External')],
+    )
+    external_destination = models.CharField(max_length=200, blank=True)
+    reason = models.TextField(blank=True)
+    changed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(destination_type='external')
+                    | (models.Q(to_clinic__isnull=False) & models.Q(external_destination=''))
+                ),
+                name='lab_route_internal_requires_clinic',
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(destination_type='internal')
+                    | (models.Q(to_clinic__isnull=True) & ~models.Q(external_destination=''))
+                ),
+                name='lab_route_external_requires_destination',
+            ),
+        ]
 
 
 class LabTestResultAttachment(models.Model):
@@ -509,4 +599,3 @@ class TemplateFieldOption(models.Model):
 
     def __str__(self):
         return f'{self.template.code}.{self.field_name}: {self.value}'
-

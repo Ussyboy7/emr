@@ -4,6 +4,7 @@ Views for the Radiology app.
 import logging
 import json
 from rest_framework import viewsets, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -14,14 +15,17 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema
 from django.utils import timezone
 from django.db.models import Count, Q
+from django.db import transaction
 from django.http import HttpResponse
+from organization.models import Clinic, SystemConfig
+from organization.routing import ensure_internal_processing_destination
 
 from common.pagination import CatalogPageNumberPagination
 from laboratory.pagination import FlexiblePageNumberPagination
 
 from common.mixins import FacilityScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_PK_PARAMS, document_viewset
-from permissions.user_capabilities import ensure_capability
+from permissions.user_capabilities import ensure_capability, user_has_capability
 logger = logging.getLogger(__name__)
 
 
@@ -36,10 +40,33 @@ def _parse_location_clinic_id(request):
         return None
 
 
+def _ensure_route_facility_access(user, clinic):
+    if not clinic or not SystemConfig.is_enabled('multi_clinic_enabled') or user.is_superuser:
+        return
+    if user_has_capability(user, 'clinical_data_view_all'):
+        return
+    assigned = set(user.location_clinics.values_list('id', flat=True))
+    if not assigned and user.location_clinic_id:
+        assigned = {user.location_clinic_id}
+    if clinic.pk not in assigned:
+        raise PermissionDenied('You are not assigned to this facility.')
+
+
+def _ensure_order_facility_access(user, order):
+    """Allow order mutations from either its origin or current facility."""
+    if not SystemConfig.is_enabled('multi_clinic_enabled') or user.is_superuser:
+        return
+    assigned = set(user.location_clinics.values_list('id', flat=True))
+    if not assigned and user.location_clinic_id:
+        assigned = {user.location_clinic_id}
+    order_facility_ids = {order.location_clinic_id, order.processing_clinic_id} - {None}
+    if not assigned.intersection(order_facility_ids):
+        raise PermissionDenied('You are not assigned to this order facility.')
 from .models import (
     RadiologyTemplate,
     RadiologyOrder,
     RadiologyStudy,
+    RadiologyStudyRoutingEvent,
     RadiologyStudyReportAttachment,
     RadiologyReport,
     ImagingPartner,
@@ -49,6 +76,7 @@ from .serializers import (
     RadiologyTemplateSerializer,
     RadiologyOrderSerializer,
     RadiologyStudySerializer,
+    RadiologyStudyRoutingEventSerializer,
     RadiologyReportSerializer,
     ImagingPartnerSerializer,
     RadiologyReferralDispatchSerializer,
@@ -224,7 +252,9 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     serializer_class = RadiologyOrderSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic']
+    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic', 'location_clinic']
+    facility_scope_fields = ('location_clinic', 'processing_clinic', 'studies__processing_clinic')
+    include_unassigned_scope = True
     search_fields = [
         'order_id',
         'clinical_notes',
@@ -248,7 +278,10 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         
         qs = (
             RadiologyOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
+            .select_related(
+                'patient', 'doctor', 'visit', 'consultation_session', 'created_by',
+                'external_clinic', 'location_clinic', 'processing_clinic',
+            )
             .prefetch_related(
                 'studies',
                 'consultation_session__diagnoses__icd10_code',
@@ -261,6 +294,12 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         source_type = self.request.query_params.get('source_type')
         if source_type in ('internal_emr', 'external_manual'):
             qs = qs.filter(source_type=source_type)
+        processing_clinic_id = self.request.query_params.get('processing_clinic')
+        if processing_clinic_id:
+            qs = qs.filter(
+                Q(processing_clinic_id=processing_clinic_id)
+                | Q(studies__processing_clinic_id=processing_clinic_id)
+            ).distinct()
         study_status = self.request.query_params.get('study_status')
         if study_status == 'pending':
             qs = qs.filter(
@@ -315,7 +354,10 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
         base_qs = (
             RadiologyOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
+            .select_related(
+                'patient', 'doctor', 'visit', 'consultation_session', 'created_by',
+                'external_clinic', 'location_clinic', 'processing_clinic',
+            )
             .prefetch_related('studies')
         )
         pm = request.query_params.get('processing_method')
@@ -324,6 +366,12 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         source_type = request.query_params.get('source_type')
         if source_type in ('internal_emr', 'external_manual'):
             base_qs = base_qs.filter(source_type=source_type)
+        processing_clinic_id = request.query_params.get('processing_clinic')
+        if processing_clinic_id:
+            base_qs = base_qs.filter(
+                Q(processing_clinic_id=processing_clinic_id)
+                | Q(studies__processing_clinic_id=processing_clinic_id)
+            ).distinct()
         gender = request.query_params.get('gender')
         if gender in ('male', 'female'):
             base_qs = base_qs.filter(patient__gender=gender)
@@ -619,6 +667,159 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     # Outsourced dispatch — mirrors `LabOrderViewSet` dispatch actions.
     # ------------------------------------------------------------------
 
+    @action(detail=True, methods=['post'], url_path='route-studies')
+    def route_studies(self, request, pk=None):
+        ensure_capability(
+            request.user,
+            'radiology_perform',
+            'Only authorised radiology staff can route studies.',
+        )
+        order = self.get_object()
+        study_ids = request.data.get('study_ids') or []
+        destination_type = request.data.get('destination_type')
+        if not isinstance(study_ids, list) or not study_ids:
+            return Response({'error': 'study_ids must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+        if destination_type not in ('internal', 'external'):
+            return Response({'error': 'destination_type must be internal or external'}, status=status.HTTP_400_BAD_REQUEST)
+
+        external_destination = (request.data.get('external_destination') or '').strip()
+        processing_clinic_id = request.data.get('processing_clinic')
+        if destination_type == 'external' and not external_destination:
+            return Response({'error': 'external_destination is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if destination_type == 'internal' and not processing_clinic_id:
+            return Response({'error': 'processing_clinic is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            study_ids = [int(study_id) for study_id in study_ids]
+            processing_clinic = None
+            if destination_type == 'internal':
+                processing_clinic = Clinic.objects.get(pk=processing_clinic_id)
+                _ensure_route_facility_access(request.user, processing_clinic)
+            with transaction.atomic():
+                locked_order = RadiologyOrder.objects.select_for_update().get(pk=order.pk)
+                if destination_type == 'internal':
+                    ensure_internal_processing_destination(locked_order.location_clinic, processing_clinic)
+                _ensure_route_facility_access(request.user, locked_order.location_clinic)
+                studies = list(RadiologyStudy.objects.select_for_update().filter(order=locked_order, id__in=study_ids))
+                if len(studies) != len(set(study_ids)):
+                    return Response({'error': 'Some studies are not part of this order'}, status=status.HTTP_400_BAD_REQUEST)
+                non_routeable = [
+                    study for study in studies
+                    if study.status in ('reported', 'verified')
+                    or study.routing_status == 'cancelled'
+                ]
+                if non_routeable:
+                    return Response(
+                        {'error': 'These studies can no longer be routed: ' + ', '.join(
+                            f'{study.procedure} ({study.status}/{study.routing_status})' for study in non_routeable
+                        )},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                reason = (request.data.get('reason') or '').strip()
+                if destination_type == 'external' and not reason:
+                    return Response(
+                        {'error': 'reason is required for external routing.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if destination_type == 'internal':
+                    issued_dispatch_ids = locked_order.dispatches.filter(
+                        status='issued', studies__in=studies,
+                    ).values_list('id', flat=True).distinct()
+                    issued_dispatches = list(
+                        locked_order.dispatches.select_for_update().filter(id__in=issued_dispatch_ids)
+                    )
+                    for dispatch in issued_dispatches:
+                        dispatch_study_ids = set(dispatch.studies.values_list('id', flat=True))
+                        remaining_study_ids = dispatch_study_ids - {study.id for study in studies}
+                        if remaining_study_ids:
+                            replacement = RadiologyReferralDispatch.objects.create(
+                                order=locked_order,
+                                partner=dispatch.partner,
+                                partner_name=dispatch.partner_name,
+                                partner_address_snapshot=dispatch.partner_address_snapshot,
+                                notes=dispatch.notes,
+                                issued_by=dispatch.issued_by,
+                            )
+                            replacement.studies.set(RadiologyStudy.objects.filter(id__in=remaining_study_ids))
+                            dispatch.status = 'superseded'
+                            dispatch.superseded_by = replacement
+                            dispatch.save(update_fields=['status', 'superseded_by'])
+                            new_status = 'superseded'
+                        else:
+                            dispatch.status = 'cancelled'
+                            dispatch.cancellation_reason = reason or 'Superseded by internal reroute'
+                            dispatch.cancelled_at = timezone.now()
+                            dispatch.cancelled_by = request.user
+                            dispatch.save(update_fields=[
+                                'status', 'cancellation_reason', 'cancelled_at', 'cancelled_by',
+                            ])
+                            new_status = 'cancelled'
+                        AuditService.log_activity(
+                            user=request.user, action='update', object_type='radiology_referral_dispatch',
+                            object_id=str(dispatch.id), module='radiology',
+                            object_repr=dispatch.dispatch_id,
+                            description=f'{new_status.title()} dispatch {dispatch.dispatch_id} for internal reroute',
+                            new_values={
+                                'status': new_status,
+                                'cancellation_reason': dispatch.cancellation_reason,
+                            },
+                            metadata={'order_id': locked_order.order_id}, request=request,
+                        )
+                events = []
+                for study in studies:
+                    event = RadiologyStudyRoutingEvent.objects.create(
+                        study=study,
+                        from_clinic=study.processing_clinic,
+                        to_clinic=processing_clinic,
+                        destination_type=destination_type,
+                        external_destination=external_destination,
+                        reason=reason,
+                        changed_by=request.user,
+                    )
+                    study.processing_clinic = processing_clinic
+                    study.routing_status = 'referred_external' if destination_type == 'external' else 'sent_to_processing'
+                    if destination_type == 'external':
+                        study.processing_method = 'outsourced'
+                        study.outsourced_facility = external_destination
+                        study.status = 'processing'
+                    else:
+                        study.processing_method = 'in_house'
+                        study.outsourced_facility = ''
+                    update_fields = ['processing_clinic', 'routing_status', 'updated_at']
+                    if destination_type == 'external':
+                        update_fields.extend(['processing_method', 'outsourced_facility', 'status'])
+                    else:
+                        update_fields.extend(['processing_method', 'outsourced_facility'])
+                    study.save(update_fields=update_fields)
+                    events.append(event)
+
+                dispatch = None
+                if destination_type == 'external':
+                    dispatch = RadiologyReferralDispatch.objects.create(
+                        order=locked_order,
+                        partner_name=external_destination,
+                        issued_by=request.user,
+                        notes=(request.data.get('reason') or '').strip(),
+                    )
+                    dispatch.studies.set(studies)
+                AuditService.log_activity(
+                    user=request.user, action='update', object_type='radiology_study_routing',
+                    object_id=str(locked_order.pk), module='radiology',
+                    object_repr=locked_order.order_id,
+                    description=f'Routed {len(studies)} study(ies) from {locked_order.order_id}',
+                    new_values={'study_ids': study_ids, 'destination_type': destination_type},
+                    request=request,
+                )
+            payload = {
+                'lines': RadiologyStudySerializer(studies, many=True).data,
+                'routing_events': RadiologyStudyRoutingEventSerializer(events, many=True).data,
+            }
+            if dispatch:
+                payload['dispatch'] = RadiologyReferralDispatchSerializer(dispatch).data
+            return Response(payload)
+        except (ValueError, Clinic.DoesNotExist):
+            return Response({'error': 'Invalid study_ids or processing_clinic'}, status=status.HTTP_400_BAD_REQUEST)
+
     @extend_schema(tags=["Radiology"], summary="Dispatches", description="List every RadiologyReferralDispatch ever issued for this order (most recent first).")
     @action(detail=True, methods=['get'], url_path='dispatches')
     def list_dispatches(self, request, pk=None):
@@ -629,6 +830,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
     @extend_schema(tags=["Radiology"], summary="Dispatch outsourced", description="Send a batch of studies in this order to one external imaging partner.")
     @action(detail=True, methods=['post'], url_path='dispatch_outsourced')
+    @transaction.atomic
     def dispatch_outsourced(self, request, pk=None):
         """
         Send a batch of studies in this order to one external imaging partner.
@@ -642,7 +844,14 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
           supersede_dispatch_id?: number     # if re-routing, mark old dispatch superseded
         }
         """
+        ensure_capability(
+            request.user,
+            'radiology_perform',
+            'Only authorised radiology staff can dispatch studies externally.',
+        )
         order = self.get_object()
+        _ensure_order_facility_access(request.user, order)
+        order = RadiologyOrder.objects.select_for_update().get(pk=order.pk)
 
         study_ids = request.data.get('study_ids') or []
         if not isinstance(study_ids, list) or not study_ids:
@@ -654,6 +863,9 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         partner_id = request.data.get('partner_id')
         partner_name_raw = (request.data.get('partner_name') or '').strip()
         notes = (request.data.get('notes') or '').strip()
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'error': 'reason is required for external dispatch.'}, status=status.HTTP_400_BAD_REQUEST)
         supersede_id = request.data.get('supersede_dispatch_id')
 
         partner = None
@@ -676,11 +888,18 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             )
 
         # Resolve the studies; refuse to dispatch studies from another order.
-        studies = list(order.studies.filter(id__in=study_ids))
+        studies = list(order.studies.select_for_update().filter(id__in=study_ids))
         missing = set(study_ids) - {s.id for s in studies}
         if missing:
             return Response(
                 {'error': f'Some studies are not part of this order: {sorted(missing)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        active_overlap = order.dispatches.filter(status='issued', studies__in=studies).distinct()
+        if active_overlap.exists() and not supersede_id:
+            return Response(
+                {'error': 'One or more selected studies already have an active dispatch.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -703,10 +922,17 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         prior = None
         if supersede_id:
             try:
-                prior = order.dispatches.get(id=supersede_id, status='issued')
+                prior = order.dispatches.select_for_update().get(id=supersede_id, status='issued')
             except RadiologyReferralDispatch.DoesNotExist:
                 return Response(
                     {'error': 'Prior dispatch not found or not currently issued'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            selected_study_ids = {study.id for study in studies}
+            prior_study_ids = set(prior.studies.values_list('id', flat=True))
+            if not selected_study_ids.issubset(prior_study_ids):
+                return Response(
+                    {'error': 'Prior dispatch must cover all selected studies.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -720,7 +946,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             partner=partner,
             partner_name=partner_name,
             partner_address_snapshot=partner_address_snapshot,
-            notes=notes,
+            notes=notes or reason,
             issued_by=request.user,
         )
         dispatch.studies.set(studies)
@@ -729,10 +955,22 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         # onto the existing free-text `outsourced_facility` field for parity
         # with the lab pattern (LabTest.outsourced_lab works the same way).
         for study in studies:
+            RadiologyStudyRoutingEvent.objects.create(
+                study=study,
+                from_clinic=study.processing_clinic,
+                to_clinic=None,
+                destination_type='external',
+                external_destination=partner_name,
+                reason=reason,
+                changed_by=request.user,
+            )
+            study.routing_status = 'referred_external'
             study.processing_method = 'outsourced'
             study.outsourced_facility = partner_name
             study.status = 'processing'
-            study.save(update_fields=['processing_method', 'outsourced_facility', 'status', 'updated_at'])
+            study.save(update_fields=[
+                'routing_status', 'processing_method', 'outsourced_facility', 'status', 'updated_at',
+            ])
 
         if prior:
             prior.status = 'superseded'
@@ -766,6 +1004,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
     @extend_schema(tags=["Radiology"], summary="Dispatches/(?P<dispatch pk>[^/.]+)/cancel", description="Cancel a still-issued dispatch (e.g. wrong partner, withdrew request).", parameters=ORDER_DISPATCH_PK_PARAMS)
     @action(detail=True, methods=['post'], url_path='dispatches/(?P<dispatch_pk>[^/.]+)/cancel')
+    @transaction.atomic
     def cancel_dispatch(self, request, pk=None, dispatch_pk=None):
         """
         Cancel a still-issued dispatch (e.g. wrong partner, withdrew request).
@@ -778,8 +1017,9 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         need radiologist review.
         """
         order = self.get_object()
+        _ensure_order_facility_access(request.user, order)
         try:
-            dispatch = order.dispatches.get(id=dispatch_pk)
+            dispatch = order.dispatches.select_for_update().get(id=dispatch_pk)
         except RadiologyReferralDispatch.DoesNotExist:
             return Response({'error': 'Dispatch not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -793,16 +1033,27 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
         reverted_procedures: list[str] = []
         skipped_procedures: list[str] = []
-        for study in dispatch.studies.all():
+        for study in dispatch.studies.select_for_update().all():
             # Only revert studies that are still in the outsourced 'processing'
             # bucket. If a report has been submitted or verified, untangling
             # it requires the verification UI, not a cancel button.
             if study.status == 'processing':
+                return_clinic = study.processing_clinic or order.processing_clinic or order.location_clinic
+                RadiologyStudyRoutingEvent.objects.create(
+                    study=study,
+                    from_clinic=study.processing_clinic,
+                    to_clinic=return_clinic,
+                    destination_type='internal' if return_clinic else 'external',
+                    external_destination='' if return_clinic else 'Cancelled external dispatch',
+                    reason=reason,
+                    changed_by=request.user,
+                )
+                study.routing_status = 'pending_triage'
                 study.status = 'pending'
                 study.processing_method = None
                 study.outsourced_facility = ''
                 study.save(update_fields=[
-                    'status', 'processing_method', 'outsourced_facility', 'updated_at',
+                    'status', 'processing_method', 'outsourced_facility', 'routing_status', 'updated_at',
                 ])
                 reverted_procedures.append(study.procedure)
             else:
@@ -887,6 +1138,7 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing individual radiology studies (like lab tests)."""
 
     facility_filter_field = 'order__processing_clinic'
+    facility_scope_fields = ('order__location_clinic', 'order__processing_clinic', 'processing_clinic')
     serializer_class = RadiologyStudySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'processing_method', 'modality']
@@ -901,6 +1153,7 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         return self.scope_queryset(
             RadiologyStudy.objects.all().select_related(
                 'order', 'order__patient', 'order__doctor', 'template',
+                'processing_clinic', 'order__location_clinic', 'order__processing_clinic',
                 'scheduled_by', 'acquired_by', 'reported_by', 'verified_by'
             )
         )

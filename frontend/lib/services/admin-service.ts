@@ -63,6 +63,7 @@ export interface Clinic {
   phone?: string;
   email?: string;
   is_active: boolean;
+  default_processing_clinic?: number | null;
   operating_hours?: Record<string, unknown>;
   services?: string[];
   staff_count?: number;

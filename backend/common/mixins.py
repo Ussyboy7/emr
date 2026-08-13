@@ -201,22 +201,84 @@ class LabRadiologyScopedMixin(FacilityScopedMixin):
     """
 
     facility_filter_field = 'processing_clinic'
+    include_unassigned_scope = False
+
+    def scope_queryset(self, qs):
+        scope = resolve_facility_scope(self.request)
+        if scope is None or scope == SCOPE_ALL:
+            return qs
+        if self.facility_scope_fields:
+            facility_filter = Q(**{self.facility_scope_fields[0]: scope})
+            for field in self.facility_scope_fields[1:]:
+                facility_filter |= Q(**{field: scope})
+            requested_processing = self.request.query_params.get('processing_clinic')
+            if requested_processing:
+                try:
+                    requested_id = int(requested_processing)
+                except (TypeError, ValueError):
+                    raise PermissionDenied('Invalid processing facility.')
+                if not _can_view_all_facilities(self.request.user):
+                    assigned = set(self.request.user.location_clinics.values_list('id', flat=True))
+                    if not assigned and self.request.user.location_clinic_id:
+                        assigned = {self.request.user.location_clinic_id}
+                    if requested_id not in assigned:
+                        raise PermissionDenied('You are not assigned to this facility.')
+                for field in self.facility_scope_fields:
+                    facility_filter |= Q(**{field: requested_id})
+            if self.include_unassigned_scope:
+                facility_filter |= Q(
+                    **{
+                        f'{self.facility_scope_fields[0]}__isnull': True,
+                        f'{self.facility_scope_fields[1]}__isnull': True,
+                    }
+                )
+            return qs.filter(facility_filter).distinct()
+        if self.facility_filter_field == 'processing_clinic':
+            facility_filter = (
+                Q(location_clinic=scope)
+                | Q(processing_clinic=scope)
+                | Q(tests__processing_clinic=scope)
+                | Q(studies__processing_clinic=scope)
+            )
+            if getattr(self, 'include_unassigned_scope', False):
+                facility_filter |= Q(location_clinic__isnull=True, processing_clinic__isnull=True)
+            return qs.filter(facility_filter).distinct()
+        if self.facility_filter_field == 'order__processing_clinic':
+            facility_filter = (
+                Q(order__location_clinic=scope)
+                | Q(order__processing_clinic=scope)
+                | Q(processing_clinic=scope)
+            )
+            if getattr(self, 'include_unassigned_scope', False):
+                facility_filter |= Q(order__location_clinic__isnull=True, order__processing_clinic__isnull=True)
+            return qs.filter(facility_filter).distinct()
+        return super().scope_queryset(qs)
 
     def auto_set_facility(self, serializer):
         if SystemConfig.is_enabled('multi_clinic_enabled'):
             location_clinic_val = serializer.validated_data.get('location_clinic')
             if location_clinic_val is None:
-                facility = resolve_facility(self.request.user)
-                if facility is not None:
-                    location_clinic_val = facility
-                    serializer.validated_data['location_clinic'] = facility
+                from common.order_location import resolve_order_origin_clinic
+
+                session = serializer.validated_data.get('consultation_session')
+                visit = serializer.validated_data.get('visit')
+                if visit is None and session is not None:
+                    visit = getattr(session, 'visit', None)
+                location_clinic_val = resolve_order_origin_clinic(
+                    visit=visit,
+                    session=session,
+                    user=None,
+                )
+                if location_clinic_val is not None:
+                    self._validate_facility_access(location_clinic_val)
+                    serializer.validated_data['location_clinic'] = location_clinic_val
             else:
                 self._validate_facility_access(location_clinic_val)
 
             location_clinic_id = self._get_facility_id(location_clinic_val) if location_clinic_val else None
 
             # processing_clinic defaults from the location (requesting) facility's config
-            if 'processing_clinic' not in serializer.validated_data and location_clinic_id is not None:
+            if serializer.validated_data.get('processing_clinic') is None and location_clinic_id is not None:
                 from organization.models import Clinic
                 try:
                     clinic_obj = Clinic.objects.get(id=location_clinic_id)

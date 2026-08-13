@@ -136,7 +136,7 @@ def _patient_info(dispatch, *, doc, patient: Patient) -> object:
 
     doctor_name = order.doctor.get_full_name() if order.doctor else '—'
     clinic_name = order.clinic or '—'
-    lab_no = order.lab_number or order.order_id or '—'
+    lab_no = _dispatch_accession(dispatch) or order.order_id or '—'
 
     # Referral letter: clinical context lives in the "Clinical Notes" section
     # below — omitting "Clinical Diagnosis" here avoids duplicating order notes
@@ -159,6 +159,30 @@ def _patient_info(dispatch, *, doc, patient: Patient) -> object:
         ],
         width=doc.usable_width,
     )
+
+
+def _test_accession(test) -> str:
+    batch = getattr(test, 'sample_batch', None)
+    return (batch.accession_number if batch else None) or test.lab_number or ''
+
+
+def _order_accession(order) -> str:
+    batch = order.sample_batches.order_by('-created_at').first()
+    return (batch.accession_number if batch else None) or order.lab_number or ''
+
+
+def _dispatch_accession(dispatch) -> str:
+    """Return accessions for only the tests selected on this dispatch."""
+    selected_tests = list(dispatch.tests.select_related('sample_batch').all())
+    if not selected_tests:
+        return dispatch.order.lab_number or dispatch.order.order_id or ''
+
+    accessions = sorted({
+        accession
+        for test in selected_tests
+        if (accession := _test_accession(test))
+    })
+    return ', '.join(accessions)
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +223,7 @@ def build_referral_letter_pdf(dispatch) -> bytes:
             t.name,
             t.code,
             (t.sample_type or '—'),
-            (t.lab_number or '—'),
+            (_test_accession(t) or '—'),
         ]
         for t in tests
     ]
@@ -259,7 +283,7 @@ def build_referral_letter_pdf(dispatch) -> bytes:
             "Medical Laboratory Science Department). "
             "Please quote the "
             f"<b>Referral ID</b> ({_e(dispatch.dispatch_id)}) and "
-            f"<b>Lab No.</b> ({_e(order.lab_number or order.order_id)}) "
+            f"<b>Lab No.</b> ({_e(_dispatch_accession(dispatch) or order.order_id)}) "
             "in all correspondence."
         ),
         Spacer(1, 18),

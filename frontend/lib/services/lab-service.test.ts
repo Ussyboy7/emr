@@ -172,6 +172,62 @@ describe('labService', () => {
           body: expect.stringContaining('test_ids'),
         }),
       );
+      expect(mockApiFetch.mock.calls[0][1].body).not.toContain('collection_clinic');
+    });
+
+    it('serializes an explicit collection clinic without changing legacy calls', async () => {
+      mockApiFetch.mockResolvedValue([{ id: 1, status: 'sample_collected' }]);
+
+      await labService.collectSamples(5, [1, 2], undefined, undefined, 9);
+
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/laboratory/orders/5/collect_samples/',
+        expect.objectContaining({
+          body: expect.stringContaining('"collection_clinic":9'),
+        }),
+      );
+    });
+  });
+
+  describe('routeTests', () => {
+    it('posts selected tests with an internal destination', async () => {
+      mockApiFetch.mockResolvedValue({ lines: [{ id: 1, routing_status: 'sent_to_processing', processing_clinic_name: 'Bode Thomas' }] });
+
+      const response = await labService.routeTests(5, {
+        test_ids: [1, 2],
+        destination_type: 'internal',
+        processing_clinic: 9,
+        reason: 'HQ triage',
+      });
+
+      expect(response.lines[0].processing_clinic_name).toBe('Bode Thomas');
+
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/laboratory/orders/5/route-tests/',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            test_ids: [1, 2],
+            destination_type: 'internal',
+            processing_clinic: 9,
+            reason: 'HQ triage',
+          }),
+        }),
+      );
+    });
+
+    it('posts selected tests with an external destination and reason', async () => {
+      mockApiFetch.mockResolvedValue({ lines: [] });
+
+      await labService.routeTests(5, {
+        test_ids: [3],
+        destination_type: 'external',
+        external_destination: 'External Lab',
+        reason: 'Specialized assay unavailable locally',
+      });
+
+      expect(mockApiFetch.mock.calls[0][1].body).toContain('external_destination');
+      expect(mockApiFetch.mock.calls[0][1].body).toContain('Specialized assay unavailable locally');
     });
   });
 

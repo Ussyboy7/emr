@@ -41,12 +41,18 @@ def ward_clinic_name(admission) -> str | None:
     return clinic.name if clinic is not None else None
 
 
-def resolve_order_location_clinic(*, visit=None, session=None, user=None):
+def resolve_order_origin_clinic(*, visit=None, session=None, user=None):
     """
     Resolve requesting clinic FK when creating orders.
 
-    Priority: consultation session → session room → visit FK → user active clinic.
+    Priority: visit → consultation session → session room. Orders without an
+    encounter remain unassigned for facility triage.
     """
+    if visit is not None:
+        loc = getattr(visit, "location_clinic", None)
+        if loc is not None:
+            return loc
+
     if session is not None:
         loc = getattr(session, "location_clinic", None)
         if loc is not None:
@@ -56,11 +62,6 @@ def resolve_order_location_clinic(*, visit=None, session=None, user=None):
             room_clinic = getattr(room, "location_clinic", None)
             if room_clinic is not None:
                 return room_clinic
-
-    if visit is not None:
-        loc = getattr(visit, "location_clinic", None)
-        if loc is not None:
-            return loc
 
     if user is not None:
         from accounts.utils import resolve_facility
@@ -72,13 +73,22 @@ def resolve_order_location_clinic(*, visit=None, session=None, user=None):
     return None
 
 
+def resolve_order_location_clinic(*, visit=None, session=None, user=None):
+    """Backward-compatible alias for the canonical origin resolver."""
+    return resolve_order_origin_clinic(visit=visit, session=session, user=user)
+
+
 def apply_order_location_clinic(validated_data: dict, *, user=None) -> dict:
     """Set location_clinic on validated order data when omitted."""
     if validated_data.get("location_clinic"):
         return validated_data
-    clinic = resolve_order_location_clinic(
-        visit=validated_data.get("visit"),
-        session=validated_data.get("consultation_session"),
+    session = validated_data.get("consultation_session")
+    visit = validated_data.get("visit")
+    if visit is None and session is not None:
+        visit = getattr(session, "visit", None)
+    clinic = resolve_order_origin_clinic(
+        visit=visit,
+        session=session,
         user=user,
     )
     if clinic is not None:

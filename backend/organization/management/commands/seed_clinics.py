@@ -31,7 +31,7 @@ class Command(BaseCommand):
                 "location": data.get("location", ""),
                 "phone": data.get("phone", ""),
                 "email": data.get("email", ""),
-                "default_processing_clinic": bode_thomas if data["code"] != "BODE-THOMAS" else None,
+                "default_processing_clinic": bode_thomas if data["code"] in {"APAPA", "TINCAN"} else None,
             }
             clinic, created = Clinic.objects.update_or_create(
                 code=data["code"],

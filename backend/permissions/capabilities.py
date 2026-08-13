@@ -27,6 +27,9 @@ CAPABILITY_CATALOG: tuple[tuple[str, str, str, str], ...] = (
     ("lab_result_submit", "Submit lab results", "Laboratory", "Enter results for collected/processed lab tests"),
     ("lab_result_verify", "Verify lab results", "Laboratory", "Approve verified lab results"),
     ("radiology_result_verify", "Verify radiology reports", "Radiology", "Approve verified radiology reports"),
+    ("lab_collect", "Collect laboratory samples", "Laboratory", "Collect and accession laboratory samples"),
+    ("lab_process", "Process laboratory tests", "Laboratory", "Process laboratory tests and route work"),
+    ("radiology_perform", "Perform radiology studies", "Radiology", "Perform and route radiology studies"),
     ("nursing_order_create", "Create nursing orders", "Nursing", "Add new nursing orders"),
     ("medical_certificate_issue", "Issue medical certificates", "Medical Records", "Create and manage medical certificates"),
 )
@@ -46,8 +49,8 @@ PAGE_TO_CAPABILITIES: dict[str, frozenset[str]] = {
     "/nursing/wards": frozenset({"ward_order_perform"}),
     # Write actions implied by module pages (admins can tighten roles later by
     # removing the capability without revoking page access).
-    "/laboratory": frozenset({"lab_result_submit", "lab_result_verify"}),
-    "/radiology": frozenset({"radiology_result_verify"}),
+    "/laboratory": frozenset({"lab_collect", "lab_process", "lab_result_submit", "lab_result_verify"}),
+    "/radiology": frozenset({"radiology_perform", "radiology_result_verify"}),
     "/pharmacy": frozenset(
         {"pharmacy_dispense", "pharmacy_stock_issue", "pharmacy_inventory_adjust"}
     ),

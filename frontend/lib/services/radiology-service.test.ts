@@ -178,4 +178,46 @@ describe('radiologyService', () => {
       );
     });
   });
+
+  describe('routeStudies', () => {
+    it('posts selected studies with an internal destination', async () => {
+      mockApiFetch.mockResolvedValue({ lines: [{ id: 10, routing_status: 'sent_to_processing', processing_clinic_name: 'Bode Thomas' }] });
+
+      const response = await radiologyService.routeStudies(5, {
+        study_ids: [10, 11],
+        destination_type: 'internal',
+        processing_clinic: 9,
+        reason: 'Send to imaging facility',
+      });
+
+      expect(response.lines[0].processing_clinic_name).toBe('Bode Thomas');
+
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/radiology/orders/5/route-studies/',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            study_ids: [10, 11],
+            destination_type: 'internal',
+            processing_clinic: 9,
+            reason: 'Send to imaging facility',
+          }),
+        }),
+      );
+    });
+
+    it('posts selected studies with an external destination and reason', async () => {
+      mockApiFetch.mockResolvedValue({ lines: [] });
+
+      await radiologyService.routeStudies(5, {
+        study_ids: [12],
+        destination_type: 'external',
+        external_destination: 'External Imaging Centre',
+        reason: 'Modality unavailable at internal facilities',
+      });
+
+      expect(mockApiFetch.mock.calls[0][1].body).toContain('external_destination');
+      expect(mockApiFetch.mock.calls[0][1].body).toContain('Modality unavailable at internal facilities');
+    });
+  });
 });

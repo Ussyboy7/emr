@@ -27,6 +27,7 @@ class ClinicSerializer(serializers.ModelSerializer):
             "phone",
             "email",
             "is_active",
+            "default_processing_clinic",
             "created_at",
             "updated_at",
             "staff_count",
@@ -155,4 +156,3 @@ class OutpatientClinicTypeSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
-

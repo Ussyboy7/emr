@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner';
 import { useRadiologyUrlSync } from '@/hooks/use-radiology-url-sync';
 import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
+import { useAnyCapability } from '@/hooks/use-capability';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   findRadiologyOrdersTabForOrders,
@@ -57,6 +58,7 @@ import {
 } from 'lucide-react';
 
 import { formatDisplayDate, formatDisplayDateMedium, formatDisplayTime } from '@/lib/dates';
+import { StudyRoutingDialog } from '@/components/radiology/StudyRoutingDialog';
 
 const formatOrderedAtDisplay = (isoString: string | undefined): string => {
   if (!isoString) return '';
@@ -124,6 +126,7 @@ const parseCustomRadiologyNames = (study: any, order?: any): string[] => {
 export default function RadiologyOrdersPage() {
   const serverToday = useServerToday();
   const { ready, handleAuthError } = useRadiologyPageAuth();
+  const canPerform = useAnyCapability(['radiology_perform']);
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +136,7 @@ export default function RadiologyOrdersPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [facilityFilter, setFacilityFilter] = useState('all');
+  const [processingFacilityFilter, setProcessingFacilityFilter] = useState('all');
   const [facilities, setFacilities] = useState<Clinic[]>([]);
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
@@ -264,6 +268,8 @@ export default function RadiologyOrdersPage() {
                 <span>•</span>
                 <span>{order.studies?.length || 0} {order.studies?.length === 1 ? 'study' : 'studies'}</span>
                 <span>•</span>
+                <span>Origin: {order.location_clinic_name || '—'} · Processing: {order.processing_clinic_name || '—'}</span>
+                <span>•</span>
                 <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStudyStatusBadge(order.studies?.[0]?.status)}`}>
                   {order.studies?.[0]?.status === 'pending' ? 'Not Started' :
                    order.studies?.[0]?.status === 'processing' ? 'Processing' :
@@ -302,6 +308,20 @@ export default function RadiologyOrdersPage() {
     setSelectedOrder(order);
     setProcessingMethod('in_house');
     setIsProcessDialogOpen(true);
+  };
+
+  const handleRouteStudies = async (payload: Parameters<typeof radiologyService.routeStudies>[1]) => {
+    if (!selectedOrder) return;
+    try {
+      await radiologyService.routeStudies(Number(selectedOrder.id), payload);
+      toast.success('Selected studies routed');
+      setIsRoutingDialogOpen(false);
+      await loadOrders({ silent: true });
+      setSelectedOrder(await radiologyService.getOrder(Number(selectedOrder.id)));
+    } catch (error: any) {
+      if (handleAuthError(error)) return;
+      toast.error(error?.message || 'Could not route the selected studies. Please try again.');
+    }
   };
 
   // Handle starting study processing — in-house only. The outsourced path
@@ -475,6 +495,11 @@ export default function RadiologyOrdersPage() {
 
   // Result entry state (like lab)
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const canRouteSelectedOrder = canPerform && Boolean(
+    facilities.find((facility) => facility.name === selectedOrder?.location_clinic_name)?.default_processing_clinic
+    || /tincan|tin can|apapa|lagos port complex|\blpc\b/i.test(selectedOrder?.location_clinic_name || ''),
+  );
+  const [isRoutingDialogOpen, setIsRoutingDialogOpen] = useState(false);
   const [selectedStudy, setSelectedStudy] = useState<any>(null);
   const [isResultsDialogOpen, setIsResultsDialogOpen] = useState(false);
   // View & Manage Order Dialog (like lab)
@@ -875,6 +900,7 @@ export default function RadiologyOrdersPage() {
         ...(priorityFilter !== 'all' ? { priority: priorityFilter } : {}),
         ...(genderFilter !== 'all' ? { gender: genderFilter as 'male' | 'female' } : {}),
         ...(facilityFilter !== 'all' ? { location_clinic: Number(facilityFilter) } : {}),
+        ...(processingFacilityFilter !== 'all' ? { processing_clinic: Number(processingFacilityFilter) } : {}),
         ...(sourceTypeFilter !== 'all' ? { source_type: sourceTypeFilter } : {}),
         ...dateQuery,
         ...rangeQuery,
@@ -917,7 +943,7 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, facilityFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery, handleAuthError]);
+  }, [debouncedSearch, processingFilter, processingFacilityFilter, priorityFilter, genderFilter, facilityFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery, handleAuthError]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1536,16 +1562,20 @@ export default function RadiologyOrdersPage() {
                     </SelectContent>
                   </Select>
                   <Select value={facilityFilter} onValueChange={setFacilityFilter}>
-                    <SelectTrigger className="w-[170px]"><SelectValue placeholder="Facility" /></SelectTrigger>
+                     <SelectTrigger className="w-[170px]"><SelectValue placeholder="Origin facility" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Facilities</SelectItem>
+                       <SelectItem value="all">All origins</SelectItem>
                       {facilities.map((facility) => (
                         <SelectItem key={facility.id} value={String(facility.id)}>
                           {facility.name}
                         </SelectItem>
                       ))}
-                    </SelectContent>
-                  </Select>
+                     </SelectContent>
+                   </Select>
+                   <Select value={processingFacilityFilter} onValueChange={setProcessingFacilityFilter}>
+                     <SelectTrigger className="w-[180px]"><SelectValue placeholder="Processing facility" /></SelectTrigger>
+                     <SelectContent><SelectItem value="all">All processing facilities</SelectItem>{facilities.map((facility) => <SelectItem key={facility.id} value={String(facility.id)}>{facility.name}</SelectItem>)}</SelectContent>
+                   </Select>
                   <Select
                     value={processingFilter}
                     onValueChange={(v) => setProcessingFilter(v as 'all' | 'in_house' | 'outsourced')}
@@ -2282,6 +2312,15 @@ export default function RadiologyOrdersPage() {
           </DialogContent>
         </Dialog>
 
+        <StudyRoutingDialog
+          open={isRoutingDialogOpen}
+          onOpenChange={setIsRoutingDialogOpen}
+           studies={(selectedOrder?.studies || []).map((study: any) => ({ id: Number(study.id), procedure: study.procedure, status: study.status, routing_status: study.routing_status, processing_clinic_name: study.processing_clinic_name }))}
+          facilities={facilities}
+          originName={selectedOrder?.location_clinic_name}
+          onRouted={handleRouteStudies}
+        />
+
         {/* View & Manage Order Dialog - All actions happen here (like lab) */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
           <DialogContent className={MODAL_SIZES.lg}>
@@ -2387,7 +2426,8 @@ export default function RadiologyOrdersPage() {
                           {selectedPatientFull?.category === 'dependent' && selectedPrincipalPersonalNumber && (
                             <p>Principal P.N.: {selectedPrincipalPersonalNumber}</p>
                           )}
-                          <p>Location: {(selectedOrder as any).location_clinic_name || '—'}</p>
+                           <p>Origin: {(selectedOrder as any).location_clinic_name || '—'}</p>
+                           <p>Processing: {(selectedOrder as any).processing_clinic_name || '—'}</p>
                         </div>
                       </div>
                     </div>
@@ -2465,6 +2505,9 @@ export default function RadiologyOrdersPage() {
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">Studies ({selectedOrder.studies?.length || 0})</p>
                     <div className="flex items-center gap-2">
+                        {canRouteSelectedOrder && <Button type="button" variant="outline" size="sm" onClick={() => setIsRoutingDialogOpen(true)} className="h-8">
+                         Route studies
+                       </Button>}
                       {/* Surface "Send to External Imaging Centre" only when at
                           least one study is eligible (pending/scheduled and not
                           on an issued dispatch). Disabled-but-visible would be

@@ -26,6 +26,8 @@ export interface LabOrder {
   ordered_at: string;
   clinic: string;
   location_clinic_name?: string;
+  originating_clinic_name?: string;
+  processing_clinic_name?: string;
   source_type?: 'internal_emr' | 'external_manual';
   external_clinic?: number | null;
   external_clinic_details?: { id: number; name: string; code?: string; location?: string } | null;
@@ -66,6 +68,13 @@ export interface LabTest {
   verification_notes?: string;
   notes?: string;
   location_clinic_name?: string;
+  originating_clinic_name?: string;
+  processing_clinic_name?: string;
+  processing_clinic?: number | null;
+  routing_status?: 'pending_triage' | 'approved_local' | 'sent_to_processing' | 'referred_external' | 'cancelled';
+  sample_batch?: number | null;
+  accession_number?: string | null;
+  sample_accession?: string | null;
 }
 
 export interface LabResultAttachment {
@@ -275,7 +284,8 @@ class LabService {
     /** Orders with at least one test in this workflow stage (list tabs). */
     workflow_tab?: 'pending' | 'processing' | 'results_ready' | 'rejected';
     /** Filter by requesting facility (organization.Clinic id). */
-    location_clinic?: number;
+     location_clinic?: number;
+     processing_clinic?: number;
     page?: number;
     page_size?: number;
     consultation_session?: number;
@@ -296,7 +306,8 @@ class LabService {
     start_date?: string;
     end_date?: string;
     /** Filter by requesting facility (organization.Clinic id). */
-    location_clinic?: number;
+     location_clinic?: number;
+     processing_clinic?: number;
   }): Promise<{
     total: number;
     pending: number;
@@ -393,14 +404,34 @@ class LabService {
   /**
    * Collect samples for multiple tests (assigns sequential lab numbers)
    */
-  async collectSamples(orderId: number, testIds: number[], collectionMethod?: string, notes?: string): Promise<LabTest[]> {
+  async collectSamples(
+    orderId: number,
+    testIds: number[],
+    collectionMethod?: string,
+    notes?: string,
+    collectionClinic?: number,
+  ): Promise<LabTest[]> {
     return apiFetch<LabTest[]>(`/laboratory/orders/${orderId}/collect_samples/`, {
       method: 'POST',
       body: JSON.stringify({
         test_ids: testIds,
         collection_method: collectionMethod || '',
         notes: notes || '',
+        collection_clinic: collectionClinic,
       }),
+    });
+  }
+
+  async routeTests(orderId: number, payload: {
+    test_ids: number[];
+    destination_type: 'internal' | 'external';
+    processing_clinic?: number;
+    external_destination?: string;
+    reason?: string;
+  }): Promise<{ lines: LabTest[]; routing_events?: unknown[]; dispatch?: LabReferralDispatch }> {
+    return apiFetch(`/laboratory/orders/${orderId}/route-tests/`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 
@@ -430,13 +461,13 @@ class LabService {
    */
   async dispatchOutsourced(
     orderId: number,
-    payload: { partner_id: number; test_ids: number[]; notes?: string }
+     payload: { partner_id: number; test_ids: number[]; notes?: string; reason?: string }
   ): Promise<LabReferralDispatch> {
     return apiFetch<LabReferralDispatch>(
       `/laboratory/orders/${orderId}/dispatch_outsourced/`,
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+         body: JSON.stringify({ ...payload, reason: payload.reason ?? payload.notes ?? '' }),
       }
     );
   }
