@@ -43,11 +43,11 @@ docs-check:
 TEST_DB_ENV=DB_HOST=localhost DB_PORT=5435 DB_NAME=emr_db_local DB_USER=emradmin DB_PASSWORD=emradmin DJANGO_SETTINGS_MODULE=emr_backend.settings_test
 
 test-backend:
-	$(TEST_DB_ENV) PYTHON=$(PYTHON) bash scripts/ci/run-backend-tests.sh
+	$(TEST_DB_ENV) PYTHON="$(abspath $(PYTHON))" bash scripts/ci/run-backend-tests.sh
 
 test-backend-coverage:
-	cd backend && $(TEST_DB_ENV) $(PYTHON) -m coverage run --source=. manage.py test --verbosity=0
-	cd backend && $(PYTHON) -m coverage report --skip-covered --show-missing
+	cd backend && $(TEST_DB_ENV) $(abspath $(PYTHON)) -m coverage run --source=. manage.py test --verbosity=0
+	cd backend && $(abspath $(PYTHON)) -m coverage report --skip-covered --show-missing
 
 test-frontend:
 	cd frontend && npm test
