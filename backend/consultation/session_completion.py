@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from patients.nursing_leg_status import (
     apply_visit_completion_after_leg,
-    mark_consultation_session_clinic_completed,
+    complete_visit_clinic_leg,
+    resolve_session_completed_clinic,
 )
 
 
@@ -20,8 +21,11 @@ def finalize_consultation_session_for_visit(session, *, user) -> bool:
     visit = getattr(session, "visit", None)
     if visit is None:
         return False
+    was_completed = visit.status == "completed"
 
-    mark_consultation_session_clinic_completed(visit, session)
+    clinic = resolve_session_completed_clinic(visit, session)
+    if clinic:
+        complete_visit_clinic_leg(visit, clinic)
 
     from physiotherapy.visit_orders import (
         ensure_physio_order_for_visit,
@@ -35,4 +39,4 @@ def finalize_consultation_session_for_visit(session, *, user) -> bool:
     )
     reopen_visit_if_physio_leg_open(visit)
 
-    return apply_visit_completion_after_leg(visit)
+    return not was_completed and visit.status == "completed"

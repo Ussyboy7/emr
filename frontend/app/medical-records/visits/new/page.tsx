@@ -22,7 +22,7 @@ import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { 
   Calendar, User, Send, Stethoscope, ClipboardList, Search, AlertTriangle,
-  MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle, X, Star
+  MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
@@ -408,7 +408,18 @@ function NewVisitPageContent() {
         }
       }
       
-      toast.error(errorMessage);
+      if (errorMessage.includes('already has an open visit')) {
+        toast.error(errorMessage, {
+          action: {
+            label: 'Manage Visits',
+            onClick: () => {
+              router.push(`/medical-records/visits?search=${encodeURIComponent(selectedPatient.name)}`);
+            },
+          },
+        });
+      } else {
+        toast.error(errorMessage);
+      }
       setIsSubmitting(false);
     }
   };
@@ -654,24 +665,6 @@ function NewVisitPageContent() {
                             </div>
                           );
                         })}
-                      </div>
-                    )}
-                    {formData.clinics.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {formData.clinics.map((clinic, idx) => (
-                          <Badge key={clinic} variant={idx === 0 ? "default" : "secondary"} className="gap-1">
-                            {idx === 0 && <Star className="h-3 w-3" />}
-                            {clinic}
-                            {idx === 0 && <span className="text-xs opacity-80">Primary</span>}
-                            <button
-                              onClick={() => handleClinicToggle(clinic)}
-                              className="ml-1 hover:text-destructive"
-                              type="button"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </Badge>
-                        ))}
                       </div>
                     )}
                   </div>

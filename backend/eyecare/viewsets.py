@@ -250,15 +250,11 @@ class EyeOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         order.save(update_fields=["status", "completed_at"])
         if order.visit_id:
             from patients.models import Visit
-            from patients.nursing_leg_status import (
-                apply_visit_completion_after_leg,
-                mark_visit_clinic_completed,
-            )
+            from patients.nursing_leg_status import complete_visit_clinic_leg
 
             visit = Visit.objects.filter(pk=order.visit_id).first()
             if visit is not None:
-                mark_visit_clinic_completed(visit, "Eye Clinic")
-                apply_visit_completion_after_leg(visit)
+                complete_visit_clinic_leg(visit, "Eye Clinic")
                 visit.save(update_fields=["completed_clinics", "status"])
         return Response(EyeOrderSerializer(order).data)
 

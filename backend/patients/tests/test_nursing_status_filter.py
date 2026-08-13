@@ -247,3 +247,27 @@ class NursingStatusFilterTests(TestCase):
             ).values_list("id", flat=True)
         )
         self.assertEqual(ids, set())
+
+    def test_sent_to_physiotherapy_excludes_completed_order(self):
+        user = User.objects.create_user(username="physio_doc3", password="test")
+        visit = self._visit("physio-completed")
+        visit.clinic = "Physiotherapy"
+        visit.clinics = ["Physiotherapy"]
+        visit.save()
+
+        from physiotherapy.models import PhysioOrder
+
+        PhysioOrder.objects.create(
+            patient=self.patient,
+            visit=visit,
+            ordered_by=user,
+            diagnosis="Completed treatment",
+            status="completed",
+        )
+
+        ids = set(
+            apply_nursing_status_filter(
+                self._base_qs(), "sent_to_physiotherapy", _mock_request()
+            ).values_list("id", flat=True)
+        )
+        self.assertEqual(ids, set())

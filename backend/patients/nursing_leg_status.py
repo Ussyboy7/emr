@@ -61,6 +61,13 @@ def mark_visit_clinic_completed(visit, clinic_name: str) -> bool:
     return True
 
 
+def complete_visit_clinic_leg(visit, clinic_name: str) -> bool:
+    """Mark one clinic leg complete and recalculate the visit aggregate state."""
+    changed = mark_visit_clinic_completed(visit, clinic_name)
+    status_changed = apply_visit_completion_after_leg(visit)
+    return changed or status_changed
+
+
 def resolve_session_completed_clinic(visit, session) -> Optional[str]:
     """Best-effort clinic name to mark done when a consultation session ends."""
     consult = consultation_clinics_on_visit(visit)

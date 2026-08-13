@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { consultationService, visitService, type Visit } from '@/lib/services';
+import { visitService, type Visit, type VisitClinicalSummary } from '@/lib/services';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useMedicalRecordsPageAuth } from '@/hooks/use-medical-records-page-auth';
 import {
@@ -47,8 +47,7 @@ import { useServerToday } from '@/hooks/use-server-today';
 import { localWeekToTodayBounds } from '@/lib/dates';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
-import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
-import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
+import { VisitSummaryModal } from '@/components/medical-records/VisitSummaryModal';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { resolvePatientPhoto } from '@/lib/patient-photo';
 
@@ -82,7 +81,7 @@ export default function VisitsPage() {
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
-  const [reportSession, setReportSession] = useState<ConsultationReportSession | null>(null);
+  const [reportSummary, setReportSummary] = useState<VisitClinicalSummary | null>(null);
   type TransformedVisit = ReturnType<typeof transformVisit>;
   const [selectedVisit, setSelectedVisit] = useState<TransformedVisit | null>(null);
   const [visitToCancel, setVisitToCancel] = useState<TransformedVisit | null>(null);
@@ -469,26 +468,14 @@ export default function VisitsPage() {
   const handleOpenVisitReport = async (visit: TransformedVisit) => {
     try {
       setReportLoading(true);
-      setReportSession(null);
+      setReportSummary(null);
       setIsReportModalOpen(true);
-
-      const session = await consultationService.resolveSessionForVisit({
-        visit: visit.numericId,
-        status: 'completed',
-        ordering: '-ended_at',
-      });
-      if (!session?.id) {
-        toast.error('No completed consultation report found for this visit.');
-        setIsReportModalOpen(false);
-        return;
-      }
-
-      const fullSession = await loadConsultationReportSession(Number(session.id));
-      setReportSession(fullSession);
+      const summary = await visitService.getVisitSummary(visit.numericId);
+      setReportSummary(summary);
     } catch (err: any) {
       console.error('Error loading visit report:', err);
       if (handleAuthError(err)) return;
-      toast.error('Failed to load consultation report.');
+      toast.error('Failed to load visit summary.');
       setIsReportModalOpen(false);
     } finally {
       setReportLoading(false);
@@ -797,38 +784,40 @@ export default function VisitsPage() {
                     }} title="View visit details (edit from there)">
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
+                    {(visit.visitStatusRaw === 'completed' || visit.completedClinics.length > 0) && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleOpenVisitReport(visit)}
+                        title="View Clinical Summary"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     {visit.visitStatusRaw === 'scheduled' && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
-                          onClick={() => handleCancelVisit(visit)}
-                          title="Cancel Visit"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button 
-                          size="sm"
-                          className="h-7 px-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-                          onClick={() => handleForwardToNursing(visit)}
-                        >
-                          <Send className="h-3 w-3 mr-1" />Send
-                        </Button>
-                      </>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
+                        onClick={() => handleCancelVisit(visit)}
+                        title="Cancel Visit"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    {visit.visitStatusRaw === 'scheduled' && (
+                      <Button
+                        size="sm"
+                        className="h-7 px-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                        onClick={() => handleForwardToNursing(visit)}
+                      >
+                        <Send className="h-3 w-3 mr-1" />Send
+                      </Button>
                     )}
                     
                     {visit.visitStatusRaw === 'completed' && (
                       <>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => handleOpenVisitReport(visit)}
-                          title="View Consultation Report"
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                        </Button>
                         <div className="h-7 w-7 flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
                           <CheckCircle2 className="h-4 w-4" />
                         </div>
@@ -1219,10 +1208,10 @@ export default function VisitsPage() {
           </DialogContent>
         </Dialog>
 
-        <ConsultationReportModal
+        <VisitSummaryModal
           open={isReportModalOpen}
           onOpenChange={setIsReportModalOpen}
-          session={reportSession}
+          summary={reportSummary}
           loading={reportLoading}
         />
       </div>

@@ -63,6 +63,21 @@ export interface NursingPoolAnalyticsResponse {
   period: { start: string; end: string };
 }
 
+export interface VisitClinicalSummary {
+  visit: Visit;
+  consultations: { results: Record<string, unknown>[]; count: number };
+  lab_results: { results: Record<string, unknown>[]; count: number };
+  radiology_orders: { results: Record<string, unknown>[]; count: number };
+  radiology_reports: { results: Record<string, unknown>[]; count: number };
+  prescriptions: { results: Record<string, unknown>[]; count: number };
+  vitals: { results: Record<string, unknown>[]; count: number };
+  physio_orders: { results: Record<string, unknown>[]; count: number };
+  eye_orders: { results: Record<string, unknown>[]; count: number };
+  referrals: { results: Record<string, unknown>[]; count: number };
+  ward_admissions: { results: Record<string, unknown>[]; count: number };
+  clinical_notes: string;
+}
+
 class VisitService {
   /**
    * Get all visits
@@ -120,6 +135,10 @@ class VisitService {
    */
   async getVisit(id: number | string): Promise<Visit> {
     return apiFetch<Visit>(`/visits/${id}/`);
+  }
+
+  async getVisitSummary(id: number | string): Promise<VisitClinicalSummary> {
+    return apiFetch<VisitClinicalSummary>(`/visits/${id}/summary/`);
   }
 
   /** Best-matching visit for a patient (e.g. in-progress or latest). */

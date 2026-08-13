@@ -21,6 +21,7 @@ export type {
   NursingPoolAnalyticsResponse,
   NursingPoolAnalyticsSummary,
   NursingPoolAnalyticsDayRow,
+  VisitClinicalSummary,
 } from './visit-service';
 export type { NursingAnalyticsSummary } from './nursing-service';
 export type {

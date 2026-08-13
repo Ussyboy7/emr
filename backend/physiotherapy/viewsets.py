@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import date as date_type, datetime, timedelta
 
+from django.db import transaction
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from django.utils import timezone
@@ -36,6 +37,26 @@ from .serializers import (
     PhysioSessionSerializer,
     PhysioTemplateSerializer,
 )
+
+
+def _sync_completed_physio_order(order, completed_at=None):
+    """Complete an order and synchronize its physiotherapy visit leg."""
+    completed_at = completed_at or timezone.now()
+    if order.status != "completed":
+        order.status = "completed"
+        order.completed_at = completed_at
+        order.save(update_fields=["status", "completed_at"])
+    elif order.completed_at is None:
+        order.completed_at = completed_at
+        order.save(update_fields=["completed_at"])
+
+    if order.visit_id:
+        from patients.nursing_leg_status import complete_visit_clinic_leg
+
+        visit = Visit.objects.select_for_update().filter(pk=order.visit_id).first()
+        if visit is not None:
+            complete_visit_clinic_leg(visit, "Physiotherapy")
+            visit.save(update_fields=["completed_clinics", "status"])
 
 
 ACTIVE_ORDER_STATUSES = ("pending", "scheduled", "in_progress")
@@ -90,6 +111,14 @@ class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             return PhysioOrderCreateSerializer
         return PhysioOrderSerializer
 
+    def update(self, request, *args, **kwargs):
+        if request.data.get("status") == "completed":
+            return Response(
+                {"detail": "Use the complete action to finish a physiotherapy order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().update(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         from common.order_location import apply_order_location_clinic
 
@@ -115,6 +144,14 @@ class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         order.status = "scheduled"
         order.scheduled_at = scheduled_at
         order.save(update_fields=["status", "scheduled_at"])
+        return Response(PhysioOrderSerializer(order).data)
+
+    @extend_schema(tags=["Physiotherapy"], summary="Complete order")
+    @action(detail=True, methods=["post"], url_path="complete")
+    def complete(self, request, pk=None):
+        with transaction.atomic():
+            order = PhysioOrder.objects.select_for_update().get(pk=self.get_object().pk)
+            _sync_completed_physio_order(order)
         return Response(PhysioOrderSerializer(order).data)
 
     @extend_schema(tags=["Physiotherapy"], summary="Home dashboard", description="Single-request payload for the physiotherapy home page.")
@@ -353,6 +390,14 @@ class PhysioSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             return PhysioSessionCreateSerializer
         return PhysioSessionSerializer
 
+    def update(self, request, *args, **kwargs):
+        if request.data.get("status") == "completed":
+            return Response(
+                {"detail": "Use the complete_session action to finish a physiotherapy session."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().update(request, *args, **kwargs)
+
     @extend_schema(tags=["Physiotherapy"], summary="Completed stats", description="Aggregate completed-session card counts in one query.")
     @action(detail=False, methods=["get"], url_path="completed-stats")
     def completed_stats(self, request):
@@ -381,43 +426,26 @@ class PhysioSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     @extend_schema(tags=["Physiotherapy"], summary="Complete session")
     @action(detail=True, methods=["post"])
     def complete_session(self, request, pk=None):
-        session = self.get_object()
-        if session.status == "completed":
-            return Response(PhysioSessionSerializer(session).data)
-        now = timezone.now()
-        if session.started_at is None:
-            session.started_at = now
-        session.completed_at = now
-        session.status = "completed"
-        if session.started_at and session.completed_at:
-            duration = int((session.completed_at - session.started_at).total_seconds() // 60)
-            session.duration_minutes = max(duration, 0)
-        session.save(update_fields=["started_at", "completed_at", "status", "duration_minutes"])
-
-        order = session.order
-        completed_count = order.sessions.filter(status="completed").count()
-        order.sessions_completed = completed_count
-        order_completed_now = False
-        if order.status != "completed":
-            order.status = "completed"
-            order.completed_at = now
-            order.save(update_fields=["sessions_completed", "status", "completed_at"])
-            order_completed_now = True
-        else:
-            order.save(update_fields=["sessions_completed"])
-
-        if order_completed_now and order.visit_id:
-            from patients.models import Visit
-            from patients.nursing_leg_status import (
-                apply_visit_completion_after_leg,
-                mark_visit_clinic_completed,
+        with transaction.atomic():
+            session = PhysioSession.objects.select_for_update().select_related("order").get(
+                pk=self.get_object().pk
             )
+            now = timezone.now()
+            if session.status != "completed":
+                if session.started_at is None:
+                    session.started_at = now
+                session.completed_at = now
+                session.status = "completed"
+                if session.started_at and session.completed_at:
+                    duration = int((session.completed_at - session.started_at).total_seconds() // 60)
+                    session.duration_minutes = max(duration, 0)
+                session.save(update_fields=["started_at", "completed_at", "status", "duration_minutes"])
 
-            visit = Visit.objects.filter(pk=order.visit_id).first()
-            if visit is not None:
-                mark_visit_clinic_completed(visit, "Physiotherapy")
-                apply_visit_completion_after_leg(visit)
-                visit.save(update_fields=["completed_clinics", "status"])
+            order = PhysioOrder.objects.select_for_update().get(pk=session.order_id)
+            completed_count = order.sessions.filter(status="completed").count()
+            order.sessions_completed = completed_count
+            order.save(update_fields=["sessions_completed"])
+            _sync_completed_physio_order(order, now)
 
         return Response(PhysioSessionSerializer(session).data)
 

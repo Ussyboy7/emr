@@ -414,7 +414,7 @@ def apply_nursing_status_filter(
         has_physio_order = Exists(
             PhysioOrder.objects.filter(
                 visit_id=OuterRef('pk'),
-                status__in=['pending', 'scheduled', 'in_progress', 'completed'],
+                status__in=['pending', 'scheduled', 'in_progress'],
             )
         )
         has_physio_clinic = Q(clinic='Physiotherapy') | Q(clinics__contains=['Physiotherapy'])
@@ -1404,12 +1404,12 @@ class VisitViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     # status is applied in get_queryset so nursing_pool can include completed visits
     # without DjangoFilterBackend's status=in_progress wiping them.
-    filterset_fields = ['patient', 'visit_type', 'clinic']
+    filterset_fields = ['patient', 'visit_type']
     search_fields = ['visit_id', 'clinical_notes', 'patient__surname', 'patient__first_name', 'patient__patient_id']
     ordering_fields = ['date', 'time', 'created_at']
     ordering = ['-date', '-time']
     
-    def get_queryset(self):
+    def get_queryset(self, org_wide=False):
         if getattr(self, 'swagger_fake_view', False):
             return Visit.objects.none()
         
@@ -1444,12 +1444,44 @@ class VisitViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         elif status_param:
             queryset = queryset.filter(status=status_param)
 
+        clinic_filter = (self.request.query_params.get('clinic') or '').strip()
+        if clinic_filter:
+            queryset = queryset.filter(
+                Q(clinic=clinic_filter) | Q(clinics__contains=[clinic_filter])
+            )
+
         queryset = annotate_visit_history_flags(queryset)
 
         if nursing_status:
             queryset = apply_nursing_status_filter(queryset, nursing_status, self.request)
 
+        # Chart reads (retrieve, summary) must see a visit reached from the patient
+        # chart regardless of the viewer's active facility — the chart is org-wide.
+        if org_wide:
+            return queryset
         return self.scope_queryset(queryset)
+
+    @extend_schema(tags=["Visits"], summary="Retrieve", description="Get a single visit. Org-wide chart read: a visit reachable from the patient chart is visible regardless of the viewer's active facility.")
+    def retrieve(self, request, *args, **kwargs):
+        """Get a single visit.
+
+        The patient chart is org-wide (see patients.PatientViewSet.visits / clinical_overview),
+        so a visit surfaced there must be retrievable regardless of the viewer's active
+        facility. The operational list endpoint stays facility-scoped.
+        """
+        visit = get_object_or_404(self.get_queryset(org_wide=True), pk=kwargs.get('pk'))
+        serializer = self.get_serializer(visit)
+        return Response(serializer.data)
+
+    @extend_schema(tags=["Visits"], summary="Visit clinical summary")
+    @action(detail=True, methods=['get'], url_path='summary')
+    def summary(self, request, pk=None):
+        """Return all clinical records linked to this visit across clinic legs."""
+        from .clinical_overview import build_visit_clinical_summary
+
+        visit = get_object_or_404(self.get_queryset(org_wide=True), pk=pk)
+
+        return Response(build_visit_clinical_summary(visit))
 
     @extend_schema(tags=["Visits"], summary="Resolve", description="Return the best-matching visit for a patient (e.g. latest or in-progress).")
     @action(detail=False, methods=['get'], url_path='resolve')

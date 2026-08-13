@@ -118,3 +118,14 @@ class PatientChartOrgWideTests(TestCase):
         ids = {row["id"] for row in res.data["results"]}
         self.assertNotIn(self.bode_visit.id, ids)
         self.assertIn(self.hq_visit.id, ids)
+
+    def test_visit_retrieve_is_org_wide(self):
+        # A visit surfaced on the patient chart (org-wide) must be retrievable
+        # even when it belongs to a facility outside the viewer's active clinic.
+        res = self.client.get(f"/api/v1/visits/{self.bode_visit.id}/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["id"], self.bode_visit.id)
+
+    def test_visit_summary_is_org_wide(self):
+        res = self.client.get(f"/api/v1/visits/{self.bode_visit.id}/summary/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)

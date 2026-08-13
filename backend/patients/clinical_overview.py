@@ -162,3 +162,86 @@ def build_patient_clinical_overview(patient: Patient) -> dict:
         "annual_checkups": list_payload(annual_checkups),
         "medical_history": medical_history,
     }
+
+
+def build_visit_clinical_summary(visit: Visit) -> dict:
+    """Aggregate clinical records linked to one visit across all clinic legs."""
+    vid = visit.id
+
+    consultations = ConsultationSessionSerializer(
+        ConsultationSession.objects.filter(visit_id=vid)
+        .select_related("room", "patient", "doctor", "visit")
+        .order_by("started_at"),
+        many=True,
+    ).data
+    lab_results = LabTestSerializer(
+        LabTest.objects.filter(order__visit_id=vid)
+        .select_related("order", "order__patient", "template")
+        .order_by("created_at"),
+        many=True,
+    ).data
+    radiology_orders = RadiologyOrderSerializer(
+        RadiologyOrder.objects.filter(visit_id=vid)
+        .select_related("patient", "doctor", "visit")
+        .prefetch_related("studies")
+        .order_by("ordered_at"),
+        many=True,
+    ).data
+    radiology_reports = RadiologyReportSerializer(
+        RadiologyReport.objects.filter(study__order__visit_id=vid)
+        .select_related("study", "study__order", "patient", "order")
+        .order_by("created_at"),
+        many=True,
+    ).data
+    prescriptions = PrescriptionSerializer(
+        Prescription.objects.filter(visit_id=vid)
+        .select_related("patient", "doctor", "visit")
+        .prefetch_related("medications")
+        .order_by("prescribed_at"),
+        many=True,
+    ).data
+    vitals = VitalReadingSerializer(
+        VitalReading.objects.filter(visit_id=vid)
+        .select_related("patient", "visit", "recorded_by")
+        .order_by("recorded_at"),
+        many=True,
+    ).data
+    physio_orders = PhysioOrderSerializer(
+        PhysioOrder.objects.filter(visit_id=vid)
+        .select_related("patient", "ordered_by", "visit")
+        .order_by("ordered_at"),
+        many=True,
+    ).data
+    eye_orders = EyeOrderSerializer(
+        EyeOrder.objects.filter(visit_id=vid)
+        .select_related("patient", "ordered_by", "visit")
+        .order_by("ordered_at"),
+        many=True,
+    ).data
+    referrals = ReferralSerializer(
+        Referral.objects.filter(visit_id=vid)
+        .select_related("patient", "visit", "session", "referred_by", "facility_partner")
+        .order_by("referred_at"),
+        many=True,
+    ).data
+    ward_admissions = PatientAdmissionSerializer(
+        PatientAdmission.objects.filter(visit_id=vid)
+        .select_related("patient", "ward", "visit")
+        .order_by("admission_date"),
+        many=True,
+    ).data
+
+    return {
+        "visit": VisitSerializer(visit).data,
+        "consultations": list_payload(consultations),
+        "lab_results": list_payload(lab_results),
+        "radiology_orders": list_payload(radiology_orders),
+        "radiology_reports": list_payload(radiology_reports),
+        "prescriptions": list_payload(prescriptions),
+        "vitals": list_payload(vitals),
+        "physio_orders": list_payload(physio_orders),
+        "eye_orders": list_payload(eye_orders),
+        "referrals": list_payload(referrals),
+        "ward_admissions": list_payload(ward_admissions),
+        "clinical_notes": visit.clinical_notes or "",
+    }

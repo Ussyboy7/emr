@@ -54,6 +54,17 @@ describe('visitService', () => {
     });
   });
 
+  describe('getVisitSummary', () => {
+    it('loads a visit-scoped clinical summary', async () => {
+      mockApiFetch.mockResolvedValue({ visit: { id: 7 } });
+
+      const summary = await visitService.getVisitSummary(7);
+
+      expect(summary.visit.id).toBe(7);
+      expect(mockApiFetch).toHaveBeenCalledWith('/visits/7/summary/');
+    });
+  });
+
   describe('createVisit', () => {
     it('posts new visit', async () => {
       mockApiFetch.mockResolvedValue({ id: 1, status: 'scheduled' });

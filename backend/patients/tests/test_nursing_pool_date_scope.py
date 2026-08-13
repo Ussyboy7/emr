@@ -115,3 +115,28 @@ class NursingPoolDateScopeTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         ids = {row["id"] for row in res.data["results"]}
         self.assertNotIn(visit.id, ids)
+
+    def test_visit_clinic_filter_matches_secondary_clinic_leg(self):
+        _, visit = create_test_patient_visit(patient_id="POOL-CLINIC-01")
+        visit.clinic = "GOPD"
+        visit.clinics = ["GOPD", "Physiotherapy"]
+        visit.status = "in_progress"
+        visit.save(update_fields=["clinic", "clinics", "status"])
+
+        response = self.client.get("/api/v1/visits/?clinic=Physiotherapy")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(visit.id, {row["id"] for row in response.data["results"]})
+
+    def test_visit_summary_returns_visit_scoped_sections(self):
+        _, visit = create_test_patient_visit(patient_id="POOL-SUMMARY-01")
+        visit.clinics = ["GOPD", "Physiotherapy"]
+        visit.status = "in_progress"
+        visit.save(update_fields=["clinics", "status"])
+
+        response = self.client.get(f"/api/v1/visits/{visit.id}/summary/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["visit"]["id"], visit.id)
+        self.assertIn("physio_orders", response.data)
+        self.assertIn("consultations", response.data)

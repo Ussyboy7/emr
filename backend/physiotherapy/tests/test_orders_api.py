@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 
 from common.tests.support import create_test_patient_visit, create_test_user
 from consultation.models import ConsultationRoom, ConsultationSession
-from physiotherapy.models import PhysioOrder
+from physiotherapy.models import PhysioOrder, PhysioSession
 
 
 class PhysioOrderApiTests(APITestCase):
@@ -84,3 +84,66 @@ class PhysioOrderApiTests(APITestCase):
         self.client.force_authenticate(user=None)
         res = self.client.get("/api/v1/orders/")
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_complete_order_marks_physio_leg_without_closing_pending_consultation(self):
+        self.visit.clinics = ["GOPD", "Physiotherapy"]
+        self.visit.status = "in_progress"
+        self.visit.save(update_fields=["clinics", "status"])
+        order = PhysioOrder.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            ordered_by=self.doctor,
+            diagnosis="Lumbar strain",
+            status="in_progress",
+        )
+
+        res = self.client.post(f"/api/v1/orders/{order.pk}/complete/")
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        self.visit.refresh_from_db()
+        self.assertEqual(order.status, "completed")
+        self.assertIn("Physiotherapy", self.visit.completed_clinics)
+        self.assertEqual(self.visit.status, "in_progress")
+
+    def test_generic_patch_cannot_bypass_completion_synchronization(self):
+        order = PhysioOrder.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            ordered_by=self.doctor,
+            diagnosis="Lumbar strain",
+            status="in_progress",
+        )
+
+        res = self.client.patch(
+            f"/api/v1/orders/{order.pk}/",
+            {"status": "completed"},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "in_progress")
+
+    def test_generic_session_patch_cannot_bypass_completion_synchronization(self):
+        order = PhysioOrder.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            ordered_by=self.doctor,
+            diagnosis="Lumbar strain",
+            status="in_progress",
+        )
+        session = PhysioSession.objects.create(
+            order=order,
+            physiotherapist=self.doctor,
+            status="in_progress",
+        )
+        res = self.client.patch(
+            f"/api/v1/sessions/{session.pk}/",
+            {"status": "completed"},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        session.refresh_from_db()
+        self.assertEqual(session.status, "in_progress")
