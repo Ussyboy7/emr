@@ -73,8 +73,8 @@ def build_observation_admissions_report(
         ("officers", "Officers"),
         ("staff", "Staff"),
         ("employee_dependants", CATEGORY_LABELS.get("employee_dependants", "Employee Dependants")),
-        ("retiree_dependents", CATEGORY_LABELS.get("retiree_dependents", "Retiree Dependents")),
         ("retirees", CATEGORY_LABELS.get("retirees", "Retirees")),
+        ("retiree_dependents", CATEGORY_LABELS.get("retiree_dependents", "Retiree Dependents")),
         ("non_npa", CATEGORY_LABELS.get("non_npa", "Non NPA")),
     ]
 

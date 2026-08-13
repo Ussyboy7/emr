@@ -17,9 +17,9 @@ MR_PATIENT_CATEGORY_ROWS: list[tuple[int, str, Q]] = [
         "Employee Dependents",
         Q(category="dependent") & ~Q(dependent_type__icontains="retiree"),
     ),
-    (4, "Retiree Dependents", Q(category="dependent", dependent_type__icontains="retiree")),
-    (5, "Non-NPA", Q(category="nonnpa")),
-    (6, "Retirees", Q(category="retiree")),
+    (4, "Retirees", Q(category="retiree")),
+    (5, "Retiree Dependents", Q(category="dependent", dependent_type__icontains="retiree")),
+    (6, "Non-NPA", Q(category="nonnpa")),
 ]
 
 GENDER_ROWS = [

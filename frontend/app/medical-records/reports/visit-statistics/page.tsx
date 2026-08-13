@@ -314,9 +314,9 @@ export default function VisitStatisticsReport() {
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Staff</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Employee</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Emp Dep</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Retiree</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Ret Dep</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Non-NPA</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Retiree</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Non-Employee</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
                     </tr>
@@ -331,9 +331,9 @@ export default function VisitStatisticsReport() {
                         <td className="p-3 text-right text-indigo-600 dark:text-indigo-400">{row.staff.toLocaleString()}</td>
                         <td className="p-3 text-right text-purple-600 dark:text-purple-400">{row.employee.toLocaleString()}</td>
                         <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{row.emp_dependent.toLocaleString()}</td>
+                        <td className="p-3 text-right text-rose-600 dark:text-rose-400">{row.retiree.toLocaleString()}</td>
                         <td className="p-3 text-right text-teal-600 dark:text-teal-400">{row.ret_dependent.toLocaleString()}</td>
                         <td className="p-3 text-right text-orange-600 dark:text-orange-400">{row.nonnpa.toLocaleString()}</td>
-                        <td className="p-3 text-right text-rose-600 dark:text-rose-400">{row.retiree.toLocaleString()}</td>
                         <td className="p-3 text-right text-stone-600 dark:text-stone-400">{row.non_employee.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
                       </tr>
@@ -346,9 +346,9 @@ export default function VisitStatisticsReport() {
                       <td className="p-3 text-right text-indigo-600 dark:text-indigo-400">{summary.staff.toLocaleString()}</td>
                       <td className="p-3 text-right text-purple-600 dark:text-purple-400">{summary.employee.toLocaleString()}</td>
                       <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{summary.emp_dependent.toLocaleString()}</td>
+                      <td className="p-3 text-right text-rose-600 dark:text-rose-400">{summary.retiree.toLocaleString()}</td>
                       <td className="p-3 text-right text-teal-600 dark:text-teal-400">{summary.ret_dependent.toLocaleString()}</td>
                       <td className="p-3 text-right text-orange-600 dark:text-orange-400">{summary.nonnpa.toLocaleString()}</td>
-                      <td className="p-3 text-right text-rose-600 dark:text-rose-400">{summary.retiree.toLocaleString()}</td>
                       <td className="p-3 text-right text-stone-600 dark:text-stone-400">{summary.non_employee.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.total.toLocaleString()}</td>
                     </tr>

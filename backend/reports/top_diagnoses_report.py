@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from django.db.models import Count, F
+from django.db.models import Count, F, Q
 
 from consultation.models import Diagnosis
 
@@ -14,6 +14,7 @@ def build_top_diagnoses_report(
     *,
     limit: int = 20,
     org_facility_id: int | None = None,
+    search: str | None = None,
 ) -> dict:
     limit = max(1, min(int(limit), 100))
 
@@ -26,6 +27,11 @@ def build_top_diagnoses_report(
     )
     if org_facility_id is not None:
         qs = qs.filter(visit__location_clinic_id=org_facility_id)
+    if search:
+        qs = qs.filter(
+            Q(icd10_code__code__icontains=search)
+            | Q(icd10_code__description__icontains=search)
+        )
 
     total_lines = qs.count()
     distinct_codes = (

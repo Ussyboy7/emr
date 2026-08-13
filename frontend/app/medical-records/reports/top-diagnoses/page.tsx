@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
+import { ReportSearchField } from "@/components/reports/ReportSearchField";
 import {
   RefreshCw,
   ArrowLeft,
@@ -80,14 +81,22 @@ export default function TopDiagnosesReport() {
   const [rows, setRows] = useState<TopDiagnosisRow[]>([]);
   const [summary, setSummary] = useState<TopDiagnosesSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(false);
+  const [search, setSearch] = useState("");
 
   const isAllTime = viewMode === "all";
   const showRankingMeta = !isAllTime;
 
+  const queryExtra = () => {
+    const extra: Record<string, string> = { limit };
+    const term = search.trim();
+    if (term) extra.search = term;
+    return extra;
+  };
+
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const params = buildQuery({ limit });
+      const params = buildQuery(queryExtra());
       if (!params) {
         toast.error("Please select a valid date range");
         setIsLoading(false);
@@ -123,7 +132,7 @@ export default function TopDiagnosesReport() {
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, limit]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, limit, search]);
 
   const hasData = (summary.total_diagnosis_lines ?? 0) > 0;
   const truncated =
@@ -154,7 +163,7 @@ export default function TopDiagnosesReport() {
           <div className="flex items-center gap-2 print:hidden">
             <ReportExportButtons
               apiPath="/reports/top-diagnoses/"
-              buildQuery={() => buildQuery({ limit })}
+              buildQuery={() => buildQuery(queryExtra())}
               filenameBase={`top_diagnoses_${filenameSuffix}`}
               disabled={!hasData}
             />
@@ -172,7 +181,7 @@ export default function TopDiagnosesReport() {
             </CardDescription>
           </CardHeader>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <ReportDateFilterFields
                 viewMode={viewMode}
                 onViewModeChange={setViewMode}
@@ -199,6 +208,7 @@ export default function TopDiagnosesReport() {
                   </SelectContent>
                 </Select>
               </div>
+              <ReportSearchField value={search} onChange={setSearch} />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                   <TrendingUp className="h-4 w-4 mr-2" />

@@ -20,8 +20,8 @@ WEEKEND_ROW_KEY = "weekend_call"
 WEEKEND_ROW_LABEL = "Weekend Call"
 
 CATEGORY_KEYS = [
-    "staff",
     "officers",
+    "staff",
     "employee_dependants",
     "retirees",
     "retiree_dependents",
@@ -29,8 +29,8 @@ CATEGORY_KEYS = [
 ]
 
 CATEGORY_LABELS = {
-    "staff": "Staff",
     "officers": "Officers",
+    "staff": "Staff",
     "employee_dependants": "Employee Dependants",
     "retirees": "Retirees",
     "retiree_dependents": "Retiree Dependents",
@@ -93,13 +93,13 @@ def mr_category_row_filters() -> list[tuple[int, str, Q]]:
             "Employee Dependents",
             Q(patient__category="dependent") & ~Q(patient__dependent_type__icontains="retiree"),
         ),
+        (4, "Retirees", Q(patient__category="retiree")),
         (
-            4,
+            5,
             "Retiree Dependents",
             Q(patient__category="dependent", patient__dependent_type__icontains="retiree"),
         ),
-        (5, "Non-NPA", Q(patient__category="nonnpa")),
-        (6, "Retirees", Q(patient__category="retiree")),
+        (6, "Non-NPA", Q(patient__category="nonnpa")),
     ]
 
 
@@ -412,8 +412,8 @@ def build_attendance_statistics_csv(report: dict[str, Any]) -> str:
     headers = [
         "Clinic",
         "Gender",
-        "Staff",
         "Officers",
+        "Staff",
         "Employee Dependants",
         "Retirees",
         "Retiree Dependents",
@@ -428,8 +428,8 @@ def build_attendance_statistics_csv(report: dict[str, Any]) -> str:
                 [
                     label,
                     row.get("gender_label", ""),
-                    row.get("staff", 0),
                     row.get("officers", 0),
+                    row.get("staff", 0),
                     row.get("employee_dependants", 0),
                     row.get("retirees", 0),
                     row.get("retiree_dependents", 0),
@@ -445,8 +445,8 @@ def build_attendance_statistics_csv(report: dict[str, Any]) -> str:
                 [
                     row.get("gender_label", key),
                     "",
-                    row.get("staff", 0),
                     row.get("officers", 0),
+                    row.get("staff", 0),
                     row.get("employee_dependants", 0),
                     row.get("retirees", 0),
                     row.get("retiree_dependents", 0),

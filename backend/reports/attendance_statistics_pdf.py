@@ -6,6 +6,7 @@ from io import BytesIO
 from django.utils import timezone
 
 from common.date_display import format_display_datetime, format_display_month_year, format_display_range
+from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
@@ -39,8 +40,8 @@ def _para(text: str, *, bold: bool = False, size: float = 8) -> Paragraph:
 def _matrix_table(report: dict, *, use_pdf_labels: bool = True) -> Table:
     headers = [
         "CATEGORY / CLINIC",
-        "STAFF",
         "OFFICERS",
+        "STAFF",
         "EMP. DEP.",
         "RETIREE",
         "RET. DEP.",
@@ -61,8 +62,8 @@ def _matrix_table(report: dict, *, use_pdf_labels: bool = True) -> Table:
                 clinic_cell = f"Total, {label}"
             cells = [
                 clinic_cell,
-                row.get("staff", 0),
                 row.get("officers", 0),
+                row.get("staff", 0),
                 row.get("employee_dependants", 0),
                 row.get("retirees", 0),
                 row.get("retiree_dependents", 0),
@@ -87,8 +88,8 @@ def _matrix_table(report: dict, *, use_pdf_labels: bool = True) -> Table:
             continue
         cells = [
             row.get("gender_label", key),
-            row.get("staff", 0),
             row.get("officers", 0),
+            row.get("staff", 0),
             row.get("employee_dependants", 0),
             row.get("retirees", 0),
             row.get("retiree_dependents", 0),

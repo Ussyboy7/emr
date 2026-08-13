@@ -12,7 +12,12 @@ EMPLOYEE_CATEGORY_Q = Q(patient__category="employee")
 NON_EMPLOYEE_CATEGORY_Q = ~Q(patient__category="employee")
 
 
-def _diagnosis_qs(period_start: date, period_end: date, org_facility_id: int | None = None):
+def _diagnosis_qs(
+    period_start: date,
+    period_end: date,
+    org_facility_id: int | None = None,
+    search: str | None = None,
+):
     qs = Diagnosis.objects.filter(
         session__status="completed",
         icd10_code__isnull=False,
@@ -22,13 +27,23 @@ def _diagnosis_qs(period_start: date, period_end: date, org_facility_id: int | N
     )
     if org_facility_id is not None:
         qs = qs.filter(visit__location_clinic_id=org_facility_id)
+    if search:
+        qs = qs.filter(
+            Q(icd10_code__code__icontains=search)
+            | Q(icd10_code__description__icontains=search)
+        )
     return qs
 
 
 def build_disease_pattern_report(
-    period_start: date, period_end: date, org_facility_id: int | None = None
+    period_start: date,
+    period_end: date,
+    org_facility_id: int | None = None,
+    search: str | None = None,
 ) -> dict:
-    diagnosis_qs = _diagnosis_qs(period_start, period_end, org_facility_id=org_facility_id)
+    diagnosis_qs = _diagnosis_qs(
+        period_start, period_end, org_facility_id=org_facility_id, search=search
+    )
     diagnosis_rows = (
         diagnosis_qs.values(
             code=F("icd10_code__code"),
@@ -95,6 +110,7 @@ def build_disease_pattern_compared_report(
     *,
     periods: int = 3,
     org_facility_id: int | None = None,
+    search: str | None = None,
 ) -> dict:
     """ICD-10 codes compared across N consecutive periods ending at period_end."""
     length_days = (period_end - period_start).days + 1
@@ -107,7 +123,9 @@ def build_disease_pattern_compared_report(
         end = start - timedelta(days=1)
 
     period_reports = [
-        build_disease_pattern_report(p_start, p_end, org_facility_id=org_facility_id)
+        build_disease_pattern_report(
+            p_start, p_end, org_facility_id=org_facility_id, search=search
+        )
         for p_start, p_end, _ in period_slices
     ]
     period_labels = [label for _, _, label in period_slices]

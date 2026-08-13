@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
+import { ReportSearchField } from "@/components/reports/ReportSearchField";
 import { RefreshCw, ArrowLeft, TrendingUp, Activity, Users, Calendar, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
@@ -84,12 +85,20 @@ export default function DiseasePatternReport() {
   const [data, setData] = useState<DiseaseData[]>([]);
   const [summary, setSummary] = useState<DiseaseSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(false);
+  const [search, setSearch] = useState("");
 
   const isAllTime = viewMode === "all";
   const showCategoryCards = !isAllTime;
 
+  const searchExtra = () => {
+    const queryExtra: Record<string, string> = {};
+    const term = search.trim();
+    if (term) queryExtra.search = term;
+    return queryExtra;
+  };
+
   const fetchReport = async () => {
-    const params = buildQuery();
+    const params = buildQuery(searchExtra());
     if (!params) {
       toast.error("Please select a valid date range");
       return;
@@ -113,7 +122,7 @@ export default function DiseasePatternReport() {
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, search]);
 
   const hasData = (summary.grand_total ?? 0) > 0;
 
@@ -142,7 +151,7 @@ export default function DiseasePatternReport() {
           <div className="flex items-center gap-2 print:hidden">
             <ReportExportButtons
               apiPath="/reports/disease-pattern/"
-              buildQuery={() => buildQuery()}
+              buildQuery={() => buildQuery(searchExtra())}
               filenameBase={`disease_pattern_${filenameSuffix}`}
               disabled={!hasData}
             />
@@ -160,7 +169,7 @@ export default function DiseasePatternReport() {
             </CardDescription>
           </CardHeader>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <ReportDateFilterFields
                 viewMode={viewMode}
                 onViewModeChange={setViewMode}
@@ -172,6 +181,7 @@ export default function DiseasePatternReport() {
                 onEndDateChange={setEndDate}
                 yearOptions={years}
               />
+              <ReportSearchField value={search} onChange={setSearch} />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                   <TrendingUp className="h-4 w-4 mr-2" />

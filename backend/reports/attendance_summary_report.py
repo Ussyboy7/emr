@@ -101,8 +101,19 @@ def build_attendance_summary_for_visits(visits_queryset: QuerySet) -> dict:
             "percentage": round((emp_dep_count / grand_total * 100) if grand_total > 0 else 0, 1),
         },
         {
-            "key": "retiree_dependents",
+            "key": "retirees",
             "sn": 4,
+            "category": "Retirees",
+            "employee": 0,
+            "non_employee": retiree_count,
+            "male": retiree_male,
+            "female": retiree_female,
+            "total": retiree_count,
+            "percentage": round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1),
+        },
+        {
+            "key": "retiree_dependents",
+            "sn": 5,
             "category": "Retiree Dependents",
             "employee": 0,
             "non_employee": ret_dep_count,
@@ -113,7 +124,7 @@ def build_attendance_summary_for_visits(visits_queryset: QuerySet) -> dict:
         },
         {
             "key": "non_npa",
-            "sn": 5,
+            "sn": 6,
             "category": "Non NPA",
             "employee": 0,
             "non_employee": nonnpa_count,
@@ -121,17 +132,6 @@ def build_attendance_summary_for_visits(visits_queryset: QuerySet) -> dict:
             "female": nonnpa_female,
             "total": nonnpa_count,
             "percentage": round((nonnpa_count / grand_total * 100) if grand_total > 0 else 0, 1),
-        },
-        {
-            "key": "retirees",
-            "sn": 6,
-            "category": "Retirees",
-            "employee": 0,
-            "non_employee": retiree_count,
-            "male": retiree_male,
-            "female": retiree_female,
-            "total": retiree_count,
-            "percentage": round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1),
         },
     ]
 

@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
+import { ReportSearchField } from "@/components/reports/ReportSearchField";
 import { RefreshCw, ArrowLeft, TrendingUp, GitCompare } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
@@ -35,9 +36,17 @@ export default function DiseasePatternComparedReport() {
   const [data, setData] = useState<ComparedRow[]>([]);
   const [labels, setLabels] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const queryExtra = () => {
+    const extra: Record<string, string> = { periods: "3" };
+    const term = search.trim();
+    if (term) extra.search = term;
+    return extra;
+  };
 
   const fetchReport = async () => {
-    const params = period.buildQuery({ periods: "3" });
+    const params = period.buildQuery(queryExtra());
     if (!params) {
       toast.error("Please select a valid date range");
       return;
@@ -64,6 +73,7 @@ export default function DiseasePatternComparedReport() {
     period.startDate,
     period.endDate,
     period.viewMode,
+    search,
   ]);
 
   return (
@@ -80,14 +90,14 @@ export default function DiseasePatternComparedReport() {
           </h1>
           <ReportExportButtons
             apiPath="/reports/disease-pattern-compared/"
-            buildQuery={() => period.buildQuery({ periods: "3" })}
+            buildQuery={() => period.buildQuery(queryExtra())}
             filenameBase={`disease_pattern_compared_${period.filenameSuffix}`}
             disabled={data.length === 0}
           />
         </div>
 
         <Card>
-          <CardContent className="p-4 grid md:grid-cols-4 gap-4">
+          <CardContent className="p-4 grid md:grid-cols-5 gap-4">
             <ReportDateFilterFields
               viewMode={period.viewMode}
               onViewModeChange={period.setViewMode}
@@ -99,6 +109,7 @@ export default function DiseasePatternComparedReport() {
               onEndDateChange={period.setEndDate}
               yearOptions={period.years}
             />
+            <ReportSearchField value={search} onChange={setSearch} />
             <div className="flex items-end">
               <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                 <TrendingUp className="h-4 w-4 mr-2" />Generate

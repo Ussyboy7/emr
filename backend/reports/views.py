@@ -34,6 +34,12 @@ def _org_clinic_scope(request):
     return scope.id
 
 
+def _search_term(request):
+    """Read the ``search`` query param, returning None when blank."""
+    value = (request.query_params.get("search") or "").strip()
+    return value or None
+
+
 def _scope_visits_by_org_clinic(request, qs):
     """Apply org-clinic tenant scoping to a report queryset (multi-clinic aware)."""
     from common.mixins import scope_query_by_facility
@@ -132,7 +138,11 @@ class TopDiagnosesReportView(views.APIView):
             limit = 20
         period_start, period_end = _period_bounds_from_request(request)
         report = build_top_diagnoses_report(
-            period_start, period_end, limit=limit, org_facility_id=_org_clinic_scope(request)
+            period_start,
+            period_end,
+            limit=limit,
+            org_facility_id=_org_clinic_scope(request),
+            search=_search_term(request),
         )
         return respond_with_export(
             request,
@@ -825,6 +835,14 @@ class ClinicAttendanceReportView(views.APIView):
             },
             {
                 'sn': 4,
+                'category': 'Retirees',
+                'male': retiree_male,
+                'female': retiree_female,
+                'total': retiree_count,
+                'percentage': round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1)
+            },
+            {
+                'sn': 5,
                 'category': 'Retiree Dependents',
                 'male': ret_dep_male,
                 'female': ret_dep_female,
@@ -832,20 +850,12 @@ class ClinicAttendanceReportView(views.APIView):
                 'percentage': round((ret_dep_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
             {
-                'sn': 5,
+                'sn': 6,
                 'category': 'Non-NPA',
                 'male': nonnpa_male,
                 'female': nonnpa_female,
                 'total': nonnpa_count,
                 'percentage': round((nonnpa_count / grand_total * 100) if grand_total > 0 else 0, 1)
-            },
-            {
-                'sn': 6,
-                'category': 'Retirees',
-                'male': retiree_male,
-                'female': retiree_female,
-                'total': retiree_count,
-                'percentage': round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
         ]
         report = {
@@ -918,7 +928,10 @@ class DiseasePatternReportView(views.APIView):
             request, default_to_current_year=True
         )
         report = build_disease_pattern_report(
-            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+            period_start,
+            period_end,
+            org_facility_id=_org_clinic_scope(request),
+            search=_search_term(request),
         )
         return respond_with_export(
             request,
@@ -944,7 +957,11 @@ class DiseasePatternComparedReportView(views.APIView):
             periods = 3
         periods = max(2, min(periods, 6))
         report = build_disease_pattern_compared_report(
-            period_start, period_end, periods=periods, org_facility_id=_org_clinic_scope(request)
+            period_start,
+            period_end,
+            periods=periods,
+            org_facility_id=_org_clinic_scope(request),
+            search=_search_term(request),
         )
         return respond_with_export(
             request,
@@ -1097,9 +1114,9 @@ class GOPAttendanceReportView(views.APIView):
             {'sn': 1, 'category': 'Officers', 'male': officers_male, 'female': officers_female, 'total': officers_total},
             {'sn': 2, 'category': 'Staff', 'male': staff_male, 'female': staff_female, 'total': staff_total},
             {'sn': 3, 'category': 'Employee Dependents', 'male': emp_dep_male, 'female': emp_dep_female, 'total': emp_dep_total},
-            {'sn': 4, 'category': 'Retiree Dependents', 'male': ret_dep_male, 'female': ret_dep_female, 'total': ret_dep_total},
-            {'sn': 5, 'category': 'Non NPA', 'male': nonnpa_male, 'female': nonnpa_female, 'total': nonnpa_total},
-            {'sn': 6, 'category': 'Retirees', 'male': retiree_male, 'female': retiree_female, 'total': retiree_total},
+            {'sn': 4, 'category': 'Retirees', 'male': retiree_male, 'female': retiree_female, 'total': retiree_total},
+            {'sn': 5, 'category': 'Retiree Dependents', 'male': ret_dep_male, 'female': ret_dep_female, 'total': ret_dep_total},
+            {'sn': 6, 'category': 'Non NPA', 'male': nonnpa_male, 'female': nonnpa_female, 'total': nonnpa_total},
         ]
         for row in categories:
             row['percentage'] = round((row['total'] / grand_total * 100) if grand_total > 0 else 0, 1)
