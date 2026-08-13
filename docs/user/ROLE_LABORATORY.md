@@ -2,6 +2,8 @@
 
 For lab staff processing orders, entering results, and verification.
 
+Facility routing and accession procedures: [Facility Order Routing](../workflows/FACILITY_ORDER_ROUTING.md).
+
 **Quick start:** [EMR_USER_QUICK_START_GUIDE.md](EMR_USER_QUICK_START_GUIDE.md)
 
 ## Typical sidebar modules

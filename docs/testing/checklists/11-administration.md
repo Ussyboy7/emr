@@ -42,7 +42,7 @@ Guides: [ROLE_ADMINISTRATION.md](../../user/ROLE_ADMINISTRATION.md) · [EMR_ADMI
 | ☐ | UAT-ADM-CLN-01 | All clinics listed | | |
 | ☐ | UAT-ADM-CLN-02 | Edit department → visit picker | | |
 
-## Rooms — `/admin/rooms`
+## Rooms — `/admin/clinics` (Rooms tab)
 
 | ☐ | ID | Scenario | P/F/N/A | Notes |
 |---|-----|----------|---------|-------|

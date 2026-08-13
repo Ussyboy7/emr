@@ -20,8 +20,7 @@ Guide for **application administrators** (users, roles, clinics, audit). Infrast
 | Dashboard & KPIs | `/admin` |
 | Users | `/admin/users` |
 | Roles & page permissions | `/admin/roles` |
-| Clinics & departments | `/admin/clinics` |
-| Rooms | `/admin/rooms` |
+| Clinics & departments (incl. Rooms tab) | `/admin/clinics` |
 | System settings | `/admin/settings` |
 | **System health** (API, DB, disk, backups) | `/admin/health` |
 | Audit trail | `/admin/audit` |

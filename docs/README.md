@@ -12,6 +12,7 @@ Start here. This index lists **maintained** documentation. Generated API docs li
 | [api/README.md](api/README.md) | OpenAPI, auth, versioning, throttling |
 | [database/README.md](database/README.md) | Schema overview and ERD generation |
 | [workflows/VISIT_LIFECYCLE.md](workflows/VISIT_LIFECYCLE.md) | End-to-end clinical flow |
+| [workflows/FACILITY_ORDER_ROUTING.md](workflows/FACILITY_ORDER_ROUTING.md) | Facility ownership, per-line routing, sample collection, accessions, and HQ triage |
 | [../AGENTS.md](../AGENTS.md) | AI/dev agent conventions |
 | [../scripts/README.md](../scripts/README.md) | Operational scripts architecture |
 

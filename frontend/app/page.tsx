@@ -206,8 +206,6 @@ export default function LandingPage() {
 
         <p className="max-w-2xl text-lg text-slate-400 leading-relaxed">
           One secure system for patient records, consultations, labs, pharmacy, and nursing across NPA clinics.
-          <br />
-          <span className="text-slate-300">Built for faster care coordination and safer clinical decisions.</span>
         </p>
         
         <div className="flex flex-col gap-4 sm:flex-row mt-4">

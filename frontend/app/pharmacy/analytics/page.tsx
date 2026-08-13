@@ -641,7 +641,7 @@ export default function PharmacyAnalyticsPage() {
                       </TableRow>
                       <TableRow>
                         <TableCell className="py-2">4</TableCell>
-                        <TableCell className="py-2 font-medium">Retiree Dependents</TableCell>
+                        <TableCell className="py-2 font-medium">Retirees</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
@@ -649,7 +649,7 @@ export default function PharmacyAnalyticsPage() {
                       </TableRow>
                       <TableRow>
                         <TableCell className="py-2">5</TableCell>
-                        <TableCell className="py-2 font-medium">Non-NPA</TableCell>
+                        <TableCell className="py-2 font-medium">Retiree Dependents</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
@@ -657,7 +657,7 @@ export default function PharmacyAnalyticsPage() {
                       </TableRow>
                       <TableRow>
                         <TableCell className="py-2">6</TableCell>
-                        <TableCell className="py-2 font-medium">Retirees</TableCell>
+                        <TableCell className="py-2 font-medium">Non-NPA</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>
                         <TableCell className="py-2 text-right">0</TableCell>

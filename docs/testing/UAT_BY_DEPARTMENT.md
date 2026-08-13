@@ -683,7 +683,7 @@ Workspace tabs: **Round · Orders · Timeline**.
 | UAT-ADM-CLN-01 | List clinics | Open clinics page | All sites listed |
 | UAT-ADM-CLN-02 | Edit department | Update department name | Reflected in visit clinic picker |
 
-### 15.5 Module: Rooms (`/admin/rooms`)
+### 15.5 Module: Rooms (`/admin/clinics` → Rooms tab)
 
 | ID | Scenario | Steps | Expected |
 |----|----------|-------|----------|

@@ -60,6 +60,7 @@ export default function CompletedTestsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const loadRequestId = useRef(0);
 
   // Dialog states
   const [selectedTest, setSelectedTest] = useState<CompletedTest | null>(null);
@@ -89,6 +90,7 @@ export default function CompletedTestsPage() {
 
   // Load completed tests function - memoized to prevent infinite loops
   const loadTests = useCallback(async () => {
+    const requestId = ++loadRequestId.current;
     try {
       setLoading(true);
       setError(null);
@@ -126,7 +128,7 @@ export default function CompletedTestsPage() {
       }
 
       const baseParams = {
-        search: debouncedSearchQuery || undefined,
+        search: debouncedSearchQuery.trim() || undefined,
         overall_status: statusFilter !== 'all' ? statusFilter : undefined,
         location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
@@ -136,38 +138,52 @@ export default function CompletedTestsPage() {
         end_date,
       } as const;
 
-      const [listResult, statsResult] = await Promise.all([
-        labService.getVerifiedResults({
-          ...baseParams,
-          page: currentPage,
-          page_size: itemsPerPage,
-        }),
-        labService.getVerificationStats({
-          status: 'verified',
-          overall_status: statusFilter !== 'all' ? statusFilter : undefined,
-          location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
-          gender: genderFilter !== 'all' ? genderFilter : undefined,
-          search: debouncedSearchQuery || undefined,
-          processing_method: processingFilter !== 'all' ? processingFilter : undefined,
-          date,
-          start_date,
-          end_date,
-        }),
-      ]);
-
-      setTotalCount(listResult.count || (listResult.results || []).length);
-      setStats({
-        total: statsResult.total || 0,
-        normal: statsResult.normal || 0,
-        abnormal: statsResult.abnormal || 0,
-        critical: statsResult.critical || 0,
+      const listPromise = labService.getVerifiedResults({
+        ...baseParams,
+        page: currentPage,
+        page_size: itemsPerPage,
       });
+      const statsPromise = labService.getVerificationStats({
+        status: 'verified',
+        overall_status: statusFilter !== 'all' ? statusFilter : undefined,
+        location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        search: debouncedSearchQuery.trim() || undefined,
+        processing_method: processingFilter !== 'all' ? processingFilter : undefined,
+        date,
+        start_date,
+        end_date,
+      });
+
+      // Render the result list as soon as it arrives. Stats use a second,
+      // heavier aggregate query and should not block search feedback.
+      const listResult = await listPromise;
+
+      if (requestId !== loadRequestId.current) return;
+      setTotalCount(listResult.count || (listResult.results || []).length);
 
       // Transform API data to frontend format (shared with consultation room lab viewer)
       const transformed = (listResult.results || []).map((row: any) =>
         transformApiRowToCompletedTest(row, 'verification')
       );
       setTests(transformed);
+      setLoading(false);
+
+      try {
+        const statsResult = await statsPromise;
+        if (requestId === loadRequestId.current) {
+          setStats({
+            total: statsResult.total || 0,
+            normal: statsResult.normal || 0,
+            abnormal: statsResult.abnormal || 0,
+            critical: statsResult.critical || 0,
+          });
+        }
+      } catch (statsError: any) {
+        if (!handleAuthError(statsError)) {
+          console.error('Error loading completed test statistics:', statsError);
+        }
+      }
     } catch (err: any) {
       if (handleAuthError(err)) return;
       setError(err.message || 'Failed to load completed tests');
@@ -176,6 +192,10 @@ export default function CompletedTestsPage() {
       setLoading(false);
     }
   }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, facilityFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday, handleAuthError]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, statusFilter, facilityFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, itemsPerPage]);
 
   // Load completed tests from API when page changes
   useEffect(() => {
