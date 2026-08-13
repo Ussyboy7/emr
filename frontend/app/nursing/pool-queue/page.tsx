@@ -55,8 +55,6 @@ import {
   type RoomActiveSessionSummary,
 } from '@/lib/consultation/room-presence';
 import {
-  buildPresenceOverridePayload,
-  userCanOverrideRoomPresence,
   type PresenceOverridePayload,
 } from '@/lib/consultation/queue-override-permissions';
 import {
@@ -230,13 +228,8 @@ export default function NursingPoolQueuePage() {
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { ready, handleAuthError, currentUser } = useNursingPageAuth();
-  const canOverridePresence = useMemo(
-    () => userCanOverrideRoomPresence(currentUser),
-    [currentUser],
-  );
+  const { ready, handleAuthError } = useNursingPageAuth();
   const [presenceOverrideRoomId, setPresenceOverrideRoomId] = useState<string | null>(null);
-  const [presenceOverrideReason, setPresenceOverrideReason] = useState('');
   const [isPresenceOverrideDialogOpen, setIsPresenceOverrideDialogOpen] = useState(false);
   const [sendingToPhysioVisitId, setSendingToPhysioVisitId] = useState<number | null>(null);
   const [markingLeftVisitId, setMarkingLeftVisitId] = useState<number | null>(null);
@@ -1177,25 +1170,15 @@ export default function NursingPoolQueuePage() {
       return;
     }
     if (room.status === 'unavailable') return;
-    if (canOverridePresence) {
-      setPresenceOverrideRoomId(room.id);
-      setPresenceOverrideReason('');
-      setIsPresenceOverrideDialogOpen(true);
-    }
+    setPresenceOverrideRoomId(room.id);
+    setIsPresenceOverrideDialogOpen(true);
   };
 
-  const confirmPresenceOverrideSend = async () => {
-    if (!presenceOverrideRoomId || !presenceOverrideReason.trim()) {
-      toast.error('Override reason is required');
-      return;
-    }
+  const confirmNoDoctorSend = async () => {
+    if (!presenceOverrideRoomId) return;
     setIsPresenceOverrideDialogOpen(false);
-    await handleSendToRoom(
-      presenceOverrideRoomId,
-      buildPresenceOverridePayload(presenceOverrideReason),
-    );
+    await handleSendToRoom(presenceOverrideRoomId, { override_presence: true });
     setPresenceOverrideRoomId(null);
-    setPresenceOverrideReason('');
   };
 
   const getStatusColor = (status: string) => {
@@ -1409,6 +1392,8 @@ export default function NursingPoolQueuePage() {
               const isMultiClinic = (patient.clinics?.length ?? 0) > 1;
               const showMarkLeft =
                 patient.nursingStatus !== 'Completed' &&
+                patient.nursingStatus !== 'Sent to Room' &&
+                patient.nursingStatus !== 'In Consultation' &&
                 (isMultiClinic ||
                   (patient.nursingStatus !== 'Sent to Physiotherapy' &&
                     patient.nursingStatus !== 'Sent to Eye Clinic'));
@@ -2021,7 +2006,7 @@ export default function NursingPoolQueuePage() {
                 rooms.map((room) => {
                   const canSend = room.status === 'available';
                   const canOverrideRoom =
-                    canOverridePresence && room.status !== 'unavailable' && !canSend;
+                    room.status !== 'unavailable' && !canSend;
                   const canClick = canSend || canOverrideRoom;
                   return (
                   <div 
@@ -2070,7 +2055,7 @@ export default function NursingPoolQueuePage() {
                         </Badge>
                         {!canSend && (
                           <p className="text-xs text-muted-foreground">
-                            {canOverrideRoom ? 'Supervisor override available' : 'Cannot send here'}
+                            {canOverrideRoom ? 'No doctor on seat' : 'Cannot send here'}
                           </p>
                         )}
                         {room.queueCount > 0 && (
@@ -2102,29 +2087,22 @@ export default function NursingPoolQueuePage() {
         <Dialog open={isPresenceOverrideDialogOpen} onOpenChange={setIsPresenceOverrideDialogOpen}>
           <DialogContent className={MODAL_SIZES.sm2}>
             <DialogHeader>
-              <DialogTitle>Override room presence</DialogTitle>
+              <DialogTitle>No doctor on seat</DialogTitle>
               <DialogDescription>
-                The doctor in this room is not on seat or not accepting patients. Provide a reason to send anyway.
+                {rooms.find((r) => r.id === presenceOverrideRoomId)?.name ??
+                  'This room'}{' '}
+                has no doctor on seat. The patient will wait in the queue until a
+                doctor checks in. Send anyway?
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-2 py-2">
-              <Label htmlFor="presence-override-reason">Reason *</Label>
-              <Textarea
-                id="presence-override-reason"
-                value={presenceOverrideReason}
-                onChange={(e) => setPresenceOverrideReason(e.target.value)}
-                placeholder="e.g. Doctor requested urgent patient, covering colleague…"
-                rows={3}
-              />
-            </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsPresenceOverrideDialogOpen(false)}>Cancel</Button>
               <Button
-                onClick={() => void confirmPresenceOverrideSend()}
-                disabled={isSubmitting || !presenceOverrideReason.trim()}
+                onClick={() => void confirmNoDoctorSend()}
+                disabled={isSubmitting}
                 className="bg-amber-600 hover:bg-amber-700"
               >
-                Send with override
+                Send anyway
               </Button>
             </DialogFooter>
           </DialogContent>

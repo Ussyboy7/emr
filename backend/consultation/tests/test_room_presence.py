@@ -137,6 +137,26 @@ class ConsultationRoomPresenceTest(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_queue_create_allowed_when_not_accepting_with_override(self):
+        self._check_in(self.doctor, self.room)
+        self.client.post(
+            f"/api/v1/consultation/rooms/{self.room.pk}/set-accepting/",
+            {"accepting": False},
+            format="json",
+        )
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient.pk,
+                "visit": self.visit.pk,
+                "override_presence": True,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
     def test_reassign_to_non_accepting_room_blocked(self):
         doctor_b = create_test_user(
             "presence_dr_b",
@@ -171,6 +191,41 @@ class ConsultationRoomPresenceTest(APITestCase):
             format="json",
         )
         self.assertEqual(patch_resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_reassign_to_non_accepting_room_allowed_with_override(self):
+        doctor_b = create_test_user(
+            "presence_dr_c",
+            pages=["/consultation", "/consultation/room"],
+            system_role="Medical Doctor",
+        )
+        self._check_in(self.doctor, self.room)
+        self._check_in(doctor_b, self.other_room)
+        self.client.force_authenticate(user=self.nurse)
+        create_resp = self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient.pk,
+                "visit": self.visit.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+        queue_id = create_resp.data["id"]
+
+        self.client.force_authenticate(user=doctor_b)
+        self.client.post(
+            f"/api/v1/consultation/rooms/{self.other_room.pk}/set-accepting/",
+            {"accepting": False},
+            format="json",
+        )
+        self.client.force_authenticate(user=self.nurse)
+        patch_resp = self.client.patch(
+            f"/api/v1/consultation/queue/{queue_id}/",
+            {"room": self.other_room.pk, "override_presence": True},
+            format="json",
+        )
+        self.assertEqual(patch_resp.status_code, status.HTTP_200_OK)
 
     def test_check_in_moves_doctor_from_previous_room(self):
         self._check_in(self.doctor, self.room)
@@ -220,7 +275,7 @@ class ConsultationRoomPresenceTest(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
-    def test_supervisor_override_requires_reason(self):
+    def test_override_does_not_require_reason(self):
         self.client.force_authenticate(user=self.supervisor)
         resp = self.client.post(
             "/api/v1/consultation/queue/",
@@ -233,9 +288,9 @@ class ConsultationRoomPresenceTest(APITestCase):
             },
             format="json",
         )
-        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
-    def test_regular_nurse_cannot_override(self):
+    def test_regular_nurse_override_allows_send_without_doctor(self):
         self.client.force_authenticate(user=self.nurse)
         resp = self.client.post(
             "/api/v1/consultation/queue/",
@@ -244,7 +299,35 @@ class ConsultationRoomPresenceTest(APITestCase):
                 "patient": self.patient.pk,
                 "visit": self.visit.pk,
                 "override_presence": True,
-                "override_reason": "Should not work",
+                "override_reason": "Will send anyway",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_nurse_override_without_reason_allows_send_without_doctor(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient.pk,
+                "visit": self.visit.pk,
+                "override_presence": True,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_queue_create_still_blocked_without_override_when_no_doctor(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.post(
+            "/api/v1/consultation/queue/",
+            {
+                "room": self.room.pk,
+                "patient": self.patient.pk,
+                "visit": self.visit.pk,
+                "override_presence": False,
             },
             format="json",
         )

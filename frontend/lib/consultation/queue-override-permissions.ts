@@ -14,7 +14,7 @@ export function userCanOverrideRoomPresence(user: UserWithCapabilities): boolean
 
 export interface PresenceOverridePayload {
   override_presence: boolean;
-  override_reason: string;
+  override_reason?: string;
 }
 
 export function buildPresenceOverridePayload(reason: string): PresenceOverridePayload {

@@ -140,13 +140,9 @@ def assert_room_operational(room: ConsultationRoom) -> None:
 def assert_room_accepting_patients(room: ConsultationRoom, *, request=None) -> None:
     assert_room_operational(room)
 
-    if request is not None and user_can_override_room_presence(request.user):
-        override, reason = _presence_override_from_request(request)
+    if request is not None:
+        override, _reason = _presence_override_from_request(request)
         if override:
-            if not reason:
-                raise ValidationError({
-                    'override_reason': ['A reason is required when overriding room presence.']
-                })
             return
 
     if not doctors_on_seat(room):
@@ -160,8 +156,10 @@ def assert_room_accepting_patients(room: ConsultationRoom, *, request=None) -> N
 
 def presence_override_audit_suffix(request) -> str:
     override, reason = _presence_override_from_request(request)
-    if override and reason:
-        return f' (presence override: {reason})'
+    if override:
+        if reason:
+            return f' (presence override: {reason})'
+        return ' (presence override — no doctor on seat)'
     return ''
 
 
