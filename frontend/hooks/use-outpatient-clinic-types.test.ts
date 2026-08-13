@@ -18,6 +18,7 @@ vi.mock('react', () => ({
     capturedLoadCallback = fn;
     return fn;
   }),
+  useMemo: vi.fn((fn: any) => fn()),
 }));
 
 vi.mock('@/lib/services', () => ({

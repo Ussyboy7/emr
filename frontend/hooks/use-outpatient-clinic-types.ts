@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { adminService, type OutpatientClinicType } from "@/lib/services";
 import { MAX_LIST_PAGE_SIZE } from "@/lib/pagination-constants";
 
@@ -39,6 +39,9 @@ export function useOutpatientClinicTypes(options?: { includeInactive?: boolean }
     load();
   }, [load]);
 
-  const names = types.map((t) => t.name);
+  // Memoize so the array reference is stable across renders (otherwise any
+  // consumer putting `names` in a useCallback/useEffect dep re-fires on every
+  // render, which can cascade into an infinite fetch loop).
+  const names = useMemo(() => types.map((t) => t.name), [types]);
   return { types, names, loading, error, refetch: load };
 }
