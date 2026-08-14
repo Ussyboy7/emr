@@ -81,6 +81,14 @@ class ClinicSerializer(serializers.ModelSerializer):
         return v if v is not None else 0
 
 
+class ClinicLightSerializer(serializers.ModelSerializer):
+    """Minimal clinic payload for switchers/filters: no aggregate counts."""
+
+    class Meta:
+        model = Clinic
+        fields = ["id", "name", "code", "is_active"]
+
+
 class DepartmentSerializer(serializers.ModelSerializer):
     """Serializer for Department model."""
     

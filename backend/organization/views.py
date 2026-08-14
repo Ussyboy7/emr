@@ -18,6 +18,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import Clinic, Department, Room, OutpatientClinicType, FacilityOutpatientClinic, WorkLocation, SystemConfig
 from .serializers import (
     ClinicSerializer,
+    ClinicLightSerializer,
     DepartmentSerializer,
     RoomSerializer,
     OutpatientClinicTypeSerializer,
@@ -46,6 +47,11 @@ class ClinicViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'code', 'location']
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
+
+    def get_serializer_class(self):
+        if self.request.query_params.get('light'):
+            return ClinicLightSerializer
+        return ClinicSerializer
     
     # Rolling window for "current activity" on the admin Clinic Status
     # tile. Lifetime counts were too broad — a doctor who consulted
@@ -63,7 +69,10 @@ class ClinicViewSet(viewsets.ModelViewSet):
         # clinic".
         if getattr(self, 'swagger_fake_view', False):
             return Clinic.objects.none()
-        
+
+        if self.request.query_params.get('light'):
+            return Clinic.objects.all().order_by('name')
+
         window_start = timezone.now() - timedelta(days=self.CLINIC_ACTIVITY_WINDOW_DAYS)
         window_start_date = window_start.date()
         return Clinic.objects.annotate(

@@ -73,7 +73,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     apiFetch<{ results: { id: number; name: string; code?: string }[] }>(
-      `/organization/clinics/?page_size=${MAX_LIST_PAGE_SIZE}`
+      `/organization/clinics/?light=1&page_size=${MAX_LIST_PAGE_SIZE}`
     )
       .then((data) => {
         if (cancelled) return;

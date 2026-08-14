@@ -28,6 +28,13 @@ class ClinicCRUDTest(APITestCase):
         resp = self.client.get("/api/v1/organization/clinics/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
+    def test_list_clinics_light_skips_counts(self):
+        self.client.post("/api/v1/organization/clinics/", {"name": "C1", "code": "C1"}, format="json")
+        resp = self.client.get("/api/v1/organization/clinics/?light=1")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        item = resp.data["results"][0]
+        self.assertEqual(set(item.keys()), {"id", "name", "code", "is_active"})
+
     def test_duplicate_code_rejected(self):
         self.client.post("/api/v1/organization/clinics/", {"name": "A", "code": "DUP1"}, format="json")
         resp = self.client.post("/api/v1/organization/clinics/", {"name": "B", "code": "DUP1"}, format="json")
