@@ -80,7 +80,6 @@ def _collection_accession_prefix(clinic):
     canonical_prefixes = {
         'BODE-THOMAS': 'BT',
         'TINCAN': 'TCIN',
-        'APAPA': 'LPC',
     }
     if code in canonical_prefixes:
         return canonical_prefixes[code]
