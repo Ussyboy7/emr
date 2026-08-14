@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from common.tests.support import create_test_user, create_test_patient_visit
-from laboratory.models import LabOrder, LabTemplate, LabTest, LabResult
+from laboratory.models import LabOrder, LabSampleBatch, LabTemplate, LabTest, LabResult
 
 
 BASE = "/api/v1/laboratory"
@@ -312,6 +312,37 @@ class LabSampleCollectionTests(APITestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_second_collection_reuses_orders_first_accession(self):
+        first = self.client.post(
+            f"{BASE}/orders/{self.order.pk}/collect_samples/",
+            {"test_ids": [self.test1.pk]},
+            format="json",
+        )
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.test1.refresh_from_db()
+        first_number = self.test1.lab_number
+
+        second = self.client.post(
+            f"{BASE}/orders/{self.order.pk}/collect_samples/",
+            {"test_ids": [self.test2.pk]},
+            format="json",
+        )
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.test2.refresh_from_db()
+
+        self.assertEqual(
+            self.test2.lab_number, first_number,
+            "A later collection on the same order reuses the order's first Lab ID",
+        )
+        self.assertEqual(
+            self.test2.sample_batch_id, self.test1.sample_batch_id,
+            "Later tests join the order's existing sample batch",
+        )
+        self.assertEqual(
+            LabSampleBatch.objects.filter(order=self.order).count(), 1,
+            "One batch per order even after multiple collection events",
+        )
 
 
 class LabSubmitResultsTests(APITestCase):

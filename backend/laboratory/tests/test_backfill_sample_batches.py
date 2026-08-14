@@ -125,3 +125,46 @@ class BackfillSampleBatchesCommandTests(TestCase):
         self.assertIsNone(test.sample_batch_id)
         self.assertIn("ambiguous: 1", output.getvalue())
         self.assertIn(order.order_id, output.getvalue())
+
+    def test_preserve_only_apply_skips_order_without_existing_accession(self):
+        visit = Visit.objects.create(
+            patient=self.patient,
+            date=date.today(),
+            time=time(10, 0),
+            location_clinic=self.hq,
+            clinic="GOPD",
+        )
+        order = self._order_with_test(visit=visit)
+
+        output = StringIO()
+        call_command(
+            "backfill_sample_batches", "--apply", "--preserve-only", stdout=output
+        )
+
+        test = order.tests.get()
+        self.assertIsNone(test.sample_batch_id)
+        self.assertEqual(LabSampleBatch.objects.count(), 0)
+        self.assertIn("skipped: 1", output.getvalue())
+        self.assertIn("created: 0", output.getvalue())
+        self.assertIn("preserve-only", output.getvalue())
+
+    def test_preserve_only_apply_materializes_batch_for_existing_accession(self):
+        visit = Visit.objects.create(
+            patient=self.patient,
+            date=date.today(),
+            time=time(10, 0),
+            location_clinic=self.hq,
+            clinic="GOPD",
+        )
+        order = self._order_with_test(visit=visit, accession="BT-26-0042")
+
+        output = StringIO()
+        call_command(
+            "backfill_sample_batches", "--apply", "--preserve-only", stdout=output
+        )
+
+        test = order.tests.get()
+        self.assertIsNotNone(test.sample_batch_id)
+        self.assertEqual(test.sample_batch.accession_number, "BT-26-0042")
+        self.assertEqual(test.lab_number, "BT-26-0042")
+        self.assertIn("preserved: 1", output.getvalue())

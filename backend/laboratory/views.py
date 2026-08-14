@@ -695,6 +695,14 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                     if idempotent and len(tests) == 1 and not tests[0].sample_batch_id
                     else None
                 )
+                # One Lab ID per order: if a prior collection already created a
+                # batch for this order, reuse it (and its accession) instead of
+                # minting a fresh serial for a later collection event.
+                existing_order_batch = (
+                    order.sample_batches.select_for_update()
+                    .order_by("collected_at", "id")
+                    .first()
+                )
                 if legacy_lab_number:
                     batch = order.sample_batches.filter(
                         accession_number=legacy_lab_number,
@@ -710,6 +718,9 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                             notes=notes,
                         )
                     shared_lab_number = legacy_lab_number
+                elif existing_order_batch is not None:
+                    batch = existing_order_batch
+                    shared_lab_number = existing_order_batch.accession_number
                 else:
                     shared_lab_number = _next_collection_accession(collection_clinic)
                     batch = LabSampleBatch.objects.create(

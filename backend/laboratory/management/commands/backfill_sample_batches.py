@@ -24,6 +24,13 @@ class Command(BaseCommand):
             action="store_true",
             help="Persist the proposed sample-batch backfill.",
         )
+        parser.add_argument(
+            "--preserve-only",
+            action="store_true",
+            help="Only materialize batches for orders that already carry a lab "
+            "number. Orders without an existing accession are skipped instead of "
+            "receiving a freshly fabricated serial.",
+        )
 
     @staticmethod
     def _origin_clinic(order):
@@ -68,6 +75,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         apply_mode = options["apply"]
+        preserve_only = options["preserve_only"]
         counts = {key: 0 for key in ("created", "preserved", "skipped", "ambiguous")}
         planned = {}
         details = []
@@ -115,6 +123,9 @@ class Command(BaseCommand):
                     if accession:
                         counts["preserved"] += 1
                     else:
+                        if preserve_only:
+                            counts["skipped"] += 1
+                            continue
                         # Serialize generated serials per collection clinic and
                         # recalculate after acquiring the row lock.
                         clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
@@ -170,6 +181,9 @@ class Command(BaseCommand):
                 counts["preserved"] += 1
 
             if not accession:
+                if preserve_only:
+                    counts["skipped"] += 1
+                    continue
                 accession = self._next_accession(clinic, planned)
 
             existing_batch = LabSampleBatch.objects.filter(
@@ -188,6 +202,8 @@ class Command(BaseCommand):
             counts["created"] += 1
 
         mode = "APPLY" if apply_mode else "DRY RUN"
+        if preserve_only:
+            mode += " (preserve-only)"
         self.stdout.write(f"{mode} backfill_sample_batches")
         self.stdout.write(
             "Counts: " + ", ".join(f"{key}: {value}" for key, value in counts.items())
