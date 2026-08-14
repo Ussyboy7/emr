@@ -306,7 +306,6 @@ class UserViewSet(viewsets.ModelViewSet):
         if active_clinic_id is not None:
             from organization.models import SystemConfig
             if SystemConfig.is_enabled('multi_clinic_enabled'):
-                assigned_ids = set(request.user.location_clinics.values_list('id', flat=True))
                 try:
                     clinic_id = int(active_clinic_id)
                 except (TypeError, ValueError):
@@ -314,11 +313,15 @@ class UserViewSet(viewsets.ModelViewSet):
                         {"active_clinic": ["Invalid clinic ID."]},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-                if clinic_id not in assigned_ids:
-                    return Response(
-                        {"active_clinic": ["You are not assigned to this clinic."]},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+                from common.mixins import _can_view_all_facilities
+
+                if not _can_view_all_facilities(request.user):
+                    assigned_ids = set(request.user.location_clinics.values_list('id', flat=True))
+                    if clinic_id not in assigned_ids:
+                        return Response(
+                            {"active_clinic": ["You are not assigned to this clinic."]},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
         serializer = UserUpdateSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
