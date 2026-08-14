@@ -838,7 +838,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setIsConsultationReportLoading(true);
     setConsultationReportSession(null);
     try {
-      const reportSession = await loadConsultationReportSession(Number(session.id));
+      const reportSession = await loadConsultationReportSession(Number(session.id), { scope: 'all' });
       setConsultationReportSession(reportSession);
     } catch {
       toast.error('Failed to load consultation report.');

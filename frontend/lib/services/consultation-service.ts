@@ -294,8 +294,14 @@ class ConsultationService {
     ordering?: string;
     page?: number;
     page_size?: number;
+    /** Cross-facility reads: pass "all" to append ?clinic_id=all. */
+    scope?: string;
   }): Promise<{ results: ConsultationSession[]; count: number }> {
-    const query = buildQueryString(params || {});
+    const { scope, ...rest } = params || {};
+    const query = buildQueryString({
+      ...rest,
+      ...(scope ? { clinic_id: scope } : {}),
+    });
     return apiFetch<{ results: ConsultationSession[]; count: number }>(`/consultation/sessions/${query}`);
   }
 
@@ -343,13 +349,15 @@ class ConsultationService {
   /**
    * Get a single consultation session
    */
-  async getSession(id: number): Promise<ConsultationSession> {
-    return apiFetch<ConsultationSession>(`/consultation/sessions/${id}/`);
+  async getSession(id: number, opts?: { scope?: string }): Promise<ConsultationSession> {
+    const scopeParam = opts?.scope ? `?clinic_id=${opts.scope}` : '';
+    return apiFetch<ConsultationSession>(`/consultation/sessions/${id}/${scopeParam}`);
   }
 
   /** Diagnoses, orders, prescriptions, and vitals for consultation room / edit modals. */
-  async getSessionWorkspaceBundle(sessionId: number): Promise<SessionWorkspaceBundle> {
-    return apiFetch<SessionWorkspaceBundle>(`/consultation/sessions/${sessionId}/workspace-bundle/`);
+  async getSessionWorkspaceBundle(sessionId: number, opts?: { scope?: string }): Promise<SessionWorkspaceBundle> {
+    const scopeParam = opts?.scope ? `?clinic_id=${opts.scope}` : '';
+    return apiFetch<SessionWorkspaceBundle>(`/consultation/sessions/${sessionId}/workspace-bundle/${scopeParam}`);
   }
 
   /** History page stat cards (replaces 4 parallel COUNT list calls). */

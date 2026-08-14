@@ -1,13 +1,13 @@
 "use client";
 
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { TabsContent } from '@/components/ui/tabs';
 import { PatientHistoryTabs } from '@/components/patient-history/PatientHistoryTabs';
+import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 import type { PatientHistoryData } from '@/lib/clinical-overview-utils';
 import type { ConsultationRoomPatient } from '@/lib/consultation/room-types';
-import { consultationService } from '@/lib/services';
 import { Edit } from 'lucide-react';
-import { toast } from 'sonner';
 
 export type ConsultationRoomHistoryTabProps = {
   currentPatient: ConsultationRoomPatient | null;
@@ -44,6 +44,9 @@ export function ConsultationRoomHistoryTab({
   onReferralUpdated,
   onEditMedicalHistory,
 }: ConsultationRoomHistoryTabProps) {
+  const [visitDetailOpen, setVisitDetailOpen] = useState(false);
+  const [visitDetailData, setVisitDetailData] = useState<{ id: string; numericId?: number; visitId?: string } | null>(null);
+
   return (
     <TabsContent value="history">
       <div className="space-y-4">
@@ -57,21 +60,14 @@ export function ConsultationRoomHistoryTab({
           allowDocumentActions={false}
           showReferrals
           showBackground
-          onViewVisit={async (v) => {
-            const visitId = Number(v?.id);
-            if (!Number.isFinite(visitId) || visitId <= 0) {
-              toast.error('Visit details are not available.');
-              return;
-            }
-            try {
-              const session = await consultationService.resolveSessionForVisit({ visit: visitId });
-              if (session?.id) {
-                onViewConsultation({ id: session.id });
-              } else {
-                toast.error('No consultation session found for this visit.');
-              }
-            } catch {
-              toast.error('Failed to load visit details.');
+          onViewVisit={(v) => {
+            if (v?.id) {
+              setVisitDetailData({
+                id: String(v.id),
+                numericId: typeof v.id === 'number' ? v.id : undefined,
+                visitId: v.visit_id || String(v.id),
+              });
+              setVisitDetailOpen(true);
             }
           }}
           onViewConsultation={onViewConsultation}
@@ -99,6 +95,14 @@ export function ConsultationRoomHistoryTab({
               </Button>
             </div>
           }
+        />
+        <VisitDetailModal
+          visit={visitDetailData}
+          isOpen={visitDetailOpen}
+          onClose={() => {
+            setVisitDetailOpen(false);
+            setVisitDetailData(null);
+          }}
         />
       </div>
     </TabsContent>

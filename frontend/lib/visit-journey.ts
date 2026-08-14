@@ -522,7 +522,7 @@ export async function resolveVisitJourneyRawVisit(
     const sessionId = idToUse.replace('session-', '');
     const numericSessionId = Number(sessionId);
     if (!Number.isNaN(numericSessionId) && numericSessionId > 0) {
-      const sessionData = await consultationService.getSession(numericSessionId);
+      const sessionData = await consultationService.getSession(numericSessionId, { scope: 'all' });
       isConsultationSession = true;
       return {
         isConsultationSession,
@@ -584,7 +584,7 @@ export async function loadVisitJourneyData(idToUse: string | number): Promise<{
     patientService.getPatient(rawVisit.patient).catch(() => null),
     patientService.getClinicalOverview(rawVisit.patient).catch(() => null),
     consultationService
-      .getSessions({ patient: rawVisit.patient })
+      .getSessions({ patient: rawVisit.patient, scope: 'all' })
       .catch(() => ({ results: [] as ConsultationSession[] })),
   ]);
 

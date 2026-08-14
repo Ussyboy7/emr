@@ -680,6 +680,7 @@ export function extractSessionEditState(
     editRadiologyOrders: bundle.radiology_orders.results || [],
     editPhysioOrders: bundle.physio_orders.results || [],
     editNursingOrders: bundle.nursing_orders.results || [],
+    editEyeOrders: bundle.eye_orders.results || [],
     formPatch: {
       presentationComplaint: safeStr(session.presentation_complaint),
       historyOfPresentIllness: safeStr(session.history_of_presenting_illness),

@@ -17,11 +17,11 @@ import { MAX_LIST_PAGE_SIZE, CATALOG_SEARCH_PAGE_SIZE } from '@/lib/pagination-c
 import {
   Search, Eye, Edit, Clock, CheckCircle2, Activity, Calendar, User, FileText, Pill, TestTube,
   Save, Loader2, Stethoscope, History, Filter, FlaskConical, Syringe, LayoutGrid, List,
-  Users, TrendingUp, ArrowRight, AlertTriangle, RefreshCw, Plus, X, ScanLine
+  Users, TrendingUp, ArrowRight, AlertTriangle, RefreshCw, Plus, X, ScanLine, Send
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from 'next/navigation';
-import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService, nursingService, wardService } from '@/lib/services';
+import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService, nursingService, wardService, referralService } from '@/lib/services';
 import type { Diagnosis, ICD10Code } from '@/lib/services/consultation-service';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
@@ -31,6 +31,7 @@ import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { toApiDateString, formatDisplayDate, formatDisplayTime, localWeekToTodayBounds } from '@/lib/dates';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
+import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { resolvePatientPhoto } from '@/lib/patient-photo';
 import {
@@ -53,6 +54,23 @@ import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/cons
 import { NursingOrderModal, type NursingOrderSubmitInput } from "@/components/consultation/orders/NursingOrderModal";
 import { buildHistoryNursingSubmission, getObservationAdmissionDefaults } from '@/lib/consultation/history-nursing-order';
 import { extractSessionEditState } from '@/lib/consultation/workspace-bundle-enrichment';
+import { ConsultationOrderListCard } from '@/components/consultation/room/ConsultationOrderListCard';
+import { ConsultationRoomPoolOrderDetailDialog, type PoolOrderDetail } from '@/components/consultation/room/ConsultationRoomPoolOrderDetailDialog';
+import { countOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
+import { PatientHistoryTabs } from '@/components/patient-history/PatientHistoryTabs';
+import { referralStatusLabel, getStatusBadgeClass, getFacilityTypeBadgeClass, getUrgencyBadgeClass, toLabel } from '@/lib/referrals/referral-helpers';
+import { PatientHistoryReferralViewDialog } from '@/components/patient-history/PatientHistoryReferralViewDialog';
+import { FacilityPartnerSelect, type FacilityPartnerSelectValue } from '@/components/referrals/FacilityPartnerSelect';
+import { REFERRAL_SPECIALTIES, REFERRAL_REASONS } from '@/lib/constants/medical-data';
+import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
+import { transformApiRowToCompletedTest, type CompletedTest as CompletedLabReportTest } from '@/lib/laboratory/completedLabReport';
+import { RadiologyCompletedReportDialog } from '@/components/radiology/RadiologyCompletedReportDialog';
+import { transformApiRadiologyReportToCompleted, type CompletedRadiologyReport } from '@/lib/radiology/completedRadiologyReport';
+import { PrescriptionReportDialog, type PrescriptionReportData } from '@/components/pharmacy/PrescriptionReportDialog';
+import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
+import { ConsultationRoomWardAdmissionDialog } from '@/components/consultation/room/ConsultationRoomWardAdmissionDialog';
+import { ConsultationRoomPhysioOrderViewDialog } from '@/components/consultation/room/ConsultationRoomPhysioOrderViewDialog';
+import { NewEyeOrderModal } from '@/components/eyecare/NewEyeOrderModal';
 
 // NOTE: doctor name is now taken directly from the session serializer (doctor_name)
 // to avoid per-row API calls in large lists.
@@ -208,6 +226,46 @@ export default function ConsultationHistoryPage() {
   const [editRadiologyOrders, setEditRadiologyOrders] = useState<any[]>([]);
   const [editPhysioOrders, setEditPhysioOrders] = useState<any[]>([]);
   const [editNursingOrders, setEditNursingOrders] = useState<any[]>([]);
+  const [editEyeOrders, setEditEyeOrders] = useState<any[]>([]);
+  const [editReferrals, setEditReferrals] = useState<any[]>([]);
+  const [editReferralsLoading, setEditReferralsLoading] = useState(false);
+  const [showAddEyeOrderModal, setShowAddEyeOrderModal] = useState(false);
+  const [editEyeOrderView, setEditEyeOrderView] = useState<PoolOrderDetail | null>(null);
+  const [referralViewOpen, setReferralViewOpen] = useState(false);
+  const [referralViewId, setReferralViewId] = useState<number | undefined>();
+  const [referralViewRefreshKey, setReferralViewRefreshKey] = useState(0);
+  const [showCreateReferral, setShowCreateReferral] = useState(false);
+  // Dedicated report modal for views opened from the History tab inside the Edit modal.
+  const [editHistoryReportSession, setEditHistoryReportSession] = useState<ConsultationReportSession | null>(null);
+  const [editHistoryReportLoading, setEditHistoryReportLoading] = useState(false);
+  // Shared detail viewers (mirror the consultation room's PatientHistoryTabs handlers).
+  const [selectedCompletedLabTest, setSelectedCompletedLabTest] = useState<CompletedLabReportTest | null>(null);
+  const [showLabResultViewer, setShowLabResultViewer] = useState(false);
+  const [selectedCompletedRadiologyReport, setSelectedCompletedRadiologyReport] = useState<CompletedRadiologyReport | null>(null);
+  const [showRadiologyReportViewer, setShowRadiologyReportViewer] = useState(false);
+  const [selectedPrescription, setSelectedPrescription] = useState<PrescriptionReportData | null>(null);
+  const [showPrescriptionViewer, setShowPrescriptionViewer] = useState(false);
+  const [selectedVital, setSelectedVital] = useState<any | null>(null);
+  const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
+  const [selectedPhysioOrder, setSelectedPhysioOrder] = useState<any | null>(null);
+  const [isPhysioOrderDialogOpen, setIsPhysioOrderDialogOpen] = useState(false);
+  const [physioOrderSessions, setPhysioOrderSessions] = useState<any[]>([]);
+  const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
+  const [selectedWardAdmission, setSelectedWardAdmission] = useState<any | null>(null);
+  const [showWardAdmissionDetail, setShowWardAdmissionDetail] = useState(false);
+  const [newReferral, setNewReferral] = useState<{
+    specialty: string;
+    priority: 'Routine' | 'Urgent' | 'STAT';
+    facility: string;
+    facility_partner: number | null;
+    facilityType: string;
+    reason: string;
+    clinicalSummary: string;
+    contactPerson: string;
+    contactPhone: string;
+  }>({ specialty: "", priority: "Routine", facility: "", facility_partner: null, facilityType: "", reason: "", clinicalSummary: "", contactPerson: "", contactPhone: "" });
+  const [visitDetailOpen, setVisitDetailOpen] = useState(false);
+  const [visitDetailData, setVisitDetailData] = useState<{ id: string; numericId?: number; visitId?: string } | null>(null);
   // Local draft prescriptions (like consultation room)
   const [draftPrescriptions, setDraftPrescriptions] = useState<any[]>([]);
 
@@ -473,6 +531,7 @@ export default function ConsultationHistoryPage() {
     setReportSession(null);
     setLoadingReport(true);
     setShowViewModal(true);
+    setShowEditModal(false);
   };
 
   const selectedConsultationId = selectedConsultation?.id;
@@ -486,7 +545,7 @@ export default function ConsultationHistoryPage() {
       return;
     }
     let cancelled = false;
-    loadConsultationReportSession(id)
+    loadConsultationReportSession(id, { scope: 'all' })
       .then((session) => {
         if (!cancelled) setReportSession(session);
       })
@@ -533,9 +592,15 @@ export default function ConsultationHistoryPage() {
       }))
     });
     setShowEditModal(true);
+    setShowViewModal(false);
   };
 
   // Load orders, session notes, and diagnoses for Edit modal when it opens (synced with backend)
+  const patientId = useMemo(() => {
+    if (!selectedConsultation) return undefined;
+    const numeric = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId ?? '', 10);
+    return numeric && !isNaN(numeric) ? numeric : undefined;
+  }, [selectedConsultation]);
   useEffect(() => {
     if (!showEditModal || !selectedConsultationId) return;
     const sessionId = parseInt(selectedConsultationId ?? '', 10);
@@ -545,8 +610,8 @@ export default function ConsultationHistoryPage() {
       setLoadingOrders(true);
       try {
         const [bundle, session] = await Promise.all([
-          consultationService.getSessionWorkspaceBundle(sessionId),
-          consultationService.getSession(sessionId),
+          consultationService.getSessionWorkspaceBundle(sessionId, { scope: 'all' }),
+          consultationService.getSession(sessionId, { scope: 'all' }),
         ]);
         const editState = extractSessionEditState(bundle, session);
         setEditPrescriptions(editState.editPrescriptions);
@@ -554,6 +619,7 @@ export default function ConsultationHistoryPage() {
         setEditRadiologyOrders(editState.editRadiologyOrders);
         setEditPhysioOrders(editState.editPhysioOrders);
         setEditNursingOrders(editState.editNursingOrders);
+        setEditEyeOrders(editState.editEyeOrders);
         setEditForm((prev) => ({ ...prev, ...editState.formPatch }));
       } catch (err) {
         console.error('Error loading orders/session for edit:', err);
@@ -561,23 +627,36 @@ export default function ConsultationHistoryPage() {
       } finally {
         setLoadingOrders(false);
       }
+
+      if (patientId && !isNaN(patientId)) {
+        setEditReferralsLoading(true);
+        try {
+          const res = await referralService.getReferrals({ patient: String(patientId), page_size: 50 });
+          setEditReferrals(res.results || []);
+        } catch {
+          setEditReferrals([]);
+        } finally {
+          setEditReferralsLoading(false);
+        }
+      }
     };
     loadOrdersAndSession();
-  }, [showEditModal, selectedConsultationId]);
+  }, [showEditModal, selectedConsultationId, patientId]);
 
   const loadEditOrdersRefetch = async () => {
     if (!selectedConsultation) return;
     const sessionId = parseInt(selectedConsultation.id, 10);
     if (isNaN(sessionId)) return;
     try {
-      const bundle = await consultationService.getSessionWorkspaceBundle(sessionId);
-      const { editPrescriptions, editLabOrders, editRadiologyOrders, editPhysioOrders, editNursingOrders } =
+      const bundle = await consultationService.getSessionWorkspaceBundle(sessionId, { scope: 'all' });
+      const { editPrescriptions, editLabOrders, editRadiologyOrders, editPhysioOrders, editNursingOrders, editEyeOrders } =
         extractSessionEditState(bundle, {});
       setEditPrescriptions(editPrescriptions);
       setEditLabOrders(editLabOrders);
       setEditRadiologyOrders(editRadiologyOrders);
       setEditPhysioOrders(editPhysioOrders);
       setEditNursingOrders(editNursingOrders);
+      setEditEyeOrders(editEyeOrders);
     } catch (err) {
       console.error('Error refetching orders:', err);
     }
@@ -1417,6 +1496,16 @@ export default function ConsultationHistoryPage() {
           loading={loadingReport}
         />
 
+        {/* Visit Detail modal */}
+        <VisitDetailModal
+          visit={visitDetailData}
+          isOpen={visitDetailOpen}
+          onClose={() => {
+            setVisitDetailOpen(false);
+            setVisitDetailData(null);
+          }}
+        />
+
         {/* Edit Modal */}
         <Dialog open={showEditModal} onOpenChange={(open) => {
           setShowEditModal(open);
@@ -1424,7 +1513,7 @@ export default function ConsultationHistoryPage() {
             setDraftPrescriptions([]);
           }
         }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[1100px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-emerald-500" />
@@ -1441,7 +1530,7 @@ export default function ConsultationHistoryPage() {
             </DialogHeader>
             {selectedConsultation && (
               <Tabs value={editActiveTab} onValueChange={setEditActiveTab} className="w-full mt-2">
-                <TabsList className="grid w-full grid-cols-6 h-10 gap-1 p-1">
+                <TabsList className="grid w-full grid-cols-9 h-10 gap-1 p-1">
                   <TabsTrigger value="notes" className="text-xs sm:text-sm flex items-center gap-1">
                     <FileText className="h-3.5 w-3.5" />
                     Notes
@@ -1462,9 +1551,21 @@ export default function ConsultationHistoryPage() {
                     <Activity className="h-3.5 w-3.5" />
                     Physio
                   </TabsTrigger>
+                  <TabsTrigger value="eyecare" className="text-xs sm:text-sm flex items-center gap-1">
+                    <Eye className="h-3.5 w-3.5" />
+                    Eye
+                  </TabsTrigger>
                   <TabsTrigger value="nursing" className="text-xs sm:text-sm flex items-center gap-1">
                     <Syringe className="h-3.5 w-3.5" />
                     Nursing
+                  </TabsTrigger>
+                  <TabsTrigger value="referral" className="text-xs sm:text-sm flex items-center gap-1">
+                    <Send className="h-3.5 w-3.5" />
+                    Referral
+                  </TabsTrigger>
+                  <TabsTrigger value="history" className="text-xs sm:text-sm flex items-center gap-1">
+                    <History className="h-3.5 w-3.5" />
+                    History
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="notes" className="space-y-5 mt-5">
@@ -2094,6 +2195,304 @@ export default function ConsultationHistoryPage() {
                     </CardContent>
                   </Card>
                 </TabsContent>
+                <TabsContent value="eyecare" className="mt-4">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Eye className="h-5 w-5 text-cyan-600" />
+                            Eye Care Orders
+                          </CardTitle>
+                          <CardDescription>
+                            Order eye care evaluation — will be sent to Eye Care queue.
+                          </CardDescription>
+                        </div>
+                        <Button variant="outline" onClick={() => setShowAddEyeOrderModal(true)}>
+                          <Plus className="mr-2 h-4 w-4" />Add Eye Order
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {loadingOrders ? (
+                        <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                      ) : editEyeOrders.length > 0 ? (
+                        <div className="space-y-3">
+                          {editEyeOrders.map((order: any) => {
+                            const getStatusBadge = (status: string) => {
+                              switch (status) {
+                                case 'pending': return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400';
+                                case 'scheduled': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                                case 'in_progress': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+                                case 'completed': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+                                default: return 'bg-gray-100 text-gray-800';
+                              }
+                            };
+                            const statusLabel = order.status === 'pending' ? 'Sent to Eye Care' : order.status === 'scheduled' ? 'Scheduled' : order.status === 'in_progress' ? 'In Progress' : order.status === 'completed' ? 'Completed' : String(order.status || '');
+                            const diagnosisCount = countOrderDiagnoses({
+                              diagnoses: order.diagnoses,
+                              diagnosisText: order.diagnosis,
+                            });
+                            return (
+                              <ConsultationOrderListCard
+                                key={order.id}
+                                borderClassName={
+                                  order.status === 'completed'
+                                    ? 'border-l-green-500'
+                                    : 'border-l-cyan-500'
+                                }
+                                cardClassName={order.priority === 'stat' ? 'bg-rose-50 dark:bg-rose-900/10' : undefined}
+                                icon={<Eye className={`h-3.5 w-3.5 ${order.priority === 'stat' ? 'text-rose-600' : 'text-cyan-600'}`} />}
+                                iconWrapClassName={
+                                  order.priority === 'stat'
+                                    ? 'bg-rose-100 dark:bg-rose-900/30'
+                                    : 'bg-cyan-100 dark:bg-cyan-900/30'
+                                }
+                                title="Eye evaluation"
+                                titleExtra={
+                                  diagnosisCount > 0 ? (
+                                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] text-muted-foreground">
+                                      {diagnosisCount} diagnosis{diagnosisCount === 1 ? '' : 'es'}
+                                    </Badge>
+                                  ) : undefined
+                                }
+                                badges={
+                                  <>
+                                    <Badge className={`px-1.5 py-0.5 text-xs ${getStatusBadge(order.status)}`}>
+                                      {statusLabel}
+                                    </Badge>
+                                    <Badge
+                                      variant={order.priority === 'stat' ? 'destructive' : order.priority === 'urgent' ? 'default' : 'secondary'}
+                                      className={`px-1.5 py-0.5 text-xs ${order.priority === 'stat' ? 'bg-rose-500' : order.priority === 'urgent' ? 'bg-amber-500' : ''}`}
+                                    >
+                                      {order.priority === 'stat' && <AlertTriangle className="mr-1 h-3 w-3" />}
+                                      {order.priority}
+                                    </Badge>
+                                  </>
+                                }
+                                actions={
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setEditEyeOrderView(order)}
+                                    className="text-muted-foreground hover:text-foreground"
+                                  >
+                                    <Eye className="mr-1 h-4 w-4" />
+                                    View
+                                  </Button>
+                                }
+                              />
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 bg-gradient-to-b from-cyan-50 to-cyan-100/50 dark:from-cyan-900/10 dark:to-cyan-900/5 rounded-lg border-2 border-dashed border-cyan-200 dark:border-cyan-800">
+                          <Eye className="h-12 w-12 mx-auto mb-3 text-cyan-500 opacity-60" />
+                          <p className="font-medium text-cyan-900 dark:text-cyan-100 mb-1">No eye care orders yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Order evaluations to be processed by Eye Care department</p>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddEyeOrderModal(true)} className="border-cyan-300 text-cyan-700 hover:bg-cyan-100">
+                            <Plus className="h-4 w-4 mr-1" />Order First Evaluation
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+                <TabsContent value="referral" className="mt-4">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Send className="h-5 w-5 text-teal-500" />
+                            Referrals
+                          </CardTitle>
+                          <CardDescription>
+                            Create a referral, then use Manage to print, issue forms, and send to Medical Records.
+                          </CardDescription>
+                        </div>
+                        <Button variant="outline" onClick={() => setShowCreateReferral(true)}>
+                          <Plus className="mr-2 h-4 w-4" />
+                          Create referral
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {editReferralsLoading ? (
+                        <div className="flex justify-center py-10 text-muted-foreground">
+                          <Loader2 className="h-6 w-6 animate-spin" />
+                        </div>
+                      ) : editReferrals.length > 0 ? (
+                        <div className="space-y-3">
+                          {editReferrals.map((referral: any) => (
+                            <Card key={referral.id} className="border-l-4 border-l-teal-500">
+                              <CardContent className="p-4">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex-1 min-w-0 space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-semibold">{referral.specialty}</span>
+                                      <Badge variant="outline" className={getStatusBadgeClass(referral.status)}>
+                                        {referralStatusLabel(referral.status)}
+                                      </Badge>
+                                      <Badge variant="outline" className={getFacilityTypeBadgeClass(referral.facility_type)}>
+                                        {toLabel(referral.facility_type)}
+                                      </Badge>
+                                      <Badge variant="outline" className={getUrgencyBadgeClass(referral.urgency)}>
+                                        {toLabel(referral.urgency)}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-sm text-muted-foreground">
+                                      <span className="font-medium text-foreground">{referral.facility}</span>
+                                      {referral.reason && <span className="ml-2">{referral.reason}</span>}
+                                    </p>
+                                  </div>
+                                  <div className="flex shrink-0 gap-2">
+                                    <Button size="sm" variant="outline" onClick={() => {
+                                      setReferralViewId(referral.id);
+                                      setReferralViewRefreshKey((k) => k + 1);
+                                      setReferralViewOpen(true);
+                                    }}>
+                                      <Eye className="h-4 w-4 mr-1" />
+                                      Manage
+                                    </Button>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 bg-gradient-to-b from-teal-50 to-teal-100/50 dark:from-teal-900/10 dark:to-teal-900/5 rounded-lg border-2 border-dashed border-teal-200 dark:border-teal-800">
+                          <Send className="h-12 w-12 mx-auto mb-3 text-teal-500 opacity-60" />
+                          <p className="font-medium text-teal-900 dark:text-teal-100 mb-1">No referrals yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Refer patient to specialists or other facilities</p>
+                          <Button variant="outline" size="sm" onClick={() => setShowCreateReferral(true)} className="border-teal-300 text-teal-700 hover:bg-teal-100">
+                            <Plus className="h-4 w-4 mr-1" />
+                            Create referral
+                          </Button>
+                        </div>
+                      )}
+
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+                <TabsContent value="history" className="mt-4">
+                  {selectedConsultation && (() => {
+                    const pid = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+                    if (!pid || isNaN(pid)) {
+                      return (
+                        <Card>
+                          <CardContent className="py-8 text-center text-muted-foreground">
+                            <History className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                            <p className="text-sm">Patient ID not available for history lookup.</p>
+                          </CardContent>
+                        </Card>
+                      );
+                    }
+                    return (
+                      <PatientHistoryTabs
+                        patientId={pid}
+                        defaultTab="background"
+                        showVisits
+                        showCertificates
+                        showReferrals
+                        showBackground
+                        showDocuments
+                        allowDocumentActions={false}
+                        onViewConsultation={async (s) => {
+                          if (s?.id) {
+                            try {
+                              setEditHistoryReportLoading(true);
+                              setEditHistoryReportSession(null);
+                              const session = await loadConsultationReportSession(Number(s.id), { scope: 'all' });
+                              setEditHistoryReportSession(session);
+                            } catch {
+                              toast.error('Failed to load consultation report.');
+                            } finally {
+                              setEditHistoryReportLoading(false);
+                            }
+                          }
+                        }}
+                        onViewVisit={(v) => {
+                          if (v?.id) {
+                            setVisitDetailData({
+                              id: String(v.id),
+                              numericId: typeof v.id === 'number' ? v.id : undefined,
+                              visitId: v.visit_id || String(v.id),
+                            });
+                            setVisitDetailOpen(true);
+                          }
+                        }}
+                        onViewLab={(lab) => {
+                          if (lab?.id) {
+                            setSelectedCompletedLabTest(transformApiRowToCompletedTest(lab as any, 'tests'));
+                            setShowLabResultViewer(true);
+                          }
+                        }}
+                        onViewImaging={(img) => {
+                          if (img?.id) {
+                            setSelectedCompletedRadiologyReport(transformApiRadiologyReportToCompleted(img as any));
+                            setShowRadiologyReportViewer(true);
+                          }
+                        }}
+                        onViewPrescription={(p) => {
+                          if (p?.id) {
+                            setSelectedPrescription(p);
+                            setShowPrescriptionViewer(true);
+                          }
+                        }}
+                        onViewVital={(v) => {
+                          if (v) {
+                            setSelectedVital(v);
+                            setIsVitalsDetailModalOpen(true);
+                          }
+                        }}
+                        onViewPhysio={async (o) => {
+                          if (!o?.id) return;
+                          setSelectedPhysioOrder(o);
+                          setIsPhysioOrderDialogOpen(true);
+                          setLoadingPhysioSessions(true);
+                          try {
+                            const sessionsResponse = await physioService.getSessions({ order: Number(o.id) });
+                            setPhysioOrderSessions(sessionsResponse.results || []);
+                          } catch {
+                            setPhysioOrderSessions([]);
+                          } finally {
+                            setLoadingPhysioSessions(false);
+                          }
+                        }}
+                        onViewEyeOrder={(o) => {
+                          if (o) setEditEyeOrderView(o);
+                        }}
+                        onViewWard={(a) => {
+                          if (a?.id) {
+                            setSelectedWardAdmission(a);
+                            setShowWardAdmissionDetail(true);
+                          }
+                        }}
+                        onViewReferral={(r) => {
+                          if (r?.id) {
+                            setReferralViewId(Number(r.id));
+                            setReferralViewRefreshKey((k) => k + 1);
+                            setReferralViewOpen(true);
+                          }
+                        }}
+                        onReferralUpdated={() => {
+                          if (selectedConsultation) {
+                            const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+                            if (patientId && !isNaN(patientId)) {
+                              setEditReferralsLoading(true);
+                              referralService.getReferrals({ patient: String(patientId), page_size: 50 })
+                                .then((res) => setEditReferrals(res.results || []))
+                                .catch(() => setEditReferrals([]))
+                                .finally(() => setEditReferralsLoading(false));
+                            }
+                          }
+                        }}
+                      />
+                    );
+                  })()}
+                </TabsContent>
               </Tabs>
             )}
             <DialogFooter>
@@ -2273,6 +2672,275 @@ export default function ConsultationHistoryPage() {
           onOpenChange={setShowAddNursingOrder}
           onSubmit={handleSubmitNursingOrder}
           observationDefaults={observationDefaults}
+        />
+
+        {selectedConsultation && (
+          <NewEyeOrderModal
+            open={showAddEyeOrderModal}
+            onOpenChange={setShowAddEyeOrderModal}
+            onSuccess={() => {
+              setShowAddEyeOrderModal(false);
+              const sessionId = parseInt(selectedConsultation.id, 10);
+              if (!isNaN(sessionId)) {
+                consultationService.getSessionWorkspaceBundle(sessionId, { scope: 'all' }).then((bundle) => {
+                  const { editEyeOrders: fresh } = extractSessionEditState(bundle, {});
+                  setEditEyeOrders(fresh);
+                }).catch(() => {});
+              }
+            }}
+            visitId={selectedConsultation.visitId ? Number(selectedConsultation.visitId) : undefined}
+          />
+        )}
+
+        <ConsultationRoomPoolOrderDetailDialog
+          open={!!editEyeOrderView}
+          onOpenChange={(open) => !open && setEditEyeOrderView(null)}
+          module="eyecare"
+          order={editEyeOrderView}
+        />
+
+        {/* Report modal for views opened from the History tab inside the Edit modal (separate state avoids racing the main View report). */}
+        <ConsultationReportModal
+          open={editHistoryReportSession !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditHistoryReportSession(null);
+              setEditHistoryReportLoading(false);
+            }
+          }}
+          session={editHistoryReportSession}
+          loading={editHistoryReportLoading}
+        />
+
+        {/* Referral view (Manage) dialog */}
+        <PatientHistoryReferralViewDialog
+          open={referralViewOpen}
+          onOpenChange={setReferralViewOpen}
+          referralId={referralViewId ?? null}
+          refreshKey={referralViewRefreshKey}
+          onReferralUpdated={() => {
+            if (selectedConsultation) {
+              const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+              if (patientId && !isNaN(patientId)) {
+                setEditReferralsLoading(true);
+                referralService.getReferrals({ patient: String(patientId), page_size: 50 })
+                  .then((res) => setEditReferrals(res.results || []))
+                  .catch(() => setEditReferrals([]))
+                  .finally(() => setEditReferralsLoading(false));
+              }
+            }
+          }}
+        />
+
+        {/* Create Referral dialog */}
+        <Dialog open={showCreateReferral} onOpenChange={setShowCreateReferral}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Send className="h-5 w-5 text-teal-500" />
+                Create Referral
+              </DialogTitle>
+              <DialogDescription>
+                Refer {selectedConsultation?.patient ?? 'patient'} to a specialist or facility
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Specialty *</Label>
+                  <Select value={newReferral.specialty} onValueChange={(v) => setNewReferral({ ...newReferral, specialty: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select specialty" /></SelectTrigger>
+                    <SelectContent className="max-h-[250px]">
+                      {REFERRAL_SPECIALTIES.map((spec) => (
+                        <SelectItem key={spec} value={spec}>{spec}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Priority</Label>
+                  <Select value={newReferral.priority} onValueChange={(v) => setNewReferral({ ...newReferral, priority: v as 'Routine' | 'Urgent' | 'STAT' })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Routine"><Badge className="bg-blue-100 text-blue-800">Routine</Badge></SelectItem>
+                      <SelectItem value="Urgent"><Badge className="bg-amber-100 text-amber-800">Urgent</Badge></SelectItem>
+                      <SelectItem value="STAT"><Badge className="bg-red-100 text-red-800">STAT</Badge></SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Referral Facility *</Label>
+                <FacilityPartnerSelect
+                  showLabel={false}
+                  value={{
+                    partnerId: newReferral.facility_partner,
+                    facility: newReferral.facility,
+                    facility_type: (newReferral.facilityType || 'internal') as 'internal' | 'external' | 'specialist',
+                  }}
+                  onChange={(next) =>
+                    setNewReferral({
+                      ...newReferral,
+                      facility: next.facility,
+                      facility_partner: next.partnerId,
+                      facilityType: next.facility_type,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Reason for Referral *</Label>
+                <Select value={newReferral.reason} onValueChange={(v) => setNewReferral({ ...newReferral, reason: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select reason" /></SelectTrigger>
+                  <SelectContent>
+                    {REFERRAL_REASONS.map((reason) => (
+                      <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Clinical Indication *</Label>
+                <Textarea
+                  value={newReferral.clinicalSummary}
+                  onChange={(e) => setNewReferral({ ...newReferral, clinicalSummary: e.target.value })}
+                  placeholder="Brief summary of patient's condition, relevant history, and reason for referral..."
+                  rows={3}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Contact Person (Optional)</Label>
+                  <Input
+                    value={newReferral.contactPerson}
+                    onChange={(e) => setNewReferral({ ...newReferral, contactPerson: e.target.value })}
+                    placeholder="Dr. / Nurse name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Contact Phone (Optional)</Label>
+                  <Input
+                    value={newReferral.contactPhone}
+                    onChange={(e) => setNewReferral({ ...newReferral, contactPhone: e.target.value })}
+                    placeholder="e.g., 08012345678"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowCreateReferral(false)}>Cancel</Button>
+              <Button
+                onClick={async () => {
+                  if (!selectedConsultation) return;
+                  const numericPatientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+                  if (!newReferral.specialty || !newReferral.facility || !newReferral.reason) {
+                    toast.error('Please fill in all required fields');
+                    return;
+                  }
+                  if (!numericPatientId || isNaN(numericPatientId)) {
+                    toast.error('Invalid patient ID');
+                    return;
+                  }
+                  try {
+                    await referralService.createReferral({
+                      patient: numericPatientId,
+                      visit: selectedConsultation.visitId || undefined,
+                      session: parseInt(selectedConsultation.id, 10) || undefined,
+                      specialty: newReferral.specialty,
+                      facility: newReferral.facility,
+                      facility_partner: newReferral.facility_partner,
+                      facility_type: (newReferral.facilityType || 'internal') as 'internal' | 'external' | 'specialist',
+                      reason: newReferral.reason,
+                      clinical_summary: newReferral.clinicalSummary || undefined,
+                      urgency: newReferral.priority === 'STAT' ? 'emergency' : (newReferral.priority.toLowerCase() as 'urgent' | 'routine'),
+                      contact_person: newReferral.contactPerson || undefined,
+                      contact_phone: newReferral.contactPhone || undefined,
+                    });
+                    setNewReferral({ specialty: "", priority: "Routine", facility: "", facility_partner: null, facilityType: "", reason: "", clinicalSummary: "", contactPerson: "", contactPhone: "" });
+                    setShowCreateReferral(false);
+                    toast.success('Referral created as draft.');
+                    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+                    if (patientId && !isNaN(patientId)) {
+                      const res = await referralService.getReferrals({ patient: String(patientId), page_size: 50 });
+                      setEditReferrals(res.results || []);
+                    }
+                  } catch (err: any) {
+                    console.error('Error creating referral:', err);
+                    toast.error(err.message || 'Failed to create referral');
+                  }
+                }}
+                disabled={!newReferral.specialty || !newReferral.facility || !newReferral.reason}
+                className="bg-teal-600 hover:bg-teal-700"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                Create Referral
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Shared detail viewers for History tab (same dialogs as the consultation room) */}
+        <LabCompletedReportDialog
+          open={showLabResultViewer}
+          onOpenChange={(o) => {
+            setShowLabResultViewer(o);
+            if (!o) setSelectedCompletedLabTest(null);
+          }}
+          test={selectedCompletedLabTest}
+          hideLabWorkflowActions
+        />
+
+        <RadiologyCompletedReportDialog
+          open={showRadiologyReportViewer}
+          onOpenChange={(o) => {
+            setShowRadiologyReportViewer(o);
+            if (!o) setSelectedCompletedRadiologyReport(null);
+          }}
+          report={selectedCompletedRadiologyReport}
+        />
+
+        <PrescriptionReportDialog
+          open={showPrescriptionViewer}
+          onOpenChange={(o) => {
+            setShowPrescriptionViewer(o);
+            if (!o) setSelectedPrescription(null);
+          }}
+          prescription={selectedPrescription}
+          prescriptionDbId={selectedPrescription?.id ?? null}
+          patient={selectedConsultation ? {
+            name: selectedConsultation.patient || '',
+            patientId: selectedConsultation.patientId || '',
+            age: selectedConsultation.patientAge,
+            gender: selectedConsultation.patientGender,
+          } : null}
+        />
+
+        <VitalsDetailModal
+          isOpen={isVitalsDetailModalOpen}
+          onClose={() => setIsVitalsDetailModalOpen(false)}
+          vitals={selectedVital}
+          patientName={selectedConsultation?.patient || 'Patient'}
+          patientId={selectedConsultation?.patientId}
+        />
+
+        <ConsultationRoomPhysioOrderViewDialog
+          open={isPhysioOrderDialogOpen}
+          onOpenChange={setIsPhysioOrderDialogOpen}
+          selectedPhysioOrder={selectedPhysioOrder}
+          physioOrderSessions={physioOrderSessions}
+          loadingPhysioSessions={loadingPhysioSessions}
+        />
+
+        <ConsultationRoomWardAdmissionDialog
+          open={showWardAdmissionDetail}
+          onOpenChange={setShowWardAdmissionDetail}
+          selectedWardAdmission={selectedWardAdmission}
         />
       </div>
     </DashboardLayout>

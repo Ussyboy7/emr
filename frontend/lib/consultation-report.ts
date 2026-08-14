@@ -399,10 +399,11 @@ export function applyBundleToReportSession(
   return session;
 }
 
-export async function loadConsultationReportSession(sessionId: number): Promise<ConsultationReportSession> {
+export async function loadConsultationReportSession(sessionId: number, opts?: { scope?: string }): Promise<ConsultationReportSession> {
+  const scopeParam = opts?.scope ? `?clinic_id=${opts.scope}` : '';
   const [session, bundle] = await Promise.all([
-    apiFetch<Record<string, unknown>>(`/consultation/sessions/${sessionId}/`),
-    consultationService.getSessionWorkspaceBundle(sessionId),
+    apiFetch<Record<string, unknown>>(`/consultation/sessions/${sessionId}/${scopeParam}`),
+    consultationService.getSessionWorkspaceBundle(sessionId, opts),
   ]);
 
   const patientId = session.patient as number;
