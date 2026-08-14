@@ -28,7 +28,7 @@ import { LogOut, Shield, Clock, Calendar, Bell, HelpCircle, Settings, Stethoscop
 export const TopBar = () => {
   const router = useRouter();
   const { currentUser, hydrated } = useCurrentUser();
-  const { activeClinicId, activeClinicName, clinics, allClinics, isMultiClinic, canViewAllClinics, switchClinic, loading: clinicLoading } = useClinic();
+  const { activeClinicId, activeClinicName, clinics, allClinics, isMultiClinic, canViewAllClinics, switchClinic, switchError, loading: clinicLoading } = useClinic();
   const clinicList = canViewAllClinics ? allClinics : clinics;
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -218,6 +218,11 @@ export const TopBar = () => {
                     )}
                   </DropdownMenuItem>
                 ))}
+                {switchError && (
+                  <div className="px-2 py-1.5 text-xs text-red-600 border-t border-sidebar-border mt-1">
+                    {switchError}
+                  </div>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

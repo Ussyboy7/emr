@@ -49,6 +49,9 @@ class ClinicSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.INT)
     def get_staff_count(self, obj):
         """Get count of staff assigned to this clinic (via M2M)."""
+        v = getattr(obj, "staff_count", None)
+        if v is not None:
+            return v
         return obj.assigned_staff.filter(is_active=True).count()
     
     @extend_schema_field(OpenApiTypes.INT)
@@ -57,7 +60,9 @@ class ClinicSerializer(serializers.ModelSerializer):
         Includes both organization.Room and consultation.ConsultationRoom.
         """
         from consultation.models import ConsultationRoom
-        org_rooms_count = obj.rooms.filter(is_active=True).count()
+        org_rooms_count = getattr(obj, "org_room_count", None)
+        if org_rooms_count is None:
+            org_rooms_count = obj.rooms.filter(is_active=True).count()
         consult_rooms_count = ConsultationRoom.objects.filter(location_clinic=obj, is_active=True).count()
         return org_rooms_count + consult_rooms_count
     

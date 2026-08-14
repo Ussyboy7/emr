@@ -89,6 +89,16 @@ class ClinicViewSet(viewsets.ModelViewSet):
                 ),
                 distinct=True,
             ),
+            staff_count=Count(
+                "assigned_staff",
+                filter=Q(assigned_staff__is_active=True),
+                distinct=True,
+            ),
+            org_room_count=Count(
+                "rooms",
+                filter=Q(rooms__is_active=True),
+                distinct=True,
+            ),
         )
     
     def perform_create(self, serializer):

@@ -18,7 +18,8 @@ interface ClinicContextType {
   allClinics: ClinicInfo[];
   isMultiClinic: boolean;
   canViewAllClinics: boolean;
-  switchClinic: (clinicId: number | null) => Promise<void>;
+  switchClinic: (clinicId: number | null) => Promise<string | null>;
+  switchError: string | null;
   clinicVersion: number;
   loading: boolean;
 }
@@ -30,6 +31,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   const [allClinics, setAllClinics] = useState<ClinicInfo[]>([]);
   const [clinicsLoaded, setClinicsLoaded] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   const [clinicVersion, setClinicVersion] = useState(0);
 
   const location_clinics = currentUser?.location_clinics;
@@ -111,6 +113,15 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       // context. Every data-fetching effect re-runs against the new clinic scope
       // without a full browser reload.
       setClinicVersion((v) => v + 1);
+      setSwitchError(null);
+      return null;
+    } catch (err) {
+      const msg =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Failed to switch clinic.";
+      setSwitchError(msg);
+      return msg;
     } finally {
       setSwitching(false);
     }
@@ -124,9 +135,10 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     isMultiClinic: multi_clinic_enabled && userClinics.length > 1,
     canViewAllClinics,
     switchClinic,
+    switchError,
     clinicVersion,
     loading: !clinicsLoaded || switching,
-  }), [active_clinic_id, activeClinicName, userClinics, allClinics, multi_clinic_enabled, canViewAllClinics, switchClinic, clinicVersion, clinicsLoaded, switching]);
+  }), [active_clinic_id, activeClinicName, userClinics, allClinics, multi_clinic_enabled, canViewAllClinics, switchClinic, switchError, clinicVersion, clinicsLoaded, switching]);
 
   return (
     <ClinicContext.Provider value={value}>
