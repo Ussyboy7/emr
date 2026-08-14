@@ -157,7 +157,7 @@ export const TopBar = () => {
         </div>
 
         {/* Clinic Switcher */}
-        {isMultiClinic && (
+        {(isMultiClinic || canViewAllClinics) && (
           <div className="flex items-center">
             <div className="h-4 w-px bg-sidebar-border mr-2 hidden md:block" />
             <DropdownMenu>
