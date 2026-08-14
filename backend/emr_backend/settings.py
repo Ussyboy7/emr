@@ -422,6 +422,16 @@ else:
                     {
                         "address": f"redis://{REDIS_HOST}:{REDIS_PORT}/0",
                         "password": REDIS_PASSWORD,
+                        # channels_redis blocks on a Redis BZPOPMIN with a 5s
+                        # timeout while receiving; redis-py 8.x defaults
+                        # socket_timeout to 5s too, so the client read times
+                        # out before the blocking pop returns, dropping the
+                        # WebSocket consumer (and, under reconnect storms,
+                        # exhausting nginx/daphne FDs → 500s). Keep the socket
+                        # timeout comfortably above the blocking read so the
+                        # BZPOPMIN can complete. Passed through create_pool to
+                        # ConnectionPool.from_url.
+                        "socket_timeout": 30,
                     }
                 ]
             },
