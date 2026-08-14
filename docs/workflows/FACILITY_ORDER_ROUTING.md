@@ -43,26 +43,54 @@ is no shared physical sample batch.
 `LabSampleBatch` represents one collection event. Tests collected together
 share one accession in the form `<FACILITY-CODE>-YY-NNNN`, for example
 `HQ-26-0001`. The facility code is taken from the collection clinic, not
-hardcoded to Bode Thomas. A later collection creates a different batch and
-accession.
+hardcoded to Bode Thomas.
+
+One order carries exactly one Lab ID. The accession is minted on the first
+sample collection for the order and reused by every later collection
+(`generate_lab_number` in `laboratory/views.py` looks up the order's earliest
+batch first). Do not mint a fresh accession per collection event.
 
 Legacy accessions, including `BT-YY-NNNN`, are compatibility identifiers and
 must never be rewritten. Run the backfill command in dry-run mode first:
 
 ```sh
-python manage.py backfill_sample_batches --dry-run
+python manage.py backfill_sample_batches --dry-run --preserve-only
 ```
 
 Only an explicitly approved apply run writes batches:
 
 ```sh
-python manage.py backfill_sample_batches --apply
+python manage.py backfill_sample_batches --apply --preserve-only
 ```
 
+`--preserve-only` restricts backfill to orders that already carry a lab number
+and skips uncollected orders that would otherwise receive fabricated serials.
 The command reports `created`, `preserved`, `skipped`, and `ambiguous` counts.
 Records without a safe collection facility, conflicting legacy accessions, or
 an accession already belonging to another order are reported as ambiguous and
 are not guessed.
+
+Orders already split across several batches (from the pre-fix per-collection
+minting) are merged onto the order's earliest batch by
+`consolidate_order_batches`. It normalizes `lab_number` on all tests of the
+order and deletes the discarded batches. Use `--dry-run` first, then `--apply`:
+
+```sh
+python manage.py consolidate_order_batches --dry-run
+python manage.py consolidate_order_batches --apply
+```
+
+### Known issue: radiology shares the `BT-YY-NNNN` namespace
+
+`RadiologyOrder.order_id` is generated in the same `BT-YY-NNNN` form with its
+own independent counter (`radiology/models.py`). Radiology IDs therefore
+collide with legacy lab accessions in the same numeric range (e.g. radiology
+`BT-26-0007` and a lab test `BT-26-0007` can both exist). There is no
+mechanical breakage — the tables and search scopes are separate — but the
+shared ID string is ambiguous on paper. Decision deferred: resolve by giving
+radiology a distinct prefix (e.g. `RAD-YY-NNNN`) once a renumber path is
+designed. New radiology dispatch IDs already use a separate `RAD-YYYY-NNNNNN`
+format.
 
 ## External referrals
 
