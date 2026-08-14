@@ -62,7 +62,12 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   }, [hydrated, currentUserId, location_clinics, active_clinic_id, multi_clinic_enabled, refresh]);
 
   useEffect(() => {
-    if (!hydrated || !currentUserId || !location_clinics || location_clinics.length === 0) {
+    if (!hydrated || !currentUserId) {
+      setClinicsLoaded(false);
+      return;
+    }
+    const hasAssigned = Boolean(location_clinics && location_clinics.length > 0);
+    if (!hasAssigned && !canViewAllClinics) {
       setClinicsLoaded(false);
       return;
     }
@@ -81,7 +86,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
         setClinicsLoaded(true);
       });
     return () => { cancelled = true; };
-  }, [hydrated, currentUserId, location_clinics]);
+  }, [hydrated, currentUserId, location_clinics, canViewAllClinics]);
 
   const userClinics = useMemo(() => {
     if (!location_clinics || location_clinics.length === 0) return [];
