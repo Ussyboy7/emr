@@ -28,7 +28,8 @@ import { LogOut, Shield, Clock, Calendar, Bell, HelpCircle, Settings, Stethoscop
 export const TopBar = () => {
   const router = useRouter();
   const { currentUser, hydrated } = useCurrentUser();
-  const { activeClinicId, activeClinicName, clinics, isMultiClinic, canViewAllClinics, switchClinic, loading: clinicLoading } = useClinic();
+  const { activeClinicId, activeClinicName, clinics, allClinics, isMultiClinic, canViewAllClinics, switchClinic, loading: clinicLoading } = useClinic();
+  const clinicList = canViewAllClinics ? allClinics : clinics;
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
@@ -198,7 +199,7 @@ export const TopBar = () => {
                     <DropdownMenuSeparator />
                   </>
                 )}
-                {clinics.map((clinic) => (
+                {clinicList.map((clinic) => (
                   <DropdownMenuItem
                     key={clinic.id}
                     onClick={() => switchClinic(clinic.id)}

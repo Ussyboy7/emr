@@ -22,7 +22,8 @@ export function ClinicFilter({ paramName = "clinic_id" }: { paramName?: string }
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { clinics, canViewAllClinics, isMultiClinic, activeClinicId } = useClinic();
+  const { clinics, allClinics, canViewAllClinics, isMultiClinic, activeClinicId } = useClinic();
+  const clinicList = canViewAllClinics ? allClinics : clinics;
 
   const visible = isMultiClinic || canViewAllClinics || clinics.length > 1;
 
@@ -60,7 +61,7 @@ export function ClinicFilter({ paramName = "clinic_id" }: { paramName?: string }
           {(canViewAllClinics || activeClinicId == null) && (
             <SelectItem value="__all__">All clinics</SelectItem>
           )}
-          {clinics.map((clinic) => (
+          {clinicList.map((clinic) => (
             <SelectItem key={clinic.id} value={String(clinic.id)}>
               {clinic.name}
             </SelectItem>

@@ -15,6 +15,7 @@ interface ClinicContextType {
   activeClinicId: number | null;
   activeClinicName: string | null;
   clinics: ClinicInfo[];
+  allClinics: ClinicInfo[];
   isMultiClinic: boolean;
   canViewAllClinics: boolean;
   switchClinic: (clinicId: number | null) => Promise<void>;
@@ -114,12 +115,13 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     activeClinicId: active_clinic_id,
     activeClinicName,
     clinics: userClinics,
+    allClinics,
     isMultiClinic: multi_clinic_enabled && userClinics.length > 1,
     canViewAllClinics,
     switchClinic,
     clinicVersion,
     loading: !clinicsLoaded || switching,
-  }), [active_clinic_id, activeClinicName, userClinics, multi_clinic_enabled, canViewAllClinics, switchClinic, clinicVersion, clinicsLoaded, switching]);
+  }), [active_clinic_id, activeClinicName, userClinics, allClinics, multi_clinic_enabled, canViewAllClinics, switchClinic, clinicVersion, clinicsLoaded, switching]);
 
   return (
     <ClinicContext.Provider value={value}>
