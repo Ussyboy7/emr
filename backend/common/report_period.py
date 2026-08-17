@@ -115,6 +115,25 @@ def _filter_datetime_range(qs, field: str, start: date, end: date):
     return qs.filter(**{f"{field}__gte": start_at, f"{field}__lt": end_at})
 
 
+def inclusive_date_bounds(start: date | None, end: date | None) -> tuple[datetime | None, datetime | None]:
+    """Aware half-open bounds for an inclusive calendar-date range.
+
+    Returns ``(start_at, end_at_exclusive)``; either side may be ``None``.
+    ``end_at`` is midnight *after* ``end`` (i.e. the range is ``[start, end]``
+    inclusive, kept index-friendly by using ``__lt`` on the upper bound).
+    """
+    tz = timezone.get_current_timezone()
+    start_at = None
+    if start is not None:
+        start_at = timezone.make_aware(datetime.combine(start, time.min), tz)
+    end_at = None
+    if end is not None:
+        end_at = timezone.make_aware(
+            datetime.combine(end + timedelta(days=1), time.min), tz
+        )
+    return start_at, end_at
+
+
 def filter_inclusive_date_range(qs, field: str, start: date | None, end: date | None):
     """Filter a datetime field to an inclusive calendar-date range.
 
@@ -122,13 +141,9 @@ def filter_inclusive_date_range(qs, field: str, start: date | None, end: date | 
     half-open timezone-aware bounds so ordinary timestamp indexes stay usable.
     ``start``/``end`` may be ``None`` for an open-ended side.
     """
-    tz = timezone.get_current_timezone()
-    if start is not None:
-        start_at = timezone.make_aware(datetime.combine(start, time.min), tz)
+    start_at, end_at = inclusive_date_bounds(start, end)
+    if start_at is not None:
         qs = qs.filter(**{f"{field}__gte": start_at})
-    if end is not None:
-        end_at = timezone.make_aware(
-            datetime.combine(end + timedelta(days=1), time.min), tz
-        )
+    if end_at is not None:
         qs = qs.filter(**{f"{field}__lt": end_at})
     return qs

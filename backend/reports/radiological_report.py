@@ -55,9 +55,10 @@ def build_radiological_report(period_start: date, period_end: date, org_facility
         "order__consultation_session__location_clinic",
         "order__visit__location_clinic",
     )
-    studies = history_studies.filter(
-        created_at__date__gte=period_start,
-        created_at__date__lte=period_end,
+    from common.report_period import filter_inclusive_date_range
+
+    studies = filter_inclusive_date_range(
+        history_studies, "created_at", period_start, period_end
     )
     total = studies.count()
 

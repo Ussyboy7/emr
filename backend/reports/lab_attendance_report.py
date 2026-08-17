@@ -5,6 +5,7 @@ from datetime import date
 
 from django.db.models import DateField, OuterRef, Q, Subquery
 
+from common.report_period import inclusive_date_bounds
 from laboratory.models import LabOrder
 from patients.models import Patient
 from reports.attendance_statistics import (
@@ -22,6 +23,7 @@ def medical_exam_lab_orders_filter(period_start: date, period_end: date) -> Q:
     - Employment medical certificates issued in the same period
     - Explicit clinical notes / test names mentioning medical exam
     """
+    cert_start, cert_end = inclusive_date_bounds(period_start, period_end)
     return (
         Q(visit__visit_type="annual_checkup")
         | Q(visit__annual_checkup__isnull=False)
@@ -31,20 +33,21 @@ def medical_exam_lab_orders_filter(period_start: date, period_end: date) -> Q:
         | Q(tests__name__icontains="employment medical")
         | Q(
             patient__medical_certificates__purpose="employment",
-            patient__medical_certificates__issued_at__date__gte=period_start,
-            patient__medical_certificates__issued_at__date__lte=period_end,
+            patient__medical_certificates__issued_at__gte=cert_start,
+            patient__medical_certificates__issued_at__lt=cert_end,
         )
     )
 
 
 def build_lab_attendance_report(period_start: date, period_end: date, org_facility_id: int | None = None) -> dict:
+    from common.report_period import filter_inclusive_date_range
+
     history_orders = LabOrder.objects.filter(patient__isnull=False)
     if org_facility_id is not None:
         history_orders = history_orders.filter(location_clinic_id=org_facility_id)
     history_orders = history_orders.select_related("patient").distinct()
-    lab_orders = history_orders.filter(
-        ordered_at__date__gte=period_start,
-        ordered_at__date__lte=period_end,
+    lab_orders = filter_inclusive_date_range(
+        history_orders, "ordered_at", period_start, period_end
     )
 
     grand_total = lab_orders.values("patient").distinct().count()

@@ -15,16 +15,17 @@ def build_eye_clinical_diagnosis_report(
     *,
     org_facility_id: int | None = None,
 ) -> dict:
-    sessions = (
+    from common.report_period import filter_inclusive_date_range
+
+    sessions = filter_inclusive_date_range(
         EyeSession.objects.filter(
             status="completed",
-            completed_at__date__gte=period_start,
-            completed_at__date__lte=period_end,
             order__patient__isnull=False,
-        )
-        .select_related("order", "order__patient", "order__consultation_session")
-        .order_by("completed_at")
-    )
+        ),
+        "completed_at",
+        period_start,
+        period_end,
+    ).select_related("order", "order__patient", "order__consultation_session").order_by("completed_at")
     if org_facility_id is not None:
         sessions = sessions.filter(order__location_clinic_id=org_facility_id)
 

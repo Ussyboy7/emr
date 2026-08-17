@@ -21,16 +21,17 @@ def build_observation_admissions_report(
     *,
     org_facility_id: int | None = None,
 ) -> dict:
-    admissions = (
+    from common.report_period import filter_inclusive_date_range
+
+    admissions = filter_inclusive_date_range(
         PatientAdmission.objects.filter(
             admission_type__in=OBSERVATION_TYPES,
-            admission_date__date__gte=period_start,
-            admission_date__date__lte=period_end,
             patient__isnull=False,
-        )
-        .select_related("patient")
-        .order_by("admission_date")
-    )
+        ),
+        "admission_date",
+        period_start,
+        period_end,
+    ).select_related("patient").order_by("admission_date")
     if org_facility_id is not None:
         admissions = admissions.filter(visit__location_clinic_id=org_facility_id)
 

@@ -42,12 +42,13 @@ def _pct(count: int, total: int) -> float:
 
 
 def _patient_cohort(*, all_time: bool, period_start: date, period_end: date):
+    from common.report_period import filter_inclusive_date_range
+
     base = Patient.objects.filter(is_active=True)
     if all_time:
         return base, "active_register"
-    return base.filter(
-        created_at__date__gte=period_start,
-        created_at__date__lte=period_end,
+    return filter_inclusive_date_range(
+        base, "created_at", period_start, period_end
     ), "registered_in_period"
 
 

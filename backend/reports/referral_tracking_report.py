@@ -87,11 +87,14 @@ def _is_new_referral(referral: Referral, org_facility_id: int | None = None) -> 
 def build_retainership_pivot(
     period_start: date, period_end: date, org_facility_id: int | None = None
 ) -> list[dict]:
+    from common.report_period import filter_inclusive_date_range
+
     referrals = (
-        Referral.objects.filter(
-            referred_at__date__gte=period_start,
-            referred_at__date__lte=period_end,
-            patient__isnull=False,
+        filter_inclusive_date_range(
+            Referral.objects.filter(patient__isnull=False),
+            "referred_at",
+            period_start,
+            period_end,
         )
         .exclude(status__in=CANCELLED_STATUSES)
         .select_related("patient", "facility_partner")
@@ -128,11 +131,14 @@ def build_retainership_pivot(
 def build_referral_tracking_report(
     period_start: date, period_end: date, org_facility_id: int | None = None
 ) -> dict:
+    from common.report_period import filter_inclusive_date_range
+
     referrals = (
-        Referral.objects.filter(
-            referred_at__date__gte=period_start,
-            referred_at__date__lte=period_end,
-            patient__isnull=False,
+        filter_inclusive_date_range(
+            Referral.objects.filter(patient__isnull=False),
+            "referred_at",
+            period_start,
+            period_end,
         )
         .select_related("patient", "facility_partner")
         .order_by("-referred_at")

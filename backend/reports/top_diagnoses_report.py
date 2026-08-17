@@ -18,12 +18,17 @@ def build_top_diagnoses_report(
 ) -> dict:
     limit = max(1, min(int(limit), 100))
 
-    qs = Diagnosis.objects.filter(
-        session__status="completed",
-        icd10_code__isnull=False,
-        patient__isnull=False,
-        session__started_at__date__gte=period_start,
-        session__started_at__date__lte=period_end,
+    from common.report_period import filter_inclusive_date_range
+
+    qs = filter_inclusive_date_range(
+        Diagnosis.objects.filter(
+            session__status="completed",
+            icd10_code__isnull=False,
+            patient__isnull=False,
+        ),
+        "session__started_at",
+        period_start,
+        period_end,
     )
     if org_facility_id is not None:
         qs = qs.filter(visit__location_clinic_id=org_facility_id)

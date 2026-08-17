@@ -32,6 +32,9 @@ def _normalize_outcome_filter(value: str) -> str:
 
 
 def _escorts_in_period(period_start: date, period_end: date):
+    from common.report_period import inclusive_date_bounds
+
+    dep_start, dep_end = inclusive_date_bounds(period_start, period_end)
     return AdmissionEscort.objects.select_related(
         "admission",
         "admission__patient",
@@ -43,13 +46,13 @@ def _escorts_in_period(period_start: date, period_end: date):
         "created_by",
     ).prefetch_related("additional_nurses").filter(
         Q(
-            departure_at__date__gte=period_start,
-            departure_at__date__lte=period_end,
+            departure_at__gte=dep_start,
+            departure_at__lt=dep_end,
         )
         | Q(
             departure_at__isnull=True,
-            created_at__date__gte=period_start,
-            created_at__date__lte=period_end,
+            created_at__gte=dep_start,
+            created_at__lt=dep_end,
         )
     )
 
