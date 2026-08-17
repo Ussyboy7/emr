@@ -198,7 +198,12 @@ DATABASES = {
         "PASSWORD": getenv_strict("DB_PASSWORD", "emr_password"),
         "HOST": getenv_strict("DB_HOST", "localhost"),
         "PORT": getenv_strict("DB_PORT", "5432"),
-        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        # Daphne/ASGI can serve concurrent requests from one process. Persistent
+        # connections multiply across request execution contexts and can exhaust
+        # PostgreSQL; opt into persistence explicitly when a pooler is present.
+        "CONN_MAX_AGE": int(
+            os.getenv("DB_CONN_MAX_AGE", "0" if os.getenv("DJANGO_ENV") == "prod" else "60")
+        ),
         "OPTIONS": {
             "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "5")),
         },
