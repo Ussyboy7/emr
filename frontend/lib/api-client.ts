@@ -229,6 +229,35 @@ type FetchOptions = RequestInit & {
   retryOnFailure?: boolean;
   maxRetries?: number;
   retryDelay?: number;
+  timeoutMs?: number;
+};
+
+const DEFAULT_API_TIMEOUT_MS = 60_000;
+
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> => {
+  if (timeoutMs <= 0 || init.signal) {
+    return fetch(input, init);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if ((error as { name?: string })?.name === "AbortError") {
+      const timeoutError = new Error(`API request timed out after ${timeoutMs}ms`);
+      timeoutError.name = "TimeoutError";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 export const getStoredAccessToken = () => {
@@ -498,6 +527,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
     retryOnFailure = true,
     maxRetries = 3,
     retryDelay = 1000,
+    timeoutMs = DEFAULT_API_TIMEOUT_MS,
     ...rest
   } = options;
 
@@ -551,26 +581,26 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           const dedupeKey = `${fullUrl}::${requestHeaders.get("Authorization") ?? ""}::${requestHeaders.get("Accept") ?? ""}`;
           let pending = inFlightGetRequests.get(dedupeKey);
           if (!pending) {
-            pending = fetch(fullUrl, {
+            pending = fetchWithTimeout(fullUrl, {
               ...rest,
               cache,
               headers: requestHeaders,
               credentials: "include",
-            });
+            }, timeoutMs);
             inFlightGetRequests.set(dedupeKey, pending);
-            pending.finally(() => {
+            void pending.finally(() => {
               inFlightGetRequests.delete(dedupeKey);
-            });
+            }).catch(() => undefined);
           }
           const baseResponse = await pending;
           response = baseResponse.clone();
         } else {
-          response = await fetch(fullUrl, {
+          response = await fetchWithTimeout(fullUrl, {
             ...rest,
             cache,
             headers: requestHeaders,
             credentials: "include",
-          });
+          }, timeoutMs);
         }
       } catch (networkError: unknown) {
         // Handle network errors (Failed to fetch, CORS, etc.)
@@ -610,12 +640,12 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           requestHeaders.set("Authorization", `Bearer ${refreshed}`);
           const method = (rest.method || "GET").toUpperCase();
           const cache = rest.cache ?? (method === "GET" ? "no-store" : undefined);
-          const retryResponse = await fetch(`${getBaseUrl()}${path}`, {
+          const retryResponse = await fetchWithTimeout(`${getBaseUrl()}${path}`, {
             ...rest,
             cache,
             headers: requestHeaders,
             credentials: "include",
-          });
+          }, timeoutMs);
           if (!retryResponse.ok) {
             if (retryResponse.status === 401) {
               redirectToLogin("session_expired");
@@ -815,6 +845,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       // Don't retry for certain types of errors
       const errorObj = error as any;
       if (errorObj.name === "NetworkError" ||
+          errorObj.name === "TimeoutError" ||
           errorObj.name === "AuthenticationError" ||
           errorObj.name === "AuthenticationExpiredError" ||
           (errorObj.message && errorObj.message.includes("API request failed: 4")) ||

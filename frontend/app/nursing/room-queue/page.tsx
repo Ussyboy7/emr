@@ -112,12 +112,9 @@ export default function RoomQueuePage() {
 
       const today = await getServerToday().catch(() => formatLocalYmd(new Date()));
 
-      const [roomsResult, activeSessions, queueItems, todayCountByRoom, queueStatsByRoom] = await Promise.all([
+      const [roomsResult, queueItems, todayCountByRoom, queueStatsByRoom] = await Promise.all([
         fetchAllPaginatedResults((page, page_size) =>
           roomService.getRooms({ page, page_size })
-        ),
-        fetchAllPaginatedResults((page, page_size) =>
-          consultationService.getSessions({ status: 'active', page, page_size })
         ),
         fetchAllPaginatedResults((page, page_size) =>
           consultationService.getQueue({ is_active: true, date: today, page, page_size })
@@ -128,9 +125,7 @@ export default function RoomQueuePage() {
         
         const transformedRooms: ConsultationRoom[] = roomsResult.map((room: any) => {
           const roomId = String(room.id);
-          const roomActiveSessions = (room.active_sessions?.length
-            ? room.active_sessions
-            : activeSessions.filter((session: any) => String(session.room) === roomId)) as any[];
+          const roomActiveSessions = (room.active_sessions || []) as any[];
           const canSend = canNursingSendToRoom(room);
           const facilityActive = room.status?.toLowerCase() === 'active' && room.is_active !== false;
           const onSeatDoctors = doctorsOnSeat(room);

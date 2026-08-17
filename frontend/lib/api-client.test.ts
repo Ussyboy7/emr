@@ -89,4 +89,28 @@ describe('apiFetch auth guard', () => {
     const { AuthenticationError } = await import('./auth-errors');
     await expect(apiFetch('/patients/')).rejects.toBeInstanceOf(AuthenticationError);
   });
+
+  it('times out a stuck request without retrying it', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn((_input, init?: RequestInit) => (
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      })
+    )));
+
+    const { apiFetch } = await import('./api-client');
+    const request = apiFetch('/slow', {
+      skipAuth: true,
+      timeoutMs: 100,
+      retryOnFailure: true,
+    });
+    const rejection = expect(request).rejects.toMatchObject({ name: 'TimeoutError' });
+
+    await vi.advanceTimersByTimeAsync(100);
+    await rejection;
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
 });

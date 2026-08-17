@@ -1,6 +1,8 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.utils import timezone
+from django.db.models.query import QuerySet
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -110,6 +112,50 @@ class LabVerificationDateFilterTests(APITestCase):
         response = self.client.get(
             "/api/laboratory/verification/",
             {"status": "verified", "search": "Unsearchable Empty Result"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 0)
+
+    def test_verified_list_does_not_scan_queryset_before_pagination(self):
+        self._make_result(test_status="verified")
+
+        with patch.object(
+            QuerySet,
+            "iterator",
+            side_effect=AssertionError("verification list scanned before pagination"),
+        ):
+            response = self.client.get(
+                "/api/laboratory/verification/",
+                {"status": "verified", "page_size": 1},
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+
+    def test_verified_list_excludes_empty_string_payloads(self):
+        empty_test = LabTest.objects.create(
+            order=self.order,
+            template=self.template,
+            name="Empty String Result",
+            code="EMPTY-STRING",
+            sample_type="Blood",
+            status="verified",
+            results={"Glucose": ""},
+            verified_by=self.user,
+            verified_at=timezone.now(),
+        )
+        LabResult.objects.create(
+            test=empty_test,
+            order=self.order,
+            patient=self.patient,
+            overall_status="normal",
+            priority="medium",
+        )
+
+        response = self.client.get(
+            "/api/laboratory/verification/",
+            {"status": "verified", "search": "Empty String Result"},
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)

@@ -12,7 +12,8 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Count, Q, Max
+from django.db.models import BooleanField, Count, Q, Max
+from django.db.models.expressions import RawSQL
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from organization.models import Clinic, SystemConfig
@@ -1660,14 +1661,18 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
         if pm in ('in_house', 'outsourced'):
             queryset = queryset.filter(test__processing_method=pm)
 
-        # Final guard: include only rows with meaningful structured results or a real result file.
-        valid_ids = []
-        for row in queryset.iterator():
-            test = row.test
-            has_result_file = bool(test.result_file and getattr(test.result_file, "name", ""))
-            if _has_meaningful_results_payload(test.results) or has_result_file:
-                valid_ids.append(row.id)
-        queryset = queryset.filter(id__in=valid_ids)
+        # Keep this guard in SQL so pagination and search happen without first
+        # scanning every historical result in Python.
+        queryset = queryset.annotate(
+            _has_meaningful_results=RawSQL(
+                "jsonb_path_exists(results, %s)",
+                ['$.* ? (@ != null && @ != "")'],
+                output_field=BooleanField(),
+            )
+        ).filter(
+            (Q(test__result_file__isnull=False) & ~Q(test__result_file=""))
+            | Q(_has_meaningful_results=True)
+        )
 
         return self.scope_queryset(queryset)
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -75,7 +75,8 @@ def local_month_bounds_to_today() -> tuple[date, date]:
 def apply_date_preset(qs, preset: str, field: str):
     """
     Apply today / week / month presets on a queryset.
-    ``field`` is a DateField name or DateTimeField (uses ``__date`` lookup).
+    ``field`` is a DateField name or DateTimeField. Datetime fields use
+    half-open timezone-aware ranges so ordinary timestamp indexes remain usable.
     """
     df = (preset or "").strip().lower()
     if not df or df == "all":
@@ -87,18 +88,28 @@ def apply_date_preset(qs, preset: str, field: str):
     if df == "today":
         if is_date_only:
             return qs.filter(**{field: today})
-        return qs.filter(**{f"{field}__date": today})
+        return _filter_datetime_range(qs, field, today, today)
 
     if df == "week":
         start, end = local_week_bounds()
         if is_date_only:
             return qs.filter(**{f"{field}__gte": start, f"{field}__lte": end})
-        return qs.filter(**{f"{field}__date__gte": start, f"{field}__date__lte": end})
+        return _filter_datetime_range(qs, field, start, end)
 
     if df == "month":
         start, end = local_month_bounds_to_today()
         if is_date_only:
             return qs.filter(**{f"{field}__gte": start, f"{field}__lte": end})
-        return qs.filter(**{f"{field}__date__gte": start, f"{field}__date__lte": end})
+        return _filter_datetime_range(qs, field, start, end)
 
     return qs
+
+
+def _filter_datetime_range(qs, field: str, start: date, end: date):
+    tz = timezone.get_current_timezone()
+    start_at = timezone.make_aware(datetime.combine(start, time.min), tz)
+    end_at = timezone.make_aware(
+        datetime.combine(end + timedelta(days=1), time.min),
+        tz,
+    )
+    return qs.filter(**{f"{field}__gte": start_at, f"{field}__lt": end_at})

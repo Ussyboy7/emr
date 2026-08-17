@@ -311,7 +311,8 @@ class VisitSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.STR)
     def get_vitals(self, obj):
         """Get the most recent vital reading for this visit."""
-        vital = obj.vital_readings.first()
+        prefetched = getattr(obj, '_latest_vital_readings', None)
+        vital = prefetched[0] if prefetched else obj.vital_readings.first()
         if vital:
             return {
                 'bp': f"{vital.blood_pressure_systolic or ''}/{vital.blood_pressure_diastolic or ''}".strip('/'),

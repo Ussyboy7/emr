@@ -295,7 +295,7 @@ const StartConsultation = () => {
         const todayStr = todayApiDateString();
         const doctorId = currentUser?.id ? Number(currentUser.id) : undefined;
 
-        const [roomsList, queueItems, statsRes, activeSessions, pausedSessions, todaySessions] =
+        const [roomsList, queueItems, statsRes, pausedSessions, todaySessions] =
           await Promise.all([
             fetchAllPaginatedResults((page, pageSize) =>
               roomService.getRooms({ page, page_size: pageSize })
@@ -307,15 +307,20 @@ const StartConsultation = () => {
             ),
             consultationService.getStats(doctorId).catch((): ConsultationStats | null => null),
             fetchAllPaginatedResults((page, pageSize) =>
-              consultationService.getSessions({ status: "active", page, page_size: pageSize })
-            ).catch(() => [] as ConsultationSession[]),
-            fetchAllPaginatedResults((page, pageSize) =>
               consultationService.getSessions({ status: "paused", page, page_size: pageSize })
             ).catch(() => [] as ConsultationSession[]),
             fetchAllPaginatedResults((page, pageSize) =>
               consultationService.getSessions({ date: todayStr, page, page_size: pageSize })
             ).catch(() => [] as ConsultationSession[]),
           ]);
+
+        const activeSessions = roomsList.flatMap((room: any) =>
+          (room.active_sessions || []).map((session: any) => ({
+            ...session,
+            room: room.id,
+            status: 'active',
+          }))
+        ) as ConsultationSession[];
 
         const roomTodayMap = buildRoomCompletedTodayMap(todaySessions);
         const stats = statsRes;

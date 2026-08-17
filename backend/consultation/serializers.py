@@ -204,6 +204,9 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.INT)
     def get_queue_count(self, obj):
         """Get count of active queue items for this room."""
+        annotated = getattr(obj, 'queue_count', None)
+        if annotated is not None:
+            return annotated
         return obj.queue_items.filter(is_active=True).count()
     
     @extend_schema_field(OpenApiTypes.STR)

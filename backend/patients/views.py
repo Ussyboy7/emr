@@ -13,7 +13,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from common.openapi import document_viewset
 from django.shortcuts import get_object_or_404
-from django.db.models import OuterRef, Subquery, Exists, Q, Count, Max
+from django.db.models import OuterRef, Subquery, Exists, Q, Count, Max, Prefetch
 from django.db import transaction
 from django.utils import timezone
 from datetime import date, timedelta
@@ -1413,7 +1413,15 @@ class VisitViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Visit.objects.none()
         
-        queryset = Visit.objects.all().select_related('patient', 'doctor', 'created_by').prefetch_related('vital_readings')
+        queryset = Visit.objects.all().select_related(
+            'patient', 'doctor', 'created_by'
+        ).prefetch_related(
+            Prefetch(
+                'vital_readings',
+                queryset=VitalReading.objects.order_by('-recorded_at')[:1],
+                to_attr='_latest_vital_readings',
+            )
+        )
         
         # Date filtering
         date = self.request.query_params.get('date')
@@ -1531,19 +1539,10 @@ class VisitViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         base = _nursing_pool_base_queryset_for_metrics(self, request)
         # Exclude status='completed' from the active buckets so the math sums cleanly.
         active = base.exclude(status='completed')
-        visit_ids = list(active.values_list('id', flat=True))
-        in_queue_ids = set(
-            ConsultationQueue.objects.filter(is_active=True, visit_id__in=visit_ids)
-            .values_list('visit_id', flat=True)
-        )
-        session_visit_ids = set(
-            ConsultationSession.objects.filter(
-                visit_id__in=visit_ids,
-                status__in=['active', 'paused'],
-            ).values_list('visit_id', flat=True)
-        )
-        in_consultation_ids = in_queue_ids | session_visit_ids
-        in_consultation = sum(1 for vid in visit_ids if vid in in_consultation_ids)
+        in_consultation = active.filter(
+            Q(queue_items__is_active=True)
+            | Q(consultation_sessions__status__in=['active', 'paused'])
+        ).distinct().count()
         completed = base.filter(
             Q(status='completed')
             | Exists(

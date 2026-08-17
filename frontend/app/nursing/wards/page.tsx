@@ -220,8 +220,17 @@ export default function WardCarePage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
 
+    const dateParams = buildDateParams();
+    const kpiBase = {
+      ...dateParams,
+      ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
+      ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
+    };
+    const wardsPromise = wardService.getWards({ page_size: MAX_LIST_PAGE_SIZE });
+    const statsPromise = wardService.getAdmissionListStats(kpiBase);
+
     try {
-      const wardsResponse = await wardService.getWards({ page_size: MAX_LIST_PAGE_SIZE });
+      const wardsResponse = await wardsPromise;
       setWards(wardsResponse.results || []);
     } catch (error: unknown) {
       console.error('Error fetching wards:', error);
@@ -230,16 +239,8 @@ export default function WardCarePage() {
       toast.error(msg);
     }
 
-    const dateParams = buildDateParams();
-
-    const kpiBase = {
-      ...dateParams,
-      ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
-      ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
-    };
-
     try {
-      const stats = await wardService.getAdmissionListStats(kpiBase);
+      const stats = await statsPromise;
       setKpiAdmittedTotal(stats.admitted ?? 0);
       setKpiPendingDischargeTotal(stats.pending_discharge ?? 0);
       setKpiEscalatedTotal(stats.escalated ?? 0);
@@ -252,7 +253,6 @@ export default function WardCarePage() {
       setKpiEscalatedTotal(0);
       setKpiUnassignedBedTotal(0);
     }
-
     try {
       const ACTIVE_STATUSES = WARD_ACTIVE_STATUS_IN;
       const listParams = {

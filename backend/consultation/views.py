@@ -142,6 +142,12 @@ class ConsultationRoomViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         return self.scope_queryset(
             ConsultationRoom.objects.all()
             .select_related('location_clinic')
+            .annotate(
+                queue_count=Count(
+                    'queue_items',
+                    filter=Q(queue_items__is_active=True),
+                )
+            )
             .prefetch_related(
                 Prefetch(
                     'occupancies',
