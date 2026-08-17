@@ -423,6 +423,11 @@ else:
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
+                # channels_redis defaults to a pool of 10 connections; with
+                # several open tabs/users this is exhausted and every
+                # group_add raises MaxConnectionsError, dropping WebSockets
+                # and triggering a reconnect storm. Raise the pool limit.
+                "max_connections": 50,
                 "hosts": [
                     {
                         "address": f"redis://{REDIS_HOST}:{REDIS_PORT}/0",
