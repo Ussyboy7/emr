@@ -1578,11 +1578,6 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing lab results awaiting verification."""
     
     facility_filter_field = 'order__processing_clinic'
-    facility_scope_fields = (
-        'order__location_clinic',
-        'order__processing_clinic',
-        'test__processing_clinic',
-    )
     serializer_class = LabResultSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
@@ -1665,12 +1660,14 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
         if pm in ('in_house', 'outsourced'):
             queryset = queryset.filter(test__processing_method=pm)
 
-        # Keep validation in PostgreSQL. Verified rows have already passed the
-        # structured-result guard at verification time; exclude legacy empty
-        # JSON objects without scanning every historical row in Python.
-        queryset = queryset.filter(
-            Q(test__result_file__isnull=False) | ~Q(test__results={})
-        )
+        # Final guard: include only rows with meaningful structured results or a real result file.
+        valid_ids = []
+        for row in queryset.iterator():
+            test = row.test
+            has_result_file = bool(test.result_file and getattr(test.result_file, "name", ""))
+            if _has_meaningful_results_payload(test.results) or has_result_file:
+                valid_ids.append(row.id)
+        queryset = queryset.filter(id__in=valid_ids)
 
         return self.scope_queryset(queryset)
 
