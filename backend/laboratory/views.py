@@ -1673,11 +1673,17 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
 
         # Avoid scanning every historical result before SearchFilter, date, and
         # clinic filters have narrowed the candidate set.
-        candidates = queryset.filter(
-            Q(test__results__isnull=False) | Q(test__result_file__isnull=False)
-        ).select_related('test')
+        candidates = (
+            queryset.filter(
+                Q(test__results__isnull=False) | Q(test__result_file__isnull=False)
+            )
+            .select_related(None)
+            .select_related('test')
+        )
         valid_ids = []
-        for row in candidates.only('id', 'test__results', 'test__result_file').iterator():
+        for row in candidates.only(
+            'id', 'test_id', 'test__results', 'test__result_file'
+        ).iterator():
             test = row.test
             has_result_file = bool(test.result_file and getattr(test.result_file, "name", ""))
             if _has_meaningful_results_payload(test.results) or has_result_file:
