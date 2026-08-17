@@ -77,6 +77,7 @@ class ClinicViewSet(viewsets.ModelViewSet):
         window_start_date = window_start.date()
         from accounts.models import User
         from consultation.models import ConsultationRoom, ConsultationSession
+        from patients.models import Visit
 
         def count_subquery(queryset, group_by):
             return Subquery(
