@@ -266,6 +266,7 @@ export default function PhysiotherapyOrdersPage() {
   useEffect(() => {
     if (!ready || pollingPaused) return;
     const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       void loadOrders({ silent: true });
       void loadStats();
     }, 15000);

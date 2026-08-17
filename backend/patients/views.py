@@ -385,14 +385,17 @@ def apply_nursing_status_filter(
         date = request.query_params.get('date')
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
+        from django.utils.dateparse import parse_date
+        from common.report_period import filter_inclusive_date_range
+
         if date:
-            q_items = q_items.filter(queued_at__date=date)
-        elif start_date:
-            q_items = q_items.filter(queued_at__date__gte=start_date)
-            if end_date:
-                q_items = q_items.filter(queued_at__date__lte=end_date)
-        elif end_date:
-            q_items = q_items.filter(queued_at__date__lte=end_date)
+            d = parse_date(date)
+            if d:
+                q_items = filter_inclusive_date_range(q_items, 'queued_at', d, d)
+        elif start_date or end_date:
+            s = parse_date(start_date) if start_date else None
+            e = parse_date(end_date) if end_date else None
+            q_items = filter_inclusive_date_range(q_items, 'queued_at', s, e)
         visit_ids = q_items.values('visit_id')
         return queryset.filter(id__in=visit_ids).exclude(status='completed')
 
@@ -1841,17 +1844,22 @@ class VitalReadingViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         if gender in ('male', 'female'):
             qs = qs.filter(patient__gender=gender)
 
-        from common.report_period import apply_date_preset
+        from common.report_period import apply_date_preset, filter_inclusive_date_range
 
         df = (self.request.query_params.get('date_filter') or '').strip().lower()
         qs = apply_date_preset(qs, df, 'recorded_at')
 
         after = (self.request.query_params.get('recorded_at_after') or '').strip()
         before = (self.request.query_params.get('recorded_at_before') or '').strip()
-        if after:
-            qs = qs.filter(recorded_at__date__gte=after)
-        if before:
-            qs = qs.filter(recorded_at__date__lte=before)
+        if after or before:
+            from django.utils.dateparse import parse_date
+
+            qs = filter_inclusive_date_range(
+                qs,
+                'recorded_at',
+                parse_date(after) if after else None,
+                parse_date(before) if before else None,
+            )
 
         return qs
     

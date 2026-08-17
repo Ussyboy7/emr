@@ -22,6 +22,7 @@ from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth, Tr
 
 from reports.export_helpers import respond_with_export
 from common.openapi import document_api_view
+from common.report_period import filter_inclusive_date_range
 
 
 def _org_clinic_scope(request):
@@ -88,9 +89,8 @@ def _build_visit_lifecycle_summary(period_visits_queryset, history_visits_querys
         first_scoped_visit_date__gte=start_date,
         first_scoped_visit_date__lte=end_date,
     ).count()
-    new_registrations = patients_qs.filter(
-        created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+    new_registrations = filter_inclusive_date_range(
+        patients_qs, "created_at", start_date, end_date
     ).count()
 
     return {
@@ -165,8 +165,8 @@ class LabPerformanceReportView(views.APIView):
         org_facility_id = _org_clinic_scope(request)
         
         # Get all tests this month
-        tests_this_month = LabTest.objects.filter(
-            order__ordered_at__date__gte=start_of_month
+        tests_this_month = filter_inclusive_date_range(
+            LabTest.objects.all(), "order__ordered_at", start_of_month, None
         )
         if org_facility_id is not None:
             tests_this_month = tests_this_month.filter(
@@ -201,16 +201,21 @@ class LabPerformanceReportView(views.APIView):
             avg_turnaround_hours = sum(turnaround_diffs) / len(turnaround_diffs) if turnaround_diffs else 0
         
         # Critical values (tests with abnormal/critical results)
-        critical_values = LabTest.objects.filter(
-            status='verified',
-            verified_at__date__gte=start_of_month
+        critical_values = filter_inclusive_date_range(
+            LabTest.objects.filter(status='verified'),
+            "verified_at",
+            start_of_month,
+            None,
         ).exclude(notes__isnull=True).exclude(notes='').filter(
             notes__icontains='critical'
         ).count()
         if org_facility_id is not None:
-            critical_values = LabTest.objects.filter(
-                status='verified',
-                verified_at__date__gte=start_of_month,
+            critical_values = filter_inclusive_date_range(
+                LabTest.objects.filter(status='verified'),
+                "verified_at",
+                start_of_month,
+                None,
+            ).filter(
                 order__location_clinic_id=org_facility_id,
             ).exclude(notes__isnull=True).exclude(notes='').filter(
                 notes__icontains='critical'
@@ -242,9 +247,11 @@ class PharmacyPerformanceReportView(views.APIView):
         org_facility_id = _org_clinic_scope(request)
 
         # Prescriptions dispensed this month
-        dispensed_this_month = Prescription.objects.filter(
-            dispensed_at__date__gte=start_of_month,
-            status='dispensed'
+        dispensed_this_month = filter_inclusive_date_range(
+            Prescription.objects.filter(status='dispensed'),
+            "dispensed_at",
+            start_of_month,
+            None,
         )
         if org_facility_id is not None:
             dispensed_this_month = dispensed_this_month.filter(
@@ -453,11 +460,14 @@ class DispensedPrescriptionsReportView(views.APIView):
 
         org_facility_id = _org_clinic_scope(request)
 
-        prescriptions = Prescription.objects.filter(
-            status='dispensed',
-            dispensed_at__isnull=False,
-            dispensed_at__date__gte=period_start,
-            dispensed_at__date__lte=period_end,
+        prescriptions = filter_inclusive_date_range(
+            Prescription.objects.filter(
+                status='dispensed',
+                dispensed_at__isnull=False,
+            ),
+            "dispensed_at",
+            period_start,
+            period_end,
         )
         if org_facility_id is not None:
             prescriptions = prescriptions.filter(location_clinic_id=org_facility_id)
@@ -494,9 +504,8 @@ class DispensedPrescriptionsReportView(views.APIView):
         )
 
         # Filter by dispense date
-        dispense_ids = Dispense.objects.filter(
-            dispensed_at__date__gte=period_start,
-            dispensed_at__date__lte=period_end,
+        dispense_ids = filter_inclusive_date_range(
+            Dispense.objects.all(), "dispensed_at", period_start, period_end
         )
         if org_facility_id is not None:
             dispense_ids = dispense_ids.filter(
@@ -631,10 +640,11 @@ class ServicesActivitiesReportView(views.APIView):
         dressing_female = gender_event_counts(dressing_qs, "female")
         dressing = dressing_male + dressing_female
 
-        sick_leave_qs = MedicalCertificate.objects.filter(
-            purpose="illness",
-            issued_at__date__gte=period_start,
-            issued_at__date__lte=period_end,
+        sick_leave_qs = filter_inclusive_date_range(
+            MedicalCertificate.objects.filter(purpose="illness"),
+            "issued_at",
+            period_start,
+            period_end,
         ).select_related("patient")
         if org_facility_id is not None:
             sick_leave_qs = sick_leave_qs.filter(issued_by__location_clinic_id=org_facility_id)
@@ -642,9 +652,8 @@ class ServicesActivitiesReportView(views.APIView):
         sick_leave_female = gender_event_counts(sick_leave_qs, "female")
         sick_leave = sick_leave_male + sick_leave_female
 
-        referrals_qs = Referral.objects.filter(
-            referred_at__date__gte=period_start,
-            referred_at__date__lte=period_end,
+        referrals_qs = filter_inclusive_date_range(
+            Referral.objects.all(), "referred_at", period_start, period_end
         ).select_related("patient")
         if org_facility_id is not None:
             referrals_qs = referrals_qs.filter(visit__location_clinic_id=org_facility_id)
@@ -1202,10 +1211,11 @@ class NewRegistrationsReportView(views.APIView):
         # reports/tests/test_report_scoping.py). Per-facility breakdown uses
         # each patient's registered-at facility (location_clinic).
 
-        qs = Patient.objects.filter(
-            is_active=True,
-            created_at__date__gte=period_start,
-            created_at__date__lte=period_end,
+        qs = filter_inclusive_date_range(
+            Patient.objects.filter(is_active=True),
+            "created_at",
+            period_start,
+            period_end,
         )
 
         total = qs.count()
@@ -1217,11 +1227,14 @@ class NewRegistrationsReportView(views.APIView):
 
         # Facility breakdown (registered-at facility), org-wide by default.
         by_facility_rows = (
-            Patient.objects.filter(
-                is_active=True,
-                created_at__date__gte=period_start,
-                created_at__date__lte=period_end,
-                location_clinic__isnull=False,
+            filter_inclusive_date_range(
+                Patient.objects.filter(
+                    is_active=True,
+                    location_clinic__isnull=False,
+                ),
+                "created_at",
+                period_start,
+                period_end,
             )
             .values('location_clinic__name')
             .annotate(count=Count('id'))
@@ -1359,9 +1372,11 @@ class TopPrescribedDrugsReportView(views.APIView):
 
         org_facility_id = _org_clinic_scope(request)
 
-        qs = PrescriptionItem.objects.filter(
-            prescription__prescribed_at__date__gte=period_start,
-            prescription__prescribed_at__date__lte=period_end,
+        qs = filter_inclusive_date_range(
+            PrescriptionItem.objects.all(),
+            "prescription__prescribed_at",
+            period_start,
+            period_end,
         )
         if org_facility_id is not None:
             qs = qs.filter(prescription__location_clinic_id=org_facility_id)
@@ -1471,11 +1486,11 @@ class CriticalLabResultsReportView(views.APIView):
         period_start, period_end = _period_bounds_from_request(request)
 
         qs = (
-            LabResult.objects
-            .filter(
-                overall_status='critical',
-                created_at__date__gte=period_start,
-                created_at__date__lte=period_end,
+            filter_inclusive_date_range(
+                LabResult.objects.filter(overall_status='critical'),
+                "created_at",
+                period_start,
+                period_end,
             )
             .select_related('test', 'test__order', 'patient', 'order__patient')
         )
@@ -1592,10 +1607,13 @@ class NotifiableDiseasesReportView(views.APIView):
     def get(self, request):
         period_start, period_end = _period_bounds_from_request(request)
 
-        qs = Diagnosis.objects.filter(
-            icd10_code__code__startswith=tuple(self.NOTIFIABLE_PREFIXES),
-            diagnosed_at__date__gte=period_start,
-            diagnosed_at__date__lte=period_end,
+        qs = filter_inclusive_date_range(
+            Diagnosis.objects.filter(
+                icd10_code__code__startswith=tuple(self.NOTIFIABLE_PREFIXES),
+            ),
+            "diagnosed_at",
+            period_start,
+            period_end,
         ).select_related('icd10_code', 'patient', 'session', 'diagnosed_by')
         org_facility_id = _org_clinic_scope(request)
         if org_facility_id is not None:

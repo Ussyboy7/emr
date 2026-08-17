@@ -348,6 +348,7 @@ export default function EyeClinicOrdersPage() {
   useEffect(() => {
     if (!ready || pollingPaused) return;
     const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       void loadOrders({ silent: true });
     }, 15000);
     return () => clearInterval(id);

@@ -113,3 +113,22 @@ def _filter_datetime_range(qs, field: str, start: date, end: date):
         tz,
     )
     return qs.filter(**{f"{field}__gte": start_at, f"{field}__lt": end_at})
+
+
+def filter_inclusive_date_range(qs, field: str, start: date | None, end: date | None):
+    """Filter a datetime field to an inclusive calendar-date range.
+
+    Equivalent to ``field__date__gte=start, field__date__lte=end`` but uses
+    half-open timezone-aware bounds so ordinary timestamp indexes stay usable.
+    ``start``/``end`` may be ``None`` for an open-ended side.
+    """
+    tz = timezone.get_current_timezone()
+    if start is not None:
+        start_at = timezone.make_aware(datetime.combine(start, time.min), tz)
+        qs = qs.filter(**{f"{field}__gte": start_at})
+    if end is not None:
+        end_at = timezone.make_aware(
+            datetime.combine(end + timedelta(days=1), time.min), tz
+        )
+        qs = qs.filter(**{f"{field}__lt": end_at})
+    return qs

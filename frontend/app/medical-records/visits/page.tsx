@@ -271,6 +271,7 @@ export default function VisitsPage() {
   useEffect(() => {
     if (!ready || pollingPaused) return;
     const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       void loadVisits({ silent: true });
       void loadStats();
     }, 15000);

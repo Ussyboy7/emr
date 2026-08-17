@@ -766,6 +766,7 @@ export default function PrescriptionsPage() {
       return;
     }
     const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       void loadPrescriptionsRef.current({ silent: true });
       void loadQueueStatsRef.current();
     }, 15000);
