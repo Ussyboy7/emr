@@ -1579,6 +1579,15 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing lab results awaiting verification."""
     
     facility_filter_field = 'order__processing_clinic'
+    # Scope completed/verification results across both requesting and processing
+    # clinic (plus the test-level processing clinic), matching Lab Orders. Orders
+    # with no clinic at all (legacy/external) remain visible to everyone.
+    facility_scope_fields = (
+        'order__location_clinic',
+        'order__processing_clinic',
+        'test__processing_clinic',
+    )
+    include_unassigned_scope = True
     serializer_class = LabResultSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']

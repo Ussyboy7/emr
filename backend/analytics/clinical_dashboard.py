@@ -67,7 +67,7 @@ def _category_rows(visits_qs) -> tuple[list[dict[str, Any]], dict[str, int]]:
     return rows, totals
 
 
-def build_clinical_dashboard(
+def _build_clinical_dashboard(
     start_dt: datetime, end_dt: datetime, *, all_time: bool = False, clinic_scope=None
 ) -> dict[str, Any]:
     start_d = start_dt.date()
@@ -310,3 +310,27 @@ def build_clinical_dashboard(
             "attendance_totals": attendance_totals,
         },
     }
+
+
+def build_clinical_dashboard(
+    start_dt: datetime, end_dt: datetime, *, all_time: bool = False, clinic_scope=None
+) -> dict[str, Any]:
+    """Cached wrapper around the heavy analytics builder.
+
+    The analytics endpoint is hit on every dashboard filter change and runs a
+    couple of dozen COUNT/aggregate queries, so results are cached briefly
+    (default 45s) keyed by the date range and clinic scope.
+    """
+    from common.cache_helpers import cache_get_or_set
+    from common.mixins import SCOPE_ALL as _SCOPE_ALL
+
+    scope_key = getattr(clinic_scope, "id", None) if clinic_scope not in (None, _SCOPE_ALL) else clinic_scope
+    period_key = "all" if all_time else f"{start_dt.date().isoformat()}:{end_dt.date().isoformat()}"
+    cache_key = f"clinical_dashboard:v1:{period_key}:{scope_key or 'all'}"
+
+    def _build() -> dict[str, Any]:
+        return _build_clinical_dashboard(
+            start_dt, end_dt, all_time=all_time, clinic_scope=clinic_scope
+        )
+
+    return cache_get_or_set(cache_key, _build)

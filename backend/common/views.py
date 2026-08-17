@@ -529,9 +529,10 @@ class OnlineUsersView(views.APIView):
 
     def get(self, request):
         from accounts.presence import list_online_users, presence_window_seconds
+        online = list_online_users()
         return Response({
-            'users': list_online_users(),
-            'count': len(list_online_users()),
+            'users': online,
+            'count': len(online),
             'presenceWindowSeconds': presence_window_seconds(),
         })
 

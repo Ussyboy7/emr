@@ -44,6 +44,12 @@ def build_operational_dashboard(
     def _build() -> dict:
         day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
         day_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+        yesterday_start = timezone.make_aware(
+            datetime.combine(yesterday, datetime.min.time())
+        )
+        yesterday_end = timezone.make_aware(
+            datetime.combine(yesterday, datetime.max.time())
+        )
 
         def scoped(qs, field="location_clinic_id"):
             if clinic_scope is None or clinic_scope == SCOPE_ALL:
@@ -51,12 +57,17 @@ def build_operational_dashboard(
             return qs.filter(**{field: clinic_scope})
 
         visits_today_qs = scoped(
-            Visit.objects.filter(Q(created_at__date=today) | Q(date=today))
+            Visit.objects.filter(
+                Q(created_at__gte=day_start, created_at__lte=day_end) | Q(date=today)
+            )
         )
         patients_today = visits_today_qs.values("patient_id").distinct().count()
         patients_yesterday = (
             scoped(
-                Visit.objects.filter(Q(created_at__date=yesterday) | Q(date=yesterday))
+                Visit.objects.filter(
+                    Q(created_at__gte=yesterday_start, created_at__lte=yesterday_end)
+                    | Q(date=yesterday)
+                )
             )
             .values("patient_id")
             .distinct()
@@ -90,7 +101,8 @@ def build_operational_dashboard(
 
         prescriptions_today = scoped(
             Prescription.objects.filter(
-                dispensed_at__date=today,
+                dispensed_at__gte=day_start,
+                dispensed_at__lte=day_end,
                 status="dispensed",
             )
         ).count()
@@ -114,19 +126,23 @@ def build_operational_dashboard(
             PatientAdmission.objects.all(),
             field="visit__location_clinic_id",
         )
-        active_admissions = admissions_qs.filter(
-            status__in=["admitted", "pending_discharge"]
-        ).count()
-        pending_discharges = admissions_qs.filter(status="pending_discharge").count()
         escalated_q = (
             Q(current_condition__icontains="needs doctor review")
             | Q(current_condition__icontains="escalat")
             | Q(current_condition__icontains="critical")
             | Q(current_condition__icontains="serious")
         )
-        escalated_admissions = admissions_qs.filter(
-            status__in=["admitted", "pending_discharge"]
-        ).filter(escalated_q).count()
+        admissions_agg = admissions_qs.aggregate(
+            active=Count("id", filter=Q(status__in=["admitted", "pending_discharge"])),
+            pending_discharges=Count("id", filter=Q(status="pending_discharge")),
+            escalated=Count(
+                "id",
+                filter=Q(status__in=["admitted", "pending_discharge"]) & escalated_q,
+            ),
+        )
+        active_admissions = admissions_agg["active"] or 0
+        pending_discharges = admissions_agg["pending_discharges"] or 0
+        escalated_admissions = admissions_agg["escalated"] or 0
 
         beds_qs = scoped(Bed.objects.all(), field="ward__location_clinic_id")
         available_beds = beds_qs.filter(status="available").count()
@@ -169,7 +185,8 @@ def build_operational_dashboard(
             scoped(
                 ConsultationSession.objects.filter(
                     status="completed",
-                    started_at__date=today,
+                    started_at__gte=day_start,
+                    started_at__lte=day_end,
                     ended_at__isnull=False,
                 )
             )
@@ -187,7 +204,10 @@ def build_operational_dashboard(
 
         lab_rows = (
             scoped(
-                LabTest.objects.filter(processed_at__date=today),
+                LabTest.objects.filter(
+                    processed_at__gte=day_start,
+                    processed_at__lte=day_end,
+                ),
                 field="order__location_clinic_id",
             )
             .values("order__location_clinic_id")
@@ -200,7 +220,8 @@ def build_operational_dashboard(
         rx_rows = scoped(
             Prescription.objects.filter(
                 status="dispensed",
-                dispensed_at__date=today,
+                dispensed_at__gte=day_start,
+                dispensed_at__lte=day_end,
             )
         ).values("location_clinic_id").annotate(n=Count("id"))
         rx_counts = {row["location_clinic_id"]: row["n"] for row in rx_rows}

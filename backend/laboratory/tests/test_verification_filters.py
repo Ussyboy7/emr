@@ -7,8 +7,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import User
-from common.tests.support import grant_pages
+from common.tests.support import create_test_user, grant_pages
 from laboratory.models import LabOrder, LabResult, LabTemplate, LabTest
+from organization.models import Clinic, SystemConfig
 from patients.models import Patient
 
 
@@ -218,3 +219,108 @@ class LabOrderStatsTests(APITestCase):
         self.assertEqual(resp.data["total"], 1)
         self.assertEqual(resp.data["pending"], 1)
         self.assertEqual(resp.data["processing"], 0)
+
+
+class LabResultFacilityScopeTests(APITestCase):
+    """Regression: completed tests scoped by order location_clinic, not only processing_clinic."""
+
+    @classmethod
+    def setUpTestData(cls):
+        SystemConfig.objects.update_or_create(key="multi_clinic_enabled", defaults={"value": "true"})
+        cls.bode = Clinic.objects.create(name="Bode Thomas", code="BODE")
+        cls.apapa = Clinic.objects.create(name="Apapa", code="APAPA")
+        cls.user = create_test_user(
+            "lab_scope_user", pages=["/laboratory"], system_role="Laboratory Scientist"
+        )
+        cls.user.location_clinic = cls.bode
+        cls.user.active_clinic = cls.bode
+        cls.user.save(update_fields=["location_clinic", "active_clinic"])
+        cls.user.location_clinics.add(cls.bode)
+        cls.patient = Patient.objects.create(
+            patient_id="LAB-SCOPE-01",
+            surname="Scope",
+            first_name="Result",
+            gender="female",
+            date_of_birth="1990-01-01",
+        )
+        cls.template = LabTemplate.objects.create(
+            name="FBC",
+            code="FBC",
+            sample_type="Blood",
+            normal_range={"WBC": {"min": 4, "max": 11}},
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(self.user)
+
+    def _verified_result(self, *, order_id: str, location_clinic, processing_clinic=None):
+        order = LabOrder.objects.create(
+            order_id=order_id,
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            clinic="GOPD",
+            location_clinic=location_clinic,
+            processing_clinic=processing_clinic,
+        )
+        test = LabTest.objects.create(
+            order=order,
+            template=self.template,
+            name="FBC",
+            code="FBC",
+            sample_type="Blood",
+            status="verified",
+            results={"WBC": "7.0"},
+            verified_by=self.user,
+            verified_at=timezone.now(),
+        )
+        return LabResult.objects.create(
+            test=test,
+            order=order,
+            patient=self.patient,
+            overall_status="normal",
+            priority="medium",
+        )
+
+    def test_verified_result_with_processing_clinic_null_visible_to_location_clinic(self):
+        self._verified_result(
+            order_id="LAB-SCOPE-BODE-1",
+            location_clinic=self.bode,
+            processing_clinic=None,
+        )
+        self._verified_result(
+            order_id="LAB-SCOPE-APAPA-1",
+            location_clinic=self.apapa,
+            processing_clinic=None,
+        )
+
+        resp = self.client.get("/api/laboratory/verification/", {"status": "verified"})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual(resp.data["results"][0]["order_id"], "LAB-SCOPE-BODE-1")
+
+    def test_verified_result_with_other_clinic_processing_but_matching_location_visible(self):
+        self._verified_result(
+            order_id="LAB-SCOPE-ROUTED-1",
+            location_clinic=self.bode,
+            processing_clinic=self.apapa,
+        )
+
+        resp = self.client.get("/api/laboratory/verification/", {"status": "verified"})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual(resp.data["results"][0]["order_id"], "LAB-SCOPE-ROUTED-1")
+
+    def test_verified_result_in_other_location_hidden(self):
+        self._verified_result(
+            order_id="LAB-SCOPE-OTHER-1",
+            location_clinic=self.apapa,
+            processing_clinic=self.apapa,
+        )
+
+        resp = self.client.get("/api/laboratory/verification/", {"status": "verified"})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 0)

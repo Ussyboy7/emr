@@ -760,8 +760,11 @@ export default function LabOrdersPage() {
       }
       if (processingFacilityFilter !== 'all') params.processing_clinic = Number(processingFacilityFilter);
 
+      // While searching, drop the workflow-tab filter so results span all
+      // statuses (mirrors the date-skip above). This keeps a just-verified
+      // order visible even when the active tab is, e.g., "Pending".
       const workflowTab = labOrdersTabToWorkflowParam(activeTab);
-      if (workflowTab) {
+      if (!searching && workflowTab) {
         params.workflow_tab = workflowTab;
       }
 
