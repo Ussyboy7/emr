@@ -7,6 +7,7 @@ from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q, Prefetch
 from django.http import Http404, HttpResponse
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -1169,6 +1170,27 @@ class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         from .session_bundle import build_session_workspace_bundle
 
         return Response(build_session_workspace_bundle(session))
+
+    @extend_schema(tags=["Consultation"], summary="Cross-location consultation report data")
+    @action(detail=True, methods=['get'], url_path='report-data', permission_classes=[IsAuthenticated])
+    def report_data(self, request, pk=None):
+        """Return one read-only report payload without operational clinic scoping."""
+        session = get_object_or_404(ConsultationSession.objects.select_related(
+            'room',
+            'room__location_clinic',
+            'patient',
+            'doctor',
+            'visit',
+            'visit__location_clinic',
+            'location_clinic',
+            'created_by',
+        ), pk=pk)
+        from .session_bundle import build_session_workspace_bundle
+
+        return Response({
+            'session': ConsultationSessionSerializer(session).data,
+            'bundle': build_session_workspace_bundle(session),
+        })
 
     @extend_schema(tags=["Consultation"], summary="Resolve for visit", description="Return the best-matching session for a visit (e.g. latest completed report).")
     @action(detail=False, methods=['get'], url_path='resolve-for-visit')

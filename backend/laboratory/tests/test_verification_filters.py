@@ -86,6 +86,35 @@ class LabVerificationDateFilterTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["count"], 1)
 
+    def test_verified_search_filters_before_empty_payload_validation(self):
+        self._make_result(test_status="verified")
+        empty_test = LabTest.objects.create(
+            order=self.order,
+            template=self.template,
+            name="Unsearchable Empty Result",
+            code="EMPTY",
+            sample_type="Blood",
+            status="verified",
+            results={},
+            verified_by=self.user,
+            verified_at=timezone.now(),
+        )
+        LabResult.objects.create(
+            test=empty_test,
+            order=self.order,
+            patient=self.patient,
+            overall_status="normal",
+            priority="medium",
+        )
+
+        response = self.client.get(
+            "/api/laboratory/verification/",
+            {"status": "verified", "search": "Unsearchable Empty Result"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 0)
+
 
 class LabOrderStatsTests(APITestCase):
     def setUp(self):

@@ -8,6 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from common.tests.support import create_test_user, create_test_patient_visit
+from organization.models import Clinic, SystemConfig
 from radiology.models import (
     RadiologyOrder,
     RadiologyStudy,
@@ -470,6 +471,47 @@ class RadiologyVerificationTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         for key in ("total", "normal", "abnormal", "critical"):
             self.assertIn(key, resp.data)
+
+    def test_report_visible_when_study_processing_clinic_is_active_clinic(self):
+        bode = Clinic.objects.create(name="Bode Verification", code="BODE-VER")
+        origin = Clinic.objects.create(name="Origin Verification", code="ORIGIN-VER")
+        SystemConfig.objects.update_or_create(
+            key="multi_clinic_enabled", defaults={"value": "true"}
+        )
+        self.user.location_clinics.add(bode)
+        self.user.active_clinic = bode
+        self.user.save(update_fields=["active_clinic"])
+
+        order = RadiologyOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            location_clinic=origin,
+            processing_clinic=origin,
+        )
+        study = RadiologyStudy.objects.create(
+            order=order,
+            procedure="Study-level routing",
+            body_part="Chest",
+            modality="X-Ray",
+            status="reported",
+            report="Reported",
+            reported_by=self.user,
+            reported_at=timezone.now(),
+            processing_clinic=bode,
+        )
+        report = RadiologyReport.objects.create(
+            study=study,
+            order=order,
+            patient=self.patient,
+            overall_status="normal",
+            priority="medium",
+        )
+
+        response = self.client.get(f"{BASE}/verification/", {"status": "reported"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(report.pk, [row["id"] for row in response.data["results"]])
 
 
 class RadiologyTemplateTests(APITestCase):

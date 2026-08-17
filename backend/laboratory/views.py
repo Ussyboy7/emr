@@ -1578,6 +1578,11 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing lab results awaiting verification."""
     
     facility_filter_field = 'order__processing_clinic'
+    facility_scope_fields = (
+        'order__location_clinic',
+        'order__processing_clinic',
+        'test__processing_clinic',
+    )
     serializer_class = LabResultSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
@@ -1660,16 +1665,24 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
         if pm in ('in_house', 'outsourced'):
             queryset = queryset.filter(test__processing_method=pm)
 
-        # Final guard: include only rows with meaningful structured results or a real result file.
+        return self.scope_queryset(queryset)
+
+    def filter_queryset(self, queryset):
+        """Apply database filters/search before validating result payloads."""
+        queryset = super().filter_queryset(queryset)
+
+        # Avoid scanning every historical result before SearchFilter, date, and
+        # clinic filters have narrowed the candidate set.
+        candidates = queryset.filter(
+            Q(test__results__isnull=False) | Q(test__result_file__isnull=False)
+        ).select_related('test')
         valid_ids = []
-        for row in queryset.iterator():
+        for row in candidates.only('id', 'test__results', 'test__result_file').iterator():
             test = row.test
             has_result_file = bool(test.result_file and getattr(test.result_file, "name", ""))
             if _has_meaningful_results_payload(test.results) or has_result_file:
                 valid_ids.append(row.id)
-        queryset = queryset.filter(id__in=valid_ids)
-
-        return self.scope_queryset(queryset)
+        return queryset.filter(id__in=valid_ids)
 
     @extend_schema(tags=["Laboratory"], summary="Stats", description="Stats for verification history/completed tests.")
     @action(detail=False, methods=['get'])

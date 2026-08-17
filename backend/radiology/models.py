@@ -327,6 +327,11 @@ class RadiologyStudy(models.Model):
         db_table = 'radiology_studies'
         ordering = ['-created_at']
         verbose_name_plural = 'Radiology Studies'
+        indexes = [
+            models.Index(fields=['status', 'reported_at']),
+            models.Index(fields=['status', 'verified_at']),
+            models.Index(fields=['processing_clinic', 'status']),
+        ]
     
     def __str__(self):
         return f"{self.procedure} - {self.order.order_id}"

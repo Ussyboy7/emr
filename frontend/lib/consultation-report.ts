@@ -6,7 +6,7 @@ import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { formatDisplayDate, formatDisplayTime, formatDisplayDateTime } from '@/lib/dates';
 import { apiFetch } from '@/lib/api-client';
 import { logWarn } from './client-logger';
-import { patientService, consultationService } from '@/lib/services';
+import { patientService } from '@/lib/services';
 import type { ApiResponse } from './types/common';
 import { buildOrderedLabResultViewRows } from '@/lib/laboratory/template-utils';
 import {
@@ -400,31 +400,20 @@ export function applyBundleToReportSession(
 }
 
 export async function loadConsultationReportSession(sessionId: number, opts?: { scope?: string }): Promise<ConsultationReportSession> {
-  const scopeParam = opts?.scope ? `?clinic_id=${opts.scope}` : '';
-  const [session, bundle] = await Promise.all([
-    apiFetch<Record<string, unknown>>(`/consultation/sessions/${sessionId}/${scopeParam}`),
-    consultationService.getSessionWorkspaceBundle(sessionId, opts),
-  ]);
-
-  const patientId = session.patient as number;
+  void opts;
+  const report = await apiFetch<{
+    session: Record<string, unknown>;
+    bundle: SessionWorkspaceBundle;
+  }>(`/consultation/sessions/${sessionId}/report-data/`);
+  const session = report.session;
+  const bundle = report.bundle;
   const visitId = session.visit as number | undefined;
   const visitType = session.visit_type ? String(session.visit_type) : undefined;
-
-  const patient = patientId
-    ? await apiFetch<Record<string, unknown>>(`/patients/${patientId}/`).catch(() => null)
-    : null;
 
   let vitalsRows: unknown[] = bundle.vitals.results || [];
   if (visitId && !vitalsRows.length) {
     const vital = await patientService.resolveVital({ visit: visitId }).catch(() => null);
     vitalsRows = vital ? [vital] : [];
-  }
-
-  if (patient) {
-    session.patient_name = patient.full_name ?? '';
-    session.patient_id = patient.patient_id ?? String(patient.id);
-    session.patient_age = patient.age ?? '';
-    session.patient_gender = patient.gender ?? '';
   }
 
   return {

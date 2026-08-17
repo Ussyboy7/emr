@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from django.db import transaction
 from drf_spectacular.utils import extend_schema
-from django.db.models import Count, Q
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, serializers
@@ -75,29 +75,57 @@ class ClinicViewSet(viewsets.ModelViewSet):
 
         window_start = timezone.now() - timedelta(days=self.CLINIC_ACTIVITY_WINDOW_DAYS)
         window_start_date = window_start.date()
+        from accounts.models import User
+        from consultation.models import ConsultationRoom, ConsultationSession
+
+        def count_subquery(queryset, group_by):
+            return Subquery(
+                queryset.filter(**{group_by: OuterRef("pk")})
+                .values(group_by)
+                .annotate(total=Count("pk", distinct=True))
+                .values("total")[:1],
+                output_field=IntegerField(),
+            )
+
         return Clinic.objects.annotate(
-            patient_count=Count(
-                "visits__patient",
-                filter=Q(visits__date__gte=window_start_date),
-                distinct=True,
+            patient_count=Subquery(
+                Visit.objects.filter(
+                    location_clinic_id=OuterRef("pk"),
+                    date__gte=window_start_date,
+                )
+                .values("location_clinic_id")
+                .annotate(total=Count("patient_id", distinct=True))
+                .values("total")[:1],
+                output_field=IntegerField(),
             ),
-            doctor_count=Count(
-                "consultation_rooms__sessions__doctor",
-                filter=Q(
-                    consultation_rooms__sessions__doctor__is_active=True,
-                    consultation_rooms__sessions__started_at__gte=window_start,
-                ),
-                distinct=True,
+            doctor_count=Subquery(
+                ConsultationSession.objects.filter(
+                    room__location_clinic_id=OuterRef("pk"),
+                    doctor__is_active=True,
+                    started_at__gte=window_start,
+                )
+                .values("room__location_clinic_id")
+                .annotate(total=Count("doctor_id", distinct=True))
+                .values("total")[:1],
+                output_field=IntegerField(),
             ),
-            staff_count=Count(
-                "assigned_staff",
-                filter=Q(assigned_staff__is_active=True),
-                distinct=True,
+            staff_count=Subquery(
+                User.objects.filter(
+                    location_clinics=OuterRef("pk"),
+                    is_active=True,
+                )
+                .values("location_clinics")
+                .annotate(total=Count("pk"))
+                .values("total")[:1],
+                output_field=IntegerField(),
             ),
-            org_room_count=Count(
-                "rooms",
-                filter=Q(rooms__is_active=True),
-                distinct=True,
+            org_room_count=count_subquery(
+                Room.objects.filter(is_active=True),
+                "location_clinic_id",
+            ),
+            consult_room_count=count_subquery(
+                ConsultationRoom.objects.filter(is_active=True),
+                "location_clinic_id",
             ),
         )
     
@@ -489,4 +517,3 @@ class SecuritySettingsView(APIView):
                 "idle_session_timeout_minutes": get_idle_session_timeout_minutes(),
             }
         )
-

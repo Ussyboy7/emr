@@ -326,6 +326,8 @@ class LabTest(models.Model):
         indexes = [
             models.Index(fields=['order', 'status']),
             models.Index(fields=['status']),
+            models.Index(fields=['status', 'processed_at']),
+            models.Index(fields=['status', 'verified_at']),
         ]
 
     def clean(self):

@@ -545,7 +545,7 @@ export default function ConsultationHistoryPage() {
       return;
     }
     let cancelled = false;
-    loadConsultationReportSession(id, { scope: 'all' })
+    loadConsultationReportSession(id)
       .then((session) => {
         if (!cancelled) setReportSession(session);
       })
@@ -2404,7 +2404,7 @@ export default function ConsultationHistoryPage() {
                             try {
                               setEditHistoryReportLoading(true);
                               setEditHistoryReportSession(null);
-                              const session = await loadConsultationReportSession(Number(s.id), { scope: 'all' });
+                               const session = await loadConsultationReportSession(Number(s.id));
                               setEditHistoryReportSession(session);
                             } catch {
                               toast.error('Failed to load consultation report.');

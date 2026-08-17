@@ -63,7 +63,9 @@ class ClinicSerializer(serializers.ModelSerializer):
         org_rooms_count = getattr(obj, "org_room_count", None)
         if org_rooms_count is None:
             org_rooms_count = obj.rooms.filter(is_active=True).count()
-        consult_rooms_count = ConsultationRoom.objects.filter(location_clinic=obj, is_active=True).count()
+        consult_rooms_count = getattr(obj, "consult_room_count", None)
+        if consult_rooms_count is None:
+            consult_rooms_count = ConsultationRoom.objects.filter(location_clinic=obj, is_active=True).count()
         return org_rooms_count + consult_rooms_count
     
     @extend_schema_field(OpenApiTypes.STR)

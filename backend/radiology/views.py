@@ -1438,6 +1438,11 @@ class RadiologyReportViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet)
     """ViewSet for viewing radiology reports awaiting verification."""
 
     facility_filter_field = 'order__processing_clinic'
+    facility_scope_fields = (
+        'order__location_clinic',
+        'order__processing_clinic',
+        'study__processing_clinic',
+    )
     serializer_class = RadiologyReportSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
