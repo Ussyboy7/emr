@@ -1665,30 +1665,14 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
         if pm in ('in_house', 'outsourced'):
             queryset = queryset.filter(test__processing_method=pm)
 
-        return self.scope_queryset(queryset)
-
-    def filter_queryset(self, queryset):
-        """Apply database filters/search before validating result payloads."""
-        queryset = super().filter_queryset(queryset)
-
-        # Avoid scanning every historical result before SearchFilter, date, and
-        # clinic filters have narrowed the candidate set.
-        candidates = (
-            queryset.filter(
-                Q(test__results__isnull=False) | Q(test__result_file__isnull=False)
-            )
-            .select_related(None)
-            .select_related('test')
+        # Keep validation in PostgreSQL. Verified rows have already passed the
+        # structured-result guard at verification time; exclude legacy empty
+        # JSON objects without scanning every historical row in Python.
+        queryset = queryset.filter(
+            Q(test__result_file__isnull=False) | ~Q(test__results={})
         )
-        valid_ids = []
-        for row in candidates.only(
-            'id', 'test_id', 'test__results', 'test__result_file'
-        ).iterator():
-            test = row.test
-            has_result_file = bool(test.result_file and getattr(test.result_file, "name", ""))
-            if _has_meaningful_results_payload(test.results) or has_result_file:
-                valid_ids.append(row.id)
-        return queryset.filter(id__in=valid_ids)
+
+        return self.scope_queryset(queryset)
 
     @extend_schema(tags=["Laboratory"], summary="Stats", description="Stats for verification history/completed tests.")
     @action(detail=False, methods=['get'])
