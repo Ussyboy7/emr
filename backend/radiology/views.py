@@ -1143,6 +1143,9 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
 
     facility_filter_field = 'order__processing_clinic'
     facility_scope_fields = ('order__location_clinic', 'order__processing_clinic', 'processing_clinic')
+    # Legacy/external studies (order with no facility) stay visible to everyone,
+    # matching RadiologyOrderViewSet and the lab test/results viewsets.
+    include_unassigned_scope = True
     serializer_class = RadiologyStudySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'processing_method', 'modality']
@@ -1447,6 +1450,9 @@ class RadiologyReportViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet)
         'order__processing_clinic',
         'study__processing_clinic',
     )
+    # Legacy/external orders (no facility) stay visible to everyone, matching
+    # LabResultViewSet and the radiology study/order viewsets.
+    include_unassigned_scope = True
     serializer_class = RadiologyReportSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
