@@ -60,6 +60,10 @@ def _ensure_order_facility_access(user, order):
     if not assigned and user.location_clinic_id:
         assigned = {user.location_clinic_id}
     order_facility_ids = {order.location_clinic_id, order.processing_clinic_id} - {None}
+    if not order_facility_ids:
+        # Legacy/external orders with no facility are unrestricted, matching
+        # list scoping that keeps them visible to everyone.
+        return
     if not assigned.intersection(order_facility_ids):
         raise PermissionDenied('You are not assigned to this order facility.')
 from .models import (

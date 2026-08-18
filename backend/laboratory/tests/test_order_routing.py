@@ -811,6 +811,34 @@ class LabOrderRoutingApiTests(APITestCase):
 
         self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
 
+    def test_collection_is_allowed_on_order_with_no_facility(self):
+        # New External Lab Request orders carry only external_clinic (no
+        # location/processing clinic). They must be actionable by any assigned
+        # lab staff, matching list scoping that keeps them visible to everyone.
+        unauthorized = create_test_user("lab-routing-nofac", pages=["/laboratory"], system_role="Laboratory Scientist")
+        unauthorized.location_clinic = self.other
+        unauthorized.active_clinic = self.other
+        unauthorized.save()
+        unauthorized.location_clinics.add(self.other)
+        self.client.force_authenticate(user=unauthorized)
+
+        no_facility_order = LabOrder.objects.create(
+            order_id=f"LAB-API-EXT-{LabOrder.objects.count() + 1}",
+            patient=self.patient,
+            source_type="external_manual",
+        )
+        test = LabTest.objects.create(
+            order=no_facility_order, name="External FBC", code="LAB-EXT-FBC", sample_type="blood"
+        )
+
+        response = self.client.post(
+            f"/api/v1/laboratory/orders/{no_facility_order.pk}/collect-samples/",
+            {"test_ids": [test.pk], "collection_clinic": self.other.pk},
+            format="json",
+        )
+
+        self.assertNotEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_internal_reroute_cancels_issued_dispatch_and_clears_external_state(self):
         external = self._route({
             "test_ids": [self.first.pk],

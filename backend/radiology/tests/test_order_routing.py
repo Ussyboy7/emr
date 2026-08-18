@@ -416,6 +416,36 @@ class RadiologyOrderRoutingApiTests(APITestCase):
 
         self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
 
+    def test_dispatch_is_allowed_on_order_with_no_facility(self):
+        # External/manual radiology orders carry only external_clinic (no
+        # location/processing clinic). They must be actionable by any assigned
+        # radiology staff, matching list scoping that keeps them visible to
+        # everyone.
+        unauthorized = create_test_user("rad-routing-nofac", pages=["/radiology"], system_role="Radiology Scientist")
+        unauthorized.location_clinic = self.other
+        unauthorized.active_clinic = self.other
+        unauthorized.save()
+        unauthorized.location_clinics.add(self.other)
+        self.client.force_authenticate(user=unauthorized)
+
+        no_facility_order = RadiologyOrder.objects.create(
+            order_id=f"RAD-API-EXT-{RadiologyOrder.objects.count() + 1}",
+            patient=self.patient,
+            source_type="external_manual",
+        )
+        study = RadiologyStudy.objects.create(
+            order=no_facility_order,
+            procedure="External Imaging",
+        )
+
+        response = self.client.post(
+            f"/api/v1/radiology/orders/{no_facility_order.pk}/dispatch_outsourced/",
+            {"study_ids": [study.pk], "partner_name": "Reference Imaging", "reason": "no-facility test"},
+            format="json",
+        )
+
+        self.assertNotEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_legacy_dispatch_updates_routing_state_and_requires_reason(self):
         missing_reason = self.client.post(
             f"/api/v1/radiology/orders/{self.order.pk}/dispatch_outsourced/",
