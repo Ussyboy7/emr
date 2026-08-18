@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import { ReportSearchField } from "@/components/reports/ReportSearchField";
 import { RefreshCw, ArrowLeft, TrendingUp, Activity, Users, Calendar, FileText } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
@@ -23,9 +26,9 @@ interface DiseaseData {
   non_employee: number;
   male: number;
   female: number;
-  gender_other: number;
   total: number;
   percentage?: number;
+  codes_count?: number;
 }
 
 interface DiseaseSummary {
@@ -36,7 +39,9 @@ interface DiseaseSummary {
   grand_total: number;
   total_male: number;
   total_female: number;
-  total_gender_other: number;
+  ranking_count: number;
+  limit: number | null;
+  group_by: string;
 }
 
 const emptySummary: DiseaseSummary = {
@@ -47,7 +52,9 @@ const emptySummary: DiseaseSummary = {
   grand_total: 0,
   total_male: 0,
   total_female: 0,
-  total_gender_other: 0,
+  ranking_count: 0,
+  limit: 20,
+  group_by: "code",
 };
 
 function normalizeSummary(raw?: Partial<DiseaseSummary> | null): DiseaseSummary {
@@ -60,7 +67,9 @@ function normalizeSummary(raw?: Partial<DiseaseSummary> | null): DiseaseSummary 
     grand_total: raw?.grand_total ?? lines,
     total_male: raw?.total_male ?? 0,
     total_female: raw?.total_female ?? 0,
-    total_gender_other: raw?.total_gender_other ?? 0,
+    ranking_count: raw?.ranking_count ?? 0,
+    limit: raw?.limit ?? 20,
+    group_by: raw?.group_by ?? "code",
   };
 }
 
@@ -86,12 +95,16 @@ export default function DiseasePatternReport() {
   const [summary, setSummary] = useState<DiseaseSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [limit, setLimit] = useState("20");
+  const [groupByFamily, setGroupByFamily] = useState(false);
 
   const isAllTime = viewMode === "all";
   const showCategoryCards = !isAllTime;
+  const grouped = groupByFamily || summary.group_by === "family";
 
   const searchExtra = () => {
-    const queryExtra: Record<string, string> = {};
+    const queryExtra: Record<string, string> = { limit };
+    if (groupByFamily) queryExtra.group_by = "family";
     const term = search.trim();
     if (term) queryExtra.search = term;
     return queryExtra;
@@ -122,9 +135,11 @@ export default function DiseasePatternReport() {
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, search]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, search, limit, groupByFamily]);
 
   const hasData = (summary.grand_total ?? 0) > 0;
+  const truncated =
+    (summary.distinct_icd10_codes ?? 0) > (summary.ranking_count ?? 0);
 
   return (
     <DashboardLayout>
@@ -169,7 +184,7 @@ export default function DiseasePatternReport() {
             </CardDescription>
           </CardHeader>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <ReportDateFilterFields
                 viewMode={viewMode}
                 onViewModeChange={setViewMode}
@@ -181,6 +196,30 @@ export default function DiseasePatternReport() {
                 onEndDateChange={setEndDate}
                 yearOptions={years}
               />
+              <div>
+                <Label>Top N</Label>
+                <Select value={limit} onValueChange={setLimit}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["10", "20", "30", "50"].map((n) => (
+                      <SelectItem key={n} value={n}>
+                        {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <Checkbox
+                    checked={groupByFamily}
+                    onCheckedChange={(v) => setGroupByFamily(v === true)}
+                  />
+                  Group by family
+                </label>
+              </div>
               <ReportSearchField value={search} onChange={setSearch} />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
@@ -216,7 +255,9 @@ export default function DiseasePatternReport() {
               <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">
                 {(summary.distinct_icd10_codes ?? 0).toLocaleString()}
               </p>
-              <p className="text-xs text-muted-foreground mt-1">Unique diagnoses in the table below</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Unique diagnoses in period
+              </p>
             </CardContent>
           </Card>
           {showCategoryCards && (
@@ -260,8 +301,10 @@ export default function DiseasePatternReport() {
               ICD-10 diagnoses — {periodLabel}
             </CardTitle>
             <CardDescription>
-              Diagnosis frequency from completed consultations (structured ICD-10). Gender &quot;Other&quot;
-              is residual where patient gender is not male or female.
+              Diagnosis frequency from completed consultations (structured ICD-10).
+              {grouped
+                ? " Grouped by diagnosis family."
+                : truncated && ` Showing top ${summary.limit ?? 20} codes.`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -282,7 +325,6 @@ export default function DiseasePatternReport() {
                       <th className="text-right p-3 font-medium text-muted-foreground">Non-emp.</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Male</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Female</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">Other</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Total</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">%</th>
                     </tr>
@@ -292,12 +334,18 @@ export default function DiseasePatternReport() {
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
                         <td className="p-3 font-mono text-foreground">{row.code ?? "—"}</td>
-                        <td className="p-3 text-foreground">{row.description ?? row.diagnosis}</td>
+                        <td className="p-3 text-foreground">
+                          {row.description ?? row.diagnosis}
+                          {grouped && typeof row.codes_count === "number" && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              ({row.codes_count} codes)
+                            </span>
+                          )}
+                        </td>
                         <td className="p-3 text-right text-foreground">{(row.employee ?? 0).toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{(row.non_employee ?? 0).toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{(row.male ?? 0).toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{(row.female ?? 0).toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{(row.gender_other ?? 0).toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">
                           {(row.percentage ?? 0).toFixed(1)}%
@@ -319,9 +367,6 @@ export default function DiseasePatternReport() {
                       </td>
                       <td className="p-3 text-right text-foreground">
                         {(summary.total_female ?? 0).toLocaleString()}
-                      </td>
-                      <td className="p-3 text-right text-foreground">
-                        {(summary.total_gender_other ?? 0).toLocaleString()}
                       </td>
                       <td className="p-3 text-right text-foreground">
                         {(summary.grand_total ?? 0).toLocaleString()}

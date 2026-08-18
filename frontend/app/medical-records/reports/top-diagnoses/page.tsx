@@ -8,15 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import { ReportSearchField } from "@/components/reports/ReportSearchField";
-import {
-  RefreshCw,
-  ArrowLeft,
-  Stethoscope,
-  Calendar,
-  TrendingUp,
-  Activity,
-  FileText,
-} from "lucide-react";
+import { RefreshCw, ArrowLeft, Stethoscope, Calendar, TrendingUp, Activity, FileText } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
@@ -30,6 +23,7 @@ interface TopDiagnosisRow {
   description: string;
   count: number;
   percentage: number;
+  codes_count?: number;
 }
 
 interface TopDiagnosesSummary {
@@ -37,6 +31,7 @@ interface TopDiagnosesSummary {
   distinct_icd10_codes: number;
   ranking_count: number;
   limit: number;
+  group_by: string;
   grand_total: number;
 }
 
@@ -45,6 +40,7 @@ const emptySummary: TopDiagnosesSummary = {
   distinct_icd10_codes: 0,
   ranking_count: 0,
   limit: 20,
+  group_by: "code",
   grand_total: 0,
 };
 
@@ -55,6 +51,7 @@ function normalizeSummary(raw?: Partial<TopDiagnosesSummary> | null): TopDiagnos
     distinct_icd10_codes: raw?.distinct_icd10_codes ?? 0,
     ranking_count: raw?.ranking_count ?? 0,
     limit: raw?.limit ?? 20,
+    group_by: raw?.group_by ?? "code",
     grand_total: raw?.grand_total ?? lines,
   };
 }
@@ -82,12 +79,15 @@ export default function TopDiagnosesReport() {
   const [summary, setSummary] = useState<TopDiagnosesSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [groupByFamily, setGroupByFamily] = useState(false);
 
   const isAllTime = viewMode === "all";
   const showRankingMeta = !isAllTime;
+  const grouped = groupByFamily || summary.group_by === "family";
 
   const queryExtra = () => {
     const extra: Record<string, string> = { limit };
+    if (groupByFamily) extra.group_by = "family";
     const term = search.trim();
     if (term) extra.search = term;
     return extra;
@@ -132,7 +132,7 @@ export default function TopDiagnosesReport() {
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, limit, search]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, limit, search, groupByFamily]);
 
   const hasData = (summary.total_diagnosis_lines ?? 0) > 0;
   const truncated =
@@ -208,6 +208,15 @@ export default function TopDiagnosesReport() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <Checkbox
+                    checked={groupByFamily}
+                    onCheckedChange={(v) => setGroupByFamily(v === true)}
+                  />
+                  Group by family
+                </label>
+              </div>
               <ReportSearchField value={search} onChange={setSearch} />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
@@ -248,14 +257,18 @@ export default function TopDiagnosesReport() {
             <>
               <Card className="border-l-4 border-l-indigo-500">
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Codes in ranking</p>
+                  <p className="text-sm text-muted-foreground">
+                    {grouped ? "Families in ranking" : "Codes in ranking"}
+                  </p>
                   <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">
                     {(summary.ranking_count ?? 0).toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {truncated
-                      ? `Top ${summary.limit} of ${summary.distinct_icd10_codes} codes`
-                      : "All codes fit within Top N"}
+                    {grouped
+                      ? "Distinct diagnosis families in the table"
+                      : truncated
+                        ? `Top ${summary.limit} of ${summary.distinct_icd10_codes} codes`
+                        : "All codes fit within Top N"}
                   </p>
                 </CardContent>
               </Card>
@@ -280,7 +293,9 @@ export default function TopDiagnosesReport() {
             </CardTitle>
             <CardDescription>
               Structured ICD-10 codes from completed consultation sessions.
-              {truncated && ` Showing top ${summary.limit} codes.`}
+              {grouped
+                ? " Grouped by diagnosis family."
+                : truncated && ` Showing top ${summary.limit} codes.`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -315,7 +330,14 @@ export default function TopDiagnosesReport() {
                       >
                         <td className="p-3 text-foreground">{idx + 1}</td>
                         <td className="p-3 font-mono text-foreground">{row.code}</td>
-                        <td className="p-3 text-foreground">{row.description || row.diagnosis}</td>
+                        <td className="p-3 text-foreground">
+                          {row.description || row.diagnosis}
+                          {grouped && typeof row.codes_count === "number" && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              ({row.codes_count} codes)
+                            </span>
+                          )}
+                        </td>
                         <td className="p-3 text-right font-semibold text-foreground">
                           {row.count.toLocaleString()}
                         </td>

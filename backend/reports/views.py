@@ -141,6 +141,7 @@ class TopDiagnosesReportView(views.APIView):
             period_start,
             period_end,
             limit=limit,
+            group_by=request.query_params.get("group_by"),
             org_facility_id=_org_clinic_scope(request),
             search=_search_term(request),
         )
@@ -933,12 +934,18 @@ class DiseasePatternReportView(views.APIView):
     def get(self, request):
         from reports.disease_pattern_report import build_disease_pattern_report
 
+        try:
+            limit = int(request.query_params.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
         report = build_disease_pattern_report(
             period_start,
             period_end,
+            limit=limit,
+            group_by=request.query_params.get("group_by"),
             org_facility_id=_org_clinic_scope(request),
             search=_search_term(request),
         )

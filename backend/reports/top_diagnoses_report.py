@@ -1,11 +1,13 @@
 """Top ICD-10 diagnoses ranking from completed consultations."""
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 
 from django.db.models import Count, F, Q
 
 from consultation.models import Diagnosis
+from reports.icd10_families import resolve_family_range
 
 
 def build_top_diagnoses_report(
@@ -15,6 +17,7 @@ def build_top_diagnoses_report(
     limit: int = 20,
     org_facility_id: int | None = None,
     search: str | None = None,
+    group_by: str | None = None,
 ) -> dict:
     limit = max(1, min(int(limit), 100))
 
@@ -49,11 +52,59 @@ def build_top_diagnoses_report(
             description=F("icd10_code__description"),
         )
         .annotate(count=Count("id"))
-        .order_by("-count", "code")[:limit]
+        .order_by("-count", "code")
     )
 
+    if group_by == "family":
+        families: dict[str, dict] = defaultdict(
+            lambda: {"label": "", "range_start": "", "range_end": "", "count": 0, "codes": set()}
+        )
+        for row in aggregated:
+            code = row["code"] or "UNSPECIFIED"
+            description = row.get("description") or ""
+            label, range_start, range_end = resolve_family_range(code)
+            entry = families[label]
+            entry["label"] = label
+            entry["range_start"] = range_start
+            entry["range_end"] = range_end
+            entry["count"] += row["count"]
+            entry["codes"].add(f"{code} — {description}" if description else code)
+        ranked = sorted(
+            families.values(),
+            key=lambda e: (-e["count"], e["label"]),
+        )[:limit]
+        results = []
+        for entry in ranked:
+            range_start, range_end = entry["range_start"], entry["range_end"]
+            code = (
+                f"{range_start}–{range_end}" if range_start and range_end and range_start != range_end
+                else range_start
+            )
+            results.append(
+                {
+                    "diagnosis": entry["label"],
+                    "code": code,
+                    "description": entry["label"],
+                    "count": entry["count"],
+                    "codes": sorted(entry["codes"]),
+                    "codes_count": len(entry["codes"]),
+                    "percentage": round((entry["count"] / total_lines * 100) if total_lines > 0 else 0, 1),
+                }
+            )
+        return {
+            "data": results,
+            "summary": {
+                "total_diagnosis_lines": total_lines,
+                "distinct_icd10_codes": distinct_codes,
+                "ranking_count": len(results),
+                "limit": limit,
+                "group_by": "family",
+                "grand_total": total_lines,
+            },
+        }
+
     results = []
-    for row in aggregated:
+    for row in aggregated[:limit]:
         code = row.get("code") or "UNSPECIFIED"
         description = row.get("description") or ""
         count = row.get("count") or 0
@@ -74,6 +125,7 @@ def build_top_diagnoses_report(
             "distinct_icd10_codes": distinct_codes,
             "ranking_count": len(results),
             "limit": limit,
+            "group_by": "code",
             "grand_total": total_lines,
         },
     }

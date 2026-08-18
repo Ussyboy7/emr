@@ -860,7 +860,7 @@ class Command(BaseCommand):
             system_role = data['system_role']
             
             # Assign clinic and department based on role
-            data['clinic'] = clinic
+            data['location_clinic'] = clinic
             dept_name = role_to_department.get(system_role)
             if dept_name and dept_name in departments:
                 data['department'] = departments[dept_name]
@@ -942,7 +942,7 @@ class Command(BaseCommand):
 
         for dept_data in department_data:
             dept, _ = Department.objects.get_or_create(
-                clinic=clinic,
+                location_clinic=clinic,
                 name=dept_data['name'],
                 defaults={'code': dept_data['code']}
             )
@@ -977,7 +977,7 @@ class Command(BaseCommand):
                 room_number=room_data['room_number'],
                 defaults={
                     'name': room_data['name'],
-                    'clinic': clinic,  # Link to clinic
+                    'location_clinic': clinic,  # Link to clinic
                     'specialty': room_data.get('specialty', ''),
                     'status': 'active',
                     'is_active': True,

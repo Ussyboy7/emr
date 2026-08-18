@@ -1,11 +1,13 @@
 """ICD-10 disease pattern — one row per code + description from completed consultations."""
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, timedelta
 
 from django.db.models import Count, F, Q
 
 from consultation.models import Diagnosis
+from reports.icd10_families import resolve_family_range
 from reports.icd_diagnosis_aggregation import merge_icd_period_reports
 
 EMPLOYEE_CATEGORY_Q = Q(patient__category="employee")
@@ -43,9 +45,15 @@ def _diagnosis_qs(
 def build_disease_pattern_report(
     period_start: date,
     period_end: date,
+    *,
+    limit: int | None = None,
     org_facility_id: int | None = None,
     search: str | None = None,
+    group_by: str | None = None,
 ) -> dict:
+    if limit is not None:
+        limit = max(1, min(int(limit), 100))
+
     diagnosis_qs = _diagnosis_qs(
         period_start, period_end, org_facility_id=org_facility_id, search=search
     )
@@ -64,15 +72,14 @@ def build_disease_pattern_report(
         .order_by("-total", "code")
     )
 
-    result = []
+    all_rows = []
     for idx, row in enumerate(diagnosis_rows, start=1):
         code = (row.get("code") or "").strip()
         description = (row.get("description") or "").strip()
         male = row.get("male", 0) or 0
         female = row.get("female", 0) or 0
         total = row.get("total", 0) or 0
-        gender_other = max(0, total - male - female)
-        result.append(
+        all_rows.append(
             {
                 "sn": idx,
                 "code": code or "—",
@@ -82,14 +89,71 @@ def build_disease_pattern_report(
                 "non_employee": row.get("non_employee", 0) or 0,
                 "male": male,
                 "female": female,
-                "gender_other": gender_other,
                 "total": total,
             }
         )
 
-    grand_total = sum(item["total"] for item in result)
-    for item in result:
+    grand_total = sum(item["total"] for item in all_rows)
+    for item in all_rows:
         item["percentage"] = round((item["total"] / grand_total * 100) if grand_total > 0 else 0, 1)
+
+    result = all_rows[:limit] if limit is not None else all_rows
+
+    if group_by == "family":
+        families: dict[str, dict] = defaultdict(
+            lambda: {
+                "label": "",
+                "range_start": "",
+                "range_end": "",
+                "employee": 0,
+                "non_employee": 0,
+                "male": 0,
+                "female": 0,
+                "total": 0,
+                "codes": set(),
+            }
+        )
+        for item in all_rows:
+            code = item.get("code") or "—"
+            label, range_start, range_end = resolve_family_range(code)
+            entry = families[label]
+            entry["label"] = label
+            entry["range_start"] = range_start
+            entry["range_end"] = range_end
+            entry["employee"] += item["employee"]
+            entry["non_employee"] += item["non_employee"]
+            entry["male"] += item["male"]
+            entry["female"] += item["female"]
+            entry["total"] += item["total"]
+            entry["codes"].add(code)
+        family_rows = []
+        for idx, entry in enumerate(
+            sorted(families.values(), key=lambda e: (-e["total"], e["label"])),
+            start=1,
+        ):
+            range_start, range_end = entry["range_start"], entry["range_end"]
+            code = (
+                f"{range_start}–{range_end}"
+                if range_start and range_end and range_start != range_end
+                else range_start or "—"
+            )
+            family_rows.append(
+                {
+                    "sn": idx,
+                    "code": code,
+                    "description": entry["label"],
+                    "diagnosis": entry["label"],
+                    "employee": entry["employee"],
+                    "non_employee": entry["non_employee"],
+                    "male": entry["male"],
+                    "female": entry["female"],
+                    "total": entry["total"],
+                    "codes": sorted(entry["codes"]),
+                    "codes_count": len(entry["codes"]),
+                    "percentage": round((entry["total"] / grand_total * 100) if grand_total > 0 else 0, 1),
+                }
+            )
+        result = family_rows[:limit] if limit is not None else family_rows
 
     return {
         "mode": "icd10",
@@ -98,12 +162,14 @@ def build_disease_pattern_report(
         "data": result,
         "summary": {
             "total_diagnosis_lines": grand_total,
-            "distinct_icd10_codes": len(result),
-            "total_employee": sum(item["employee"] for item in result),
-            "total_non_employee": sum(item["non_employee"] for item in result),
-            "total_male": sum(item["male"] for item in result),
-            "total_female": sum(item["female"] for item in result),
-            "total_gender_other": sum(item["gender_other"] for item in result),
+            "distinct_icd10_codes": len(all_rows),
+            "total_employee": sum(item["employee"] for item in all_rows),
+            "total_non_employee": sum(item["non_employee"] for item in all_rows),
+            "total_male": sum(item["male"] for item in all_rows),
+            "total_female": sum(item["female"] for item in all_rows),
+            "ranking_count": len(result),
+            "limit": limit,
+            "group_by": "family" if group_by == "family" else "code",
             "grand_total": grand_total,
         },
     }

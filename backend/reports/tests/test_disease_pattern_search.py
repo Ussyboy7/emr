@@ -131,6 +131,27 @@ class DiseasePatternSearchTests(DiseasePatternSearchMixin, APITestCase):
         rows, _ = self._rows("   ")
         self.assertEqual(len(rows), 2)
 
+    def test_limit_restricts_rows(self):
+        url = f"{DISEASE_PATTERN_URL}?period=all&limit=1"
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        rows = resp.data.get("data") or []
+        summary = resp.data.get("summary") or {}
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(summary["ranking_count"], 1)
+        self.assertEqual(summary["distinct_icd10_codes"], 2)
+        self.assertEqual(summary["grand_total"], 2)
+
+    def test_no_other_column(self):
+        url = f"{DISEASE_PATTERN_URL}?period=all"
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        rows = resp.data.get("data") or []
+        summary = resp.data.get("summary") or {}
+        self.assertTrue(rows)
+        self.assertNotIn("gender_other", rows[0])
+        self.assertNotIn("total_gender_other", summary)
+
 
 class TopDiagnosesSearchTests(DiseasePatternSearchMixin, APITestCase):
     """?search= filters /reports/top-diagnoses/."""
