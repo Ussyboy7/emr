@@ -5,10 +5,19 @@
 deploy_load_registry_config() {
     local registry_file="${PROJECT_ROOT}/backend/env/registry.env"
     if [[ -f "$registry_file" ]]; then
+        # EMR_IMAGE_TAG must come from git or CI — never from registry.env,
+        # which may contain a stale hardcoded SHA. Preserve the caller's
+        # value (CI sets it) and restore after sourcing.
+        local _saved_image_tag="${EMR_IMAGE_TAG:-}"
         set -a
         # shellcheck source=/dev/null
         source "$registry_file"
         set +a
+        if [[ -n "$_saved_image_tag" ]]; then
+            export EMR_IMAGE_TAG="$_saved_image_tag"
+        else
+            unset EMR_IMAGE_TAG
+        fi
     fi
 }
 
