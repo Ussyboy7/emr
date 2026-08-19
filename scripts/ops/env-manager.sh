@@ -402,15 +402,25 @@ cmd_deploy() {
         _deploy_check_server
     fi
     _deploy_ensure_repo
+    _deploy_backup_database || true
+    _deploy_pull_latest || { _deploy_rollback; return 1; }
+    # Resolve image tag AFTER git pull so it uses the current HEAD,
+    # not a stale value from registry.env or the environment.
     deploy_load_registry_config
     export EMR_IMAGE_TAG="$(deploy_resolve_image_tag)"
     if deploy_registry_enabled; then
         ui_info "Registry deploy — backend: ${EMR_BACKEND_IMAGE:-?}:${EMR_IMAGE_TAG}, frontend: ${EMR_FRONTEND_IMAGE:-?}:${EMR_IMAGE_TAG}"
+        # Validate we can actually pull before attempting
+        if ! deploy_registry_login; then
+            ui_warning "Registry login failed — switching to local build"
+            export EMR_USE_REGISTRY=0
+        elif ! deploy_validate_registry_access; then
+            ui_warning "Registry validation failed — switching to local build"
+            export EMR_USE_REGISTRY=0
+        fi
     elif [[ "$STACK_ENVIRONMENT" != "local" ]]; then
         ui_info "Local build deploy (set EMR_USE_REGISTRY=1 in backend/env/registry.env to pull from GHCR)"
     fi
-    _deploy_backup_database || true
-    _deploy_pull_latest || { _deploy_rollback; return 1; }
 
     if [[ "$DEPLOY_MODE" == "full" ]]; then
         _deploy_stop_stack
@@ -584,7 +594,6 @@ _deploy_build_up_fast() {
     up_services=$(_deploy_resolve_services)
 
     if deploy_registry_enabled; then
-        deploy_registry_login
         ui_step "Fast deploy — pulling backend + frontend (${EMR_IMAGE_TAG})"
         stack_compose pull backend frontend
         ui_step "Fast deploy — restarting: ${up_services}"
@@ -629,7 +638,6 @@ _deploy_build_up_fast() {
 
 _deploy_build_up_full() {
     if deploy_registry_enabled; then
-        deploy_registry_login
         ui_step "Full deploy — pulling images (${EMR_IMAGE_TAG}) and starting stack"
         stack_compose pull backend frontend
         stack_compose up -d

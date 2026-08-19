@@ -35,15 +35,55 @@ deploy_registry_login() {
 
     if [[ -n "${EMR_REGISTRY_TOKEN:-}" && -n "${EMR_REGISTRY_USER:-}" ]]; then
         ui_step "Logging in to ${registry}"
-        echo "$EMR_REGISTRY_TOKEN" | docker login "$registry" -u "$EMR_REGISTRY_USER" --password-stdin
-        return 0
+        if echo "$EMR_REGISTRY_TOKEN" | docker login "$registry" -u "$EMR_REGISTRY_USER" --password-stdin 2>/dev/null; then
+            ui_success "Logged in to ${registry} as ${EMR_REGISTRY_USER}"
+            return 0
+        else
+            ui_error "Login failed for ${registry} as ${EMR_REGISTRY_USER}"
+            return 1
+        fi
     fi
 
     if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_ACTOR:-}" ]]; then
         ui_step "Logging in to ${registry} (CI token)"
-        echo "$GITHUB_TOKEN" | docker login "$registry" -u "$GITHUB_ACTOR" --password-stdin
+        if echo "$GITHUB_TOKEN" | docker login "$registry" -u "$GITHUB_ACTOR" --password-stdin 2>/dev/null; then
+            ui_success "Logged in to ${registry} as ${GITHUB_ACTOR}"
+            return 0
+        else
+            ui_error "Login failed for ${registry} as ${GITHUB_ACTOR}"
+            return 1
+        fi
+    fi
+
+    # No explicit credentials — try existing Docker config
+    ui_info "Attempting login with existing Docker credentials for ${registry}"
+    if docker login "$registry" --username "" 2>/dev/null; then
         return 0
     fi
 
-    ui_info "Using existing docker credentials for ${registry} (or public pulls)"
+    ui_warning "No credentials available for ${registry} — will fall back to local build"
+    return 1
+}
+
+deploy_validate_registry_access() {
+    local registry="${EMR_REGISTRY:-ghcr.io}"
+    local backend_image="${EMR_BACKEND_IMAGE:-ghcr.io/ussyboy7/emr-backend}"
+    local frontend_image="${EMR_FRONTEND_IMAGE:-ghcr.io/ussyboy7/emr-frontend-stag}"
+    local tag="${EMR_IMAGE_TAG:-latest}"
+
+    ui_step "Validating registry access for ${tag}"
+
+    # Quick check: can we pull the backend manifest?
+    if docker manifest inspect "${backend_image}:${tag}" >/dev/null 2>&1; then
+        ui_success "Registry access OK — ${backend_image}:${tag}"
+        return 0
+    fi
+
+    ui_error "Cannot access ${backend_image}:${tag} from registry"
+    ui_info "Possible causes:"
+    ui_info "  1. GHCR credentials not configured (set GITHUB_TOKEN + GITHUB_ACTOR, or EMR_REGISTRY_TOKEN + EMR_REGISTRY_USER)"
+    ui_info "  2. Image not yet pushed by CI (check: ghcr.io/ussyboy7/emr-backend:${tag})"
+    ui_info "  3. Registry package visibility restrictions"
+    ui_info "Falling back to local build…"
+    return 1
 }
