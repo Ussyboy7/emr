@@ -14,12 +14,19 @@ def build_top_diagnoses_report(
     period_start: date,
     period_end: date,
     *,
-    limit: int = 20,
+    limit: int | None = 20,
+    page: int | None = None,
+    page_size: int | None = None,
     org_facility_id: int | None = None,
     search: str | None = None,
     group_by: str | None = None,
 ) -> dict:
-    limit = max(1, min(int(limit), 100))
+    if limit is not None:
+        limit = max(1, min(int(limit), 1000))
+    if page is not None:
+        page = max(1, int(page))
+    if page_size is not None:
+        page_size = max(1, min(int(page_size), 100))
 
     from common.report_period import filter_inclusive_date_range
 
@@ -72,7 +79,9 @@ def build_top_diagnoses_report(
         ranked = sorted(
             families.values(),
             key=lambda e: (-e["count"], e["label"]),
-        )[:limit]
+        )
+        if limit is not None:
+            ranked = ranked[:limit]
         results = []
         for entry in ranked:
             range_start, range_end = entry["range_start"], entry["range_end"]
@@ -91,20 +100,30 @@ def build_top_diagnoses_report(
                     "percentage": round((entry["count"] / total_lines * 100) if total_lines > 0 else 0, 1),
                 }
             )
+        total_ranking_count = len(results)
+        if page is not None and page_size is not None:
+            start = (page - 1) * page_size
+            end = start + page_size
+            paginated = results[start:end]
+        else:
+            paginated = results
         return {
-            "data": results,
+            "data": paginated,
             "summary": {
                 "total_diagnosis_lines": total_lines,
                 "distinct_icd10_codes": distinct_codes,
-                "ranking_count": len(results),
+                "ranking_count": total_ranking_count,
                 "limit": limit,
+                "page": page,
+                "page_size": page_size,
                 "group_by": "family",
                 "grand_total": total_lines,
             },
         }
 
     results = []
-    for row in aggregated[:limit]:
+    rows_iter = aggregated[:limit] if limit is not None else aggregated
+    for row in rows_iter:
         code = row.get("code") or "UNSPECIFIED"
         description = row.get("description") or ""
         count = row.get("count") or 0
@@ -118,13 +137,22 @@ def build_top_diagnoses_report(
             }
         )
 
+    total_ranking_count = len(results)
+    if page is not None and page_size is not None:
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated = results[start:end]
+    else:
+        paginated = results
     return {
-        "data": results,
+        "data": paginated,
         "summary": {
             "total_diagnosis_lines": total_lines,
             "distinct_icd10_codes": distinct_codes,
-            "ranking_count": len(results),
+            "ranking_count": total_ranking_count,
             "limit": limit,
+            "page": page,
+            "page_size": page_size,
             "group_by": "code",
             "grand_total": total_lines,
         },

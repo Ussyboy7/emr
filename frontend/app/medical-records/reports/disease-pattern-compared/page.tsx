@@ -4,8 +4,12 @@ import React, { useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import { ReportSearchField } from "@/components/reports/ReportSearchField";
+import { StandardPagination } from "@/components/shared/StandardPagination";
 import { RefreshCw, ArrowLeft, TrendingUp, GitCompare } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
@@ -37,9 +41,25 @@ export default function DiseasePatternComparedReport() {
   const [labels, setLabels] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [limit, setLimit] = useState("20");
+  const [customLimit, setCustomLimit] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const effectiveLimit = customLimit.trim()
+    ? customLimit.trim()
+    : limit === "custom"
+      ? "20"
+      : limit;
 
   const queryExtra = () => {
     const extra: Record<string, string> = { periods: "3" };
+    if (effectiveLimit.toLowerCase() !== "all") {
+      extra.limit = effectiveLimit;
+    }
+    extra.page = String(currentPage);
+    extra.page_size = String(itemsPerPage);
     const term = search.trim();
     if (term) extra.search = term;
     return extra;
@@ -53,16 +73,18 @@ export default function DiseasePatternComparedReport() {
     }
     setIsLoading(true);
     try {
-      const res = await apiFetch<{ data: ComparedRow[]; period_labels: string[] }>(
+      const res = await apiFetch<{ data: ComparedRow[]; period_labels: string[]; summary: { ranking_count: number } }>(
         `/reports/disease-pattern-compared/?${params.toString()}`
       );
       setData(res.data ?? []);
       setLabels(res.period_labels ?? []);
+      setTotalCount(res.summary?.ranking_count ?? res.data?.length ?? 0);
     } catch (e: unknown) {
       if (handleAuthError(e)) return;
       toast.error(e instanceof Error ? e.message : "Failed to load report");
       setData([]);
       setLabels([]);
+      setTotalCount(0);
     } finally {
       setIsLoading(false);
     }
@@ -74,6 +96,9 @@ export default function DiseasePatternComparedReport() {
     period.endDate,
     period.viewMode,
     search,
+    effectiveLimit,
+    currentPage,
+    itemsPerPage,
   ]);
 
   return (
@@ -97,7 +122,7 @@ export default function DiseasePatternComparedReport() {
         </div>
 
         <Card>
-          <CardContent className="p-4 grid md:grid-cols-5 gap-4">
+          <CardContent className="p-4 grid md:grid-cols-6 gap-4">
             <ReportDateFilterFields
               viewMode={period.viewMode}
               onViewModeChange={period.setViewMode}
@@ -109,7 +134,51 @@ export default function DiseasePatternComparedReport() {
               onEndDateChange={period.setEndDate}
               yearOptions={period.years}
             />
-            <ReportSearchField value={search} onChange={setSearch} />
+            <div>
+              <Label>Top N</Label>
+              <Select
+                value={limit}
+                onValueChange={(v) => {
+                  setLimit(v);
+                  if (v !== "custom") setCustomLimit("");
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["10", "20", "30", "50", "100"].map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="custom">Custom...</SelectItem>
+                </SelectContent>
+              </Select>
+                {(limit === "custom" || customLimit) && (
+                <Input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  placeholder="Enter number (e.g. 200)"
+                  value={customLimit}
+                  onChange={(e) => {
+                    setCustomLimit(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="mt-2"
+                />
+              )}
+            </div>
+            <ReportSearchField
+              value={search}
+              onChange={(v) => {
+                setSearch(v);
+                setCurrentPage(1);
+              }}
+            />
             <div className="flex items-end">
               <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                 <TrendingUp className="h-4 w-4 mr-2" />Generate
@@ -127,34 +196,48 @@ export default function DiseasePatternComparedReport() {
             {isLoading ? (
               <RefreshCw className="h-8 w-8 animate-spin mx-auto my-8 text-muted-foreground" />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left p-3">S/N</th>
-                      <th className="text-left p-3">Code</th>
-                      <th className="text-left p-3">Description</th>
-                      {labels.map((label) => (
-                        <th key={label} className="text-right p-3">{label}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.map((row) => (
-                      <tr key={row.sn} className="border-b">
-                        <td className="p-3">{row.sn}</td>
-                        <td className="p-3 font-mono">{row.code}</td>
-                        <td className="p-3">{row.description}</td>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left p-3">S/N</th>
+                        <th className="text-left p-3">Code</th>
+                        <th className="text-left p-3">Description</th>
                         {labels.map((label) => (
-                          <td key={label} className="p-3 text-right">
-                            {row.periods[label]?.total ?? 0}
-                          </td>
+                          <th key={label} className="text-right p-3">{label}</th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {data.map((row) => (
+                        <tr key={row.sn} className="border-b">
+                          <td className="p-3">{row.sn}</td>
+                          <td className="p-3 font-mono">{row.code}</td>
+                          <td className="p-3">{row.description}</td>
+                          {labels.map((label) => (
+                            <td key={label} className="p-3 text-right">
+                              {row.periods[label]?.total ?? 0}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <StandardPagination
+                  currentPage={currentPage}
+                  totalItems={totalCount || data.length}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(n) => {
+                    setItemsPerPage(n);
+                    setCurrentPage(1);
+                  }}
+                  itemName="diagnoses"
+                  pageSizeOptions={[10, 20, 50, 100]}
+                />
+              </>
             )}
           </CardContent>
         </Card>

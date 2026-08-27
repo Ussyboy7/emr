@@ -13,6 +13,8 @@ def build_eye_clinical_diagnosis_report(
     period_start: date,
     period_end: date,
     *,
+    page: int | None = None,
+    page_size: int | None = None,
     org_facility_id: int | None = None,
 ) -> dict:
     from common.report_period import filter_inclusive_date_range
@@ -39,15 +41,29 @@ def build_eye_clinical_diagnosis_report(
 
     data = build_icd_frequency_rows(counts)
     total = sum(counts.values())
+    total_count = len(data)
+    if page is not None:
+        page = max(1, int(page))
+    if page_size is not None:
+        page_size = max(1, min(int(page_size), 100))
+    if page is not None and page_size is not None:
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated = data[start:end]
+    else:
+        paginated = data
 
     return {
         "mode": "icd10",
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
-        "data": data,
+        "data": paginated,
         "summary": {
             "total_diagnosis_lines": total,
-            "distinct_icd10_codes": len(data),
+            "distinct_icd10_codes": total_count,
+            "ranking_count": total_count,
+            "page": page,
+            "page_size": page_size,
             "total_sessions": sessions.count(),
             "grand_total": total,
         },

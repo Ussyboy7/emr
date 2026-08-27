@@ -41,6 +41,23 @@ def _search_term(request):
     return value or None
 
 
+def _pagination_params(request):
+    """Return (page, page_size) or (None, None) when export requested."""
+    if request.query_params.get("export") in ("csv", "pdf"):
+        return None, None
+    page = request.query_params.get("page")
+    page_size = request.query_params.get("page_size")
+    try:
+        page = int(page) if page is not None and str(page).strip() != "" else None
+    except (TypeError, ValueError):
+        page = None
+    try:
+        page_size = int(page_size) if page_size is not None and str(page_size).strip() != "" else None
+    except (TypeError, ValueError):
+        page_size = None
+    return page, page_size
+
+
 def _scope_visits_by_org_clinic(request, qs):
     """Apply org-clinic tenant scoping to a report queryset (multi-clinic aware)."""
     from common.mixins import scope_query_by_facility
@@ -132,15 +149,23 @@ class TopDiagnosesReportView(views.APIView):
     def get(self, request):
         from reports.top_diagnoses_report import build_top_diagnoses_report
 
-        try:
-            limit = int(request.query_params.get("limit", 20))
-        except (TypeError, ValueError):
-            limit = 20
+        limit_param = request.query_params.get("limit")
+        if limit_param is None or str(limit_param).strip().lower() in ("all", ""):
+            # No limit param defaults to 20 for Top Diagnoses (ranking)
+            limit = 20 if limit_param is None else None
+        else:
+            try:
+                limit = int(limit_param)
+            except (TypeError, ValueError):
+                limit = 20
         period_start, period_end = _period_bounds_from_request(request)
+        page, page_size = _pagination_params(request)
         report = build_top_diagnoses_report(
             period_start,
             period_end,
             limit=limit,
+            page=page,
+            page_size=page_size,
             group_by=request.query_params.get("group_by"),
             org_facility_id=_org_clinic_scope(request),
             search=_search_term(request),
@@ -934,17 +959,24 @@ class DiseasePatternReportView(views.APIView):
     def get(self, request):
         from reports.disease_pattern_report import build_disease_pattern_report
 
-        try:
-            limit = int(request.query_params.get("limit", 20))
-        except (TypeError, ValueError):
-            limit = 20
+        limit_param = request.query_params.get("limit")
+        if limit_param is None or str(limit_param).strip().lower() in ("all", ""):
+            limit = None
+        else:
+            try:
+                limit = int(limit_param)
+            except (TypeError, ValueError):
+                limit = 20
         period_start, period_end = _period_bounds_from_request(
             request, default_to_current_year=True
         )
+        page, page_size = _pagination_params(request)
         report = build_disease_pattern_report(
             period_start,
             period_end,
             limit=limit,
+            page=page,
+            page_size=page_size,
             group_by=request.query_params.get("group_by"),
             org_facility_id=_org_clinic_scope(request),
             search=_search_term(request),
@@ -972,10 +1004,22 @@ class DiseasePatternComparedReportView(views.APIView):
         except (TypeError, ValueError):
             periods = 3
         periods = max(2, min(periods, 6))
+        limit_param = request.query_params.get("limit")
+        if limit_param is None or str(limit_param).strip().lower() in ("all", ""):
+            limit = None
+        else:
+            try:
+                limit = int(limit_param)
+            except (TypeError, ValueError):
+                limit = 20
+        page, page_size = _pagination_params(request)
         report = build_disease_pattern_compared_report(
             period_start,
             period_end,
             periods=periods,
+            limit=limit,
+            page=page,
+            page_size=page_size,
             org_facility_id=_org_clinic_scope(request),
             search=_search_term(request),
         )
@@ -1014,8 +1058,9 @@ class PhysioClinicalDiagnosisReportView(views.APIView):
         from reports.physio_clinical_diagnosis import build_physio_clinical_diagnosis_report
 
         period_start, period_end = _period_bounds_from_request(request)
+        page, page_size = _pagination_params(request)
         report = build_physio_clinical_diagnosis_report(
-            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+            period_start, period_end, page=page, page_size=page_size, org_facility_id=_org_clinic_scope(request)
         )
         return respond_with_export(
             request,
@@ -1033,8 +1078,9 @@ class EyeClinicalDiagnosisReportView(views.APIView):
         from reports.eye_clinical_diagnosis import build_eye_clinical_diagnosis_report
 
         period_start, period_end = _period_bounds_from_request(request)
+        page, page_size = _pagination_params(request)
         report = build_eye_clinical_diagnosis_report(
-            period_start, period_end, org_facility_id=_org_clinic_scope(request)
+            period_start, period_end, page=page, page_size=page_size, org_facility_id=_org_clinic_scope(request)
         )
         return respond_with_export(
             request,

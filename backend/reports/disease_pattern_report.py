@@ -47,12 +47,18 @@ def build_disease_pattern_report(
     period_end: date,
     *,
     limit: int | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
     org_facility_id: int | None = None,
     search: str | None = None,
     group_by: str | None = None,
 ) -> dict:
     if limit is not None:
-        limit = max(1, min(int(limit), 100))
+        limit = max(1, min(int(limit), 1000))
+    if page is not None:
+        page = max(1, int(page))
+    if page_size is not None:
+        page_size = max(1, min(int(page_size), 100))
 
     diagnosis_qs = _diagnosis_qs(
         period_start, period_end, org_facility_id=org_facility_id, search=search
@@ -155,11 +161,20 @@ def build_disease_pattern_report(
             )
         result = family_rows[:limit] if limit is not None else family_rows
 
+    # Backend pagination
+    total_ranking_count = len(result)
+    if page is not None and page_size is not None:
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_result = result[start:end]
+    else:
+        paginated_result = result
+
     return {
         "mode": "icd10",
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
-        "data": result,
+        "data": paginated_result,
         "summary": {
             "total_diagnosis_lines": grand_total,
             "distinct_icd10_codes": len(all_rows),
@@ -167,8 +182,10 @@ def build_disease_pattern_report(
             "total_non_employee": sum(item["non_employee"] for item in all_rows),
             "total_male": sum(item["male"] for item in all_rows),
             "total_female": sum(item["female"] for item in all_rows),
-            "ranking_count": len(result),
+            "ranking_count": total_ranking_count,
             "limit": limit,
+            "page": page,
+            "page_size": page_size,
             "group_by": "family" if group_by == "family" else "code",
             "grand_total": grand_total,
         },
@@ -180,10 +197,19 @@ def build_disease_pattern_compared_report(
     period_end: date,
     *,
     periods: int = 3,
+    limit: int | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
     org_facility_id: int | None = None,
     search: str | None = None,
 ) -> dict:
     """ICD-10 codes compared across N consecutive periods ending at period_end."""
+    if limit is not None:
+        limit = max(1, min(int(limit), 1000))
+    if page is not None:
+        page = max(1, int(page))
+    if page_size is not None:
+        page_size = max(1, min(int(page_size), 100))
     length_days = (period_end - period_start).days + 1
     period_slices: list[tuple[date, date, str]] = []
     end = period_end
@@ -195,19 +221,31 @@ def build_disease_pattern_compared_report(
 
     period_reports = [
         build_disease_pattern_report(
-            p_start, p_end, org_facility_id=org_facility_id, search=search
+            p_start, p_end, limit=limit, org_facility_id=org_facility_id, search=search
         )
         for p_start, p_end, _ in period_slices
     ]
     period_labels = [label for _, _, label in period_slices]
     rows = merge_icd_period_reports(period_slices, period_reports)
+    if limit is not None:
+        rows = rows[:limit]
+    total_count = len(rows)
+    if page is not None and page_size is not None:
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated = rows[start:end]
+    else:
+        paginated = rows
 
     return {
         "mode": "icd10_compared",
         "period_labels": period_labels,
-        "data": rows,
+        "data": paginated,
         "summary": {
-            "distinct_icd10_codes": len(rows),
+            "distinct_icd10_codes": total_count,
+            "ranking_count": total_count,
+            "page": page,
+            "page_size": page_size,
             "periods": [
                 {
                     "label": label,

@@ -10,9 +10,11 @@ import { RefreshCw, ArrowLeft, TrendingUp, Activity, Users, Calendar, FileText }
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
+import { StandardPagination } from "@/components/shared/StandardPagination";
 import Link from "next/link";
 import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
@@ -96,14 +98,28 @@ export default function DiseasePatternReport() {
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState("20");
+  const [customLimit, setCustomLimit] = useState("");
   const [groupByFamily, setGroupByFamily] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  const effectiveLimit = customLimit.trim()
+    ? customLimit.trim()
+    : limit === "custom"
+      ? "20"
+      : limit;
 
   const isAllTime = viewMode === "all";
   const showCategoryCards = !isAllTime;
   const grouped = groupByFamily || summary.group_by === "family";
 
   const searchExtra = () => {
-    const queryExtra: Record<string, string> = { limit };
+    const queryExtra: Record<string, string> = {};
+    if (effectiveLimit.toLowerCase() !== "all") {
+      queryExtra.limit = effectiveLimit;
+    }
+    queryExtra.page = String(currentPage);
+    queryExtra.page_size = String(itemsPerPage);
     if (groupByFamily) queryExtra.group_by = "family";
     const term = search.trim();
     if (term) queryExtra.search = term;
@@ -135,7 +151,7 @@ export default function DiseasePatternReport() {
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, search, limit, groupByFamily]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, search, effectiveLimit, groupByFamily, currentPage, itemsPerPage]);
 
   const hasData = (summary.grand_total ?? 0) > 0;
   const truncated =
@@ -198,29 +214,61 @@ export default function DiseasePatternReport() {
               />
               <div>
                 <Label>Top N</Label>
-                <Select value={limit} onValueChange={setLimit}>
+                <Select
+                  value={limit}
+                  onValueChange={(v) => {
+                    setLimit(v);
+                    if (v !== "custom") setCustomLimit("");
+                    setCurrentPage(1);
+                  }}
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {["10", "20", "30", "50"].map((n) => (
+                    {["10", "20", "30", "50", "100"].map((n) => (
                       <SelectItem key={n} value={n}>
                         {n}
                       </SelectItem>
                     ))}
+                    <SelectItem value="all">All ({summary.distinct_icd10_codes || 768})</SelectItem>
+                    <SelectItem value="custom">Custom...</SelectItem>
                   </SelectContent>
                 </Select>
+                {(limit === "custom" || customLimit) && (
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    placeholder="Enter number (e.g. 200)"
+                    value={customLimit}
+                    onChange={(e) => {
+                      setCustomLimit(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="mt-2"
+                  />
+                )}
               </div>
               <div className="flex items-end">
                 <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
                   <Checkbox
                     checked={groupByFamily}
-                    onCheckedChange={(v) => setGroupByFamily(v === true)}
+                    onCheckedChange={(v) => {
+                      setGroupByFamily(v === true);
+                      setCurrentPage(1);
+                    }}
                   />
                   Group by family
                 </label>
               </div>
-              <ReportSearchField value={search} onChange={setSearch} />
+              <ReportSearchField
+                value={search}
+                onChange={(v) => {
+                  setSearch(v);
+                  setCurrentPage(1);
+                }}
+              />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                   <TrendingUp className="h-4 w-4 mr-2" />
@@ -314,23 +362,24 @@ export default function DiseasePatternReport() {
                 <p className="text-muted-foreground">Loading report data...</p>
               </div>
             ) : hasData ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left p-3 font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground">Code</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground">Description</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">Employee</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">Non-emp.</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">Male</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">Female</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">Total</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.map((row) => (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left p-3 font-medium text-muted-foreground">S/N</th>
+                        <th className="text-left p-3 font-medium text-muted-foreground">Code</th>
+                        <th className="text-left p-3 font-medium text-muted-foreground">Description</th>
+                        <th className="text-right p-3 font-medium text-muted-foreground">Employee</th>
+                        <th className="text-right p-3 font-medium text-muted-foreground">Non-emp.</th>
+                        <th className="text-right p-3 font-medium text-muted-foreground">Male</th>
+                        <th className="text-right p-3 font-medium text-muted-foreground">Female</th>
+                        <th className="text-right p-3 font-medium text-muted-foreground">Total</th>
+                        <th className="text-right p-3 font-medium text-muted-foreground">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.map((row) => (
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
                         <td className="p-3 font-mono text-foreground">{row.code ?? "—"}</td>
@@ -375,7 +424,20 @@ export default function DiseasePatternReport() {
                     </tr>
                   </tbody>
                 </table>
-              </div>
+                </div>
+                <StandardPagination
+                  currentPage={currentPage}
+                  totalItems={summary.ranking_count || data.length}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(n) => {
+                    setItemsPerPage(n);
+                    setCurrentPage(1);
+                  }}
+                  itemName="diagnoses"
+                  pageSizeOptions={[10, 20, 50, 100]}
+                />
+              </>
             ) : (
               <div className="text-center py-12">
                 <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />

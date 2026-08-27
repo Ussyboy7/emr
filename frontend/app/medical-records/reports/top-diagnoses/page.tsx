@@ -4,10 +4,12 @@ import React, { useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import { ReportSearchField } from "@/components/reports/ReportSearchField";
+import { StandardPagination } from "@/components/shared/StandardPagination";
 import { RefreshCw, ArrowLeft, Stethoscope, Calendar, TrendingUp, Activity, FileText } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
@@ -30,7 +32,7 @@ interface TopDiagnosesSummary {
   total_diagnosis_lines: number;
   distinct_icd10_codes: number;
   ranking_count: number;
-  limit: number;
+  limit: number | null;
   group_by: string;
   grand_total: number;
 }
@@ -50,7 +52,7 @@ function normalizeSummary(raw?: Partial<TopDiagnosesSummary> | null): TopDiagnos
     total_diagnosis_lines: lines,
     distinct_icd10_codes: raw?.distinct_icd10_codes ?? 0,
     ranking_count: raw?.ranking_count ?? 0,
-    limit: raw?.limit ?? 20,
+    limit: raw?.limit === null ? null : (raw?.limit ?? 20),
     group_by: raw?.group_by ?? "code",
     grand_total: raw?.grand_total ?? lines,
   };
@@ -75,18 +77,34 @@ export default function TopDiagnosesReport() {
   } = useMrReportPeriod("all");
 
   const [limit, setLimit] = useState("20");
+  const [customLimit, setCustomLimit] = useState("");
   const [rows, setRows] = useState<TopDiagnosisRow[]>([]);
   const [summary, setSummary] = useState<TopDiagnosesSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [groupByFamily, setGroupByFamily] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  const effectiveLimit = customLimit.trim()
+    ? customLimit.trim()
+    : limit === "custom"
+      ? "20"
+      : limit;
 
   const isAllTime = viewMode === "all";
   const showRankingMeta = !isAllTime;
   const grouped = groupByFamily || summary.group_by === "family";
 
   const queryExtra = () => {
-    const extra: Record<string, string> = { limit };
+    const extra: Record<string, string> = {};
+    if (effectiveLimit.toLowerCase() !== "all") {
+      extra.limit = effectiveLimit;
+    } else {
+      extra.limit = "all";
+    }
+    extra.page = String(currentPage);
+    extra.page_size = String(itemsPerPage);
     if (groupByFamily) extra.group_by = "family";
     const term = search.trim();
     if (term) extra.search = term;
@@ -113,12 +131,14 @@ export default function TopDiagnosesReport() {
           total_diagnosis_lines: response.reduce((sum, r) => sum + r.count, 0),
           distinct_icd10_codes: response.length,
           ranking_count: response.length,
-          limit: parseInt(limit, 10) || 20,
+          limit: effectiveLimit.toLowerCase() === "all" ? null : parseInt(effectiveLimit, 10) || 20,
           grand_total: response.reduce((sum, r) => sum + r.count, 0),
         });
+        setCurrentPage(1);
       } else {
         setRows(response.data ?? []);
         setSummary(normalizeSummary(response.summary));
+        setCurrentPage(1);
       }
     } catch (error: unknown) {
       console.error("Error fetching top diagnoses:", error);
@@ -132,7 +152,7 @@ export default function TopDiagnosesReport() {
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, limit, search, groupByFamily]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, effectiveLimit, search, groupByFamily, currentPage, itemsPerPage]);
 
   const hasData = (summary.total_diagnosis_lines ?? 0) > 0;
   const truncated =
@@ -195,18 +215,41 @@ export default function TopDiagnosesReport() {
               />
               <div>
                 <Label>Top N</Label>
-                <Select value={limit} onValueChange={setLimit}>
+                <Select
+                  value={limit}
+                  onValueChange={(v) => {
+                    setLimit(v);
+                    if (v !== "custom") setCustomLimit("");
+                    setCurrentPage(1);
+                  }}
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {["10", "20", "30", "50"].map((n) => (
+                    {["10", "20", "30", "50", "100"].map((n) => (
                       <SelectItem key={n} value={n}>
                         {n}
                       </SelectItem>
                     ))}
+                    <SelectItem value="all">All ({summary.distinct_icd10_codes || 768})</SelectItem>
+                    <SelectItem value="custom">Custom...</SelectItem>
                   </SelectContent>
                 </Select>
+                {(limit === "custom" || customLimit) && (
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    placeholder="Enter number (e.g. 200)"
+                    value={customLimit}
+                    onChange={(e) => {
+                      setCustomLimit(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="mt-2"
+                  />
+                )}
               </div>
               <div className="flex items-end">
                 <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
@@ -276,7 +319,7 @@ export default function TopDiagnosesReport() {
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">Top N limit</p>
                   <p className="text-2xl sm:text-3xl font-bold text-slate-700 dark:text-slate-300">
-                    {summary.limit}
+                    {summary.limit === null ? "All" : summary.limit}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">Maximum rows returned in table</p>
                 </CardContent>
@@ -295,7 +338,9 @@ export default function TopDiagnosesReport() {
               Structured ICD-10 codes from completed consultation sessions.
               {grouped
                 ? " Grouped by diagnosis family."
-                : truncated && ` Showing top ${summary.limit} codes.`}
+                : summary.limit === null
+                  ? ` Showing all ${summary.ranking_count} codes.`
+                  : truncated && ` Showing top ${summary.limit} codes.`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -311,7 +356,8 @@ export default function TopDiagnosesReport() {
                 <p className="text-sm text-muted-foreground">No diagnoses found for {periodLabel}</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
@@ -328,7 +374,7 @@ export default function TopDiagnosesReport() {
                         key={`${row.code}-${idx}`}
                         className="border-b border-border hover:bg-muted/30 transition-colors"
                       >
-                        <td className="p-3 text-foreground">{idx + 1}</td>
+                        <td className="p-3 text-foreground">{(currentPage - 1) * itemsPerPage + idx + 1}</td>
                         <td className="p-3 font-mono text-foreground">{row.code}</td>
                         <td className="p-3 text-foreground">
                           {row.description || row.diagnosis}
@@ -346,7 +392,20 @@ export default function TopDiagnosesReport() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+                </div>
+                <StandardPagination
+                  currentPage={currentPage}
+                  totalItems={summary.ranking_count || summary.distinct_icd10_codes || rows.length}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(n) => {
+                    setItemsPerPage(n);
+                    setCurrentPage(1);
+                  }}
+                  itemName="diagnoses"
+                  pageSizeOptions={[10, 20, 50, 100]}
+                />
+              </>
             )}
           </CardContent>
         </Card>

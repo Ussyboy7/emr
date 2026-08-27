@@ -9,6 +9,7 @@ import { RefreshCw, ArrowLeft, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
+import { StandardPagination } from "@/components/shared/StandardPagination";
 import Link from "next/link";
 import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
@@ -54,20 +55,26 @@ export function ClinicalDiagnosisReportPage({
   const [data, setData] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
 
   const fetchReport = async () => {
-    const params = buildQuery();
-    if (!params) {
+    const baseParams = buildQuery();
+    if (!baseParams) {
       toast.error("Please select a valid date range");
       return;
     }
+    baseParams.set("page", String(currentPage));
+    baseParams.set("page_size", String(itemsPerPage));
+    const params = baseParams;
     setIsLoading(true);
     try {
-      const res = await apiFetch<{ data: Row[]; summary: { total_diagnosis_lines: number } }>(
+      const res = await apiFetch<{ data: Row[]; summary: { total_diagnosis_lines: number; ranking_count?: number; distinct_icd10_codes?: number } }>(
         `${apiPath}?${params.toString()}`
       );
       setData(res.data ?? []);
-      setTotal(res.summary?.total_diagnosis_lines ?? 0);
+      const summaryTotal = res.summary?.ranking_count ?? res.summary?.distinct_icd10_codes ?? res.data?.length ?? 0;
+      setTotal(summaryTotal);
     } catch (e: unknown) {
       if (handleAuthError(e)) return;
       toast.error(e instanceof Error ? e.message : "Failed to load report");
@@ -78,7 +85,7 @@ export function ClinicalDiagnosisReportPage({
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, currentPage, itemsPerPage]);
 
   return (
     <DashboardLayout>
@@ -132,28 +139,44 @@ export function ClinicalDiagnosisReportPage({
             {isLoading ? (
               <RefreshCw className="h-8 w-8 animate-spin mx-auto my-8 text-muted-foreground" />
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left p-3">S/N</th>
-                    <th className="text-left p-3">Code</th>
-                    <th className="text-left p-3">Description</th>
-                    <th className="text-right p-3">Count</th>
-                    <th className="text-right p-3">%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((row) => (
-                    <tr key={row.sn} className="border-b">
-                      <td className="p-3">{row.sn}</td>
-                      <td className="p-3 font-mono">{row.code}</td>
-                      <td className="p-3">{row.description}</td>
-                      <td className="p-3 text-right font-semibold">{row.count}</td>
-                      <td className="p-3 text-right">{row.percentage.toFixed(1)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left p-3">S/N</th>
+                        <th className="text-left p-3">Code</th>
+                        <th className="text-left p-3">Description</th>
+                        <th className="text-right p-3">Count</th>
+                        <th className="text-right p-3">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.map((row) => (
+                        <tr key={row.sn} className="border-b">
+                          <td className="p-3">{row.sn}</td>
+                          <td className="p-3 font-mono">{row.code}</td>
+                          <td className="p-3">{row.description}</td>
+                          <td className="p-3 text-right font-semibold">{row.count}</td>
+                          <td className="p-3 text-right">{row.percentage.toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <StandardPagination
+                  currentPage={currentPage}
+                  totalItems={total || data.length}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(n) => {
+                    setItemsPerPage(n);
+                    setCurrentPage(1);
+                  }}
+                  itemName="diagnoses"
+                  pageSizeOptions={[10, 20, 50, 100]}
+                />
+              </>
             )}
           </CardContent>
         </Card>
