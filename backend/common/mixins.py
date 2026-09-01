@@ -144,7 +144,11 @@ class FacilityScopedMixin:
                 if len(null_fields) >= 2:
                     facility_filter |= Q(**{f'{null_fields[0]}__isnull': True, f'{null_fields[1]}__isnull': True})
             return qs.filter(facility_filter).distinct()
-        return qs.filter(**{self.facility_filter_field: scope})
+        # Single-field path: also include unassigned records when opted-in.
+        facility_q = Q(**{self.facility_filter_field: scope})
+        if getattr(self, 'include_unassigned_scope', False):
+            facility_q |= Q(**{f'{self.facility_filter_field}__isnull': True})
+        return qs.filter(facility_q)
 
     def filter_queryset(self, queryset):
         qs = super().filter_queryset(queryset)

@@ -88,6 +88,7 @@ class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     filterset_class = PhysioOrderFilter
     ordering_fields = ["ordered_at", "scheduled_at", "status"]
     ordering = ["-ordered_at"]
+    include_unassigned_scope = True
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -376,6 +377,7 @@ class PhysioSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ["scheduled_at", "created_at", "completed_at", "status", "session_number"]
     ordering = ["-completed_at", "-scheduled_at"]
     facility_filter_field = 'order__location_clinic'
+    include_unassigned_scope = True
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
