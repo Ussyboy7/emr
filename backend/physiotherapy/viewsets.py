@@ -174,12 +174,18 @@ class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 
         def build() -> dict:
             orders_qs = self.get_queryset()
-            sessions_qs = self.scope_queryset(
+            # Scope sessions via order's location_clinic (not the order
+            # viewset's own field) so the filter targets the right column.
+            from common.mixins import scope_query_by_facility
+
+            sessions_qs = scope_query_by_facility(
                 PhysioSession.objects.select_related(
                     "order",
                     "order__patient",
                     "physiotherapist",
-                )
+                ),
+                request,
+                field="order__location_clinic",
             )
             day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
             day_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
