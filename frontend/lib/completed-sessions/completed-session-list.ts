@@ -21,7 +21,7 @@ export type CompletedSessionListParams = {
   has_recommendations?: boolean;
 };
 
-/** Match lab completed: search widens date to all-time; otherwise apply preset/custom range. */
+/** Apply preset/custom date range; search no longer widens to all-time. */
 export function buildCompletedSessionQueryParams(options: {
   debouncedSearch: string;
   dateFilter: string;
@@ -29,12 +29,7 @@ export function buildCompletedSessionQueryParams(options: {
   currentPage: number;
   itemsPerPage: number;
 }): CompletedSessionListParams {
-  const searching = Boolean(options.debouncedSearch.trim());
-  const effectiveDateFilter = searching || options.dateFilter === 'all' ? 'all' : options.dateFilter;
-  const completedRange = buildCompletedAtApiRange(
-    effectiveDateFilter,
-    searching ? { from: '', to: '' } : options.dateRange,
-  );
+  const completedRange = buildCompletedAtApiRange(options.dateFilter, options.dateRange);
 
   return {
     status: 'completed',
@@ -46,7 +41,13 @@ export function buildCompletedSessionQueryParams(options: {
   };
 }
 
-/** Single-request completed-session stats (preferred over parallel COUNT calls). */
+export type CompletedSessionListResponse<T> = {
+  results: T[];
+  count: number;
+  completed_stats?: CompletedSessionStats;
+};
+
+/** Prefer stats embedded in the list response; fall back to a separate stats call. */
 export async function fetchCompletedSessionStats(
   getCompletedStats: (
     params: Omit<
@@ -55,6 +56,10 @@ export async function fetchCompletedSessionStats(
     >,
   ) => Promise<CompletedSessionStats>,
   base: Omit<CompletedSessionListParams, 'page' | 'page_size' | 'has_diagnosis' | 'has_findings' | 'is_urgent' | 'has_recommendations'>,
+  embedded?: CompletedSessionStats,
 ): Promise<CompletedSessionStats> {
+  if (embedded) {
+    return embedded;
+  }
   return getCompletedStats(base);
 }

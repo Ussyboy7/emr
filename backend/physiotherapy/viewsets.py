@@ -23,6 +23,7 @@ from common.pagination import StandardPageNumberPagination
 from common.session_report_pdf import build_physio_session_pdf_bytes
 from accounts.utils import resolve_facility, resolve_facility_id
 from common.cache_helpers import cache_get_or_set
+from common.completed_session_views import CompletedSessionListMixin
 from common.mixins import FacilityScopedMixin
 from common.openapi import document_destroy_viewset, document_viewset
 from organization.models import SystemConfig
@@ -34,6 +35,7 @@ from .serializers import (
     PhysioOrderCreateSerializer,
     PhysioOrderSerializer,
     PhysioSessionCreateSerializer,
+    PhysioSessionListSerializer,
     PhysioSessionSerializer,
     PhysioTemplateSerializer,
 )
@@ -376,7 +378,7 @@ class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Physiotherapy", resource="physio sessions")
-class PhysioSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
+class PhysioSessionViewSet(CompletedSessionListMixin, FacilityScopedMixin, viewsets.ModelViewSet):
     pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = PhysioSessionFilter
@@ -384,19 +386,32 @@ class PhysioSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     ordering = ["-completed_at", "-scheduled_at"]
     facility_filter_field = 'order__location_clinic'
     include_unassigned_scope = True
+    completed_stats_mode = "physio"
+    session_list_serializer_class = PhysioSessionListSerializer
+    session_list_select_related = (
+        "order",
+        "order__patient",
+        "order__ordered_by",
+        "order__location_clinic",
+        "physiotherapist",
+    )
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return PhysioSession.objects.none()
-        
-        return self.scope_queryset(
-            PhysioSession.objects.select_related("order", "order__patient", "physiotherapist", "template").all()
-        )
+
+        if self.action == "list":
+            qs = PhysioSession.objects.select_related(*self.session_list_select_related).all()
+        else:
+            qs = PhysioSession.objects.select_related(
+                "order", "order__patient", "physiotherapist", "template"
+            ).all()
+        return self.scope_queryset(qs)
 
     def get_serializer_class(self):
         if self.action == "create":
             return PhysioSessionCreateSerializer
-        return PhysioSessionSerializer
+        return super().get_serializer_class()
 
     def update(self, request, *args, **kwargs):
         if request.data.get("status") == "completed":

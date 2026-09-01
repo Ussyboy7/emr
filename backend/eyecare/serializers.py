@@ -59,6 +59,35 @@ class EyeOrderCreateSerializer(serializers.ModelSerializer):
         ]
 
 
+class EyeOrderListSummarySerializer(serializers.ModelSerializer):
+    """Minimal order fields for completed-session list rows."""
+
+    class Meta:
+        model = EyeOrder
+        fields = ['id', 'diagnosis', 'priority', 'chief_complaint']
+
+
+class EyeSessionListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for completed-session list grids."""
+    patient_name = serializers.CharField(source='order.patient.get_full_name', read_only=True)
+    patient_id = serializers.CharField(source='order.patient.patient_id', read_only=True)
+    patient_photo = serializers.SerializerMethodField()
+    order_details = EyeOrderListSummarySerializer(source='order', read_only=True)
+
+    class Meta:
+        model = EyeSession
+        fields = [
+            'id', 'order', 'order_details', 'session_number', 'status',
+            'scheduled_at', 'completed_at', 'findings', 'procedures_performed',
+            'patient_name', 'patient_id', 'patient_photo',
+        ]
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        patient = getattr(getattr(obj, 'order', None), 'patient', None)
+        return patient_photo_url(patient)
+
+
 def _absolute_file_url(request, file_field):
     if not file_field or not getattr(file_field, 'name', None):
         return None

@@ -24,6 +24,7 @@ from common.pagination import StandardPageNumberPagination
 from .report_pdf import build_eye_session_pdf_response
 from accounts.utils import resolve_facility, resolve_facility_id
 from common.cache_helpers import cache_get_or_set
+from common.completed_session_views import CompletedSessionListMixin
 from common.mixins import FacilityScopedMixin
 from common.openapi import document_destroy_viewset, document_viewset
 from organization.models import SystemConfig
@@ -36,6 +37,7 @@ from .serializers import (
     EyeOrderSerializer,
     EyeSessionCreateSerializer,
     EyeSessionDiagnosticFileSerializer,
+    EyeSessionListSerializer,
     EyeSessionSerializer,
 )
 
@@ -392,7 +394,7 @@ class EyeOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 
 
 @document_viewset(tag="Eyecare", resource="eye sessions")
-class EyeSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
+class EyeSessionViewSet(CompletedSessionListMixin, FacilityScopedMixin, viewsets.ModelViewSet):
     """Eye clinic clinical sessions."""
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     pagination_class = StandardPageNumberPagination
@@ -402,21 +404,33 @@ class EyeSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     ordering = ["-completed_at", "-scheduled_at"]
     facility_filter_field = 'order__location_clinic'
     include_unassigned_scope = True
+    completed_stats_mode = "eye"
+    session_list_serializer_class = EyeSessionListSerializer
+    session_list_select_related = (
+        "order",
+        "order__patient",
+        "order__ordered_by",
+        "order__location_clinic",
+    )
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return EyeSession.objects.none()
-        
-        return self.scope_queryset(
-            EyeSession.objects.select_related("order", "order__patient", "order__ordered_by")
-            .prefetch_related("diagnostic_uploads")
-            .all()
-        )
+
+        if self.action == "list":
+            qs = EyeSession.objects.select_related(*self.session_list_select_related).all()
+        else:
+            qs = (
+                EyeSession.objects.select_related("order", "order__patient", "order__ordered_by")
+                .prefetch_related("diagnostic_uploads")
+                .all()
+            )
+        return self.scope_queryset(qs)
 
     def get_serializer_class(self):
         if self.action == "create":
             return EyeSessionCreateSerializer
-        return EyeSessionSerializer
+        return super().get_serializer_class()
 
     @extend_schema(tags=["Eyecare"], summary="Completed stats", description="Aggregate completed-session card counts in one query.")
     @action(detail=False, methods=["get"], url_path="completed-stats")

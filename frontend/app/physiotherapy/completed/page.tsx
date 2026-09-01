@@ -65,6 +65,7 @@ export default function PhysioCompletedPage() {
   // Dialogs
   const [selectedSession, setSelectedSession] = useState<PhysioSession | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [viewDialogLoading, setViewDialogLoading] = useState(false);
   const [isSessionReportOpen, setIsSessionReportOpen] = useState(false);
   const [reportSession, setReportSession] = useState<PhysioSession | null>(null);
 
@@ -89,16 +90,18 @@ export default function PhysioCompletedPage() {
         currentPage,
         itemsPerPage,
       });
-      const { page, page_size, ...statsBase } = listParams;
 
-      const [response, statsResult] = await Promise.all([
-        physioService.getSessions(listParams),
-        fetchCompletedSessionStats(physioService.getCompletedStats.bind(physioService), statsBase),
-      ]);
+      const response = await physioService.getSessions(listParams);
 
       setSessions(response?.results ?? []);
       setTotalCount(response?.count ?? 0);
-      setStats(statsResult);
+      setStats(
+        await fetchCompletedSessionStats(
+          physioService.getCompletedStats.bind(physioService),
+          listParams,
+          response.completed_stats,
+        ),
+      );
     } catch (err: any) {
       console.error('Error loading completed sessions:', err);
       if (handleAuthError(err)) return;
@@ -121,6 +124,22 @@ export default function PhysioCompletedPage() {
   const openSessionReport = (session: PhysioSession) => {
     setReportSession(session);
     setIsSessionReportOpen(true);
+  };
+
+  const openViewDialog = async (session: PhysioSession) => {
+    setViewDialogLoading(true);
+    setIsViewDialogOpen(true);
+    try {
+      const full = await physioService.getSession(session.id);
+      setSelectedSession(full);
+    } catch (err: unknown) {
+      setIsViewDialogOpen(false);
+      if (!handleAuthError(err)) {
+        toast.error('Failed to load session details');
+      }
+    } finally {
+      setViewDialogLoading(false);
+    }
   };
 
   return (
@@ -237,7 +256,7 @@ export default function PhysioCompletedPage() {
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={() => { setSelectedSession(session); setIsViewDialogOpen(true); }}>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={() => void openViewDialog(session)}>
                                   <Eye className="h-4 w-4 text-muted-foreground hover:text-blue-600" />
                                 </Button>
                               </TooltipTrigger>
@@ -319,7 +338,11 @@ export default function PhysioCompletedPage() {
               </DialogDescription>
             </DialogHeader>
 
-            {selectedSession && (
+            {viewDialogLoading ? (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin opacity-50" />
+              </div>
+            ) : selectedSession ? (
               <div className="space-y-6">
                 {/* Patient & Session Info */}
                 <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
@@ -504,7 +527,7 @@ export default function PhysioCompletedPage() {
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
             <DialogFooter className="gap-2 sm:gap-0 pt-4 border-t">
               <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
             </DialogFooter>

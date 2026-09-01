@@ -233,7 +233,16 @@ export const eyeCareService = {
     completed_before?: string;
   }) {
     const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
-    return apiFetch<{ results: EyeSession[]; count?: number }>(`/eyecare/sessions/${query}`);
+    return apiFetch<{
+      results: EyeSession[];
+      count?: number;
+      completed_stats?: {
+        total: number;
+        withDiagnosis: number;
+        urgent: number;
+        withFindings: number;
+      };
+    }>(`/eyecare/sessions/${query}`);
   },
 
   /**

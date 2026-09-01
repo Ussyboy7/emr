@@ -6,6 +6,7 @@ from django.db.models import Q
 from common.session_filters import (
     filter_nonempty_findings,
     filter_nonempty_order_diagnosis,
+    filter_order_patient_search,
     filter_session_search,
 )
 
@@ -17,20 +18,18 @@ def filter_physio_orders_by_search(qs, search: str):
     term = (search or '').strip()
     if not term:
         return qs
-    q = Q()
+    id_q = Q()
     if term.isdigit():
-        q |= Q(pk=int(term))
+        id_q |= Q(pk=int(term))
     m = re.match(r'^PHY-(\d+)$', term, re.IGNORECASE)
     if m:
-        q |= Q(pk=int(m.group(1)))
-    return qs.filter(
-        q
-        | Q(patient__patient_id__icontains=term)
-        | Q(patient__surname__icontains=term)
-        | Q(patient__first_name__icontains=term)
-        | Q(patient__middle_name__icontains=term)
-        | Q(diagnosis__icontains=term)
-    ).distinct()
+        id_q |= Q(pk=int(m.group(1)))
+    return filter_order_patient_search(
+        qs,
+        term,
+        extra_q=Q(diagnosis__icontains=term),
+        id_q=id_q,
+    )
 
 
 class PhysioOrderFilter(filters.FilterSet):

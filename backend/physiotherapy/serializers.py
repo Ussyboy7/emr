@@ -88,6 +88,63 @@ class PhysioOrderCreateSerializer(serializers.ModelSerializer):
         ]
 
 
+class PhysioOrderListSummarySerializer(serializers.ModelSerializer):
+    """Minimal order fields for completed-session list rows."""
+
+    class Meta:
+        model = PhysioOrder
+        fields = ['id', 'diagnosis', 'priority']
+
+
+class PhysioSessionListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for completed-session list grids."""
+    patient_name = serializers.SerializerMethodField()
+    patient_id = serializers.SerializerMethodField()
+    patient_photo = serializers.SerializerMethodField()
+    physiotherapist_name = serializers.SerializerMethodField()
+    order_details = PhysioOrderListSummarySerializer(source='order', read_only=True)
+
+    class Meta:
+        model = PhysioSession
+        fields = [
+            'id', 'order', 'order_details', 'session_number', 'status',
+            'scheduled_at', 'completed_at', 'patient_name', 'patient_id',
+            'patient_photo', 'physiotherapist_name', 'recommendations',
+        ]
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_name(self, obj):
+        try:
+            if obj.order and obj.order.patient:
+                return obj.order.patient.get_full_name()
+            return None
+        except (AttributeError, TypeError):
+            return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_physiotherapist_name(self, obj):
+        try:
+            if obj.physiotherapist:
+                return obj.physiotherapist.get_full_name() or obj.physiotherapist.username
+            return None
+        except (AttributeError, TypeError):
+            return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_id(self, obj):
+        try:
+            if obj.order and obj.order.patient:
+                return obj.order.patient.patient_id
+            return None
+        except (AttributeError, TypeError):
+            return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_patient_photo(self, obj):
+        patient = getattr(getattr(obj, 'order', None), 'patient', None)
+        return patient_photo_url(patient)
+
+
 class PhysioSessionSerializer(serializers.ModelSerializer):
     """Serializer for physiotherapy sessions."""
     patient_name = serializers.SerializerMethodField()

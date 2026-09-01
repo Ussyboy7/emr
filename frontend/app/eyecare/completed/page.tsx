@@ -80,16 +80,18 @@ export default function EyeClinicCompletedSessionsPage() {
         currentPage,
         itemsPerPage,
       });
-      const { page, page_size, ...statsBase } = listParams;
 
-      const [listResult, statsResult] = await Promise.all([
-        eyeCareService.getSessions(listParams),
-        fetchCompletedSessionStats(eyeCareService.getCompletedStats.bind(eyeCareService), statsBase),
-      ]);
+      const listResult = await eyeCareService.getSessions(listParams);
 
       setSessions(listResult?.results ?? []);
       setTotalCount(listResult?.count ?? 0);
-      setStats(statsResult);
+      setStats(
+        await fetchCompletedSessionStats(
+          eyeCareService.getCompletedStats.bind(eyeCareService),
+          listParams,
+          listResult.completed_stats,
+        ),
+      );
     } catch (err: unknown) {
       console.error('Error loading completed eye sessions:', err);
       if (handleAuthError(err)) return;

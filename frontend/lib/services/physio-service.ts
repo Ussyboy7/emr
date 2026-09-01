@@ -243,9 +243,18 @@ class PhysioService {
     page_size?: number;
     completed_after?: string;
     completed_before?: string;
-  }): Promise<{ results: PhysioSession[]; count: number }> {
+  }): Promise<{
+    results: PhysioSession[];
+    count: number;
+    completed_stats?: {
+      total: number;
+      withDiagnosis: number;
+      urgent: number;
+      withFindings: number;
+    };
+  }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: PhysioSession[]; count: number }>(`/sessions/${query}`);
+    return apiFetch(`/sessions/${query}`);
   }
 
   getCompletedStats(params?: {
