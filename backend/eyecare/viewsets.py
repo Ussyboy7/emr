@@ -158,12 +158,16 @@ class EyeOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                     "location_clinic",
                 )
             )
-            sessions_qs = self.scope_queryset(
+            from common.mixins import scope_query_by_facility
+
+            sessions_qs = scope_query_by_facility(
                 EyeSession.objects.select_related(
                     "order",
                     "order__patient",
                     "order__ordered_by",
-                )
+                ),
+                request,
+                field="order__location_clinic",
             )
             day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
             day_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
