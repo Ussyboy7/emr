@@ -396,6 +396,7 @@ class EyeOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 @document_viewset(tag="Eyecare", resource="eye sessions")
 class EyeSessionViewSet(CompletedSessionListMixin, FacilityScopedMixin, viewsets.ModelViewSet):
     """Eye clinic clinical sessions."""
+    serializer_class = EyeSessionSerializer
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]

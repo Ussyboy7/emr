@@ -379,6 +379,7 @@ class PhysioOrderViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 
 @document_viewset(tag="Physiotherapy", resource="physio sessions")
 class PhysioSessionViewSet(CompletedSessionListMixin, FacilityScopedMixin, viewsets.ModelViewSet):
+    serializer_class = PhysioSessionSerializer
     pagination_class = StandardPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = PhysioSessionFilter
