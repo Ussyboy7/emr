@@ -180,6 +180,12 @@ export function EditPatientDialog({
   const patch = (partial: Partial<EditPatientFormState>) =>
     setEditForm((prev) => ({ ...prev, ...partial }));
 
+  const stepIndex = STEPS.findIndex((s) => s.id === tab);
+  const goToStep = (dir: 1 | -1) => {
+    const next = stepIndex + dir;
+    if (next >= 0 && next < STEPS.length) setTab(STEPS[next].id);
+  };
+
   const addAllergy = () => {
     const value = allergyDraft.trim();
     if (!value) return;
@@ -420,7 +426,7 @@ export function EditPatientDialog({
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Religion</Label>
                       <Select
@@ -435,25 +441,6 @@ export function EditPatientDialog({
                           {RELIGIONS.map((religion) => (
                             <SelectItem key={religion} value={religion}>
                               {religion}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Tribe</Label>
-                      <Select
-                        value={editForm.tribe || undefined}
-                        onValueChange={(v) => patch({ tribe: v === 'not-specified' ? '' : v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select tribe" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-[200px]">
-                          <SelectItem value="not-specified">Unspecified</SelectItem>
-                          {NIGERIAN_TRIBES.map((tribe) => (
-                            <SelectItem key={tribe} value={tribe}>
-                              {tribe}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -664,41 +651,6 @@ export function EditPatientDialog({
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>State of Residence</Label>
-                      <Select
-                        value={editForm.stateOfResidence || undefined}
-                        onValueChange={(v) =>
-                          patch({ stateOfResidence: v === 'not-specified' ? '' : v })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select state" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-[200px]">
-                          <SelectItem value="not-specified">Unspecified</SelectItem>
-                          {NIGERIA_STATES_AND_LGAS.map((s) => (
-                            <SelectItem key={s.name} value={s.name}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label>Residential Address</Label>
-                      <Textarea
-                        value={editForm.residentialAddress}
-                        onChange={(e) => patch({ residentialAddress: e.target.value })}
-                        placeholder="Current residential address"
-                        rows={2}
-                      />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
                       <Label>State of Origin</Label>
                       <Select
                         value={editForm.stateOfOrigin || undefined}
@@ -752,6 +704,59 @@ export function EditPatientDialog({
                       value={editForm.permanentAddress}
                       onChange={(e) => patch({ permanentAddress: e.target.value })}
                       placeholder="Permanent home address"
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Tribe</Label>
+                      <Select
+                        value={editForm.tribe || undefined}
+                        onValueChange={(v) => patch({ tribe: v === 'not-specified' ? '' : v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select tribe" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px]">
+                          <SelectItem value="not-specified">Unspecified</SelectItem>
+                          {NIGERIAN_TRIBES.map((tribe) => (
+                            <SelectItem key={tribe} value={tribe}>
+                              {tribe}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>State of Residence</Label>
+                      <Select
+                        value={editForm.stateOfResidence || undefined}
+                        onValueChange={(v) =>
+                          patch({ stateOfResidence: v === 'not-specified' ? '' : v })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select state" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px]">
+                          <SelectItem value="not-specified">Unspecified</SelectItem>
+                          {NIGERIA_STATES_AND_LGAS.map((s) => (
+                            <SelectItem key={s.name} value={s.name}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Residential Address</Label>
+                    <Textarea
+                      value={editForm.residentialAddress}
+                      onChange={(e) => patch({ residentialAddress: e.target.value })}
+                      placeholder="Current residential address"
                       rows={2}
                     />
                   </div>
@@ -1271,18 +1276,31 @@ export function EditPatientDialog({
           )}
         </div>
 
-        <DialogFooter className="px-5 py-4 border-t shrink-0">
+        <DialogFooter className="px-5 py-4 border-t shrink-0 sm:justify-between">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={onSave} disabled={isSubmitting || editFormLoading || !selectedPatient}>
-            {isSubmitting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Edit className="h-4 w-4 mr-2" />
+          <div className="flex gap-2">
+            {stepIndex > 0 && (
+              <Button variant="outline" type="button" onClick={() => goToStep(-1)}>
+                Back
+              </Button>
             )}
-            Save Changes
-          </Button>
+            {stepIndex < STEPS.length - 1 ? (
+              <Button type="button" onClick={() => goToStep(1)}>
+                Next
+              </Button>
+            ) : (
+              <Button onClick={onSave} disabled={isSubmitting || editFormLoading || !selectedPatient}>
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Edit className="h-4 w-4 mr-2" />
+                )}
+                Save Changes
+              </Button>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

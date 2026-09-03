@@ -62,6 +62,7 @@ class PatientSerializer(serializers.ModelSerializer):
             'blood_group', 'genotype', 'allergies',
             'nok_surname', 'nok_first_name', 'nok_middle_name', 'nok_relationship', 'nok_address', 'nok_phone',
             'created_at', 'updated_at', 'created_by_name', 'updated_by_name', 'is_active',
+            'is_first_time_patient',
             'clear_photo', 'records_note',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'updated_at', 'age']

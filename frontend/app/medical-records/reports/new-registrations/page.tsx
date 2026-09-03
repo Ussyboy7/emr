@@ -29,6 +29,9 @@ interface DailyRow {
 interface NewRegs {
   total: number;
   by_category: Record<string, number>;
+  first_time_patients?: number;
+  paper_record_patients?: number;
+  by_category_first_time?: Record<string, number>;
   daily_data: DailyRow[];
   start_date: string | null;
   end_date: string | null;
@@ -173,7 +176,7 @@ export default function NewRegistrationsReport() {
           </Card>
         ) : data ? (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Card className="border-l-4 border-l-emerald-500">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
@@ -182,6 +185,38 @@ export default function NewRegistrationsReport() {
                       <p className="text-2xl sm:text-3xl font-bold">{data.total.toLocaleString()}</p>
                     </div>
                     <UserPlus className="h-10 w-10 text-emerald-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-teal-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">First-time patients</p>
+                      <p className="text-2xl sm:text-3xl font-bold">
+                        {(data.first_time_patients ?? 0).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {data.total > 0 ? (((data.first_time_patients ?? 0) / data.total) * 100).toFixed(1) : "0.0"}% of total
+                      </p>
+                    </div>
+                    <UserPlus className="h-10 w-10 text-teal-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">From paper records</p>
+                      <p className="text-2xl sm:text-3xl font-bold">
+                        {(data.paper_record_patients ?? 0).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Existing patients onboarded from manual records
+                      </p>
+                    </div>
+                    <Users className="h-10 w-10 text-amber-500 opacity-50" />
                   </div>
                 </CardContent>
               </Card>
@@ -194,6 +229,9 @@ export default function NewRegistrationsReport() {
                         <p className="text-2xl sm:text-3xl font-bold">{v.toLocaleString()}</p>
                         <p className="text-xs text-muted-foreground mt-1">
                           {data.total > 0 ? ((v / data.total) * 100).toFixed(1) : "0.0"}% of total
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {(data.by_category_first_time?.[k] ?? 0).toLocaleString()} first-time
                         </p>
                       </div>
                       <Users className="h-10 w-10 text-sky-500 opacity-50" />

@@ -238,6 +238,16 @@ const statisticalReports: StatisticalReportTile[] = [
     iconWrap: "bg-emerald-500/10",
     iconClass: "text-emerald-500",
   },
+  {
+    id: "doctor-patient-count",
+    title: "Doctor Patient Count",
+    description: "Completed consultations and distinct patients per doctor",
+    icon: Stethoscope,
+    href: "/medical-records/reports/doctor-patient-count",
+    borderAccent: "border-l-cyan-500",
+    iconWrap: "bg-cyan-500/10",
+    iconClass: "text-cyan-500",
+  },
 ];
 
 function StatisticalReportRowCard({

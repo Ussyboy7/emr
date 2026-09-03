@@ -19,6 +19,7 @@ REPORT_ENDPOINTS = [
     "/api/v1/reports/radiological-services/",
     "/api/v1/reports/referral-tracking/",
     "/api/v1/reports/disease-pattern/",
+    "/api/v1/reports/doctor-patient-count/",
     "/api/v1/reports/new-registrations/",
     "/api/v1/reports/drug-expiry/",
     "/api/v1/reports/top-drugs/",

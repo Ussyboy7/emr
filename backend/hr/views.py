@@ -15,6 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from audit.services import AuditService
 from patients.models import AnnualCheckup, AnnualCheckupExemption
+from reports.export_helpers import csv_http_response
 
 from django.db.models import Q
 
@@ -147,11 +148,10 @@ class HRComplianceViewSet(viewsets.ViewSet):
             description=f"Exported annual check-up compliance CSV for {year}",
             request=request,
         )
-        response = HttpResponse(buffer.getvalue(), content_type="text/csv")
-        response["Content-Disposition"] = (
-            f'attachment; filename="annual_checkup_compliance_{year}.csv"'
+        return csv_http_response(
+            buffer.getvalue(),
+            f"annual_checkup_compliance_{year}.csv",
         )
-        return response
 
     @extend_schema(tags=["HR"], summary="Outcome letter pdf", parameters=CHECKUP_PK_PARAM)
     @action(detail=True, methods=["get"], url_path="outcome-letter-pdf")

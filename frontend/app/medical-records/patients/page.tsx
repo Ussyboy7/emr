@@ -470,14 +470,26 @@ function PatientsListPageContent() {
     setIsOverviewModalOpen(true);
   };
 
+  // Radix DropdownMenu + Dialog race: opening a modal synchronously inside a
+  // menu-item click leaves the menu mounted while the dialog locks body
+  // pointer-events, and the lock is never released (page freezes until
+  // refresh). Deferring to the next tick lets the menu fully close first.
+  const openDialogAfterMenuClose = (fn: () => void) => {
+    window.setTimeout(fn, 0);
+  };
+
   const openRetireeConversion = (patient: Patient) => {
-    setPatientToConvert(patient);
-    setIsRetireeConversionOpen(true);
+    openDialogAfterMenuClose(() => {
+      setPatientToConvert(patient);
+      setIsRetireeConversionOpen(true);
+    });
   };
 
   const openDeletePatient = (patient: Patient) => {
-    setPatientToDelete(patient);
-    setIsDeleteDialogOpen(true);
+    openDialogAfterMenuClose(() => {
+      setPatientToDelete(patient);
+      setIsDeleteDialogOpen(true);
+    });
   };
 
   const handleRetireeConversion = async () => {
@@ -520,9 +532,11 @@ function PatientsListPageContent() {
 
   // Promote to Officer handlers
   const openPromoteDialog = (patient: Patient) => {
-    setPatientToPromote(patient);
-    setNewPersonalNumber('');
-    setIsPromoteOpen(true);
+    openDialogAfterMenuClose(() => {
+      setPatientToPromote(patient);
+      setNewPersonalNumber('');
+      setIsPromoteOpen(true);
+    });
   };
 
   const handlePromote = async () => {
@@ -551,16 +565,20 @@ function PatientsListPageContent() {
 
   // Convert to CSR handlers
   const openCsrConversion = (patient: Patient) => {
-    setPatientToConvertCsr(patient);
-    setIsCsrConversionOpen(true);
+    openDialogAfterMenuClose(() => {
+      setPatientToConvertCsr(patient);
+      setIsCsrConversionOpen(true);
+    });
   };
 
   // Merge handler — opens the side-by-side merge dialog.
   const openMergeDialog = (patient: Patient) => {
     // The local Patient and the dialog's LocalPatient are structurally
     // compatible; cast at the boundary.
-    setPatientToMerge(patient as never);
-    setIsMergeDialogOpen(true);
+    openDialogAfterMenuClose(() => {
+      setPatientToMerge(patient as never);
+      setIsMergeDialogOpen(true);
+    });
   };
 
   const onMergeSuccess = async () => {

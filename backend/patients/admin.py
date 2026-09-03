@@ -18,8 +18,8 @@ from .models import (
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
-    list_display = ['patient_id', 'get_full_name', 'category', 'gender', 'age', 'phone', 'is_active', 'created_at']
-    list_filter = ['category', 'gender', 'blood_group', 'is_active', 'created_at']
+    list_display = ['patient_id', 'get_full_name', 'category', 'gender', 'age', 'phone', 'is_active', 'is_first_time_patient', 'created_at']
+    list_filter = ['category', 'gender', 'blood_group', 'is_active', 'is_first_time_patient', 'created_at']
     search_fields = ['patient_id', 'surname', 'first_name', 'middle_name', 'personal_number', 'phone', 'email']
     readonly_fields = ['patient_id', 'created_at', 'updated_at', 'age']
     fieldsets = (

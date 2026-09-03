@@ -174,6 +174,10 @@ class Patient(models.Model):
         related_name="updated_patients",
     )
     is_active = models.BooleanField(default=True)
+    is_first_time_patient = models.BooleanField(
+        default=False,
+        help_text="Checked when the patient is coming to the clinic for the first time (no prior paper records).",
+    )
 
     # Merge support. If merged_into is set, this record has been folded into
     # another patient. Clinical FKs were re-pointed at merge time; this row

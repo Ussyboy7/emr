@@ -20,7 +20,7 @@ from nursing.models import NursingOrder, Procedure
 from consultation.models import Referral, ConsultationSession, Diagnosis
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth, TruncDay, TruncWeek
 
-from reports.export_helpers import respond_with_export
+from reports.export_helpers import csv_http_response, respond_with_export
 from common.openapi import document_api_view
 from common.report_period import filter_inclusive_date_range
 
@@ -455,9 +455,7 @@ class VisitStatisticsReportView(views.APIView):
         if export_type == "csv":
             csv_text = build_visit_statistics_csv(report)
             filename = f"visit_statistics_{period_start}_{period_end}.csv"
-            response = HttpResponse(csv_text, content_type="text/csv")
-            response["Content-Disposition"] = f'attachment; filename="{filename}"'
-            return response
+            return csv_http_response(csv_text, filename)
 
         return Response(report)
 
@@ -1031,6 +1029,30 @@ class DiseasePatternComparedReportView(views.APIView):
         )
 
 
+@document_api_view(tag="Reports", summary="Doctor patient count report")
+class DoctorPatientCountReportView(views.APIView):
+    """Completed consultation sessions and distinct patients per doctor."""
+
+    def get(self, request):
+        from reports.doctor_patient_count import build_doctor_patient_count_report
+
+        period_start, period_end = _period_bounds_from_request(
+            request, default_to_current_year=True
+        )
+        report = build_doctor_patient_count_report(
+            period_start,
+            period_end,
+            org_facility_id=_org_clinic_scope(request),
+            search=_search_term(request),
+        )
+        return respond_with_export(
+            request,
+            report,
+            filename_prefix="doctor_patient_count",
+            title="Doctor Patient Count",
+        )
+
+
 @document_api_view(tag="Reports", summary="Observation admissions report")
 class ObservationAdmissionsReportView(views.APIView):
     """Patients placed on observation — admission events by category."""
@@ -1278,6 +1300,15 @@ class NewRegistrationsReportView(views.APIView):
         for category, _ in Patient.CATEGORY_CHOICES:
             by_category[category] = qs.filter(category=category).count()
 
+        # First-time vs paper-record breakdown (registration checkbox)
+        first_time_patients = qs.filter(is_first_time_patient=True).count()
+        paper_record_patients = total - first_time_patients
+        by_category_first_time = {}
+        for category, _ in Patient.CATEGORY_CHOICES:
+            by_category_first_time[category] = qs.filter(
+                category=category, is_first_time_patient=True
+            ).count()
+
         # Facility breakdown (registered-at facility), org-wide by default.
         by_facility_rows = (
             filter_inclusive_date_range(
@@ -1313,6 +1344,9 @@ class NewRegistrationsReportView(views.APIView):
         report = {
             'total': total,
             'by_category': by_category,
+            'first_time_patients': first_time_patients,
+            'paper_record_patients': paper_record_patients,
+            'by_category_first_time': by_category_first_time,
             'by_facility': by_facility,
             'daily_data': daily_data,
             'start_date': period_start.isoformat(),
@@ -1782,8 +1816,6 @@ class AttendanceStatisticsReportView(views.APIView):
         if format_type == "csv":
             csv_text = build_attendance_statistics_csv(report)
             filename = f"attendance_statistics_{period_start}_{period_end}.csv"
-            response = HttpResponse(csv_text, content_type="text/csv")
-            response["Content-Disposition"] = f'attachment; filename="{filename}"'
-            return response
+            return csv_http_response(csv_text, filename)
 
         return Response(report)

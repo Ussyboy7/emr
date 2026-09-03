@@ -105,6 +105,13 @@ def _table_from_rows(headers: list[str], rows: list[list[Any]]) -> Table:
     return table
 
 
+def _csv_cell(value: Any) -> Any:
+    """Render a value for CSV: join lists so Excel doesn't get Python reprs."""
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(v) for v in value)
+    return value
+
+
 def build_generic_csv(report: Any, *, title: str = "Report") -> str:
     buf = StringIO()
     writer = csv.writer(buf)
@@ -116,7 +123,7 @@ def build_generic_csv(report: Any, *, title: str = "Report") -> str:
             headers = list(report[0].keys())
             writer.writerow(headers)
             for row in report:
-                writer.writerow([row.get(h, "") for h in headers])
+                writer.writerow([_csv_cell(row.get(h, "")) for h in headers])
         return buf.getvalue()
 
     if not isinstance(report, dict):
@@ -156,7 +163,7 @@ def build_generic_csv(report: Any, *, title: str = "Report") -> str:
             headers = list(rows[0].keys())
             writer.writerow(headers)
             for row in rows:
-                writer.writerow([row.get(h, "") for h in headers])
+                writer.writerow([_csv_cell(row.get(h, "")) for h in headers])
         elif rows and isinstance(rows[0], (list, tuple)):
             for row in rows:
                 writer.writerow(list(row))
@@ -235,6 +242,13 @@ def build_generic_pdf(
     return buffer.getvalue()
 
 
+def csv_http_response(csv_text: str, filename: str) -> HttpResponse:
+    """CSV download with UTF-8 BOM so Excel detects UTF-8 (fixes – — é mangling)."""
+    response = HttpResponse("\ufeff" + (csv_text or ""), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 def respond_with_export(
     request,
     report: Any,
@@ -255,10 +269,7 @@ def respond_with_export(
             csv_text = csv_builder(report)
         else:
             csv_text = build_generic_csv(report, title=title)
-        filename = f"{filename_prefix}.csv"
-        response = HttpResponse(csv_text, content_type="text/csv")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response
+        return csv_http_response(csv_text, f"{filename_prefix}.csv")
 
     if export_type == "pdf":
         if pdf_builder:

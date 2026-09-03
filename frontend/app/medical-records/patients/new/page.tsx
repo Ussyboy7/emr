@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -83,8 +84,9 @@ export default function NewPatientPage() {
 
   const [formData, setFormData] = useState({
     // Personal Details
-    personalNumber: '', title: '', surname: '', firstName: '', middleName: '', 
+    personalNumber: '', title: '', surname: '', firstName: '', middleName: '',
     gender: '', dateOfBirth: '', maritalStatus: '', religion: '', tribe: '', occupation: '',
+    isFirstTimePatient: false,
     // Work Information (Employee/Retiree)
     employeeType: '', division: '', location: '',
     // NonNPA Information
@@ -521,6 +523,7 @@ export default function NewPatientPage() {
         first_name: formData.firstName.trim(),
         middle_name: (formData.middleName || '').trim(),
         gender: formData.gender.toLowerCase(), // Backend expects lowercase: 'male', 'female'
+        is_first_time_patient: formData.isFirstTimePatient,
         date_of_birth: formData.dateOfBirth,
         marital_status: (formData.maritalStatus || '').toLowerCase(), // Backend expects lowercase: 'single', 'married', etc.
         religion: (formData.religion || '').trim(),
@@ -737,6 +740,7 @@ export default function NewPatientPage() {
     setFormData({
       personalNumber: '', title: '', surname: '', firstName: '', middleName: '',
       gender: '', dateOfBirth: '', maritalStatus: '', religion: '', tribe: '', occupation: '',
+      isFirstTimePatient: false,
       employeeType: '', division: '', location: '',
       nonNPAType: '',
       dependentType: '', principalStaffId: '',
@@ -892,6 +896,25 @@ export default function NewPatientPage() {
 
                   {/* Personal Details Tab */}
                   <TabsContent value="personal" className="space-y-4 pt-4">
+                    <label className="flex items-start gap-3 rounded-lg border border-teal-200 bg-teal-50/50 p-3 cursor-pointer dark:border-teal-800 dark:bg-teal-950/20">
+                      <Checkbox
+                        checked={formData.isFirstTimePatient}
+                        onCheckedChange={(v) =>
+                          setFormData((prev) => ({ ...prev, isFirstTimePatient: v === true }))
+                        }
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium">
+                          First-time patient
+                        </span>
+                        <span className="block text-xs text-muted-foreground mt-0.5">
+                          Tick if this patient is coming to the clinic for the first time (no prior
+                          paper/manual records). Leave unticked when onboarding an existing patient
+                          from manual records.
+                        </span>
+                      </span>
+                    </label>
                     {/* Personal Number - only for Employee/Retiree */}
                     {showWorkInfo && (
                       <div className="space-y-2">
@@ -989,24 +1012,13 @@ export default function NewPatientPage() {
                       </div>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label>Religion</Label>
                         <Select value={formData.religion || undefined} onValueChange={(v) => handleInputChange('religion', v)}>
                           <SelectTrigger><SelectValue placeholder="Select religion" /></SelectTrigger>
                           <SelectContent>
                             {RELIGIONS.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Tribe</Label>
-                        <Select value={formData.tribe || undefined} onValueChange={(v) => handleInputChange('tribe', v)}>
-                          <SelectTrigger><SelectValue placeholder="Select tribe" /></SelectTrigger>
-                          <SelectContent className="max-h-[200px]">
-                            {NIGERIAN_TRIBES.map((tribe) => (
-                              <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>
-                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1172,24 +1184,6 @@ export default function NewPatientPage() {
 
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
-                        <Label>State of Residence</Label>
-                        <Select value={formData.stateOfResidence} onValueChange={(v) => handleInputChange('stateOfResidence', v)}>
-                          <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
-                          <SelectContent className="max-h-[200px]">
-                            {NIGERIA_STATES_AND_LGAS.map(state => <SelectItem key={state.name} value={state.name}>{state.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2 sm:col-span-2">
-                        <Label>Residential Address</Label>
-                        <Textarea value={formData.residentialAddress} onChange={(e) => handleInputChange('residentialAddress', e.target.value)} placeholder="Current residential address" rows={2} />
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
                         <Label>State of Origin</Label>
                         <Select value={formData.stateOfOrigin} onValueChange={(v) => handleInputChange('stateOfOrigin', v)}>
                           <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
@@ -1212,6 +1206,34 @@ export default function NewPatientPage() {
                     <div className="space-y-2">
                       <Label>Permanent Address</Label>
                       <Textarea value={formData.permanentAddress} onChange={(e) => handleInputChange('permanentAddress', e.target.value)} placeholder="Permanent home address" rows={2} />
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Tribe</Label>
+                        <Select value={formData.tribe || undefined} onValueChange={(v) => handleInputChange('tribe', v)}>
+                          <SelectTrigger><SelectValue placeholder="Select tribe" /></SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            {NIGERIAN_TRIBES.map((tribe) => (
+                              <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>State of Residence</Label>
+                        <Select value={formData.stateOfResidence} onValueChange={(v) => handleInputChange('stateOfResidence', v)}>
+                          <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            {NIGERIA_STATES_AND_LGAS.map(state => <SelectItem key={state.name} value={state.name}>{state.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Residential Address</Label>
+                      <Textarea value={formData.residentialAddress} onChange={(e) => handleInputChange('residentialAddress', e.target.value)} placeholder="Current residential address" rows={2} />
                     </div>
 
                     <div className="flex justify-between pt-4">

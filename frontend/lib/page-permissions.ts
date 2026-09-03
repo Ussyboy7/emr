@@ -45,6 +45,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/medical-records/reports/weekend-duty", name: "Weekend Duty", description: "Weekend duty roster report", module: "Medical Records" },
   { id: "/medical-records/reports/visit-statistics", name: "Visit Statistics", description: "Visit statistics report", module: "Medical Records" },
   { id: "/medical-records/reports/new-registrations", name: "New Registrations", description: "Daily breakdown of newly registered patients by category", module: "Medical Records" },
+  { id: "/medical-records/reports/doctor-patient-count", name: "Doctor Patient Count", description: "Completed consultations and distinct patients per doctor", module: "Medical Records" },
   { id: "/medical-records/reports/patient-demographics", name: "Patient Demographics", description: "Register distribution by category, gender, age, and blood group", module: "Medical Records" },
   { id: "/medical-records/referrals", name: "Referral queue (records)", description: "Review referrals for stamping and records workflow (same data as consultation referrals)", module: "Medical Records" },
   { id: "/medical-records/coding", name: "ICD-10 Coding", description: "Browse and search the ICD-10 code catalog", module: "Medical Records" },

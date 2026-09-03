@@ -156,6 +156,7 @@ export interface Patient {
   nok_address?: string;
   nok_phone?: string;
   is_active: boolean;
+  is_first_time_patient?: boolean;
   created_at: string;
   updated_at: string;
   created_by_name?: string | null;
