@@ -396,6 +396,19 @@ class Prescription(models.Model):
     prescribed_at = models.DateTimeField(auto_now_add=True)
     dispensing_started_at = models.DateTimeField(null=True, blank=True)
     dispensed_at = models.DateTimeField(null=True, blank=True)
+    dispensing_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="prescriptions_being_dispensed",
+        help_text="Pharmacist currently holding the dispense modal lock",
+    )
+    dispensing_lock_heartbeat_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last heartbeat from the open dispense modal",
+    )
     created_by = models.ForeignKey(
         "accounts.User",
         on_delete=models.SET_NULL,

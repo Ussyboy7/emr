@@ -705,6 +705,8 @@ export default function PrescriptionsPage() {
           clinicalNotes: rx.diagnosis || '',
           specialInstructions: rx.notes || '',
           visitNotes, // Notes / Special Instructions from visit
+          prescribed_at: rx.prescribed_at,
+          dispense_lock: rx.dispense_lock || undefined,
         };
       }));
       setPrescriptions(transformed as Prescription[]);
@@ -760,6 +762,31 @@ export default function PrescriptionsPage() {
     void loadPrescriptionsRef.current();
   }, [currentPage, itemsPerPage, statusFilter, searchQuery, genderFilter, dateFilter, ready]);
 
+  const closeDispenseModal = useCallback(async () => {
+    const rxId = selectedPrescription?.id;
+    setShowDispenseModal(false);
+    if (rxId) {
+      try {
+        await pharmacyService.releaseDispense(Number(rxId));
+      } catch (e) {
+        console.warn('Failed to release dispense lock', e);
+      }
+      void loadPrescriptionsRef.current({ silent: true });
+      void loadQueueStatsRef.current();
+    }
+  }, [selectedPrescription?.id]);
+
+  useEffect(() => {
+    if (!showDispenseModal || !selectedPrescription?.id) return;
+    const rxId = Number(selectedPrescription.id);
+    const id = setInterval(() => {
+      void pharmacyService.heartbeatDispense(rxId).catch((e) => {
+        console.warn('Dispense lock heartbeat failed', e);
+      });
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [showDispenseModal, selectedPrescription?.id]);
+
   useEffect(() => {
     if (!ready) return;
     if (showViewModal || showDispenseModal || showSubstitutionModal) {
@@ -769,19 +796,19 @@ export default function PrescriptionsPage() {
       if (typeof document !== 'undefined' && document.hidden) return;
       void loadPrescriptionsRef.current({ silent: true });
       void loadQueueStatsRef.current();
-    }, 15000);
+    }, 30000);
     return () => clearInterval(id);
   }, [
+    ready,
+    showViewModal,
+    showDispenseModal,
+    showSubstitutionModal,
     currentPage,
     itemsPerPage,
     statusFilter,
     searchQuery,
     genderFilter,
     dateFilter,
-    showViewModal,
-    showDispenseModal,
-    showSubstitutionModal,
-    ready,
   ]);
 
   // Status update functionality
@@ -1209,13 +1236,21 @@ export default function PrescriptionsPage() {
   const handleStartDispense = async (prescription: Prescription) => {
     let freshRx: any = null;
     try {
-      freshRx = await pharmacyService.getPrescription(Number(prescription.id));
-      // Mark the moment pharmacist starts attending this prescription.
-      if (freshRx?.status === 'pending') {
-        freshRx = await pharmacyService.updatePrescriptionStatus(Number(prescription.id), 'dispensing');
+      // Exclusive soft-lock: blocks other pharmacists while this modal is open.
+      freshRx = await pharmacyService.claimDispense(Number(prescription.id));
+    } catch (e: any) {
+      const lockedBy = e?.body?.locked_by_name || e?.apiMessage;
+      if (e?.status === 409 || lockedBy) {
+        toast.error(
+          lockedBy
+            ? `${lockedBy} is already dispensing this prescription`
+            : 'Another pharmacist is already dispensing this prescription',
+        );
+      } else {
+        console.error('Error claiming prescription for dispense:', e);
+        toast.error(e?.message || 'Failed to open prescription for dispensing');
       }
-    } catch (e) {
-      console.error('Error fetching prescription for dispense:', e);
+      return;
     }
     const uiStatus =
       freshRx?.status === 'pending' ? 'Pending' :
@@ -1224,7 +1259,7 @@ export default function PrescriptionsPage() {
       freshRx?.status === 'partially_dispensed' ? 'Partially Dispensed' :
       prescription.status;
     const hydrated = freshRx
-      ? { ...prescription, ...freshRx, status: uiStatus }
+      ? { ...prescription, ...freshRx, status: uiStatus, dispense_lock: freshRx.dispense_lock }
       : { ...prescription, status: uiStatus };
     setSelectedPrescription(hydrated as any);
     const transformedMedications = transformMedications(hydrated.medications || [], hydrated.status);
@@ -1635,6 +1670,7 @@ export default function PrescriptionsPage() {
       toast.success(`${selectedMedications.length} medication(s) dispensed successfully for ${selectedPrescription?.patient?.name || 'patient'}`);
 
       // Clean up state after successful dispense
+      const rxId = selectedPrescription?.id;
       setShowDispenseModal(false);
       setSelectedPrescription(null);
       setSelectedMedications([]);
@@ -1643,6 +1679,13 @@ export default function PrescriptionsPage() {
       setDispenseEntryModes({});
       setDispenseNotes('');
       setSelectedBatches({});
+      if (rxId) {
+        try {
+          await pharmacyService.releaseDispense(Number(rxId));
+        } catch {
+          /* status already advanced by dispense */
+        }
+      }
 
       // Clear batch cache for affected medications to ensure fresh data
       selectedMedications.forEach(medId => {
@@ -2104,6 +2147,11 @@ export default function PrescriptionsPage() {
                           <span className="font-semibold text-foreground truncate">{rx.patient.name}</span>
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityColor(rx.priority)}`}>{rx.priority}</Badge>
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(rx.status)}`}>{rx.status}</Badge>
+                          {rx.dispense_lock?.locked && !rx.dispense_lock.locked_by_me && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-700 border-amber-500/30">
+                              In use by {rx.dispense_lock.locked_by_name || 'another pharmacist'}
+                            </Badge>
+                          )}
                           {rx.medications.slice(0, 2).map((med) => (
                             <Badge key={med.id} variant="secondary" className="text-[10px] px-1.5 py-0 flex items-center gap-1">
                               <span>{med.name.split(' ')[0]} ×{med.quantity}</span>
@@ -2120,7 +2168,17 @@ export default function PrescriptionsPage() {
 
                           {/* Dispense/Complete buttons based on status */}
                           {(rx.status === 'Pending' || rx.status === 'Processing' || rx.status === 'Ready') && (
-                            <Button size="sm" className="h-7 px-2 bg-violet-600 hover:bg-violet-700 text-white text-xs" onClick={() => handleStartDispense(rx)}>
+                            <Button
+                              size="sm"
+                              className="h-7 px-2 bg-violet-600 hover:bg-violet-700 text-white text-xs"
+                              onClick={() => handleStartDispense(rx)}
+                              disabled={Boolean(rx.dispense_lock?.locked && !rx.dispense_lock.locked_by_me)}
+                              title={
+                                rx.dispense_lock?.locked && !rx.dispense_lock.locked_by_me
+                                  ? `${rx.dispense_lock.locked_by_name || 'Another pharmacist'} is dispensing`
+                                  : undefined
+                              }
+                            >
                               <Package className="h-3 w-3 mr-1" />Dispense
                             </Button>
                           )}
@@ -2134,6 +2192,13 @@ export default function PrescriptionsPage() {
                                   ? 'bg-green-600 hover:bg-green-700'
                                   : 'bg-blue-600 hover:bg-blue-700'
                               }`}
+                              disabled={Boolean(
+                                rx.dispense_lock?.locked &&
+                                  !rx.dispense_lock.locked_by_me &&
+                                  !rx.medications.every(
+                                    (med: any) => (med.quantity - (med.dispensed_quantity || 0)) <= 0
+                                  )
+                              )}
                               onClick={() => {
                                 if (rx.medications.every((med: any) => (med.quantity - (med.dispensed_quantity || 0)) <= 0)) {
                                   // All items dispensed - mark as completed
@@ -2144,7 +2209,13 @@ export default function PrescriptionsPage() {
                                 }
                               }}
                               title={
-                                rx.medications.every(med => (med.quantity - (med.dispensed_quantity || 0)) <= 0)
+                                rx.dispense_lock?.locked &&
+                                !rx.dispense_lock.locked_by_me &&
+                                !rx.medications.every(
+                                  (med: any) => (med.quantity - (med.dispensed_quantity || 0)) <= 0
+                                )
+                                  ? `${rx.dispense_lock.locked_by_name || 'Another pharmacist'} is dispensing`
+                                  : rx.medications.every(med => (med.quantity - (med.dispensed_quantity || 0)) <= 0)
                                   ? "Mark prescription as fully completed"
                                   : "Resume dispensing remaining medications"
                               }
@@ -2172,6 +2243,12 @@ export default function PrescriptionsPage() {
                         <span>{rx.patient.age > 0 ? `${rx.patient.age}y` : 'Age unknown'} {rx.patient.gender}</span>
                         <span>•</span>
                         <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{rx.doctor}</span>
+                        {rx.date ? (
+                          <>
+                            <span>•</span>
+                            <span>{rx.date}{rx.time ? ` ${rx.time}` : ''}</span>
+                          </>
+                        ) : null}
                         {((rx as any).patient_details?.allergies?.length > 0) && (
                           <span className="text-red-600 dark:text-red-400 flex items-center gap-1">
                             <AlertTriangle className="h-3 w-3" />Allergies
@@ -2303,6 +2380,16 @@ export default function PrescriptionsPage() {
               {selectedPrescription && (selectedPrescription.status === 'Pending' || selectedPrescription.status === 'Processing' || selectedPrescription.status === 'Ready') && (
                 <Button
                   className="bg-violet-600 hover:bg-violet-700"
+                  disabled={Boolean(
+                    selectedPrescription.dispense_lock?.locked &&
+                      !selectedPrescription.dispense_lock.locked_by_me
+                  )}
+                  title={
+                    selectedPrescription.dispense_lock?.locked &&
+                    !selectedPrescription.dispense_lock.locked_by_me
+                      ? `${selectedPrescription.dispense_lock.locked_by_name || 'Another pharmacist'} is dispensing`
+                      : undefined
+                  }
                   onClick={() => {
                     setShowViewModal(false);
                     handleStartDispense(selectedPrescription);
@@ -2315,6 +2402,16 @@ export default function PrescriptionsPage() {
               {selectedPrescription && selectedPrescription.status === 'Partially Dispensed' && (
                 <Button
                   className="bg-blue-600 hover:bg-blue-700"
+                  disabled={Boolean(
+                    selectedPrescription.dispense_lock?.locked &&
+                      !selectedPrescription.dispense_lock.locked_by_me
+                  )}
+                  title={
+                    selectedPrescription.dispense_lock?.locked &&
+                    !selectedPrescription.dispense_lock.locked_by_me
+                      ? `${selectedPrescription.dispense_lock.locked_by_name || 'Another pharmacist'} is dispensing`
+                      : undefined
+                  }
                   onClick={() => {
                     setShowViewModal(false);
                     handleStartDispense(selectedPrescription);
@@ -2329,7 +2426,16 @@ export default function PrescriptionsPage() {
         </Dialog>
 
         {/* Enhanced Dispense Modal */}
-        <Dialog open={showDispenseModal} onOpenChange={setShowDispenseModal}>
+        <Dialog
+          open={showDispenseModal}
+          onOpenChange={(open) => {
+            if (!open) {
+              void closeDispenseModal();
+            } else {
+              setShowDispenseModal(true);
+            }
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -2524,12 +2630,12 @@ export default function PrescriptionsPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setShowDispenseModal(false);
                   setSelectedMedications([]);
                   setDispenseQuantities({});
                   setDispenseCoverageQuantities({});
                   setDispenseEntryModes({});
                   setSelectedBatches({});
+                  void closeDispenseModal();
                 }}
               >
                 Cancel

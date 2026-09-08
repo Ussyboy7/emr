@@ -61,6 +61,13 @@ export interface Prescription {
   visitNotes?: string; // Notes / Special Instructions from visit
   patient_details?: any; // Additional patient details
   visit_details?: any; // Additional visit details
+  dispense_lock?: {
+    locked: boolean;
+    locked_by_me: boolean;
+    locked_by_id: number | null;
+    locked_by_name: string | null;
+    lock_heartbeat_at: string | null;
+  };
 }
 
 export interface DrugInteraction {

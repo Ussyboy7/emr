@@ -277,12 +277,25 @@ class MedicationViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Medication not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(MedicationSerializer(med).data)
 
-    def _annotate_store_stock(self, queryset, location: str):
+    def _annotate_store_stock(self, queryset, location: str, request=None):
+        """
+        Annotate medications with inventory aggregates for ``location``.
+
+        When multi-clinic is enabled, aggregates match MedicationInventory list
+        scoping (facility filter) so card totals agree with View Batches.
+        """
         loc = (location or "Store").strip()
         inv_base = MedicationInventory.objects.filter(
             medication_id=OuterRef("pk"),
             location__iexact=loc,
         )
+        if request is not None:
+            from common.mixins import SCOPE_ALL, resolve_facility_scope
+
+            if SystemConfig.is_enabled("multi_clinic_enabled"):
+                scope = resolve_facility_scope(request)
+                if scope is not None and scope != SCOPE_ALL:
+                    inv_base = inv_base.filter(location_clinic=scope)
         store_quantity = Coalesce(
             Subquery(
                 inv_base.values("medication_id")
@@ -316,7 +329,7 @@ class MedicationViewSet(viewsets.ModelViewSet):
 
     def _store_stock_summary_queryset(self, request, location: str):
         qs = Medication.objects.filter(is_active=True).select_related("generic")
-        qs = self._annotate_store_stock(qs, location)
+        qs = self._annotate_store_stock(qs, location, request=request)
         stock_status = (request.query_params.get("stock_status") or "all").strip().lower()
         today = timezone.now().date()
         threshold = today + timedelta(days=180)
@@ -369,15 +382,17 @@ class MedicationViewSet(viewsets.ModelViewSet):
     def store_stock_stats(self, request):
         location = (request.query_params.get("location") or "Store").strip()
         base = Medication.objects.filter(is_active=True).select_related("generic")
-        base = self._annotate_store_stock(base, location)
+        base = self._annotate_store_stock(base, location, request=request)
         today = timezone.now().date()
         threshold = today + timedelta(days=180)
-        total_units = (
-            MedicationInventory.objects.filter(location__iexact=location).aggregate(
-                s=Sum("quantity")
-            )["s"]
-            or Decimal("0")
-        )
+        inv_units = MedicationInventory.objects.filter(location__iexact=location)
+        if SystemConfig.is_enabled("multi_clinic_enabled"):
+            from common.mixins import SCOPE_ALL, resolve_facility_scope
+
+            scope = resolve_facility_scope(request)
+            if scope is not None and scope != SCOPE_ALL:
+                inv_units = inv_units.filter(location_clinic=scope)
+        total_units = inv_units.aggregate(s=Sum("quantity"))["s"] or Decimal("0")
 
         def cnt(extra_q):
             return base.filter(extra_q).count()
@@ -674,7 +689,8 @@ class MedicationInventoryViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         """Receive stock: merge into an existing batch row when batch# matches, else create."""
-        from pharmacy.hod_store import is_hod_store_location
+        from pharmacy.central_store import get_central_store_clinic_id
+        from pharmacy.hod_store import is_central_store_location, is_hod_store_location
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -686,21 +702,34 @@ class MedicationInventoryViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                 {'location': ['HOD store inventory is updated via stock transfers only.']}
             )
 
+        # Central Store / facility-scoped inventory must carry location_clinic so
+        # store-stock-summary and View Batches use the same rows.
+        if is_central_store_location(location):
+            central_id = get_central_store_clinic_id()
+            if central_id is not None:
+                from organization.models import Clinic
+
+                serializer.validated_data['location_clinic'] = Clinic.objects.get(pk=central_id)
+        else:
+            self.auto_set_facility(serializer)
+
+        clinic = serializer.validated_data.get('location_clinic')
         medication = serializer.validated_data['medication']
         batch_number = (serializer.validated_data.get('batch_number') or '').strip()
         expiry = serializer.validated_data['expiry_date']
         add_qty = serializer.validated_data['quantity']
         supplier = (serializer.validated_data.get('supplier') or '').strip()
 
-        existing = (
-            MedicationInventory.objects.select_for_update()
-            .filter(
-                medication=medication,
-                location=location,
-                batch_number__iexact=batch_number,
-            )
-            .first()
+        existing_qs = MedicationInventory.objects.select_for_update().filter(
+            medication=medication,
+            location=location,
+            batch_number__iexact=batch_number,
         )
+        if clinic is not None:
+            existing_qs = existing_qs.filter(
+                Q(location_clinic=clinic) | Q(location_clinic__isnull=True)
+            )
+        existing = existing_qs.first()
 
         if existing:
             if existing.expiry_date != expiry:
@@ -718,6 +747,9 @@ class MedicationInventoryViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             if supplier:
                 existing.supplier = supplier
                 update_fields.append('supplier')
+            if clinic is not None and existing.location_clinic_id is None:
+                existing.location_clinic = clinic
+                update_fields.append('location_clinic')
             existing.save(update_fields=update_fields)
             AuditService.log_activity(
                 user=request.user,
@@ -961,6 +993,7 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             'consultation_session__room__location_clinic',
             'location_clinic',
             'created_by',
+            'dispensing_by',
         ).prefetch_related(
             'medications__medication',
             'medications__dispenses',
@@ -984,6 +1017,11 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Prescription.objects.none()
 
+        if getattr(self, 'action', None) in ('list', 'queue_stats'):
+            from pharmacy.dispense_lock import sweep_stale_dispense_locks
+
+            sweep_stale_dispense_locks()
+
         qs = self._prescription_base_qs()
         if getattr(self, 'action', None) == 'list':
             qs = self._apply_prescription_list_filters(self.request, qs)
@@ -993,8 +1031,11 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='queue-stats')
     def queue_stats(self, request):
         """Counts for the queue matching the same filters as the list (full result set, not one page)."""
+        from pharmacy.dispense_lock import sweep_stale_dispense_locks
+
+        sweep_stale_dispense_locks()
         qs = self._apply_prescription_list_filters(request, self._prescription_base_qs())
-        qs = self.filter_queryset(qs)
+        qs = self.filter_queryset(self.scope_queryset(qs))
         pending = qs.filter(status='pending').count()
         processing = qs.filter(status='dispensing').count()
         partially_dispensed = qs.filter(status='partially_dispensed').count()
@@ -1159,18 +1200,26 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             prescription = serializer.save(created_by=self.request.user, doctor=self.request.user)
         else:
             prescription = serializer.save(created_by=self.request.user)
+
+        merged = bool(getattr(prescription, "merged_into_existing", False))
         
         # Log audit
         AuditService.log_prescription_action(
             user=self.request.user,
-            action='create',
+            action='update' if merged else 'create',
             prescription=prescription,
             module='pharmacy',
-            description=f'Created prescription {prescription.prescription_id} for patient {prescription.patient.get_full_name()}',
+            description=(
+                f'Added medications to prescription {prescription.prescription_id}'
+                if merged
+                else f'Created prescription {prescription.prescription_id} for patient {prescription.patient.get_full_name()}'
+            ),
             request=self.request,
         )
 
-        # Notify Pharmacy (doctor -> pharmacy)
+        # Notify Pharmacy (doctor -> pharmacy) — skip noisy notify on merge into open RX
+        if merged:
+            return
         try:
             from notifications.services import NotificationService
 
@@ -1461,6 +1510,71 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         )
 
         return Response({'interactions': interactions})
+
+    def _lock_conflict_response(self, exc):
+        from pharmacy.dispense_lock import _user_display
+
+        holder = getattr(exc, "holder", None)
+        return Response(
+            {
+                "error": str(exc),
+                "detail": str(exc),
+                "locked_by_name": _user_display(holder),
+                "locked_by_id": getattr(holder, "pk", None),
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    @extend_schema(
+        tags=["Pharmacy"],
+        summary="Claim dispense lock",
+        description="Exclusive claim while the dispense modal is open. Heartbeat every ~60s.",
+    )
+    @action(detail=True, methods=["post"], url_path="claim-dispense")
+    def claim_dispense(self, request, pk=None):
+        ensure_capability(
+            request.user,
+            "pharmacy_dispense",
+            "Only authorised pharmacy staff can dispense prescriptions.",
+        )
+        from pharmacy.dispense_lock import DispenseLockConflict, claim_dispense_lock
+
+        prescription = self.get_object()
+        try:
+            rx = claim_dispense_lock(prescription, request.user)
+        except DispenseLockConflict as exc:
+            return self._lock_conflict_response(exc)
+        except ValueError as exc:
+            return Response({"error": str(exc), "detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(rx).data)
+
+    @extend_schema(tags=["Pharmacy"], summary="Heartbeat dispense lock")
+    @action(detail=True, methods=["post"], url_path="heartbeat-dispense")
+    def heartbeat_dispense(self, request, pk=None):
+        from pharmacy.dispense_lock import DispenseLockConflict, heartbeat_dispense_lock
+
+        prescription = self.get_object()
+        try:
+            rx = heartbeat_dispense_lock(prescription, request.user)
+        except DispenseLockConflict as exc:
+            return self._lock_conflict_response(exc)
+        return Response(self.get_serializer(rx).data)
+
+    @extend_schema(
+        tags=["Pharmacy"],
+        summary="Release dispense lock",
+        description="Release claim when the modal closes; reverts abandoned Processing to Pending/Partial.",
+    )
+    @action(detail=True, methods=["post"], url_path="release-dispense")
+    def release_dispense(self, request, pk=None):
+        from pharmacy.dispense_lock import DispenseLockConflict, release_dispense_lock
+
+        prescription = self.get_object()
+        try:
+            rx = release_dispense_lock(prescription, request.user)
+        except DispenseLockConflict as exc:
+            return self._lock_conflict_response(exc)
+        return Response(self.get_serializer(rx).data)
     
     @extend_schema(tags=["Pharmacy"], summary="Dispense", description="Dispense medication from a prescription.")
     @action(detail=True, methods=['post'])
@@ -1472,7 +1586,20 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             "pharmacy_dispense",
             "Only authorised pharmacy staff can dispense prescriptions.",
         )
+        from pharmacy.dispense_lock import DispenseLockConflict, claim_dispense_lock, lock_is_active
+
         prescription = self.get_object()
+        try:
+            if not (
+                prescription.dispensing_by_id == request.user.pk
+                and lock_is_active(prescription)
+            ):
+                prescription = claim_dispense_lock(prescription, request.user)
+        except DispenseLockConflict as exc:
+            return self._lock_conflict_response(exc)
+        except ValueError as exc:
+            return Response({"error": str(exc), "detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         item_id = request.data.get('item_id')
         coverage_quantity_raw = request.data.get('coverage_quantity', None)
         try:

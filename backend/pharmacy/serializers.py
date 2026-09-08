@@ -628,12 +628,22 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     icd10_diagnoses = serializers.SerializerMethodField()
     dispensed_by_name = serializers.SerializerMethodField()
     location_clinic_name = serializers.SerializerMethodField()
+    dispense_lock = serializers.SerializerMethodField()
+    merged_into_existing = serializers.BooleanField(read_only=True, required=False)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_location_clinic_name(self, obj):
         from common.order_location import order_location_clinic_name
 
         return order_location_clinic_name(obj)
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_dispense_lock(self, obj):
+        from pharmacy.dispense_lock import lock_info
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        return lock_info(obj, request_user=user)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_dispensed_by_name(self, obj):
@@ -722,16 +732,17 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         )
 
     def create(self, validated_data):
-        """Create prescription with nested items and validation."""
+        """Create prescription with nested items, or append to an open pending RX."""
+        from pharmacy.dispense_lock import find_mergeable_prescription
+        from pharmacy.models import PrescriptionItem
+
         items_data = validated_data.pop("items", [])
 
-        # Validate that we have items
         if not items_data:
             raise ValidationError(
                 "At least one medication item is required for a prescription."
             )
 
-        # Check for duplicate medications in the same prescription
         medication_ids = [
             item.get("medication") for item in items_data if item.get("medication")
         ]
@@ -740,7 +751,6 @@ class PrescriptionSerializer(serializers.ModelSerializer):
                 "Duplicate medications are not allowed in the same prescription."
             )
 
-        # Validate inventory availability for each item
         for item_data in items_data:
             medication_id = item_data.get("medication")
             quantity = item_data.get("quantity", 0)
@@ -765,18 +775,62 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
         validated_data = apply_order_location_clinic(validated_data, user=user)
-        prescription = Prescription.objects.create(**validated_data)
 
-        # Create prescription items
-        prescription_items = []
-        for item_data in items_data:
-            prescription_items.append(
-                PrescriptionItem(prescription=prescription, **item_data)
+        patient = validated_data.get("patient")
+        visit = validated_data.get("visit")
+        session = validated_data.get("consultation_session")
+        admission = validated_data.get("admission")
+        merge_target = None
+        if patient is not None:
+            merge_target = find_mergeable_prescription(
+                patient_id=getattr(patient, "pk", patient),
+                visit_id=getattr(visit, "pk", visit) if visit else None,
+                consultation_session_id=getattr(session, "pk", session) if session else None,
+                admission_id=getattr(admission, "pk", admission) if admission else None,
             )
 
-        PrescriptionItem.objects.bulk_create(prescription_items)
+        if merge_target is not None:
+            notes = (validated_data.get("notes") or "").strip()
+            diagnosis = (validated_data.get("diagnosis") or "").strip()
+            update_fields = []
+            if notes:
+                merge_target.notes = (
+                    f"{merge_target.notes}\n{notes}".strip()
+                    if merge_target.notes
+                    else notes
+                )
+                update_fields.append("notes")
+            if diagnosis and not merge_target.diagnosis:
+                merge_target.diagnosis = diagnosis
+                update_fields.append("diagnosis")
+            if update_fields:
+                merge_target.save(update_fields=update_fields)
 
+            PrescriptionItem.objects.bulk_create(
+                [
+                    PrescriptionItem(prescription=merge_target, **item_data)
+                    for item_data in items_data
+                ]
+            )
+            merge_target.merged_into_existing = True
+            return merge_target
+
+        prescription = Prescription.objects.create(**validated_data)
+        PrescriptionItem.objects.bulk_create(
+            [
+                PrescriptionItem(prescription=prescription, **item_data)
+                for item_data in items_data
+            ]
+        )
+        prescription.merged_into_existing = False
         return prescription
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["merged_into_existing"] = bool(
+            getattr(instance, "merged_into_existing", False)
+        )
+        return data
 
     class Meta:
         model = Prescription

@@ -51,6 +51,14 @@ export interface Prescription {
   created_at?: string;
   dispensed_at?: string;
   dispensed_by_name?: string;
+  dispense_lock?: {
+    locked: boolean;
+    locked_by_me: boolean;
+    locked_by_id: number | null;
+    locked_by_name: string | null;
+    lock_heartbeat_at: string | null;
+  };
+  merged_into_existing?: boolean;
 }
 
 export interface PrescriptionItem {
@@ -362,6 +370,27 @@ class PharmacyService {
 
   async updatePrescriptionStatus(prescriptionId: number, status: Prescription['status'], notes?: string): Promise<Prescription> {
     return this.updatePrescription(prescriptionId, { status, notes });
+  }
+
+  async claimDispense(prescriptionId: number): Promise<Prescription> {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/claim-dispense/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async heartbeatDispense(prescriptionId: number): Promise<Prescription> {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/heartbeat-dispense/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async releaseDispense(prescriptionId: number): Promise<Prescription> {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/release-dispense/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   }
 
   async cancelPrescription(prescriptionId: number | string, reason?: string): Promise<Prescription> {
