@@ -812,6 +812,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
                     for item_data in items_data
                 ]
             )
+            merge_target.recalculate_status()
             merge_target.merged_into_existing = True
             return merge_target
 

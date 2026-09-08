@@ -252,42 +252,112 @@ def find_mergeable_prescription(
     consultation_session_id=None,
     admission_id=None,
 ):
-    """Open pending RX for the same clinical context (append instead of new RX)."""
+    """Open RX for the same clinical context (append instead of creating a new RX)."""
     from pharmacy.models import Prescription
 
-    qs = Prescription.objects.filter(patient_id=patient_id, status="pending").filter(
-        dispensing_by__isnull=True
-    )
+    qs = Prescription.objects.filter(
+        patient_id=patient_id,
+        status__in=("pending", "dispensing", "partially_dispensed", "dispensed"),
+    ).filter(dispensing_by__isnull=True)
     if visit_id:
         qs = qs.filter(visit_id=visit_id)
     elif admission_id:
         qs = qs.filter(admission_id=admission_id)
     else:
         return None
+
+    def _pick(queryset):
+        rows = list(queryset.order_by("-prescribed_at", "-id")[:20])
+        if not rows:
+            return None
+        priority = {
+            "partially_dispensed": 0,
+            "dispensing": 1,
+            "pending": 2,
+            "dispensed": 3,
+        }
+        rows.sort(key=lambda r: (priority.get(r.status, 9), -r.prescribed_at.timestamp(), -r.pk))
+        return rows[0]
+
     if consultation_session_id:
-        session_match = (
-            qs.filter(consultation_session_id=consultation_session_id)
-            .order_by("-prescribed_at")
-            .first()
-        )
+        session_match = _pick(qs.filter(consultation_session_id=consultation_session_id))
         if session_match:
             return session_match
-    return qs.order_by("-prescribed_at").first()
+    return _pick(qs)
 
 
-def merge_pending_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
+def _item_match_on_rx(keeper_id, item):
+    from pharmacy.models import PrescriptionItem
+
+    qs = PrescriptionItem.objects.filter(
+        prescription_id=keeper_id,
+        superseded_at__isnull=True,
+    )
+    if item.medication_id:
+        med_match = qs.filter(medication_id=item.medication_id).first()
+        if med_match:
+            return med_match
+    if item.generic_id:
+        return qs.filter(generic_id=item.generic_id).first()
+    return None
+
+
+def _absorb_item_into_keeper(keeper, item) -> str:
     """
-    Collapse historical pending RXs that share the same patient+visit into one.
+    Move/combine a donor line onto keeper.
+    Returns: combined | moved | dropped
+    """
+    from pharmacy.models import Dispense
 
-    Keeps the earliest prescription; moves (or quantity-merges) items; cancels donors.
+    match = _item_match_on_rx(keeper.pk, item)
+    donor_dispensed = float(item.dispensed_quantity or 0)
+
+    if match is not None and donor_dispensed <= 0:
+        # Same med already on keeper — take the larger prescribed qty, drop duplicate line.
+        match_qty = float(match.quantity or 0)
+        donor_qty = float(item.quantity or 0)
+        if donor_qty > match_qty:
+            match.quantity = item.quantity
+            update_fields = ["quantity"]
+            if item.medication_id and not match.medication_id:
+                match.medication_id = item.medication_id
+                update_fields.append("medication")
+            match.save(update_fields=update_fields)
+        item.delete()
+        return "combined"
+
+    if match is not None and donor_dispensed > 0:
+        # Keep dispense history on its own line under the keeper.
+        Dispense.objects.filter(prescription_item_id=item.pk).update(
+            prescription_id=keeper.pk
+        )
+        item.prescription_id = keeper.pk
+        item.save(update_fields=["prescription"])
+        return "moved"
+
+    Dispense.objects.filter(prescription_item_id=item.pk).update(prescription_id=keeper.pk)
+    item.prescription_id = keeper.pk
+    item.save(update_fields=["prescription"])
+    return "moved"
+
+
+def merge_open_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
+    """
+    Collapse same-visit RXs (pending / processing / partial / dispensed) into one card.
+
+    Keeps the best open RX (prefer partial); absorbs donor lines; cancels donors.
     Skips groups with an active dispense lock.
     """
     from django.db.models import Count
 
-    from pharmacy.models import Prescription, PrescriptionItem
+    from pharmacy.models import Prescription
 
+    open_statuses = ("pending", "dispensing", "partially_dispensed", "dispensed")
     groups = list(
-        Prescription.objects.filter(status="pending", visit_id__isnull=False)
+        Prescription.objects.filter(
+            visit_id__isnull=False,
+            status__in=open_statuses,
+        )
         .values("patient_id", "visit_id")
         .annotate(c=Count("id"))
         .filter(c__gt=1)
@@ -299,23 +369,31 @@ def merge_pending_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
     moved_items = 0
     combined_items = 0
 
+    priority = {
+        "partially_dispensed": 0,
+        "dispensing": 1,
+        "dispensed": 2,
+        "pending": 3,
+    }
+
     for g in groups:
         rx_list = list(
             Prescription.objects.filter(
                 patient_id=g["patient_id"],
                 visit_id=g["visit_id"],
-                status="pending",
-            )
-            .order_by("prescribed_at", "id")
-            .prefetch_related("medications")
+                status__in=open_statuses,
+            ).order_by("prescribed_at", "id")
         )
         if len(rx_list) < 2:
             continue
         if any(r.dispensing_by_id for r in rx_list):
             continue
 
-        keeper = rx_list[0]
-        donors = rx_list[1:]
+        keeper = sorted(
+            rx_list,
+            key=lambda r: (priority.get(r.status, 9), r.prescribed_at, r.id),
+        )[0]
+        donors = [r for r in rx_list if r.pk != keeper.pk]
         if dry_run:
             merged_groups += 1
             cancelled += len(donors)
@@ -330,32 +408,10 @@ def merge_pending_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
                 diag_bits.append(donor.diagnosis.strip())
 
             for item in list(donor.medications.all()):
-                match = None
-                if item.medication_id or item.generic_id:
-                    qs = PrescriptionItem.objects.filter(
-                        prescription_id=keeper.pk,
-                        superseded_at__isnull=True,
-                    )
-                    if item.medication_id:
-                        qs = qs.filter(medication_id=item.medication_id)
-                    else:
-                        qs = qs.filter(
-                            generic_id=item.generic_id, medication_id__isnull=True
-                        )
-                    match = qs.first()
-
-                if (
-                    match is not None
-                    and float(match.dispensed_quantity or 0) <= 0
-                    and float(item.dispensed_quantity or 0) <= 0
-                ):
-                    match.quantity = (match.quantity or 0) + (item.quantity or 0)
-                    match.save(update_fields=["quantity"])
-                    item.delete()
+                result = _absorb_item_into_keeper(keeper, item)
+                if result == "combined":
                     combined_items += 1
                 else:
-                    item.prescription_id = keeper.pk
-                    item.save(update_fields=["prescription"])
                     moved_items += 1
 
             donor.status = "cancelled"
@@ -385,6 +441,7 @@ def merge_pending_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
             update_fields.append("diagnosis")
         if update_fields:
             keeper.save(update_fields=update_fields)
+        keeper.recalculate_status()
         merged_groups += 1
 
     return {
@@ -395,3 +452,8 @@ def merge_pending_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
         "combined_items": combined_items,
         "dry_run": dry_run,
     }
+
+
+def merge_pending_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
+    """Backward-compatible alias — merges all open same-visit statuses."""
+    return merge_open_same_visit_prescriptions(dry_run=dry_run)

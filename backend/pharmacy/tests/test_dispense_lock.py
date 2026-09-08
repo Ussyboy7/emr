@@ -268,3 +268,35 @@ class SameVisitMergeTests(TestCase):
         self.assertEqual(self.rx.status, "pending")
         self.assertEqual(rx2.status, "cancelled")
         self.assertEqual(self.rx.medications.count(), 2)
+
+    def test_historical_merge_collapses_pending_into_partial(self):
+        from pharmacy.dispense_lock import merge_open_same_visit_prescriptions
+
+        self.rx.status = "partially_dispensed"
+        self.rx.save(update_fields=["status"])
+        item = self.rx.medications.first()
+        item.dispensed_quantity = Decimal("2")
+        item.save(update_fields=["dispensed_quantity"])
+
+        rx2 = Prescription.objects.create(
+            prescription_id="RX-MERGE-PARTIAL-2",
+            patient=self.patient,
+            doctor=self.doctor,
+            created_by=self.doctor,
+            visit=self.visit,
+            status="pending",
+        )
+        PrescriptionItem.objects.create(
+            prescription=rx2,
+            generic=self.generic_b,
+            medication=self.med_b,
+            quantity=Decimal("5"),
+            unit="tablet",
+        )
+        result = merge_open_same_visit_prescriptions()
+        self.assertEqual(result["merged_groups"], 1)
+        self.rx.refresh_from_db()
+        rx2.refresh_from_db()
+        self.assertEqual(rx2.status, "cancelled")
+        self.assertEqual(self.rx.medications.count(), 2)
+        self.assertIn(self.rx.status, ("partially_dispensed", "pending"))
