@@ -273,3 +273,125 @@ def find_mergeable_prescription(
         if session_match:
             return session_match
     return qs.order_by("-prescribed_at").first()
+
+
+def merge_pending_same_visit_prescriptions(*, dry_run: bool = False) -> dict:
+    """
+    Collapse historical pending RXs that share the same patient+visit into one.
+
+    Keeps the earliest prescription; moves (or quantity-merges) items; cancels donors.
+    Skips groups with an active dispense lock.
+    """
+    from django.db.models import Count
+
+    from pharmacy.models import Prescription, PrescriptionItem
+
+    groups = list(
+        Prescription.objects.filter(status="pending", visit_id__isnull=False)
+        .values("patient_id", "visit_id")
+        .annotate(c=Count("id"))
+        .filter(c__gt=1)
+        .order_by("patient_id", "visit_id")
+    )
+
+    merged_groups = 0
+    cancelled = 0
+    moved_items = 0
+    combined_items = 0
+
+    for g in groups:
+        rx_list = list(
+            Prescription.objects.filter(
+                patient_id=g["patient_id"],
+                visit_id=g["visit_id"],
+                status="pending",
+            )
+            .order_by("prescribed_at", "id")
+            .prefetch_related("medications")
+        )
+        if len(rx_list) < 2:
+            continue
+        if any(r.dispensing_by_id for r in rx_list):
+            continue
+
+        keeper = rx_list[0]
+        donors = rx_list[1:]
+        if dry_run:
+            merged_groups += 1
+            cancelled += len(donors)
+            continue
+
+        note_bits = []
+        diag_bits = []
+        for donor in donors:
+            if (donor.notes or "").strip():
+                note_bits.append(donor.notes.strip())
+            if (donor.diagnosis or "").strip():
+                diag_bits.append(donor.diagnosis.strip())
+
+            for item in list(donor.medications.all()):
+                match = None
+                if item.medication_id or item.generic_id:
+                    qs = PrescriptionItem.objects.filter(
+                        prescription_id=keeper.pk,
+                        superseded_at__isnull=True,
+                    )
+                    if item.medication_id:
+                        qs = qs.filter(medication_id=item.medication_id)
+                    else:
+                        qs = qs.filter(
+                            generic_id=item.generic_id, medication_id__isnull=True
+                        )
+                    match = qs.first()
+
+                if (
+                    match is not None
+                    and float(match.dispensed_quantity or 0) <= 0
+                    and float(item.dispensed_quantity or 0) <= 0
+                ):
+                    match.quantity = (match.quantity or 0) + (item.quantity or 0)
+                    match.save(update_fields=["quantity"])
+                    item.delete()
+                    combined_items += 1
+                else:
+                    item.prescription_id = keeper.pk
+                    item.save(update_fields=["prescription"])
+                    moved_items += 1
+
+            donor.status = "cancelled"
+            merge_note = f"[Merged into {keeper.prescription_id}]"
+            donor.notes = (
+                f"{donor.notes}\n{merge_note}".strip() if donor.notes else merge_note
+            )
+            donor.dispensing_by = None
+            donor.dispensing_lock_heartbeat_at = None
+            donor.save(
+                update_fields=[
+                    "status",
+                    "notes",
+                    "dispensing_by",
+                    "dispensing_lock_heartbeat_at",
+                ]
+            )
+            cancelled += 1
+
+        update_fields = []
+        if note_bits:
+            extra = "\n".join(note_bits)
+            keeper.notes = f"{keeper.notes}\n{extra}".strip() if keeper.notes else extra
+            update_fields.append("notes")
+        if diag_bits and not (keeper.diagnosis or "").strip():
+            keeper.diagnosis = diag_bits[0]
+            update_fields.append("diagnosis")
+        if update_fields:
+            keeper.save(update_fields=update_fields)
+        merged_groups += 1
+
+    return {
+        "groups": len(groups),
+        "merged_groups": merged_groups,
+        "cancelled": cancelled,
+        "moved_items": moved_items,
+        "combined_items": combined_items,
+        "dry_run": dry_run,
+    }

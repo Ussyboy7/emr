@@ -241,3 +241,30 @@ class SameVisitMergeTests(TestCase):
         self.assertEqual(result.pk, self.rx.pk)
         self.assertTrue(getattr(result, "merged_into_existing", False))
         self.assertEqual(self.rx.medications.count(), 2)
+
+    def test_historical_merge_collapses_same_visit_pending(self):
+        from pharmacy.dispense_lock import merge_pending_same_visit_prescriptions
+
+        rx2 = Prescription.objects.create(
+            prescription_id="RX-MERGE-002",
+            patient=self.patient,
+            doctor=self.doctor,
+            created_by=self.doctor,
+            visit=self.visit,
+            status="pending",
+        )
+        PrescriptionItem.objects.create(
+            prescription=rx2,
+            generic=self.generic_b,
+            medication=self.med_b,
+            quantity=Decimal("5"),
+            unit="tablet",
+        )
+        result = merge_pending_same_visit_prescriptions()
+        self.assertEqual(result["merged_groups"], 1)
+        self.assertEqual(result["cancelled"], 1)
+        self.rx.refresh_from_db()
+        rx2.refresh_from_db()
+        self.assertEqual(self.rx.status, "pending")
+        self.assertEqual(rx2.status, "cancelled")
+        self.assertEqual(self.rx.medications.count(), 2)
