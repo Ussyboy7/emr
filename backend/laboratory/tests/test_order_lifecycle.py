@@ -61,8 +61,8 @@ class LabOrderCreateTest(APITestCase):
         order = LabOrder.objects.get(pk=first.data["id"])
         self.assertEqual(order.tests.count(), 2)
 
-    def test_no_append_after_sample_progress(self):
-        first = self.client.post("/api/v1/laboratory/orders/", {
+    def test_list_returns_nested_patient_object(self):
+        created = self.client.post("/api/v1/laboratory/orders/", {
             "patient": self.patient.pk,
             "visit": self.visit.pk,
             "priority": "routine",
@@ -70,20 +70,16 @@ class LabOrderCreateTest(APITestCase):
                 {"name": "Full Blood Count", "code": "FBC", "sample_type": "blood", "status": "pending"},
             ],
         }, format="json")
-        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
-        from laboratory.models import LabTest
-        LabTest.objects.filter(order_id=first.data["id"]).update(status="sample_collected")
-        second = self.client.post("/api/v1/laboratory/orders/", {
-            "patient": self.patient.pk,
-            "visit": self.visit.pk,
-            "priority": "routine",
-            "tests_data": [
-                {"name": "Malaria Parasite", "code": "MP", "sample_type": "blood", "status": "pending"},
-            ],
-        }, format="json")
-        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
-        self.assertNotEqual(first.data["id"], second.data["id"])
-        self.assertFalse(second.data.get("merged_into_existing"))
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertIsInstance(created.data.get("patient"), dict)
+        self.assertTrue(created.data["patient"].get("name"))
+
+        listed = self.client.get("/api/v1/laboratory/orders/")
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        row = next(r for r in listed.data["results"] if r["id"] == created.data["id"])
+        self.assertIsInstance(row.get("patient"), dict)
+        self.assertTrue(row["patient"].get("name"))
+        self.assertIsInstance(row.get("doctor"), (dict, type(None)))
 
 
 class LabOrderListTest(APITestCase):

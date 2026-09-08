@@ -470,8 +470,11 @@ class LabOrderSerializer(serializers.ModelSerializer):
         # Add patient and doctor as full objects in response
         representation['patient'] = self.get_patient_details(instance)
         representation['doctor'] = self.get_doctor_details(instance)
+        representation['merged_into_existing'] = bool(
+            getattr(instance, 'merged_into_existing', False)
+        )
         return representation
-    
+
     def validate_clinic(self, value):
         """Normalize clinic name before validation."""
         if value:
@@ -553,13 +556,6 @@ class LabOrderSerializer(serializers.ModelSerializer):
             LabTest.objects.create(order=order, **test_data)
         order.merged_into_existing = False
         return order
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data['merged_into_existing'] = bool(
-            getattr(instance, 'merged_into_existing', False)
-        )
-        return data
 
     def _expand_known_tests_from_other(self, order, tests_data):
         """
