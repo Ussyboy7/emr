@@ -49,6 +49,56 @@ class RadiologyOrderCreateTest(APITestCase):
         }, format="json")
         self.assertIn(resp.status_code, [status.HTTP_400_BAD_REQUEST])
 
+    def test_second_create_same_visit_appends_when_pending(self):
+        first = self.client.post("/api/v1/radiology/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "routine",
+            "studies_data": [
+                {"procedure": "Chest X-Ray", "body_part": "Chest", "modality": "X-Ray", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post("/api/v1/radiology/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "stat",
+            "studies_data": [
+                {"procedure": "Abdomen Ultrasound", "body_part": "Abdomen", "modality": "Ultrasound", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data["id"], second.data["id"])
+        self.assertTrue(second.data.get("merged_into_existing"))
+        self.assertEqual(second.data.get("priority"), "stat")
+        from radiology.models import RadiologyOrder
+        order = RadiologyOrder.objects.get(pk=first.data["id"])
+        self.assertEqual(order.studies.count(), 2)
+
+    def test_no_append_after_study_progress(self):
+        first = self.client.post("/api/v1/radiology/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "routine",
+            "studies_data": [
+                {"procedure": "Chest X-Ray", "body_part": "Chest", "modality": "X-Ray", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        from radiology.models import RadiologyStudy
+        RadiologyStudy.objects.filter(order_id=first.data["id"]).update(status="scheduled")
+        second = self.client.post("/api/v1/radiology/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "routine",
+            "studies_data": [
+                {"procedure": "Skull X-Ray", "body_part": "Head", "modality": "X-Ray", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertNotEqual(first.data["id"], second.data["id"])
+        self.assertFalse(second.data.get("merged_into_existing"))
+
 
 class RadiologyOrderListTest(APITestCase):
     """GET /api/v1/radiology/orders/"""

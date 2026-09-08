@@ -35,6 +35,56 @@ class LabOrderCreateTest(APITestCase):
         }, format="json")
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_second_create_same_visit_appends_when_pending(self):
+        first = self.client.post("/api/v1/laboratory/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "routine",
+            "tests_data": [
+                {"name": "Full Blood Count", "code": "FBC", "sample_type": "blood", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post("/api/v1/laboratory/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "urgent",
+            "tests_data": [
+                {"name": "Malaria Parasite", "code": "MP", "sample_type": "blood", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data["id"], second.data["id"])
+        self.assertTrue(second.data.get("merged_into_existing"))
+        self.assertEqual(second.data.get("priority"), "urgent")
+        from laboratory.models import LabOrder
+        order = LabOrder.objects.get(pk=first.data["id"])
+        self.assertEqual(order.tests.count(), 2)
+
+    def test_no_append_after_sample_progress(self):
+        first = self.client.post("/api/v1/laboratory/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "routine",
+            "tests_data": [
+                {"name": "Full Blood Count", "code": "FBC", "sample_type": "blood", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        from laboratory.models import LabTest
+        LabTest.objects.filter(order_id=first.data["id"]).update(status="sample_collected")
+        second = self.client.post("/api/v1/laboratory/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "routine",
+            "tests_data": [
+                {"name": "Malaria Parasite", "code": "MP", "sample_type": "blood", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertNotEqual(first.data["id"], second.data["id"])
+        self.assertFalse(second.data.get("merged_into_existing"))
+
 
 class LabOrderListTest(APITestCase):
     """GET /api/v1/laboratory/orders/"""
