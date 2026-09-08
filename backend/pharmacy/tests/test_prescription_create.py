@@ -70,3 +70,44 @@ class PrescriptionListTest(APITestCase):
     def test_queue_stats(self):
         resp = self.client.get("/api/v1/pharmacy/prescriptions/queue-stats/")
         self.assertIn(resp.status_code, [status.HTTP_200_OK, status.HTTP_404_NOT_FOUND])
+
+    def test_list_hides_cancelled_by_default(self):
+        from datetime import date
+        from patients.models import Patient
+        from pharmacy.models import Prescription
+
+        patient = Patient.objects.create(
+            patient_id="RX-CANCEL-HIDE",
+            surname="Cancel",
+            first_name="Hide",
+            gender="male",
+            date_of_birth=date(1990, 1, 1),
+        )
+        Prescription.objects.create(
+            prescription_id="RX-CANCEL-ACTIVE",
+            patient=patient,
+            doctor=self.user,
+            created_by=self.user,
+            status="pending",
+        )
+        Prescription.objects.create(
+            prescription_id="RX-CANCEL-HIDDEN",
+            patient=patient,
+            doctor=self.user,
+            created_by=self.user,
+            status="cancelled",
+        )
+        resp = self.client.get("/api/v1/pharmacy/prescriptions/", {"search": "RX-CANCEL"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        results = resp.data.get("results", resp.data)
+        ids = {r["prescription_id"] for r in results}
+        self.assertIn("RX-CANCEL-ACTIVE", ids)
+        self.assertNotIn("RX-CANCEL-HIDDEN", ids)
+
+        cancelled = self.client.get(
+            "/api/v1/pharmacy/prescriptions/",
+            {"search": "RX-CANCEL", "status": "cancelled"},
+        )
+        self.assertEqual(cancelled.status_code, status.HTTP_200_OK)
+        cancelled_ids = {r["prescription_id"] for r in cancelled.data.get("results", cancelled.data)}
+        self.assertIn("RX-CANCEL-HIDDEN", cancelled_ids)

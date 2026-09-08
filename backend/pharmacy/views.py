@@ -1011,6 +1011,10 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 
         date_preset = (params.get('date_preset') or 'all').lower()
         qs = apply_date_preset(qs, date_preset, 'prescribed_at')
+        # Default queue hides cancelled (merged donors / voids). Explicit status=cancelled to include.
+        status_param = (params.get('status') or '').strip().lower()
+        if not status_param or status_param == 'all':
+            qs = qs.exclude(status='cancelled')
         return qs
 
     def get_queryset(self):

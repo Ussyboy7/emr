@@ -137,7 +137,7 @@ const mapApiPrescriptionStatusToUi = (s: string | undefined, fallback: string): 
   if (s === 'dispensing') return 'Processing';
   if (s === 'dispensed') return 'Dispensed';
   if (s === 'partially_dispensed') return 'Partially Dispensed';
-  if (s === 'cancelled') return 'On Hold';
+  if (s === 'cancelled') return 'Cancelled';
   return fallback;
 };
 
@@ -698,8 +698,8 @@ export default function PrescriptionsPage() {
                   : rx.status === 'partially_dispensed'
                     ? 'Partially Dispensed'
                     : rx.status === 'cancelled'
-                      ? 'On Hold'
-                      : 'On Hold',
+                      ? 'Cancelled'
+                      : 'Pending',
           priority,
           waitTime,
           clinicalNotes: rx.diagnosis || '',
@@ -1177,7 +1177,8 @@ export default function PrescriptionsPage() {
       case 'Ready': return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400';
       case 'Partially Dispensed': return 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-400';
       case 'Dispensed': return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400';
-      case 'On Hold': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400';
+      case 'On Hold':
+      case 'Cancelled': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
     }
   };
