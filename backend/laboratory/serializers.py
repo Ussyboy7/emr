@@ -498,6 +498,8 @@ class LabOrderSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create lab order with nested tests, or append into a fully-pending same-visit order."""
+        from django.db import transaction
+
         from common.order_location import apply_order_location_clinic
         from laboratory.order_merge import bump_priority, find_mergeable_lab_order
 
@@ -514,48 +516,50 @@ class LabOrderSerializer(serializers.ModelSerializer):
         user = getattr(request, 'user', None) if request else None
         validated_data = apply_order_location_clinic(validated_data, user=None)
 
-        merge_target = None
-        if validated_data.get('source_type') != 'external_manual':
-            patient = validated_data.get('patient')
-            visit = validated_data.get('visit')
-            session = validated_data.get('consultation_session')
-            admission = validated_data.get('admission')
-            if patient is not None and (visit or admission):
-                merge_target = find_mergeable_lab_order(
-                    patient_id=getattr(patient, 'pk', patient),
-                    visit_id=getattr(visit, 'pk', visit) if visit else None,
-                    consultation_session_id=getattr(session, 'pk', session) if session else None,
-                    admission_id=getattr(admission, 'pk', admission) if admission else None,
-                )
+        with transaction.atomic():
+            merge_target = None
+            if validated_data.get('source_type') != 'external_manual':
+                patient = validated_data.get('patient')
+                visit = validated_data.get('visit')
+                session = validated_data.get('consultation_session')
+                admission = validated_data.get('admission')
+                if patient is not None and (visit or admission):
+                    merge_target = find_mergeable_lab_order(
+                        patient_id=getattr(patient, 'pk', patient),
+                        visit_id=getattr(visit, 'pk', visit) if visit else None,
+                        consultation_session_id=getattr(session, 'pk', session) if session else None,
+                        admission_id=getattr(admission, 'pk', admission) if admission else None,
+                        for_update=True,
+                    )
 
-        if merge_target is not None:
-            update_fields = []
-            notes = (validated_data.get('clinical_notes') or '').strip()
-            if notes:
-                merge_target.clinical_notes = (
-                    f"{merge_target.clinical_notes}\n{notes}".strip()
-                    if merge_target.clinical_notes
-                    else notes
+            if merge_target is not None:
+                update_fields = []
+                notes = (validated_data.get('clinical_notes') or '').strip()
+                if notes:
+                    merge_target.clinical_notes = (
+                        f"{merge_target.clinical_notes}\n{notes}".strip()
+                        if merge_target.clinical_notes
+                        else notes
+                    )
+                    update_fields.append('clinical_notes')
+                new_priority = bump_priority(
+                    merge_target.priority, validated_data.get('priority')
                 )
-                update_fields.append('clinical_notes')
-            new_priority = bump_priority(
-                merge_target.priority, validated_data.get('priority')
-            )
-            if new_priority != merge_target.priority:
-                merge_target.priority = new_priority
-                update_fields.append('priority')
-            if update_fields:
-                merge_target.save(update_fields=update_fields)
+                if new_priority != merge_target.priority:
+                    merge_target.priority = new_priority
+                    update_fields.append('priority')
+                if update_fields:
+                    merge_target.save(update_fields=update_fields)
+                for test_data in tests_data:
+                    LabTest.objects.create(order=merge_target, **test_data)
+                merge_target.merged_into_existing = True
+                return merge_target
+
+            order = LabOrder.objects.create(**validated_data)
             for test_data in tests_data:
-                LabTest.objects.create(order=merge_target, **test_data)
-            merge_target.merged_into_existing = True
-            return merge_target
-
-        order = LabOrder.objects.create(**validated_data)
-        for test_data in tests_data:
-            LabTest.objects.create(order=order, **test_data)
-        order.merged_into_existing = False
-        return order
+                LabTest.objects.create(order=order, **test_data)
+            order.merged_into_existing = False
+            return order
 
     def _expand_known_tests_from_other(self, order, tests_data):
         """

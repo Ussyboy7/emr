@@ -312,6 +312,8 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create radiology order with studies, or append into a fully-pending same-visit order."""
+        from django.db import transaction
+
         from common.order_location import apply_order_location_clinic
         from radiology.order_merge import bump_priority, find_mergeable_radiology_order
 
@@ -344,48 +346,50 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
                 **study_data
             )
 
-        merge_target = None
-        if validated_data.get('source_type') != 'external_manual':
-            patient = validated_data.get('patient')
-            visit = validated_data.get('visit')
-            session = validated_data.get('consultation_session')
-            admission = validated_data.get('admission')
-            if patient is not None and (visit or admission):
-                merge_target = find_mergeable_radiology_order(
-                    patient_id=getattr(patient, 'pk', patient),
-                    visit_id=getattr(visit, 'pk', visit) if visit else None,
-                    consultation_session_id=getattr(session, 'pk', session) if session else None,
-                    admission_id=getattr(admission, 'pk', admission) if admission else None,
-                )
+        with transaction.atomic():
+            merge_target = None
+            if validated_data.get('source_type') != 'external_manual':
+                patient = validated_data.get('patient')
+                visit = validated_data.get('visit')
+                session = validated_data.get('consultation_session')
+                admission = validated_data.get('admission')
+                if patient is not None and (visit or admission):
+                    merge_target = find_mergeable_radiology_order(
+                        patient_id=getattr(patient, 'pk', patient),
+                        visit_id=getattr(visit, 'pk', visit) if visit else None,
+                        consultation_session_id=getattr(session, 'pk', session) if session else None,
+                        admission_id=getattr(admission, 'pk', admission) if admission else None,
+                        for_update=True,
+                    )
 
-        if merge_target is not None:
-            update_fields = []
-            notes = (validated_data.get('clinical_notes') or '').strip()
-            if notes:
-                merge_target.clinical_notes = (
-                    f"{merge_target.clinical_notes}\n{notes}".strip()
-                    if merge_target.clinical_notes
-                    else notes
+            if merge_target is not None:
+                update_fields = []
+                notes = (validated_data.get('clinical_notes') or '').strip()
+                if notes:
+                    merge_target.clinical_notes = (
+                        f"{merge_target.clinical_notes}\n{notes}".strip()
+                        if merge_target.clinical_notes
+                        else notes
+                    )
+                    update_fields.append('clinical_notes')
+                new_priority = bump_priority(
+                    merge_target.priority, validated_data.get('priority')
                 )
-                update_fields.append('clinical_notes')
-            new_priority = bump_priority(
-                merge_target.priority, validated_data.get('priority')
-            )
-            if new_priority != merge_target.priority:
-                merge_target.priority = new_priority
-                update_fields.append('priority')
-            if update_fields:
-                merge_target.save(update_fields=update_fields)
+                if new_priority != merge_target.priority:
+                    merge_target.priority = new_priority
+                    update_fields.append('priority')
+                if update_fields:
+                    merge_target.save(update_fields=update_fields)
+                for raw in studies_data:
+                    _create_study(merge_target, raw)
+                merge_target.merged_into_existing = True
+                return merge_target
+
+            order = RadiologyOrder.objects.create(**validated_data)
             for raw in studies_data:
-                _create_study(merge_target, raw)
-            merge_target.merged_into_existing = True
-            return merge_target
-
-        order = RadiologyOrder.objects.create(**validated_data)
-        for raw in studies_data:
-            _create_study(order, raw)
-        order.merged_into_existing = False
-        return order
+                _create_study(order, raw)
+            order.merged_into_existing = False
+            return order
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

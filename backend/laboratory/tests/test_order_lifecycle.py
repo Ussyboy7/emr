@@ -81,6 +81,48 @@ class LabOrderCreateTest(APITestCase):
         self.assertTrue(row["patient"].get("name"))
         self.assertIsInstance(row.get("doctor"), (dict, type(None)))
 
+    def test_historical_merge_pending_same_visit(self):
+        from laboratory.models import LabOrder
+        from laboratory.order_merge import merge_pending_same_visit_lab_orders
+
+        first = self.client.post("/api/v1/laboratory/orders/", {
+            "patient": self.patient.pk,
+            "visit": self.visit.pk,
+            "priority": "routine",
+            "tests_data": [
+                {"name": "Full Blood Count", "code": "FBC", "sample_type": "blood", "status": "pending"},
+            ],
+        }, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        # Simulate a pre-append duplicate by creating a second order directly.
+        from laboratory.models import LabTest
+        donor = LabOrder.objects.create(
+            patient_id=self.patient.pk,
+            visit_id=self.visit.pk,
+            doctor=self.doctor,
+            priority="routine",
+        )
+        LabTest.objects.create(
+            order=donor,
+            name="Urinalysis",
+            code="UA",
+            sample_type="urine",
+            status="pending",
+        )
+        LabTest.objects.create(
+            order=donor,
+            name="Full Blood Count",
+            code="FBC",
+            sample_type="blood",
+            status="pending",
+        )
+        result = merge_pending_same_visit_lab_orders()
+        self.assertEqual(result["merged_groups"], 1)
+        self.assertFalse(LabOrder.objects.filter(pk=donor.pk).exists())
+        keeper = LabOrder.objects.get(pk=first.data["id"])
+        codes = set(keeper.tests.values_list("code", flat=True))
+        self.assertEqual(codes, {"FBC", "UA"})
+
 
 class LabOrderListTest(APITestCase):
     """GET /api/v1/laboratory/orders/"""
