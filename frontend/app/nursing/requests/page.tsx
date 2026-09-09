@@ -243,10 +243,10 @@ export default function NursingRequestsPage() {
     packSizeForRequestItem(item, Object.values(medicationLookup));
 
   const statsCards = useMemo(() => [
-    { label: "Total", value: stats.total, icon: Send, border: "border-l-teal-500", text: "text-teal-600 dark:text-teal-400", iconClass: "text-teal-400", filter: "all" },
-    { label: "Pending", value: stats.pending, icon: Clock, border: "border-l-amber-500", text: "text-amber-600 dark:text-amber-400", iconClass: "text-amber-400", filter: "pending" },
-    { label: "Approved", value: stats.approved, icon: Clock, border: "border-l-blue-500", text: "text-blue-600 dark:text-blue-400", iconClass: "text-blue-400", filter: "approved" },
-    { label: "Confirmed", value: stats.confirmed, icon: CheckCircle2, border: "border-l-emerald-500", text: "text-emerald-600 dark:text-emerald-400", iconClass: "text-emerald-400", filter: "received", sub: stats.awaitingConfirmation ? `Awaiting: ${stats.awaitingConfirmation}` : undefined },
+    { label: "Total", value: stats.total, icon: Send, color: "text-teal-500", bg: "bg-teal-500/10" },
+    { label: "Pending", value: stats.pending, icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+    { label: "Approved", value: stats.approved, icon: Clock, color: "text-blue-500", bg: "bg-blue-500/10" },
+    { label: "Confirmed", value: stats.confirmed, icon: CheckCircle2, color: "text-green-500", bg: "bg-green-500/10", sub: stats.awaitingConfirmation ? `Awaiting: ${stats.awaitingConfirmation}` : undefined },
   ], [stats]);
 
   return (
@@ -278,19 +278,17 @@ export default function NursingRequestsPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statsCards.map((stat, i) => (
-            <Card
-              key={i}
-              className={`border-l-4 ${stat.border} cursor-pointer hover:shadow-md`}
-              onClick={() => { setStatusFilter(stat.filter); setCurrentPage(1); }}
-            >
+            <Card key={i}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-2xl sm:text-3xl font-bold ${stat.text}`}>{stat.value}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                     {stat.sub && <p className="text-xs text-muted-foreground">{stat.sub}</p>}
                   </div>
-                  <stat.icon className={`h-8 w-8 ${stat.iconClass}`} />
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
                 </div>
               </CardContent>
             </Card>

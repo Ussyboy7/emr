@@ -465,21 +465,23 @@ export default function RoomQueuePage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: 'Sent today', value: stats.sentToday, icon: ArrowRight, border: 'border-l-indigo-500', text: 'text-indigo-600 dark:text-indigo-400', iconClass: 'text-indigo-400' },
-            { label: 'Waiting now', value: stats.totalInQueues, icon: Users, border: 'border-l-blue-500', text: 'text-blue-600 dark:text-blue-400', iconClass: 'text-blue-400' },
-            { label: 'In consult', value: stats.inConsult, icon: Stethoscope, border: 'border-l-violet-500', text: 'text-violet-600 dark:text-violet-400', iconClass: 'text-violet-400' },
-            { label: 'Avg Wait Time', value: `${stats.avgWaitTime} min`, icon: Clock, border: 'border-l-amber-500', text: 'text-amber-600 dark:text-amber-400', iconClass: 'text-amber-400' },
+            { label: 'Sent today', value: stats.sentToday, icon: ArrowRight, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
+            { label: 'Waiting now', value: stats.totalInQueues, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+            { label: 'In consult', value: stats.inConsult, icon: Stethoscope, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+            { label: 'Avg Wait Time', value: `${stats.avgWaitTime} min`, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
           ].map((stat, i) => (
-            <Card key={i} className={`border-l-4 ${stat.border}`}>
+            <Card key={i}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-2xl sm:text-3xl font-bold ${stat.text}`}>{stat.value}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                   </div>
-                  <stat.icon className={`h-8 w-8 ${stat.iconClass}`} />
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
                 </div>
               </CardContent>
             </Card>

@@ -1256,19 +1256,21 @@ export default function NursingPoolQueuePage() {
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Today's Visits", value: stats.totalInPool, icon: Users, border: 'border-l-rose-500', text: 'text-rose-600 dark:text-rose-400', iconClass: 'text-rose-400', onClick: () => setStatusFilter('all') },
-            { label: 'Pending Vitals', value: stats.pendingVitals, icon: Stethoscope, border: 'border-l-amber-500', text: 'text-amber-600 dark:text-amber-400', iconClass: 'text-amber-400', onClick: () => setStatusFilter('pending') },
-            { label: 'Ready for Consultation', value: stats.readyForConsultation, icon: UserCheck, border: 'border-l-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', iconClass: 'text-emerald-400', onClick: () => setStatusFilter('ready-for-consultation') },
-            { label: 'In Consultation', value: stats.inConsultation, icon: Activity, border: 'border-l-violet-500', text: 'text-violet-600 dark:text-violet-400', iconClass: 'text-violet-400', onClick: () => setStatusFilter('in-consultation') },
+            { label: "Today's Visits", value: stats.totalInPool, icon: Users, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+            { label: 'Pending Vitals', value: stats.pendingVitals, icon: Stethoscope, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+            { label: 'Ready for Consultation', value: stats.readyForConsultation, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+            { label: 'In Consultation', value: stats.inConsultation, icon: Activity, color: 'text-violet-500', bg: 'bg-violet-500/10' },
           ].map((stat, i) => (
-            <Card key={i} className={`border-l-4 ${stat.border} cursor-pointer hover:shadow-md`} onClick={stat.onClick}>
+            <Card key={i} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-2xl sm:text-3xl font-bold ${stat.text}`}>{stat.value}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                   </div>
-                  <stat.icon className={`h-8 w-8 ${stat.iconClass}`} />
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
                 </div>
               </CardContent>
             </Card>
