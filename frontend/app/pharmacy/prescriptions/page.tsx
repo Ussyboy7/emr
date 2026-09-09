@@ -44,7 +44,7 @@ import {
   ClipboardList, Search, Eye, Clock, CheckCircle2, CheckCircle, Pill, Calendar,
   AlertTriangle, Package, Activity, Stethoscope,
   ArrowRight, XCircle, Printer, ShieldAlert, ArrowRightLeft, Info,
-  Beaker, Hash, Loader2, Tag, GitBranch
+  Beaker, Loader2, Tag, GitBranch
 } from 'lucide-react';
 import type { Prescription, PrescriptionStatus, Priority, DrugInteraction, MedicationBatch, SubstituteOption, MedicationItem } from './TYPES';
 
@@ -1982,8 +1982,8 @@ export default function PrescriptionsPage() {
           </div>
         </div>
 
-        {/* Stats Cards — workflow + volume */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        {/* Stats Cards — workflow */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -2033,19 +2033,6 @@ export default function PrescriptionsPage() {
                   </p>
                 </div>
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total</p>
-                  <p className="text-2xl font-bold text-slate-700 dark:text-slate-200 tabular-nums">
-                    {queueStatsLoading ? '—' : stats.total.toLocaleString()}
-                  </p>
-                </div>
-                <Hash className="h-5 w-5 text-slate-500" />
               </div>
             </CardContent>
           </Card>

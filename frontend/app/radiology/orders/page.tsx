@@ -1425,7 +1425,7 @@ export default function RadiologyOrdersPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Tooltip>
               <TooltipTrigger asChild>
           <Card className="border-l-4 border-l-gray-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
@@ -1498,17 +1498,6 @@ export default function RadiologyOrdersPage() {
                 <p className="text-xs">Studies that were rejected and need rework</p>
               </TooltipContent>
             </Tooltip>
-          <Card className="border-l-4 border-l-red-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">STAT Orders</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">{stats.stat}</p>
-                </div>
-                <AlertTriangle className="h-8 w-8 text-red-400" />
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Filters & Tabs */}

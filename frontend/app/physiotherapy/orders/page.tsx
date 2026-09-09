@@ -732,7 +732,7 @@ export default function PhysiotherapyOrdersPage() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Card className="border-l-4 border-l-yellow-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
@@ -787,25 +787,6 @@ export default function PhysiotherapyOrdersPage() {
               </TooltipTrigger>
               <TooltipContent>
                 <p className="text-xs">Active treatment sessions</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Card className="border-l-4 border-l-red-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('cancelled')}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Cancelled</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">{stats.cancelled}</p>
-                      </div>
-                      <XCircle className="h-8 w-8 text-red-400" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="text-xs">Cancelled orders</p>
               </TooltipContent>
             </Tooltip>
 
