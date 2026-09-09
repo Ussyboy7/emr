@@ -1260,9 +1260,9 @@ export default function ConsultationHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.today}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.today}</p>
                 </div>
-                <Calendar className="h-8 w-8 text-blue-500/80" />
+                <Calendar className="h-8 w-8 text-blue-400" />
               </div>
             </CardContent>
           </Card>
@@ -1271,9 +1271,9 @@ export default function ConsultationHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">This Week</p>
-                  <p className="text-2xl font-bold text-slate-600 dark:text-slate-400">{stats.thisWeek}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-slate-600 dark:text-slate-400">{stats.thisWeek}</p>
                 </div>
-                <History className="h-8 w-8 text-slate-500/80" />
+                <History className="h-8 w-8 text-slate-400" />
               </div>
             </CardContent>
           </Card>
@@ -1282,9 +1282,9 @@ export default function ConsultationHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">In Progress</p>
-                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.inProgress}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.inProgress}</p>
                 </div>
-                <Activity className="h-8 w-8 text-amber-500/80" />
+                <Activity className="h-8 w-8 text-amber-400" />
               </div>
             </CardContent>
           </Card>
@@ -1293,9 +1293,9 @@ export default function ConsultationHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Completed</p>
-                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
                 </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-500/80" />
+                <CheckCircle2 className="h-8 w-8 text-emerald-400" />
               </div>
             </CardContent>
           </Card>

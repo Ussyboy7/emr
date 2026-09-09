@@ -839,8 +839,9 @@ export default function WardCarePage() {
               label: 'On ward',
               value: kpiAdmittedTotal,
               icon: Users,
-              color: 'text-blue-500',
-              bg: 'bg-blue-500/10',
+              border: 'border-l-blue-500',
+              text: 'text-blue-600 dark:text-blue-400',
+              iconClass: 'text-blue-400',
               ring: 'ring-blue-500',
             },
             {
@@ -848,8 +849,9 @@ export default function WardCarePage() {
               label: 'Pending discharge',
               value: kpiPendingDischargeTotal,
               icon: CheckCircle,
-              color: 'text-amber-500',
-              bg: 'bg-amber-500/10',
+              border: 'border-l-amber-500',
+              text: 'text-amber-600 dark:text-amber-400',
+              iconClass: 'text-amber-400',
               ring: 'ring-amber-500',
             },
             {
@@ -857,8 +859,9 @@ export default function WardCarePage() {
               label: 'Escalated',
               value: kpiEscalatedTotal,
               icon: AlertTriangle,
-              color: 'text-orange-500',
-              bg: 'bg-orange-500/10',
+              border: 'border-l-orange-500',
+              text: 'text-orange-600 dark:text-orange-400',
+              iconClass: 'text-orange-400',
               ring: 'ring-orange-500',
             },
             {
@@ -866,8 +869,9 @@ export default function WardCarePage() {
               label: 'No bed assigned',
               value: kpiUnassignedBedTotal,
               icon: BedIcon,
-              color: 'text-violet-500',
-              bg: 'bg-violet-500/10',
+              border: 'border-l-violet-500',
+              text: 'text-violet-600 dark:text-violet-400',
+              iconClass: 'text-violet-400',
               ring: 'ring-violet-500',
             },
           ]).map((stat) => {
@@ -876,7 +880,7 @@ export default function WardCarePage() {
               <Card
                 key={stat.key}
                 onClick={() => applyKpiFilter(stat.key)}
-                className={`cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${
+                className={`border-l-4 ${stat.border} cursor-pointer transition-all hover:shadow-md ${
                   isActive ? `ring-2 ring-offset-1 ${stat.ring}` : ''
                 }`}
                 role="button"
@@ -893,11 +897,9 @@ export default function WardCarePage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">{stat.label}</p>
-                      <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                      <p className={`text-2xl sm:text-3xl font-bold ${stat.text}`}>{stat.value}</p>
                     </div>
-                    <div className={`p-3 rounded-full ${stat.bg}`}>
-                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                    </div>
+                    <stat.icon className={`h-8 w-8 ${stat.iconClass}`} />
                   </div>
                 </CardContent>
               </Card>

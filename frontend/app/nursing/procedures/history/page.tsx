@@ -348,26 +348,15 @@ export default function ProceduresHistoryPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Card className="border-l-4 border-l-slate-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Records</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.total}</p>
-                </div>
-                <FileText className="h-8 w-8 text-slate-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className="border-l-4 border-l-emerald-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Injections</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.injections}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{historyStats.injections}</p>
                 </div>
-                <Syringe className="h-8 w-8 text-emerald-500 opacity-50" />
+                <Syringe className="h-8 w-8 text-emerald-400" />
               </div>
             </CardContent>
           </Card>
@@ -376,9 +365,9 @@ export default function ProceduresHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Dressings</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.dressings}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">{historyStats.dressings}</p>
                 </div>
-                <Bandage className="h-8 w-8 text-violet-500 opacity-50" />
+                <Bandage className="h-8 w-8 text-violet-400" />
               </div>
             </CardContent>
           </Card>
@@ -387,9 +376,9 @@ export default function ProceduresHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Medications</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.medications}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{historyStats.medications}</p>
                 </div>
-                <Pill className="h-8 w-8 text-blue-500 opacity-50" />
+                <Pill className="h-8 w-8 text-blue-400" />
               </div>
             </CardContent>
           </Card>
@@ -398,9 +387,9 @@ export default function ProceduresHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Observations</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.observations}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{historyStats.observations}</p>
                 </div>
-                <Activity className="h-8 w-8 text-amber-500 opacity-50" />
+                <Activity className="h-8 w-8 text-amber-400" />
               </div>
             </CardContent>
           </Card>

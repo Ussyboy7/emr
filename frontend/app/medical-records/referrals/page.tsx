@@ -4,7 +4,7 @@ import React, { useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { StandardPagination } from "@/components/shared/StandardPagination";
-import { FileText } from "lucide-react";
+import { FileText, ListOrdered, Send, Search, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   referralService,
@@ -179,36 +179,68 @@ export default function MedicalRecordsReferralsPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-blue-500">
+          <Card
+            className="border-l-4 border-l-blue-500 cursor-pointer hover:shadow-md"
+            onClick={() => setStatusFilter("all")}
+          >
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">In queue (excl. draft)</p>
-              <p className="text-2xl font-bold text-blue-600">
-                {statsLoading ? "…" : stats.total}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">In queue (excl. draft)</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">
+                    {statsLoading ? "…" : stats.total}
+                  </p>
+                </div>
+                <ListOrdered className="h-8 w-8 text-blue-400" />
+              </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-sky-500">
+          <Card
+            className="border-l-4 border-l-sky-500 cursor-pointer hover:shadow-md"
+            onClick={() => setStatusFilter("submitted_to_records")}
+          >
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Submitted</p>
-              <p className="text-2xl font-bold text-sky-600">
-                {statsLoading ? "…" : stats.submitted}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Submitted</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-sky-600 dark:text-sky-400">
+                    {statsLoading ? "…" : stats.submitted}
+                  </p>
+                </div>
+                <Send className="h-8 w-8 text-sky-400" />
+              </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-amber-500">
+          <Card
+            className="border-l-4 border-l-amber-500 cursor-pointer hover:shadow-md"
+            onClick={() => setStatusFilter("records_review")}
+          >
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">In review</p>
-              <p className="text-2xl font-bold text-amber-600">
-                {statsLoading ? "…" : stats.inReview}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">In review</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">
+                    {statsLoading ? "…" : stats.inReview}
+                  </p>
+                </div>
+                <Search className="h-8 w-8 text-amber-400" />
+              </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-emerald-500">
+          <Card
+            className="border-l-4 border-l-emerald-500 cursor-pointer hover:shadow-md"
+            onClick={() => setStatusFilter("approved_for_forms")}
+          >
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Records acknowledged</p>
-              <p className="text-2xl font-bold text-emerald-600">
-                {statsLoading ? "…" : stats.approved}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Records acknowledged</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                    {statsLoading ? "…" : stats.approved}
+                  </p>
+                </div>
+                <CheckCircle2 className="h-8 w-8 text-emerald-400" />
+              </div>
             </CardContent>
           </Card>
         </div>
