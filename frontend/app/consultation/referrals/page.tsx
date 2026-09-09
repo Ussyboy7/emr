@@ -25,7 +25,7 @@ import {
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { MODAL_SIZES } from "@/components/ui/modal-sizes";
 import { isAuthenticationError } from "@/lib/auth-errors";
-import { Plus, Send, Stethoscope } from "lucide-react";
+import { CheckCircle2, ClipboardList, Clock, Plus, Send, Stethoscope } from "lucide-react";
 import { toast } from "sonner";
 import {
   referralService,
@@ -407,36 +407,64 @@ export default function ConsultationReferralsPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-blue-500">
+          <Card>
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Total (all statuses)</p>
-              <p className="text-2xl font-bold text-blue-600">
-                {statsLoading ? "…" : stats.total}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total (all statuses)</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">
+                    {statsLoading ? "…" : stats.total}
+                  </p>
+                </div>
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <ClipboardList className="h-5 w-5 text-blue-500" />
+                </div>
+              </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-sky-500">
+          <Card>
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Submitted</p>
-              <p className="text-2xl font-bold text-sky-600">
-                {statsLoading ? "…" : stats.submitted}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Submitted</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-sky-500 mt-1">
+                    {statsLoading ? "…" : stats.submitted}
+                  </p>
+                </div>
+                <div className="p-3 rounded-full bg-sky-500/10">
+                  <Send className="h-5 w-5 text-sky-500" />
+                </div>
+              </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-amber-500">
+          <Card>
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">In review</p>
-              <p className="text-2xl font-bold text-amber-600">
-                {statsLoading ? "…" : stats.inReview}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">In review</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-500 mt-1">
+                    {statsLoading ? "…" : stats.inReview}
+                  </p>
+                </div>
+                <div className="p-3 rounded-full bg-amber-500/10">
+                  <Clock className="h-5 w-5 text-amber-500" />
+                </div>
+              </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-emerald-500">
+          <Card>
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Records acknowledged</p>
-              <p className="text-2xl font-bold text-emerald-600">
-                {statsLoading ? "…" : stats.approved}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Records acknowledged</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 mt-1">
+                    {statsLoading ? "…" : stats.approved}
+                  </p>
+                </div>
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

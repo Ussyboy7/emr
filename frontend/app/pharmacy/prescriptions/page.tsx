@@ -1989,11 +1989,13 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-2xl font-bold text-amber-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-500 tabular-nums mt-1">
                     {queueStatsLoading ? '—' : stats.pending.toLocaleString()}
                   </p>
                 </div>
-                <Clock className="h-5 w-5 text-amber-500" />
+                <div className="p-3 rounded-full bg-amber-500/10">
+                  <Clock className="h-5 w-5 text-amber-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2002,11 +2004,13 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Processing</p>
-                  <p className="text-2xl font-bold text-blue-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 tabular-nums mt-1">
                     {queueStatsLoading ? '—' : stats.processing.toLocaleString()}
                   </p>
                 </div>
-                <Activity className="h-5 w-5 text-blue-500" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Activity className="h-5 w-5 text-blue-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2015,11 +2019,13 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Partial</p>
-                  <p className="text-2xl font-bold text-violet-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-500 tabular-nums mt-1">
                     {queueStatsLoading ? '—' : stats.partiallyDispensed.toLocaleString()}
                   </p>
                 </div>
-                <GitBranch className="h-5 w-5 text-violet-500" />
+                <div className="p-3 rounded-full bg-violet-500/10">
+                  <GitBranch className="h-5 w-5 text-violet-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2028,11 +2034,13 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Fully dispensed</p>
-                  <p className="text-2xl font-bold text-emerald-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 tabular-nums mt-1">
                     {queueStatsLoading ? '—' : stats.dispensed.toLocaleString()}
                   </p>
                 </div>
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                </div>
               </div>
             </CardContent>
           </Card>

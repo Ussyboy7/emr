@@ -1255,47 +1255,55 @@ export default function ConsultationHistoryPage() {
 
         {/* Stats: Today | This Week | In Progress | Completed */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-blue-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.today}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">{stats.today}</p>
                 </div>
-                <Calendar className="h-8 w-8 text-blue-500/80" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Calendar className="h-5 w-5 text-blue-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-slate-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">This Week</p>
-                  <p className="text-2xl font-bold text-slate-600 dark:text-slate-400">{stats.thisWeek}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-slate-500 mt-1">{stats.thisWeek}</p>
                 </div>
-                <History className="h-8 w-8 text-slate-500/80" />
+                <div className="p-3 rounded-full bg-slate-500/10">
+                  <History className="h-5 w-5 text-slate-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-amber-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">In Progress</p>
-                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.inProgress}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-500 mt-1">{stats.inProgress}</p>
                 </div>
-                <Activity className="h-8 w-8 text-amber-500/80" />
+                <div className="p-3 rounded-full bg-amber-500/10">
+                  <Activity className="h-5 w-5 text-amber-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-emerald-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Completed</p>
-                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 mt-1">{stats.completed}</p>
                 </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-500/80" />
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -1981,14 +1981,16 @@ export default function LabOrdersPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Tooltip>
               <TooltipTrigger asChild>
-          <Card className="border-l-4 border-l-gray-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
+          <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-gray-500 mt-1">{stats.pendingSamples}</p>
                 </div>
-                <Beaker className="h-8 w-8 text-gray-400" />
+                <div className="p-3 rounded-full bg-gray-500/10">
+                  <Beaker className="h-5 w-5 text-gray-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1999,14 +2001,16 @@ export default function LabOrdersPage() {
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-          <Card className="border-l-4 border-l-blue-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('processing')}>
+          <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('processing')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Processing</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.processing}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">{stats.processing}</p>
                 </div>
-                <Activity className="h-8 w-8 text-blue-400" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Activity className="h-5 w-5 text-blue-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2017,14 +2021,16 @@ export default function LabOrdersPage() {
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-          <Card className="border-l-4 border-l-amber-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('results')}>
+          <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('results')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Results</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.resultsReady}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-500 mt-1">{stats.resultsReady}</p>
                 </div>
-                <FileText className="h-8 w-8 text-amber-400" />
+                <div className="p-3 rounded-full bg-amber-500/10">
+                  <FileText className="h-5 w-5 text-amber-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2035,14 +2041,16 @@ export default function LabOrdersPage() {
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-          <Card className="border-l-4 border-l-rose-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('rejected')}>
+          <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('rejected')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Rework Required</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.reworkOrders}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-500 mt-1">{stats.reworkOrders}</p>
                 </div>
-                <XCircle className="h-8 w-8 text-rose-400" />
+                <div className="p-3 rounded-full bg-rose-500/10">
+                  <XCircle className="h-5 w-5 text-rose-500" />
+                </div>
               </div>
             </CardContent>
           </Card>

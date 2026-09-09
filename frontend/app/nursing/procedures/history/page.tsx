@@ -349,58 +349,68 @@ export default function ProceduresHistoryPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Card className="border-l-4 border-l-slate-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Records</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-slate-500 mt-1">{historyStats.total}</p>
                 </div>
-                <FileText className="h-8 w-8 text-slate-500 opacity-50" />
+                <div className="p-3 rounded-full bg-slate-500/10">
+                  <FileText className="h-5 w-5 text-slate-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-emerald-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Injections</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.injections}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 mt-1">{historyStats.injections}</p>
                 </div>
-                <Syringe className="h-8 w-8 text-emerald-500 opacity-50" />
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <Syringe className="h-5 w-5 text-emerald-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-violet-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Dressings</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.dressings}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-500 mt-1">{historyStats.dressings}</p>
                 </div>
-                <Bandage className="h-8 w-8 text-violet-500 opacity-50" />
+                <div className="p-3 rounded-full bg-violet-500/10">
+                  <Bandage className="h-5 w-5 text-violet-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-blue-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Medications</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.medications}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">{historyStats.medications}</p>
                 </div>
-                <Pill className="h-8 w-8 text-blue-500 opacity-50" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Pill className="h-5 w-5 text-blue-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-amber-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Observations</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.observations}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-500 mt-1">{historyStats.observations}</p>
                 </div>
-                <Activity className="h-8 w-8 text-amber-500 opacity-50" />
+                <div className="p-3 rounded-full bg-amber-500/10">
+                  <Activity className="h-5 w-5 text-amber-500" />
+                </div>
               </div>
             </CardContent>
           </Card>

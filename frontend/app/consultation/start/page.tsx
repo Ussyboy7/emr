@@ -786,14 +786,14 @@ const StartConsultation = () => {
         </div>
 
         {/* Enhanced Stats Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           {/* Operational / free rooms */}
-          <Card className="border-l-4 border-l-emerald-500 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground font-medium">Operational rooms</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                  <p className="text-sm text-muted-foreground">Operational rooms</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 mt-1">
                     {operationalRooms.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -805,60 +805,60 @@ const StartConsultation = () => {
                     )}
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center">
-                  <CheckCircle className="h-6 w-6 text-white" />
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <CheckCircle className="h-5 w-5 text-emerald-500" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Active + paused sessions */}
-          <Card className="border-l-4 border-l-red-500 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground font-medium">Active & paused</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">
+                  <p className="text-sm text-muted-foreground">Active & paused</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-red-500 mt-1">
                     {overviewStats.openConsultations}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Open sessions across all rooms
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
-                  <Stethoscope className="h-6 w-6 text-white" />
+                <div className="p-3 rounded-full bg-red-500/10">
+                  <Stethoscope className="h-5 w-5 text-red-500" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Patients Waiting */}
-          <Card className="border-l-4 border-l-blue-500 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground font-medium">Patients Waiting</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">
+                  <p className="text-sm text-muted-foreground">Patients Waiting</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">
                     {overviewStats.queueCount}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     across all rooms
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
-                  <Users className="h-6 w-6 text-white" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Users className="h-5 w-5 text-blue-500" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Today's Activity */}
-          <Card className="border-l-4 border-l-purple-500 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground font-medium">Today's Sessions</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">
+                  <p className="text-sm text-muted-foreground">Today's Sessions</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-500 mt-1">
                     {overviewStats.completedToday}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -870,8 +870,8 @@ const StartConsultation = () => {
                     )}
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
-                  <UserCheck className="h-6 w-6 text-white" />
+                <div className="p-3 rounded-full bg-violet-500/10">
+                  <UserCheck className="h-5 w-5 text-violet-500" />
                 </div>
               </div>
             </CardContent>

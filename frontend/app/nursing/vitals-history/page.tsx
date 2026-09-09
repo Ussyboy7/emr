@@ -276,47 +276,55 @@ export default function VitalsHistoryPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-rose-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Readings</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-500 mt-1">{historyStats.total}</p>
                 </div>
-                <Activity className="h-8 w-8 text-rose-500 opacity-50" />
+                <div className="p-3 rounded-full bg-rose-500/10">
+                  <Activity className="h-5 w-5 text-rose-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-blue-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.today}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">{historyStats.today}</p>
                 </div>
-                <Calendar className="h-8 w-8 text-blue-500 opacity-50" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Calendar className="h-5 w-5 text-blue-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-violet-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">This Week</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.week}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-500 mt-1">{historyStats.week}</p>
                 </div>
-                <Clock className="h-8 w-8 text-violet-500 opacity-50" />
+                <div className="p-3 rounded-full bg-violet-500/10">
+                  <Clock className="h-5 w-5 text-violet-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-emerald-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Patients</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{historyStats.patients}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 mt-1">{historyStats.patients}</p>
                 </div>
-                <User className="h-8 w-8 text-emerald-500 opacity-50" />
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <User className="h-5 w-5 text-emerald-500" />
+                </div>
               </div>
             </CardContent>
           </Card>

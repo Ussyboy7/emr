@@ -735,14 +735,16 @@ export default function PhysiotherapyOrdersPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Card className="border-l-4 border-l-yellow-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
+                <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Pending</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-amber-500 mt-1">{stats.pending}</p>
                       </div>
-                      <Clock className="h-8 w-8 text-yellow-400" />
+                      <div className="p-3 rounded-full bg-amber-500/10">
+                        <Clock className="h-5 w-5 text-amber-500" />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -754,14 +756,16 @@ export default function PhysiotherapyOrdersPage() {
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Card className="border-l-4 border-l-blue-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('scheduled')}>
+                <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('scheduled')}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Scheduled</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.scheduled}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">{stats.scheduled}</p>
                       </div>
-                      <Calendar className="h-8 w-8 text-blue-400" />
+                      <div className="p-3 rounded-full bg-blue-500/10">
+                        <Calendar className="h-5 w-5 text-blue-500" />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -773,14 +777,16 @@ export default function PhysiotherapyOrdersPage() {
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Card className="border-l-4 border-l-orange-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('in_progress')}>
+                <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('in_progress')}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">In Progress</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">{stats.inProgress}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-orange-500 mt-1">{stats.inProgress}</p>
                       </div>
-                      <Activity className="h-8 w-8 text-orange-400" />
+                      <div className="p-3 rounded-full bg-orange-500/10">
+                        <Activity className="h-5 w-5 text-orange-500" />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -792,14 +798,16 @@ export default function PhysiotherapyOrdersPage() {
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Card className="border-l-4 border-l-emerald-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('completed')}>
+                <Card className="cursor-pointer hover:shadow-md" onClick={() => setActiveTab('completed')}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Completed</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-emerald-500 mt-1">{stats.completed}</p>
                       </div>
-                      <CheckCircle className="h-8 w-8 text-emerald-400" />
+                      <div className="p-3 rounded-full bg-emerald-500/10">
+                        <CheckCircle className="h-5 w-5 text-emerald-500" />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

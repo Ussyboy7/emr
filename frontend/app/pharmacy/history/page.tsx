@@ -250,11 +250,13 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Dispensed</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-500 tabular-nums mt-1">
                     {summaryLoading ? '—' : stats ? stats.total.toLocaleString() : '—'}
                   </p>
                 </div>
-                <Package className="h-6 w-6 text-violet-500" />
+                <div className="p-3 rounded-full bg-violet-500/10">
+                  <Package className="h-5 w-5 text-violet-500" />
+                </div>
               </div>
               <p className="text-xs text-muted-foreground mt-1">All time records</p>
             </CardContent>
@@ -264,11 +266,13 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 tabular-nums mt-1">
                     {summaryLoading ? '—' : stats ? stats.today.toLocaleString() : '—'}
                   </p>
                 </div>
-                <Calendar className="h-6 w-6 text-emerald-500" />
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <Calendar className="h-5 w-5 text-emerald-500" />
+                </div>
               </div>
               <p className="text-xs text-muted-foreground mt-1">Dispensed today</p>
             </CardContent>
@@ -278,11 +282,13 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Substitutions</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-500 tabular-nums mt-1">
                     {summaryLoading ? '—' : stats ? stats.withSubstitutions.toLocaleString() : '—'}
                   </p>
                 </div>
-                <TrendingUp className="h-6 w-6 text-amber-500" />
+                <div className="p-3 rounded-full bg-amber-500/10">
+                  <TrendingUp className="h-5 w-5 text-amber-500" />
+                </div>
               </div>
               <p className="text-xs text-muted-foreground mt-1">With substitutions</p>
             </CardContent>
@@ -292,11 +298,13 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Avg Wait Time</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 tabular-nums">
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 tabular-nums mt-1">
                     {summaryLoading ? '—' : stats ? stats.avgWaitLabel : '—'}
                   </p>
                 </div>
-                <Clock className="h-6 w-6 text-blue-500" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Clock className="h-5 w-5 text-blue-500" />
+                </div>
               </div>
               <p className="text-xs text-muted-foreground mt-1">Average processing</p>
             </CardContent>

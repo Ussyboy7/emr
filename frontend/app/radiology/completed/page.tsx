@@ -216,47 +216,55 @@ export default function CompletedReportsPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-blue-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Completed</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-500 mt-1">{stats.total}</p>
                 </div>
-                <Stethoscope className="h-8 w-8 text-blue-400" />
+                <div className="p-3 rounded-full bg-blue-500/10">
+                  <Stethoscope className="h-5 w-5 text-blue-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-emerald-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Normal</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.normal}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500 mt-1">{stats.normal}</p>
                 </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-400" />
+                <div className="p-3 rounded-full bg-emerald-500/10">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-amber-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Abnormal</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.abnormal}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-500 mt-1">{stats.abnormal}</p>
                 </div>
-                <AlertTriangle className="h-8 w-8 text-amber-400" />
+                <div className="p-3 rounded-full bg-amber-500/10">
+                  <AlertTriangle className="h-5 w-5 text-amber-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-rose-500">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Critical</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-500 mt-1">{stats.critical}</p>
                 </div>
-                <AlertTriangle className="h-8 w-8 text-rose-400" />
+                <div className="p-3 rounded-full bg-rose-500/10">
+                  <AlertTriangle className="h-5 w-5 text-rose-500" />
+                </div>
               </div>
             </CardContent>
           </Card>
