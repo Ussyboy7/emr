@@ -321,53 +321,53 @@ export default function InventoryPage() {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
+          <Card className="border-l-4 border-l-violet-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Batch lines (in stock)</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-violet-600">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">{stats.total}</p>
                 </div>
-                <Package className="h-6 w-6 text-violet-500" />
+                <Package className="h-8 w-8 text-violet-400" />
               </div>
             </CardContent>
           </Card>
-          <Card className={stats.outOfStock > 0 ? 'border-red-200 dark:border-red-800' : ''}>
+          <Card className={`border-l-4 border-l-rose-500 ${stats.outOfStock > 0 ? 'border-red-200 dark:border-red-800' : ''}`}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Out of Stock</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-red-600">{stats.outOfStock}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.outOfStock}</p>
                 </div>
-                <XCircle className="h-6 w-6 text-red-500" />
+                <XCircle className="h-8 w-8 text-rose-400" />
               </div>
               {stats.outOfStock > 0 && (
                 <p className="text-xs text-red-600 mt-1">⚠️ Requires attention</p>
               )}
             </CardContent>
           </Card>
-          <Card className={stats.lowStock > 0 ? 'border-amber-200 dark:border-amber-800' : ''}>
+          <Card className={`border-l-4 border-l-amber-500 ${stats.lowStock > 0 ? 'border-amber-200 dark:border-amber-800' : ''}`}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Low Stock</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600">{stats.lowStock}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.lowStock}</p>
                 </div>
-                <AlertTriangle className="h-6 w-6 text-amber-500" />
+                <AlertTriangle className="h-8 w-8 text-amber-400" />
               </div>
               {stats.lowStock > 0 && (
                 <p className="text-xs text-amber-600 mt-1">⚠️ Reorder soon</p>
               )}
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-l-4 border-l-emerald-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Near expiry (≤{EXPIRY_WARNING_DAYS}d)</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.nearExpiry}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.nearExpiry}</p>
                 </div>
-                <TrendingUp className="h-6 w-6 text-emerald-500" />
+                <TrendingUp className="h-8 w-8 text-emerald-400" />
               </div>
             </CardContent>
           </Card>
