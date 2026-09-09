@@ -15,7 +15,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { formatDisplayDate, formatDisplayDateMedium, formatDisplayDateTime, formatDisplayTime, toApiDateFromInstant } from '@/lib/dates';
 import { pharmacyService, type Prescription as ApiPrescription, type PrescriptionItem } from '@/lib/services';
@@ -1970,7 +1969,6 @@ export default function PrescriptionsPage() {
   }, []);
 
   return (
-    <TooltipProvider>
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
@@ -1984,103 +1982,60 @@ export default function PrescriptionsPage() {
           </div>
         </div>
 
-        {/* Stats Cards — same layout as Lab / Radiology / Physio */}
+        {/* Stats Cards — workflow */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card
-                className="border-l-4 border-l-amber-500 cursor-pointer hover:shadow-md"
-                onClick={() => setStatusFilter('pending')}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Pending</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
-                        {queueStatsLoading ? '—' : stats.pending.toLocaleString()}
-                      </p>
-                    </div>
-                    <Clock className="h-8 w-8 text-amber-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-xs">Prescriptions waiting to be dispensed</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card
-                className="border-l-4 border-l-blue-500 cursor-pointer hover:shadow-md"
-                onClick={() => setStatusFilter('dispensing')}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Processing</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">
-                        {queueStatsLoading ? '—' : stats.processing.toLocaleString()}
-                      </p>
-                    </div>
-                    <Activity className="h-8 w-8 text-blue-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-xs">Prescriptions currently being dispensed</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card
-                className="border-l-4 border-l-violet-500 cursor-pointer hover:shadow-md"
-                onClick={() => setStatusFilter('partially_dispensed')}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Partial</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400 tabular-nums">
-                        {queueStatsLoading ? '—' : stats.partiallyDispensed.toLocaleString()}
-                      </p>
-                    </div>
-                    <GitBranch className="h-8 w-8 text-violet-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-xs">Partially dispensed — some items still remaining</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card
-                className="border-l-4 border-l-emerald-500 cursor-pointer hover:shadow-md"
-                onClick={() => setStatusFilter('dispensed')}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Fully dispensed</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                        {queueStatsLoading ? '—' : stats.dispensed.toLocaleString()}
-                      </p>
-                    </div>
-                    <CheckCircle2 className="h-8 w-8 text-emerald-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-xs">Fully dispensed prescriptions</p>
-            </TooltipContent>
-          </Tooltip>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Pending</p>
+                  <p className="text-2xl font-bold text-amber-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.pending.toLocaleString()}
+                  </p>
+                </div>
+                <Clock className="h-5 w-5 text-amber-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Processing</p>
+                  <p className="text-2xl font-bold text-blue-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.processing.toLocaleString()}
+                  </p>
+                </div>
+                <Activity className="h-5 w-5 text-blue-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Partial</p>
+                  <p className="text-2xl font-bold text-violet-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.partiallyDispensed.toLocaleString()}
+                  </p>
+                </div>
+                <GitBranch className="h-5 w-5 text-violet-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Fully dispensed</p>
+                  <p className="text-2xl font-bold text-emerald-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.dispensed.toLocaleString()}
+                  </p>
+                </div>
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Filters */}
@@ -3202,6 +3157,5 @@ export default function PrescriptionsPage() {
 
       </div>
     </DashboardLayout>
-    </TooltipProvider>
   );
 }
