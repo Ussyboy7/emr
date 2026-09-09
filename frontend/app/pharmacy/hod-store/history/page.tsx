@@ -140,36 +140,36 @@ export default function HodDispenseHistoryPage() {
         value: summaryLoading ? "—" : stats ? stats.total.toLocaleString() : "—",
         sub: "All HOD store issues",
         icon: Package,
-        border: "border-l-violet-500",
-        text: "text-violet-600 dark:text-violet-400",
-        iconClass: "text-violet-400",
+        color: "text-violet-600",
+        iconColor: "text-violet-500",
+        bg: "bg-violet-500/10",
       },
       {
         label: "Today",
         value: summaryLoading ? "—" : stats ? stats.today.toLocaleString() : "—",
         sub: "Issued today",
         icon: Calendar,
-        border: "border-l-emerald-500",
-        text: "text-emerald-600 dark:text-emerald-400",
-        iconClass: "text-emerald-400",
+        color: "text-emerald-600",
+        iconColor: "text-emerald-500",
+        bg: "bg-emerald-500/10",
       },
       {
         label: "Units Issued",
         value: summaryLoading ? "—" : stats ? stats.totalQuantity.toLocaleString() : "—",
         sub: "Total quantity",
         icon: Pill,
-        border: "border-l-amber-500",
-        text: "text-amber-600 dark:text-amber-400",
-        iconClass: "text-amber-400",
+        color: "text-amber-600",
+        iconColor: "text-amber-500",
+        bg: "bg-amber-500/10",
       },
       {
         label: "Avg per Issue",
         value: summaryLoading ? "—" : stats ? stats.avgQuantity.toLocaleString() : "—",
         sub: "Average units",
         icon: History,
-        border: "border-l-blue-500",
-        text: "text-blue-600 dark:text-blue-400",
-        iconClass: "text-blue-400",
+        color: "text-blue-600",
+        iconColor: "text-blue-500",
+        bg: "bg-blue-500/10",
       },
     ],
     [summaryLoading, stats]
@@ -215,16 +215,18 @@ export default function HodDispenseHistoryPage() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statsCards.map((stat, i) => (
-            <Card key={i} className={`border-l-4 ${stat.border}`}>
+            <Card key={i}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${stat.text}`}>
+                    <p className={`text-2xl sm:text-3xl font-bold tabular-nums ${stat.color} mt-1`}>
                       {stat.value}
                     </p>
                   </div>
-                  <stat.icon className={`h-8 w-8 ${stat.iconClass}`} />
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.iconColor}`} />
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{stat.sub}</p>
               </CardContent>
