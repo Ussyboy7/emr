@@ -6,16 +6,19 @@ from datetime import date
 
 from common.diagnosis_resolution import resolve_order_diagnoses
 from physiotherapy.models import PhysioSession
-from reports.icd_diagnosis_aggregation import build_icd_frequency_rows, increment_icd_counts
+from reports.icd_diagnosis_aggregation import finalize_icd_frequency_report, increment_icd_counts
 
 
 def build_physio_clinical_diagnosis_report(
     period_start: date,
     period_end: date,
     *,
+    limit: int | None = None,
     page: int | None = None,
     page_size: int | None = None,
     org_facility_id: int | None = None,
+    search: str | None = None,
+    group_by: str | None = None,
 ) -> dict:
     from common.report_period import filter_inclusive_date_range
 
@@ -39,32 +42,20 @@ def build_physio_clinical_diagnosis_report(
         rows = resolve_order_diagnoses(order=order, patient_id=order.patient_id)
         increment_icd_counts(counts, rows)
 
-    data = build_icd_frequency_rows(counts)
-    total = sum(counts.values())
-    total_count = len(data)
-    if page is not None:
-        page = max(1, int(page))
-    if page_size is not None:
-        page_size = max(1, min(int(page_size), 100))
-    if page is not None and page_size is not None:
-        start = (page - 1) * page_size
-        end = start + page_size
-        paginated = data[start:end]
-    else:
-        paginated = data
+    data, summary = finalize_icd_frequency_report(
+        counts,
+        limit=limit,
+        page=page,
+        page_size=page_size,
+        search=search,
+        group_by=group_by,
+    )
+    summary["total_sessions"] = sessions.count()
 
     return {
         "mode": "icd10",
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
-        "data": paginated,
-        "summary": {
-            "total_diagnosis_lines": total,
-            "distinct_icd10_codes": total_count,
-            "ranking_count": total_count,
-            "page": page,
-            "page_size": page_size,
-            "total_sessions": sessions.count(),
-            "grand_total": total,
-        },
+        "data": data,
+        "summary": summary,
     }

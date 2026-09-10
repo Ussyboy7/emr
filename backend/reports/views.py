@@ -1081,8 +1081,23 @@ class PhysioClinicalDiagnosisReportView(views.APIView):
 
         period_start, period_end = _period_bounds_from_request(request)
         page, page_size = _pagination_params(request)
+        limit_param = request.query_params.get("limit")
+        if limit_param is None or str(limit_param).strip().lower() in ("all", ""):
+            limit = None
+        else:
+            try:
+                limit = int(limit_param)
+            except (TypeError, ValueError):
+                limit = 20
         report = build_physio_clinical_diagnosis_report(
-            period_start, period_end, page=page, page_size=page_size, org_facility_id=_org_clinic_scope(request)
+            period_start,
+            period_end,
+            limit=limit,
+            page=page,
+            page_size=page_size,
+            org_facility_id=_org_clinic_scope(request),
+            search=_search_term(request),
+            group_by=request.query_params.get("group_by"),
         )
         return respond_with_export(
             request,
@@ -1101,8 +1116,23 @@ class EyeClinicalDiagnosisReportView(views.APIView):
 
         period_start, period_end = _period_bounds_from_request(request)
         page, page_size = _pagination_params(request)
+        limit_param = request.query_params.get("limit")
+        if limit_param is None or str(limit_param).strip().lower() in ("all", ""):
+            limit = None
+        else:
+            try:
+                limit = int(limit_param)
+            except (TypeError, ValueError):
+                limit = 20
         report = build_eye_clinical_diagnosis_report(
-            period_start, period_end, page=page, page_size=page_size, org_facility_id=_org_clinic_scope(request)
+            period_start,
+            period_end,
+            limit=limit,
+            page=page,
+            page_size=page_size,
+            org_facility_id=_org_clinic_scope(request),
+            search=_search_term(request),
+            group_by=request.query_params.get("group_by"),
         )
         return respond_with_export(
             request,
