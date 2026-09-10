@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { ReportDateFilterFields } from "@/components/reports/ReportDateFilterFields";
 import { ReportSearchField } from "@/components/reports/ReportSearchField";
 import { RefreshCw, ArrowLeft, TrendingUp, Calendar } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -26,7 +25,6 @@ interface Row {
   diagnosis: string;
   count: number;
   percentage: number;
-  codes_count?: number;
 }
 
 interface Summary {
@@ -34,7 +32,6 @@ interface Summary {
   distinct_icd10_codes: number;
   ranking_count: number;
   limit: number | null;
-  group_by: string;
   total_sessions?: number;
 }
 
@@ -43,7 +40,6 @@ const emptySummary: Summary = {
   distinct_icd10_codes: 0,
   ranking_count: 0,
   limit: 20,
-  group_by: "code",
 };
 
 export function ClinicalDiagnosisReportPage({
@@ -83,7 +79,6 @@ export function ClinicalDiagnosisReportPage({
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState("20");
   const [customLimit, setCustomLimit] = useState("");
-  const [groupByFamily, setGroupByFamily] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
 
@@ -93,8 +88,6 @@ export function ClinicalDiagnosisReportPage({
       ? "20"
       : limit;
 
-  const grouped = groupByFamily || summary.group_by === "family";
-
   const searchExtra = () => {
     const queryExtra: Record<string, string> = {};
     if (effectiveLimit.toLowerCase() !== "all") {
@@ -102,7 +95,6 @@ export function ClinicalDiagnosisReportPage({
     }
     queryExtra.page = String(currentPage);
     queryExtra.page_size = String(itemsPerPage);
-    if (groupByFamily) queryExtra.group_by = "family";
     const term = search.trim();
     if (term) queryExtra.search = term;
     return queryExtra;
@@ -125,7 +117,6 @@ export function ClinicalDiagnosisReportPage({
         distinct_icd10_codes: res.summary?.distinct_icd10_codes ?? 0,
         ranking_count: res.summary?.ranking_count ?? res.data?.length ?? 0,
         limit: res.summary?.limit ?? null,
-        group_by: res.summary?.group_by ?? "code",
         total_sessions: res.summary?.total_sessions,
       });
     } catch (e: unknown) {
@@ -145,14 +136,13 @@ export function ClinicalDiagnosisReportPage({
     viewMode,
     search,
     effectiveLimit,
-    groupByFamily,
     currentPage,
     itemsPerPage,
   ]);
 
   const hasData = (summary.total_diagnosis_lines ?? 0) > 0;
   const truncated =
-    (summary.distinct_icd10_codes ?? 0) > (summary.ranking_count ?? 0) && !grouped;
+    (summary.distinct_icd10_codes ?? 0) > (summary.ranking_count ?? 0);
 
   return (
     <DashboardLayout>
@@ -198,7 +188,7 @@ export function ClinicalDiagnosisReportPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <ReportDateFilterFields
                 viewMode={viewMode}
                 onViewModeChange={(v) => {
@@ -262,18 +252,6 @@ export function ClinicalDiagnosisReportPage({
                   />
                 )}
               </div>
-              <div className="flex items-end">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                  <Checkbox
-                    checked={groupByFamily}
-                    onCheckedChange={(v) => {
-                      setGroupByFamily(v === true);
-                      setCurrentPage(1);
-                    }}
-                  />
-                  Group by family
-                </label>
-              </div>
               <ReportSearchField
                 value={search}
                 onChange={(v) => {
@@ -293,9 +271,7 @@ export function ClinicalDiagnosisReportPage({
 
         <Card>
           <CardHeader>
-            <CardTitle>
-              {grouped ? "ICD-10 families" : "ICD-10 clinical diagnoses"}
-            </CardTitle>
+            <CardTitle>ICD-10 clinical diagnoses</CardTitle>
             <CardDescription>
               Multi-count all ICD-10 diagnoses per completed session. Nursing pool check-ins use last known diagnosis.
               {truncated ? " Showing codes truncated by Top N." : ""}
@@ -311,9 +287,8 @@ export function ClinicalDiagnosisReportPage({
                     <thead>
                       <tr className="border-b">
                         <th className="text-left p-3">S/N</th>
-                        <th className="text-left p-3">{grouped ? "Family range" : "Code"}</th>
-                        <th className="text-left p-3">{grouped ? "Family" : "Description"}</th>
-                        {grouped && <th className="text-right p-3">Codes</th>}
+                        <th className="text-left p-3">Code</th>
+                        <th className="text-left p-3">Description</th>
                         <th className="text-right p-3">Count</th>
                         <th className="text-right p-3">%</th>
                       </tr>
@@ -321,10 +296,7 @@ export function ClinicalDiagnosisReportPage({
                     <tbody>
                       {data.length === 0 ? (
                         <tr>
-                          <td
-                            colSpan={grouped ? 6 : 5}
-                            className="p-6 text-center text-muted-foreground"
-                          >
+                          <td colSpan={5} className="p-6 text-center text-muted-foreground">
                             No diagnoses for this period.
                           </td>
                         </tr>
@@ -334,9 +306,6 @@ export function ClinicalDiagnosisReportPage({
                             <td className="p-3">{row.sn}</td>
                             <td className="p-3 font-mono">{row.code}</td>
                             <td className="p-3">{row.description}</td>
-                            {grouped && (
-                              <td className="p-3 text-right">{row.codes_count ?? "—"}</td>
-                            )}
                             <td className="p-3 text-right font-semibold">{row.count}</td>
                             <td className="p-3 text-right">{row.percentage.toFixed(1)}%</td>
                           </tr>
@@ -354,7 +323,7 @@ export function ClinicalDiagnosisReportPage({
                     setItemsPerPage(n);
                     setCurrentPage(1);
                   }}
-                  itemName={grouped ? "families" : "diagnoses"}
+                  itemName="diagnoses"
                   pageSizeOptions={[10, 20, 50, 100]}
                 />
               </>

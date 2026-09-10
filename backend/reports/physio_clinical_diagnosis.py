@@ -18,7 +18,6 @@ def build_physio_clinical_diagnosis_report(
     page_size: int | None = None,
     org_facility_id: int | None = None,
     search: str | None = None,
-    group_by: str | None = None,
 ) -> dict:
     from common.report_period import filter_inclusive_date_range
 
@@ -48,7 +47,6 @@ def build_physio_clinical_diagnosis_report(
         page=page,
         page_size=page_size,
         search=search,
-        group_by=group_by,
     )
     summary["total_sessions"] = sessions.count()
 
