@@ -23,6 +23,7 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { DispenseMedicationLineCard, DispenseMedicationListHeader } from "@/components/pharmacy/DispenseMedicationLineCard";
 import { PrescriptionPatientContext } from "@/components/pharmacy/PrescriptionPatientContext";
+import { PharmacyPatientPrescriptionHistory } from "@/components/pharmacy/PharmacyPatientPrescriptionHistory";
 import {
   PrescriptionMedicationViewLine,
   PrescriptionMedicationViewListHeader,
@@ -2360,6 +2361,25 @@ export default function PrescriptionsPage() {
                     ))}
                   </div>
                 </div>
+
+                <PharmacyPatientPrescriptionHistory
+                  patientDbId={
+                    (selectedPrescription.patient_details as { id?: number } | undefined)?.id ??
+                    (/^\d+$/.test(selectedPrescription.patient.id)
+                      ? Number(selectedPrescription.patient.id)
+                      : null)
+                  }
+                  currentPrescriptionId={selectedPrescription.id}
+                  patient={{
+                    name: selectedPrescription.patient.name,
+                    patientId:
+                      selectedPrescription.patient.mrn ||
+                      selectedPrescription.patient.id ||
+                      '',
+                    age: selectedPrescription.patient.age,
+                    gender: selectedPrescription.patient.gender,
+                  }}
+                />
               </div>
             )}
 
@@ -2619,6 +2639,25 @@ export default function PrescriptionsPage() {
                     className="mt-1"
                   />
                 </div>
+
+                <PharmacyPatientPrescriptionHistory
+                  patientDbId={
+                    (selectedPrescription.patient_details as { id?: number } | undefined)?.id ??
+                    (/^\d+$/.test(selectedPrescription.patient.id)
+                      ? Number(selectedPrescription.patient.id)
+                      : null)
+                  }
+                  currentPrescriptionId={selectedPrescription.id}
+                  patient={{
+                    name: selectedPrescription.patient.name,
+                    patientId:
+                      selectedPrescription.patient.mrn ||
+                      selectedPrescription.patient.id ||
+                      '',
+                    age: selectedPrescription.patient.age,
+                    gender: selectedPrescription.patient.gender,
+                  }}
+                />
               </div>
             )}
 
