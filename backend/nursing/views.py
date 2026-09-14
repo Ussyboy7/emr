@@ -281,18 +281,10 @@ class ProcedureViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     search_fields = [
         'procedure_id',
         'description',
-        'notes',
-        'medication_name',
-        'dosage',
-        'route',
-        'site',
         'patient__first_name',
         'patient__surname',
         'patient__patient_id',
         'patient__personal_number',
-        'performed_by__first_name',
-        'performed_by__last_name',
-        'performed_by__username',
     ]
     ordering_fields = ['performed_at']
     ordering = ['-performed_at']

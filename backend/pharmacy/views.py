@@ -2670,7 +2670,6 @@ class HodStockIssueViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         'patient_name',
         'patient_mrn',
         'reason',
-        'notes',
     ]
     ordering_fields = ['issued_at']
     ordering = ['-issued_at']

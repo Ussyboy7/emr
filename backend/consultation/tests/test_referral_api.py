@@ -325,10 +325,19 @@ class ReferralListTests(ReferralSetupMixin, APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(len(resp.data["results"]), 1)
 
-    def test_search_by_reason(self):
-        resp = self.client.get(BASE_URL, {"search": "arrhythmia"})
+    def test_search_by_patient(self):
+        resp = self.client.get(BASE_URL, {"search": "Jane"})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertTrue(len(resp.data["results"]) >= 1)
+        ids = {r["id"] for r in resp.data["results"]}
+        self.assertIn(self.ref1.pk, ids)
+        self.assertIn(self.ref2.pk, ids)
+        self.assertNotIn(self.ref3.pk, ids)
+
+    def test_search_by_patient_id(self):
+        resp = self.client.get(BASE_URL, {"search": "REF-PT-001"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        for item in resp.data["results"]:
+            self.assertEqual(item["patient"], self.patient.pk)
 
     def test_search_by_facility(self):
         resp = self.client.get(BASE_URL, {"search": "City General"})

@@ -38,9 +38,9 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     search_fields = [
         'appointment_id',
         'reason',
-        'notes',
         'patient__first_name',
         'patient__surname',
+        'patient__middle_name',
         'patient__patient_id',
     ]
     ordering_fields = ['appointment_date', 'appointment_time', 'created_at']

@@ -1408,7 +1408,13 @@ class VisitViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     # status is applied in get_queryset so nursing_pool can include completed visits
     # without DjangoFilterBackend's status=in_progress wiping them.
     filterset_fields = ['patient', 'visit_type']
-    search_fields = ['visit_id', 'clinical_notes', 'patient__surname', 'patient__first_name', 'patient__patient_id']
+    search_fields = [
+        'visit_id',
+        'patient__surname',
+        'patient__first_name',
+        'patient__middle_name',
+        'patient__patient_id',
+    ]
     ordering_fields = ['date', 'time', 'created_at']
     ordering = ['-date', '-time']
     
@@ -1833,8 +1839,6 @@ class VitalReadingViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         'patient__surname',
         'patient__patient_id',
         'patient__personal_number',
-        'recorded_by__first_name',
-        'recorded_by__last_name',
     ]
     ordering_fields = ['recorded_at']
     ordering = ['-recorded_at']

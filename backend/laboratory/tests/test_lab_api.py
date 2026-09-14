@@ -167,6 +167,30 @@ class LabOrderListFilterTests(APITestCase):
         ids = [row["id"] for row in resp.data["results"]]
         self.assertEqual(ids, [self.order_routine.pk])
 
+    def test_patient_tracker_matches_test_lab_number(self):
+        LabTest.objects.create(
+            order=self.order_routine,
+            name="FBC",
+            code="FBC",
+            sample_type="Blood",
+            lab_number="BT-26-8888",
+            status="pending",
+        )
+        LabTest.objects.create(
+            order=self.order_stat,
+            name="RBS",
+            code="RBS",
+            sample_type="Blood",
+            lab_number="BT-26-0001",
+            status="pending",
+        )
+        resp = self.client.get(f"{BASE}/patient-tracker/", {"search": "BT-26-8888"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        hits = resp.data["results"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["lab_number"], "BT-26-8888")
+        self.assertEqual(hits[0]["patient_id"], self.patient.patient_id)
+
 
 class LabOrderWorkflowTabFilterTests(APITestCase):
     """GET /api/v1/laboratory/orders/?workflow_tab=… — tab-scoped list."""

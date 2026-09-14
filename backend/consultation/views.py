@@ -350,9 +350,9 @@ class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     filterset_fields = ['room', 'patient', 'doctor', 'status', 'visit']
     search_fields = [
         'session_id',
-        'notes',
         'patient__first_name',
         'patient__surname',
+        'patient__middle_name',
         'patient__patient_id',
         'visit__visit_id',
         'doctor__first_name',
@@ -1718,7 +1718,15 @@ class ReferralViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         "status",
         "urgency",
     ]
-    search_fields = ["referral_id", "specialty", "facility", "reason", "clinical_summary"]
+    search_fields = [
+        "referral_id",
+        "specialty",
+        "facility",
+        "patient__first_name",
+        "patient__surname",
+        "patient__middle_name",
+        "patient__patient_id",
+    ]
     ordering_fields = ["referred_at", "urgency"]
     ordering = ["-referred_at"]
 
