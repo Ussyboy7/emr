@@ -971,8 +971,6 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     filterset_fields = ['patient', 'doctor', 'status', 'consultation_session', 'visit']
     search_fields = [
         'prescription_id',
-        'diagnosis',
-        'notes',
         'patient__first_name',
         'patient__surname',
         'patient__middle_name',

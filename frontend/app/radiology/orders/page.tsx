@@ -889,9 +889,9 @@ export default function RadiologyOrdersPage() {
       }
 
       const searching = Boolean(debouncedSearch);
-      const dateQuery = searching ? {} : buildDateQuery(dateFilter);
+      const dateQuery = buildDateQuery(dateFilter);
       const rangeQuery =
-        !searching && (dateRange.from || dateRange.to)
+        dateRange.from || dateRange.to
           ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
           : {};
       const commonFilters = {
@@ -909,28 +909,38 @@ export default function RadiologyOrdersPage() {
       const listFilters = {
         ...commonFilters,
         ...(searching ? {} : studyStatus ? { study_status: studyStatus } : {}),
-        ...(!searching && activeTab === 'rejected' ? { date_field: 'rejected_at' as const } : {}),
+        ...(activeTab === 'rejected' ? { date_field: 'rejected_at' as const } : {}),
       };
 
-      const [response, statsResponse] = await Promise.all([
-        radiologyService.getOrders({
-          page: currentPage,
-          page_size: itemsPerPage,
-          ...listFilters,
-        }),
-        radiologyService.getOrderStats(commonFilters),
-      ]);
+      const listPromise = radiologyService.getOrders({
+        page: currentPage,
+        page_size: itemsPerPage,
+        ...listFilters,
+      });
+      const statsPromise = radiologyService.getOrderStats(commonFilters);
 
+      const response = await listPromise;
       setOrders(response.results || []);
       setTotalCount(response.count || response.results.length);
-      setStats({
-        total: statsResponse.total || 0,
-        pendingSamples: statsResponse.pending || 0,
-        processing: statsResponse.processing || 0,
-        resultsReady: statsResponse.results_ready || 0,
-        rejected: statsResponse.rejected || 0,
-        stat: statsResponse.stat || 0,
-      });
+      if (!silent) {
+        setLoading(false);
+      }
+
+      try {
+        const statsResponse = await statsPromise;
+        setStats({
+          total: statsResponse.total || 0,
+          pendingSamples: statsResponse.pending || 0,
+          processing: statsResponse.processing || 0,
+          resultsReady: statsResponse.results_ready || 0,
+          rejected: statsResponse.rejected || 0,
+          stat: statsResponse.stat || 0,
+        });
+      } catch (statsErr) {
+        if (!handleAuthError(statsErr)) {
+          console.error('Error loading radiology order statistics:', statsErr);
+        }
+      }
     } catch (err: any) {
       if (handleAuthError(err)) return;
       if (!silent) {

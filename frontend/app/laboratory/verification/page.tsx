@@ -154,9 +154,7 @@ export default function ResultsVerificationPage() {
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (facilityFilter !== 'all') params.location_clinic = Number(facilityFilter);
       if (processingFilter !== 'all') params.processing_method = processingFilter;
-      if (!searching) {
-        Object.assign(params, buildDateQuery(dateFilter, serverToday));
-      }
+      Object.assign(params, buildDateQuery(dateFilter, serverToday));
 
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
@@ -195,10 +193,7 @@ export default function ResultsVerificationPage() {
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (facilityFilter !== 'all') params.location_clinic = Number(facilityFilter);
       if (processingFilter !== 'all') params.processing_method = processingFilter;
-
-      if (!searching) {
-        Object.assign(params, buildDateQuery(dateFilter, serverToday));
-      }
+      Object.assign(params, buildDateQuery(dateFilter, serverToday));
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);
@@ -225,7 +220,7 @@ export default function ResultsVerificationPage() {
       gender: genderFilter !== 'all' ? genderFilter : undefined,
       location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
       processing_method: processingFilter !== 'all' ? processingFilter : undefined,
-      ...(searching ? {} : buildDateQuery(dateFilter, serverToday)),
+      ...buildDateQuery(dateFilter, serverToday),
     } as const;
 
     const [pendingStats, verifiedStats] = await Promise.all([

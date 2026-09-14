@@ -78,6 +78,37 @@ class RadiologyOrderApiTests(APITestCase):
         notes = [row["clinical_notes"] for row in rows]
         self.assertEqual(notes, ["Session order"])
 
+    def test_search_matches_study_procedure(self):
+        created = self.client.post(
+            "/api/v1/radiology/orders/",
+            {
+                "patient": self.patient.pk,
+                "visit": self.visit.pk,
+                "priority": "routine",
+                "studies_data": [
+                    {
+                        "procedure": "Chest X-Ray",
+                        "body_part": "Chest",
+                        "modality": "X-Ray",
+                        "status": "pending",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        RadiologyOrder.objects.create(
+            patient=self.patient,
+            visit=self.visit,
+            doctor=self.doctor,
+            priority="routine",
+            clinical_notes="No studies matching chest",
+        )
+        res = self.client.get("/api/v1/radiology/orders/", {"search": "Chest X-Ray"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        ids = [row["id"] for row in res.data.get("results", [])]
+        self.assertEqual(ids, [created.data["id"]])
+
     def test_radiology_orders_forbidden_without_page_permission(self):
         outsider = create_test_user("rad_outsider", pages=["/pharmacy"])
         self.client.force_authenticate(user=outsider)

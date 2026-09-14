@@ -153,6 +153,20 @@ class LabOrderListFilterTests(APITestCase):
         for key in ("total", "pending", "processing", "results_ready", "rework_required", "stat"):
             self.assertIn(key, resp.data)
 
+    def test_search_matches_test_lab_number_without_other_orders(self):
+        LabTest.objects.create(
+            order=self.order_routine,
+            name="FBC",
+            code="FBC",
+            sample_type="Blood",
+            lab_number="BT-26-9999",
+            status="pending",
+        )
+        resp = self.client.get(f"{BASE}/orders/", {"search": "BT-26-9999"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = [row["id"] for row in resp.data["results"]]
+        self.assertEqual(ids, [self.order_routine.pk])
+
 
 class LabOrderWorkflowTabFilterTests(APITestCase):
     """GET /api/v1/laboratory/orders/?workflow_tab=… — tab-scoped list."""

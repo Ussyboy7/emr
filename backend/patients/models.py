@@ -2,6 +2,7 @@
 Patient models for the EMR system.
 """
 
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.core.validators import RegexValidator, MinValueValidator, MaxValueValidator
 from django.utils import timezone
@@ -201,6 +202,10 @@ class Patient(models.Model):
             models.Index(fields=["personal_number"]),
             models.Index(fields=["category"]),
             models.Index(fields=["surname", "first_name"]),
+            GinIndex(fields=["surname"], name="patients_surname_trgm_idx", opclasses=["gin_trgm_ops"]),
+            GinIndex(fields=["first_name"], name="patients_first_name_trgm_idx", opclasses=["gin_trgm_ops"]),
+            GinIndex(fields=["middle_name"], name="patients_middle_name_trgm_idx", opclasses=["gin_trgm_ops"]),
+            GinIndex(fields=["patient_id"], name="patients_patient_id_trgm_idx", opclasses=["gin_trgm_ops"]),
         ]
 
     def __str__(self):

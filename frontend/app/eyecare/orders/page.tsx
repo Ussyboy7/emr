@@ -242,9 +242,7 @@ export default function EyeClinicOrdersPage() {
     if (activeTab !== 'all') {
       params.status_tab = activeTab as 'pending' | 'in_progress' | 'cancelled' | 'completed';
     }
-    if (searching) {
-      params.date_filter = 'all';
-    } else if (dateRange.from || dateRange.to) {
+    if (dateRange.from || dateRange.to) {
       params.date_filter = 'all';
       if (dateRange.from) params.ordered_at_after = dateRange.from;
       if (dateRange.to) params.ordered_at_before = dateRange.to;
@@ -267,9 +265,7 @@ export default function EyeClinicOrdersPage() {
     const params: Parameters<typeof eyeCareService.getOrders>[0] = {
       search: searching ? debouncedSearchQuery.trim() : undefined,
     };
-    if (searching) {
-      params.date_filter = 'all';
-    } else if (dateRange.from || dateRange.to) {
+    if (dateRange.from || dateRange.to) {
       params.date_filter = 'all';
       if (dateRange.from) params.ordered_at_after = dateRange.from;
       if (dateRange.to) params.ordered_at_before = dateRange.to;

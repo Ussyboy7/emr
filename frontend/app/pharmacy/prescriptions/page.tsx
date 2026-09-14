@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { usePharmacyPageAuth } from '@/hooks/use-pharmacy-page-auth';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -352,6 +353,7 @@ export default function PrescriptionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -565,7 +567,7 @@ export default function PrescriptionsPage() {
         status: statusFilter !== 'all' ? statusFilter : undefined,
         page: currentPage,
         page_size: itemsPerPage,
-        search: searchQuery || undefined,
+        search: debouncedSearchQuery.trim() || undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         date_preset: dateFilter !== 'all' ? dateFilter : undefined,
       });
@@ -732,7 +734,7 @@ export default function PrescriptionsPage() {
     setQueueStatsLoading(true);
     try {
       const s = await pharmacyService.getPrescriptionQueueStats({
-        search: searchQuery || undefined,
+        search: debouncedSearchQuery.trim() || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         date_preset: dateFilter !== 'all' ? dateFilter : undefined,
@@ -750,7 +752,7 @@ export default function PrescriptionsPage() {
   useEffect(() => {
     if (!ready) return;
     void loadQueueStatsRef.current();
-  }, [searchQuery, statusFilter, genderFilter, dateFilter, ready]);
+  }, [debouncedSearchQuery, statusFilter, genderFilter, dateFilter, ready]);
 
   const loadQueueStatsRef = useRef(loadQueueStats);
   loadQueueStatsRef.current = loadQueueStats;
@@ -761,7 +763,7 @@ export default function PrescriptionsPage() {
   useEffect(() => {
     if (!ready) return;
     void loadPrescriptionsRef.current();
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, genderFilter, dateFilter, ready]);
+  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, genderFilter, dateFilter, ready]);
 
   const closeDispenseModal = useCallback(async () => {
     const rxId = selectedPrescription?.id;
@@ -807,7 +809,7 @@ export default function PrescriptionsPage() {
     currentPage,
     itemsPerPage,
     statusFilter,
-    searchQuery,
+    debouncedSearchQuery,
     genderFilter,
     dateFilter,
   ]);
@@ -1148,7 +1150,7 @@ export default function PrescriptionsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, priorityFilter, genderFilter]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, priorityFilter, genderFilter]);
 
   const stats = useMemo(
     () => ({

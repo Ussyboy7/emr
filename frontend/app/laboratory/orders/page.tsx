@@ -736,13 +736,11 @@ export default function LabOrdersPage() {
       if (sourceTypeFilter !== 'all') {
         (params as any).source_type = sourceTypeFilter;
       }
-      if (!searching) {
-        Object.assign(params, buildDateQuery(dateFilter, serverToday));
-        if (dateRange.from || dateRange.to) {
-          delete params.date;
-          if (dateRange.from) params.start_date = dateRange.from;
-          if (dateRange.to) params.end_date = dateRange.to;
-        }
+      Object.assign(params, buildDateQuery(dateFilter, serverToday));
+      if (dateRange.from || dateRange.to) {
+        delete params.date;
+        if (dateRange.from) params.start_date = dateRange.from;
+        if (dateRange.to) params.end_date = dateRange.to;
       }
 
       // On the Rework Required tab, filter the list by rejection date rather
@@ -761,43 +759,49 @@ export default function LabOrdersPage() {
       if (processingFacilityFilter !== 'all') params.processing_clinic = Number(processingFacilityFilter);
 
       // While searching, drop the workflow-tab filter so results span all
-      // statuses (mirrors the date-skip above). This keeps a just-verified
-      // order visible even when the active tab is, e.g., "Pending".
+      // statuses for the current date window (Pending can still find a
+      // just-verified order). Date stays applied — all-time search is too slow.
       const workflowTab = labOrdersTabToWorkflowParam(activeTab);
       if (!searching && workflowTab) {
         params.workflow_tab = workflowTab;
       }
 
-      const [response, statsResponse] = await Promise.all([
-        labService.getOrders(params),
-        labService.getOrderStats({
-          priority: priorityFilter !== 'all' ? transformToBackendPriority(priorityFilter) : undefined,
-          search: searching ? debouncedSearchQuery.trim() : undefined,
-          processing_method: processingFilter !== 'all' ? processingFilter : undefined,
-          source_type: sourceTypeFilter !== 'all' ? sourceTypeFilter : undefined,
-          gender: genderFilter !== 'all' ? genderFilter : undefined,
-          location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
-          processing_clinic: processingFacilityFilter !== 'all' ? Number(processingFacilityFilter) : undefined,
-          ...(searching
-            ? {}
-            : {
-                ...buildDateQuery(dateFilter, serverToday),
-                ...(dateRange.from || dateRange.to
-                  ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
-                  : {}),
-              }),
-        }),
-      ]);
+      const statsPromise = labService.getOrderStats({
+        priority: priorityFilter !== 'all' ? transformToBackendPriority(priorityFilter) : undefined,
+        search: searching ? debouncedSearchQuery.trim() : undefined,
+        processing_method: processingFilter !== 'all' ? processingFilter : undefined,
+        source_type: sourceTypeFilter !== 'all' ? sourceTypeFilter : undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
+        processing_clinic: processingFacilityFilter !== 'all' ? Number(processingFacilityFilter) : undefined,
+        ...buildDateQuery(dateFilter, serverToday),
+        ...(dateRange.from || dateRange.to
+          ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
+          : {}),
+      });
+
+      const response = await labService.getOrders(params);
 
       setTotalCount(response.count || response.results.length);
       const transformedOrders = response.results.map(transformOrder);
       setOrders(transformedOrders);
-      setStats({
-        pendingSamples: statsResponse.pending || 0,
-        processing: statsResponse.processing || 0,
-        resultsReady: statsResponse.results_ready || 0,
-        reworkOrders: statsResponse.rework_required || 0,
-      });
+      if (!silent) {
+        setLoading(false);
+      }
+
+      try {
+        const statsResponse = await statsPromise;
+        setStats({
+          pendingSamples: statsResponse.pending || 0,
+          processing: statsResponse.processing || 0,
+          resultsReady: statsResponse.results_ready || 0,
+          reworkOrders: statsResponse.rework_required || 0,
+        });
+      } catch (statsErr) {
+        if (!handleAuthError(statsErr)) {
+          console.error('Error loading lab order statistics:', statsErr);
+        }
+      }
     } catch (err: any) {
       if (handleAuthError(err)) return;
 

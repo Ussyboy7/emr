@@ -107,8 +107,7 @@ export default function CompletedTestsPage() {
       let start_date: string | undefined;
       let end_date: string | undefined;
 
-      const searching = Boolean(debouncedSearchQuery.trim());
-      const allTime = dateFilter === 'all' || searching;
+      const allTime = dateFilter === 'all';
 
       if (!allTime && (dateRange.from || dateRange.to)) {
         start_date = dateRange.from || undefined;

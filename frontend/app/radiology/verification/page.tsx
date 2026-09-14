@@ -20,6 +20,7 @@ import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import { RADIOLOGY_VERIFICATION_POLL_INTERVAL } from '@/lib/constants/ui';
 import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useServerToday } from '@/hooks/use-server-today';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useRadiologyUrlSync } from '@/hooks/use-radiology-url-sync';
 import { useRadiologyPageAuth } from '@/hooks/use-radiology-page-auth';
 import { MODAL_SIZES } from '@/components/ui/modal-sizes';
@@ -51,6 +52,7 @@ export default function RadiologyVerificationPage() {
   const [error, setError] = useState<string | null>(null);
   const [verifiedError, setVerifiedError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -123,7 +125,7 @@ export default function RadiologyVerificationPage() {
   useEffect(() => {
     setCurrentPage(1);
     setVerifiedCurrentPage(1);
-  }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, facilityFilter, itemsPerPage]);
+  }, [debouncedSearch, categoryFilter, priorityFilter, dateFilter, genderFilter, facilityFilter, itemsPerPage]);
 
   useEffect(() => {
     if (!ready) return;
@@ -141,15 +143,15 @@ export default function RadiologyVerificationPage() {
     try {
       setLoading(true);
       setError(null);
-      const searching = Boolean(searchQuery.trim());
+      const searching = Boolean(debouncedSearch.trim());
       const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
-        search: searching ? searchQuery.trim() : undefined,
+        search: searching ? debouncedSearch.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
-        ...(searching ? {} : buildDateQuery(dateFilter)),
+        ...buildDateQuery(dateFilter),
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
@@ -169,22 +171,22 @@ export default function RadiologyVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, handleAuthError, buildDateQuery]);
+  }, [currentPage, itemsPerPage, debouncedSearch, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, handleAuthError, buildDateQuery]);
 
   const loadVerifiedReports = useCallback(async () => {
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
-      const searching = Boolean(searchQuery.trim());
+      const searching = Boolean(debouncedSearch.trim());
       const params: any = {
         status: 'verified',
         page: verifiedCurrentPage,
         page_size: itemsPerPage,
-        search: searching ? searchQuery.trim() : undefined,
+        search: searching ? debouncedSearch.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
-        ...(searching ? {} : buildDateQuery(dateFilter)),
+        ...buildDateQuery(dateFilter),
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
@@ -204,19 +206,19 @@ export default function RadiologyVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, handleAuthError, buildDateQuery]);
+  }, [verifiedCurrentPage, itemsPerPage, debouncedSearch, genderFilter, facilityFilter, categoryFilter, dateFilter, priorityFilter, handleAuthError, buildDateQuery]);
 
   const loadVerificationCounts = useCallback(async () => {
     try {
-      const searching = Boolean(searchQuery.trim());
+      const searching = Boolean(debouncedSearch.trim());
       const base = {
         overall_status: undefined,
         priority: priorityFilter !== 'all' ? priorityFilter.toLowerCase() : undefined,
-        search: searching ? searchQuery.trim() : undefined,
+        search: searching ? debouncedSearch.trim() : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
         location_clinic: facilityFilter !== 'all' ? Number(facilityFilter) : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
-        ...(searching ? {} : buildDateQuery(dateFilter)),
+        ...buildDateQuery(dateFilter),
       };
       const [pendingStats, verifiedStats] = await Promise.all([
         radiologyService.getVerificationStats({ ...base, status: 'reported' }),
@@ -234,7 +236,7 @@ export default function RadiologyVerificationPage() {
       if (handleAuthError(err)) return;
       toast.error('Failed to load verification counts');
     }
-  }, [priorityFilter, searchQuery, genderFilter, facilityFilter, categoryFilter, dateFilter, handleAuthError, buildDateQuery]);
+  }, [priorityFilter, debouncedSearch, genderFilter, facilityFilter, categoryFilter, dateFilter, handleAuthError, buildDateQuery]);
 
   useEffect(() => {
     if (!ready) return;
@@ -243,7 +245,7 @@ export default function RadiologyVerificationPage() {
 
   // When searching, switch tab if the current one has no matches but the other does.
   useEffect(() => {
-    const q = searchQuery.trim();
+    const q = debouncedSearch.trim();
     if (!q) {
       autoTabRef.current = null;
       return;
@@ -264,7 +266,7 @@ export default function RadiologyVerificationPage() {
     setActiveTab(next);
     toast.info(`Found in ${RADIOLOGY_VERIFICATION_TAB_LABELS[next]} — switched tab.`);
   }, [
-    searchQuery,
+    debouncedSearch,
     activeTab,
     loading,
     verifiedLoading,

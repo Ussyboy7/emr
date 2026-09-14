@@ -188,11 +188,9 @@ export default function PhysiotherapyOrdersPage() {
       const status = physioOrdersTabToStatus(activeTab);
       if (status) params.status = status;
 
-      if (!searching) {
-        const dp = buildDateFilterParams();
-        if (dp.ordered_at_after) params.ordered_at_after = dp.ordered_at_after;
-        if (dp.ordered_at_before) params.ordered_at_before = dp.ordered_at_before;
-      }
+      const dp = buildDateFilterParams();
+      if (dp.ordered_at_after) params.ordered_at_after = dp.ordered_at_after;
+      if (dp.ordered_at_before) params.ordered_at_before = dp.ordered_at_before;
 
       const response = await physioService.getOrders(params);
       setTotalCount(response.count);

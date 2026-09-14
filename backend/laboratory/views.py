@@ -12,8 +12,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import BooleanField, Count, Q, Max
-from django.db.models.expressions import RawSQL
+from django.db.models import Count, Q, Max
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from organization.models import Clinic, SystemConfig
@@ -121,6 +120,7 @@ from .models import (
     LabReferralDispatch,
     LabResult,
     TemplateFieldOption,
+    lab_results_payload_is_meaningful,
 )
 from .serializers import (
     LabTemplateSerializer,
@@ -136,33 +136,13 @@ from .serializers import (
 )
 from common.mixins import FacilityScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_ID_PARAMS, document_viewset
+from common.search_filters import ExistsAwareSearchFilter
 from permissions.user_capabilities import ensure_capability, user_has_capability
 from .pagination import FlexiblePageNumberPagination, LabCatalogPagination
 from .result_display import dedupe_result_alias_rows, sort_lab_result_rows_for_pdf
 from audit.services import AuditService
 
-
-def _has_meaningful_results_payload(payload) -> bool:
-    """
-    True only when at least one result value is clinically meaningful.
-    Empty strings/null/empty containers are treated as no result.
-    """
-    if not isinstance(payload, dict) or not payload:
-        return False
-
-    for value in payload.values():
-        if value is None:
-            continue
-        if isinstance(value, str):
-            if value.strip():
-                return True
-            continue
-        if isinstance(value, (list, tuple, set, dict)):
-            if len(value) > 0:
-                return True
-            continue
-        return True
-    return False
+_has_meaningful_results_payload = lab_results_payload_is_meaningful
 
 
 def _parse_results_payload(results):
@@ -275,22 +255,21 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing lab orders."""
     serializer_class = LabOrderSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, ExistsAwareSearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic', 'location_clinic']
     facility_scope_fields = ('location_clinic', 'processing_clinic', 'tests__processing_clinic')
     include_unassigned_scope = True
     search_fields = [
         'order_id',
-        'clinical_notes',
         'lab_number',
-        'tests__lab_number',
-        'external_requesting_doctor_name',
-        'manual_request_reference',
-        'external_clinic__name',
         'patient__first_name',
         'patient__surname',
+        'patient__middle_name',
         'patient__patient_id',
     ]
+    search_exists = (
+        ('laboratory.LabTest', 'order_id', ('lab_number',)),
+    )
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
     
@@ -1600,13 +1579,10 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
         'order__lab_number',
         'test__lab_number',
         'patient__patient_id',
-        'patient__personal_number',
         'patient__surname',
         'patient__first_name',
-        'patient__middle_name',
         'test__code',
         'test__name',
-        'test__template__name',
     ]
     ordering_fields = ['created_at', 'test__verified_at']
     ordering = ['-created_at']
@@ -1674,17 +1650,9 @@ class LabResultViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet):
         if pm in ('in_house', 'outsourced'):
             queryset = queryset.filter(test__processing_method=pm)
 
-        # Keep this guard in SQL so pagination and search happen without first
-        # scanning every historical result in Python.
-        queryset = queryset.annotate(
-            _has_meaningful_results=RawSQL(
-                "jsonb_path_exists(results, %s)",
-                ['$.* ? (@ != null && @ != "")'],
-                output_field=BooleanField(),
-            )
-        ).filter(
-            (Q(test__result_file__isnull=False) & ~Q(test__result_file=""))
-            | Q(_has_meaningful_results=True)
+        queryset = queryset.filter(
+            Q(test__has_results=True)
+            | (Q(test__result_file__isnull=False) & ~Q(test__result_file=""))
         )
 
         return self.scope_queryset(queryset)

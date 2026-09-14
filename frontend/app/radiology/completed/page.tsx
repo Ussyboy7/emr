@@ -124,8 +124,7 @@ export default function CompletedReportsPage() {
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
       }
-      const searching = Boolean(debouncedSearchQuery.trim());
-      const allTime = dateFilter === 'all' || searching;
+      const allTime = dateFilter === 'all';
       if (!allTime) {
         Object.assign(params, buildDateQuery(dateFilter));
         if (dateRange.from || dateRange.to) {

@@ -25,6 +25,7 @@ from laboratory.pagination import FlexiblePageNumberPagination
 
 from common.mixins import FacilityScopedMixin, LabRadiologyScopedMixin
 from common.openapi import ORDER_DISPATCH_PK_PARAMS, document_viewset
+from common.search_filters import ExistsAwareSearchFilter
 from permissions.user_capabilities import ensure_capability, user_has_capability
 logger = logging.getLogger(__name__)
 
@@ -255,24 +256,20 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing radiology orders."""
     serializer_class = RadiologyOrderSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, ExistsAwareSearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic', 'location_clinic']
     facility_scope_fields = ('location_clinic', 'processing_clinic', 'studies__processing_clinic')
     include_unassigned_scope = True
     search_fields = [
         'order_id',
-        'clinical_notes',
-        'provisional_diagnosis',
-        'external_requesting_doctor_name',
-        'manual_request_reference',
-        'external_clinic__name',
-        'studies__procedure',
-        'studies__body_part',
-        'studies__modality',
         'patient__first_name',
         'patient__surname',
+        'patient__middle_name',
         'patient__patient_id',
     ]
+    search_exists = (
+        ('radiology.RadiologyStudy', 'order_id', ('procedure', 'body_part', 'modality')),
+    )
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
 

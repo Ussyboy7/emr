@@ -6,6 +6,26 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 
+def lab_results_payload_is_meaningful(payload) -> bool:
+    """True when at least one result value is clinically meaningful."""
+    if not isinstance(payload, dict) or not payload:
+        return False
+
+    for value in payload.values():
+        if value is None:
+            continue
+        if isinstance(value, str):
+            if value.strip():
+                return True
+            continue
+        if isinstance(value, (list, tuple, set, dict)):
+            if len(value) > 0:
+                return True
+            continue
+        return True
+    return False
+
+
 class LabTemplate(models.Model):
     """
     Laboratory test templates for common tests.
@@ -307,6 +327,11 @@ class LabTest(models.Model):
     results = models.JSONField(default=dict, blank=True, help_text="Test results as key-value pairs")
     result_file = models.FileField(upload_to='lab_results/', blank=True, null=True)
     notes = models.TextField(blank=True)
+    has_results = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="True when structured results or a result file are present.",
+    )
     
     # Verification
     verified_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='verified_lab_tests')
@@ -338,7 +363,26 @@ class LabTest(models.Model):
                 raise ValidationError({
                     'sample_batch': 'The sample batch must belong to this lab order.',
                 })
-    
+
+    def _result_file_present(self) -> bool:
+        name = getattr(self.result_file, "name", None) or ""
+        return bool(str(name).strip())
+
+    def refresh_has_results(self) -> bool:
+        self.has_results = lab_results_payload_is_meaningful(self.results) or self._result_file_present()
+        return self.has_results
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        should_refresh = update_fields is None or any(
+            f in update_fields for f in ("results", "result_file", "has_results")
+        )
+        if should_refresh:
+            self.refresh_has_results()
+            if update_fields is not None and "has_results" not in update_fields:
+                kwargs["update_fields"] = list(update_fields) + ["has_results"]
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.code} - {self.name} ({self.order.order_id})"
 
