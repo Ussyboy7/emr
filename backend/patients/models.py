@@ -290,6 +290,28 @@ class Patient(models.Model):
 
         return f"{years} year{'s' if years != 1 else ''} {months} month{'s' if months != 1 else ''}"
 
+    def _next_nonnpa_sequence(self) -> int:
+        """Next free sequence number for ``NN-{type}-{number}`` ids.
+
+        Derive it from the highest suffix actually in use instead of the row
+        count: ids can be sparse, and ``NN-{type}-*`` ids may be held by rows
+        whose stored ``nonnpa_type`` differs from this one (legacy spacing or
+        a type change). A count-based number then collides with those ids until
+        ``save`` exhausts its retries and registration fails with a 500.
+        """
+        prefix = f"NN-{self.nonnpa_type.strip().upper()}-"
+        highest = 0
+        for patient_id in Patient.objects.filter(
+            patient_id__istartswith=prefix
+        ).values_list("patient_id", flat=True):
+            suffix = patient_id[len(prefix):]
+            if suffix.isdigit():
+                highest = max(highest, int(suffix))
+        counted = Patient.objects.filter(
+            category="nonnpa", nonnpa_type__iexact=self.nonnpa_type.strip()
+        ).count()
+        return max(highest, counted) + 1
+
     def generate_patient_id(self):
         """
         Generate patient ID based on category:
@@ -315,13 +337,8 @@ class Patient(models.Model):
             elif self.category == "nonnpa":
                 if not self.nonnpa_type:
                     raise ValueError("Non-NPA type is required for Non-NPA patients")
-                # Count existing Non-NPA patients of the same type to get next number
-                count = Patient.objects.filter(
-                    category="nonnpa", nonnpa_type__iexact=self.nonnpa_type.strip()
-                ).count()
-                sequence = str(count + 1).zfill(
-                    2
-                )  # Zero-padded to 2 digits (01, 02, etc.)
+                # Zero-padded to 2 digits (01, 02, ...), skipping ids in use.
+                sequence = str(self._next_nonnpa_sequence()).zfill(2)
                 self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
 
             elif self.category == "dependent":
@@ -400,19 +417,13 @@ class Patient(models.Model):
                     )
                 else:
                     # Generate new sequence
-                    count = Patient.objects.filter(
-                        category="nonnpa", nonnpa_type__iexact=self.nonnpa_type.strip()
-                    ).count()
-                    sequence = str(count + 1).zfill(2)
+                    sequence = str(self._next_nonnpa_sequence()).zfill(2)
                     self.patient_id = (
                         f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
                     )
             else:
                 # Generate new sequence
-                count = Patient.objects.filter(
-                    category="nonnpa", nonnpa_type__iexact=self.nonnpa_type.strip()
-                ).count()
-                sequence = str(count + 1).zfill(2)
+                sequence = str(self._next_nonnpa_sequence()).zfill(2)
                 self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
 
         elif self.category == "dependent":
