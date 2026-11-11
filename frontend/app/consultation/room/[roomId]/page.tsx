@@ -30,6 +30,7 @@ import type {
 } from '@/lib/consultation/room-types';
 import type { RoomPresenceStatus } from '@/lib/consultation/room-presence';
 import { isDoctorCheckedIntoRoom, ROOM_PRESENCE_HEARTBEAT_MS, doctorDisplayName } from '@/lib/consultation/room-presence';
+import { findMyActiveSession } from '@/lib/consultation/room-active-session';
 import {
   debugConsultationRoom,
   formatRoomTime as formatTime,
@@ -640,9 +641,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         
         // Restore this doctor's active session in the room (shared queue — claim on start).
-        const mySession = (roomData.active_sessions ?? []).find(
-          (session) => session.doctor_id === currentDoctorId,
-        ) ?? roomData.active_session;
+        // Never fall back to the room's first active session: in a shared room that
+        // belongs to a colleague, and adopting it would pause their consultation.
+        const mySession = findMyActiveSession(roomData.active_sessions, currentDoctorId);
         if (mySession?.id) {
           const restored = await restoreActiveSession(mySession.id, { silent: true });
           if (!restored) {
