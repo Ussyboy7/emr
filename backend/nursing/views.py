@@ -281,6 +281,7 @@ class ProcedureViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     search_fields = [
         'procedure_id',
         'description',
+        'medication_name',
         'patient__first_name',
         'patient__surname',
         'patient__patient_id',
