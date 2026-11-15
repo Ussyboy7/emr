@@ -678,11 +678,13 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                     if idempotent and len(tests) == 1 and not tests[0].sample_batch_id
                     else None
                 )
-                # One Lab ID per order: if a prior collection already created a
-                # batch for this order, reuse it (and its accession) instead of
-                # minting a fresh serial for a later collection event.
+                # One accession per physical collection batch: a later
+                # collection joins the order's existing batch only when it is
+                # drawn at the same collection facility. Collecting at another
+                # facility mints a fresh accession with that facility's prefix.
                 existing_order_batch = (
                     order.sample_batches.select_for_update()
+                    .filter(collection_clinic=collection_clinic)
                     .order_by("collected_at", "id")
                     .first()
                 )
