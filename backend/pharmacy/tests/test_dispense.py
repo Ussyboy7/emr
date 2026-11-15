@@ -137,6 +137,38 @@ class PharmacyDispenseApiTests(TestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_complete_dispensing_requires_dispense_capability(self):
+        doctor = User.objects.create_user(
+            username="pharm_consult_dr",
+            password="testpass123",
+            system_role="Medical Doctor",
+        )
+        grant_pages(doctor, ["/consultation"])
+        self.client.force_authenticate(user=doctor)
+
+        res = self.client.post(
+            f"/api/v1/pharmacy/prescriptions/{self.prescription.pk}/complete_dispensing/",
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.prescription.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.prescription.status, "pending")
+        self.assertFalse(self.item.is_dispensed)
+
+    def test_pharmacist_can_complete_dispensing(self):
+        res = self.client.post(
+            f"/api/v1/pharmacy/prescriptions/{self.prescription.pk}/complete_dispensing/",
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.prescription.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.prescription.status, "dispensed")
+        self.assertTrue(self.item.is_dispensed)
+
     def test_full_dispense_marks_item_and_prescription_dispensed(self):
         res = self.client.post(
             self._dispense_url(),

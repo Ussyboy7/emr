@@ -1889,6 +1889,11 @@ class PrescriptionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def complete_dispensing(self, request, pk=None):
         """Manually mark a prescription as fully dispensed/completed."""
+        ensure_capability(
+            request.user,
+            "pharmacy_dispense",
+            "Only authorised pharmacy staff can dispense prescriptions.",
+        )
         prescription = self.get_object()
 
         # Mark all active (non-superseded) items as dispensed

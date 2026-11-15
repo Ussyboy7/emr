@@ -3,6 +3,8 @@
 Covers: create, list, filter, retrieve, schedule, acquire, report,
 verify/reject reports, templates CRUD, stats, and auth checks.
 """
+from unittest.mock import patch
+
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -591,6 +593,82 @@ class RadiologyAuthTests(APITestCase):
         self.client.force_authenticate(user=user)
         resp = self.client.get(f"{BASE}/orders/")
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class RadiologyStudyStatusCapabilityTests(APITestCase):
+    """Study status transitions must require the capability that owns them."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = create_test_user(
+            "rad_api_status_caps",
+            pages=["/radiology"],
+            system_role="Radiologist",
+        )
+        cls.patient, _ = create_test_patient_visit(patient_id="RADAPI-SC-01")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+        self.order = RadiologyOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        self.study = RadiologyStudy.objects.create(
+            order=self.order,
+            procedure="Chest X-Ray",
+            body_part="Chest",
+            modality="X-Ray",
+            status="acquired",
+        )
+
+    def test_update_status_verified_requires_verify_capability(self):
+        with patch("permissions.user_capabilities.get_user_capabilities", return_value=set()):
+            resp = self.client.post(
+                f"{BASE}/studies/{self.study.pk}/update_status/",
+                {"status": "verified"},
+                format="json",
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.study.refresh_from_db()
+        self.assertEqual(self.study.status, "acquired")
+
+    def test_update_status_processing_requires_perform_capability(self):
+        with patch("permissions.user_capabilities.get_user_capabilities", return_value=set()):
+            resp = self.client.post(
+                f"{BASE}/studies/{self.study.pk}/update_status/",
+                {"status": "processing"},
+                format="json",
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.study.refresh_from_db()
+        self.assertEqual(self.study.status, "acquired")
+
+    def test_update_results_cannot_verify_without_capability(self):
+        with patch("permissions.user_capabilities.get_user_capabilities", return_value=set()):
+            resp = self.client.post(
+                f"{BASE}/studies/{self.study.pk}/update_results/",
+                {"report": "Normal study", "status": "verified"},
+                format="json",
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.study.refresh_from_db()
+        self.assertEqual(self.study.status, "acquired")
+
+    def test_update_status_verified_allowed_with_capability(self):
+        resp = self.client.post(
+            f"{BASE}/studies/{self.study.pk}/update_status/",
+            {"status": "verified"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.study.refresh_from_db()
+        self.assertEqual(self.study.status, "verified")
 
 
 class RadiologyOrderFullLifecycleTest(APITestCase):

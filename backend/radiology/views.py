@@ -1162,21 +1162,37 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             )
         )
 
+    def _assert_status_capability(self, user, new_status):
+        """Gate a study status write on the capability that owns the transition."""
+        if new_status == 'verified':
+            ensure_capability(
+                user,
+                'radiology_result_verify',
+                'Only authorised radiology staff can verify reports.',
+            )
+        else:
+            ensure_capability(
+                user,
+                'radiology_perform',
+                'Only authorised radiology staff can update study status.',
+            )
+
     @extend_schema(tags=["Radiology"], summary="Update status", description="Update study status (like lab test status).")
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
         """Update study status (like lab test status)."""
+        new_status = request.data.get('status')
+        if new_status not in ['pending', 'processing', 'reported', 'verified', 'rejected']:
+            return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
+        self._assert_status_capability(request.user, new_status)
+
         try:
             study = self.get_object()
             old_status = study.status  # Capture old status before updating
-            new_status = request.data.get('status')
             processing_method = request.data.get('processing_method')
             outsourced_facility = request.data.get('outsourced_facility')
 
             logger.debug("update_study_status called for study %s, status: %s", study.id, new_status)
-
-            if new_status not in ['pending', 'processing', 'reported', 'verified', 'rejected']:
-                return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
 
             # Update status
             study.status = new_status
@@ -1243,6 +1259,9 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             custom_reports = _parse_custom_reports(request.data.get('custom_reports'))
             critical = request.data.get('critical', False)
             status_update = request.data.get('status')
+
+        if status_update:
+            self._assert_status_capability(request.user, status_update)
 
         try:
             study = self.get_object()

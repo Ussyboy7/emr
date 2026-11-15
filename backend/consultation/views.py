@@ -12,7 +12,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
@@ -82,6 +82,20 @@ from .room_queue_stats import build_room_queue_stats
 from .queue_notifications import notify_doctor_in_room
 
 DIAGNOSIS_REVIEW_PAGE = "/medical-records/diagnosis-review"
+
+# Pages whose users may open a read-only consultation report. Reports stay
+# readable across locations by design, so this is a page allowlist rather than
+# facility scoping; it keeps every other authenticated account out.
+CONSULTATION_REPORT_PAGES = (
+    "/consultation",
+    "/medical-records/patients",
+    "/medical-records/patient-records",
+    "/medical-records/visits",
+    "/medical-records/diagnosis-review",
+    "/medical-records/reports",
+    "/nursing/wards",
+    "/consultation/wards",
+)
 
 
 def user_can_correct_diagnoses(user) -> bool:
@@ -1177,10 +1191,25 @@ class ConsultationSessionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
 
         return Response(build_session_workspace_bundle(session))
 
+    def _assert_can_read_report(self, user):
+        """Reports are cross-location by design, so gate them on viewing pages, not clinic scope."""
+        if getattr(user, "is_superuser", False):
+            return
+        from permissions.page_paths import user_has_any_page
+        from permissions.user_pages import get_user_allowed_pages, get_user_denied_pages
+
+        if not user_has_any_page(
+            get_user_allowed_pages(user),
+            CONSULTATION_REPORT_PAGES,
+            get_user_denied_pages(user),
+        ):
+            raise PermissionDenied("You do not have permission to view consultation reports.")
+
     @extend_schema(tags=["Consultation"], summary="Cross-location consultation report data")
     @action(detail=True, methods=['get'], url_path='report-data', permission_classes=[IsAuthenticated])
     def report_data(self, request, pk=None):
         """Return one read-only report payload without operational clinic scoping."""
+        self._assert_can_read_report(request.user)
         session = get_object_or_404(ConsultationSession.objects.select_related(
             'room',
             'room__location_clinic',
