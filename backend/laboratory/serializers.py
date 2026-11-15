@@ -311,6 +311,9 @@ class LabTestSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = [
             'created_at', 'updated_at', 'processing_clinic', 'routing_status',
+            # Verification/rejection attribution is server-owned so it always
+            # names the authenticated actor, never a client-supplied user.
+            'verified_by', 'verified_at', 'rejected_by', 'rejected_at',
         ]
 
 

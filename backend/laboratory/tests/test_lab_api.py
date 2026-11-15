@@ -3,6 +3,8 @@
 Covers: create, list, filter, retrieve, collect samples, submit results,
 verify results, templates CRUD, stats, and auth checks.
 """
+from unittest.mock import patch
+
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -443,6 +445,124 @@ class LabSubmitResultsTests(APITestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class LabTestStatusCapabilityTests(APITestCase):
+    """PATCH /api/v1/laboratory/tests/{id}/ — status transitions are capability-gated.
+
+    The generic update endpoint is reachable with page access alone, so status
+    writes must independently require the capability that owns the transition.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = create_test_user(
+            "lab_api_status_caps",
+            pages=["/laboratory"],
+            system_role="Laboratory Scientist",
+        )
+        cls.patient, _ = create_test_patient_visit(patient_id="LABAPI-SC-01")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+        self.order = LabOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        self.test_obj = LabTest.objects.create(
+            order=self.order,
+            name="Glucose",
+            code="GLU",
+            sample_type="Blood",
+            status="processing",
+        )
+
+    def _patch_test(self, payload):
+        return self.client.patch(
+            f"{BASE}/tests/{self.test_obj.pk}/",
+            payload,
+            format="json",
+        )
+
+    def test_status_transition_requires_status_capability(self):
+        with patch("permissions.user_capabilities.get_user_capabilities", return_value=set()):
+            resp = self._patch_test({"status": "results_ready"})
+
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.test_obj.refresh_from_db()
+        self.assertEqual(self.test_obj.status, "processing")
+
+    def test_non_status_patch_allowed_without_status_capability(self):
+        with patch("permissions.user_capabilities.get_user_capabilities", return_value=set()):
+            resp = self._patch_test({"notes": "Sample slightly haemolysed"})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.test_obj.refresh_from_db()
+        self.assertEqual(self.test_obj.notes, "Sample slightly haemolysed")
+
+    def test_status_transition_allowed_with_capability(self):
+        resp = self._patch_test({"status": "results_ready"})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.test_obj.refresh_from_db()
+        self.assertEqual(self.test_obj.status, "results_ready")
+
+    def test_patch_cannot_spoof_verification_attribution(self):
+        other = create_test_user("lab_api_spoof_verifier", pages=["/laboratory"])
+
+        resp = self._patch_test({
+            "status": "verified",
+            "verified_by": other.pk,
+            "verified_at": "2020-01-01T00:00:00Z",
+            "rejected_by": other.pk,
+            "rejected_at": "2020-01-01T00:00:00Z",
+        })
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.test_obj.refresh_from_db()
+        self.assertEqual(self.test_obj.status, "verified")
+        self.assertEqual(self.test_obj.verified_by_id, self.user.pk)
+        self.assertNotEqual(
+            self.test_obj.verified_at.isoformat(),
+            "2020-01-01T00:00:00+00:00",
+        )
+        self.assertIsNone(self.test_obj.rejected_by_id)
+        self.assertIsNone(self.test_obj.rejected_at)
+
+    def test_patch_cannot_spoof_rejection_attribution(self):
+        other = create_test_user("lab_api_spoof_rejecter", pages=["/laboratory"])
+
+        resp = self._patch_test({
+            "status": "rejected",
+            "rejected_by": other.pk,
+            "rejected_at": "2020-01-01T00:00:00Z",
+            "verification_notes": "Haemolysed sample",
+        })
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.test_obj.refresh_from_db()
+        self.assertEqual(self.test_obj.status, "rejected")
+        self.assertEqual(self.test_obj.rejected_by_id, self.user.pk)
+        self.assertNotEqual(
+            self.test_obj.rejected_at.isoformat(),
+            "2020-01-01T00:00:00+00:00",
+        )
+        self.assertEqual(self.test_obj.verification_notes, "Haemolysed sample")
+
+    def test_patch_cannot_clear_existing_verification_attribution(self):
+        self.test_obj.status = "verified"
+        self.test_obj.verified_by = self.user
+        self.test_obj.verified_at = timezone.now()
+        self.test_obj.save()
+
+        resp = self._patch_test({"verified_by": None, "verified_at": None, "notes": "Amended"})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.test_obj.refresh_from_db()
+        self.assertEqual(self.test_obj.verified_by_id, self.user.pk)
+        self.assertIsNotNone(self.test_obj.verified_at)
 
 
 class LabVerificationTests(APITestCase):

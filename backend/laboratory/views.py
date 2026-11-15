@@ -1457,6 +1457,22 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             return Response({'error': 'Test not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
+# Status transitions on a lab test require the capability that owns them. The
+# generic update endpoint is reachable with page access alone, so it must not be
+# a shortcut around the dedicated collect/process/submit/verify actions.
+LAB_TEST_STATUS_CAPABILITIES = {
+    'sample_collected': ('lab_collect', 'Only authorised laboratory staff can collect samples.'),
+    'processing': ('lab_process', 'Only authorised laboratory staff can process tests.'),
+    'results_ready': ('lab_result_submit', 'Only authorised laboratory staff can submit results.'),
+    'verified': ('lab_result_verify', 'Only authorised laboratory staff can verify results.'),
+    'rejected': ('lab_result_verify', 'Only authorised laboratory staff can reject results.'),
+}
+LAB_TEST_DEFAULT_STATUS_CAPABILITY = (
+    'lab_process',
+    'Only authorised laboratory staff can update test status.',
+)
+
+
 @document_viewset(tag="Laboratory", resource="lab tests")
 class LabTestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
     """ViewSet for managing lab tests."""
@@ -1509,6 +1525,13 @@ class LabTestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         """Handle status changes, especially rejection."""
         instance = serializer.instance
         old_status = instance.status
+
+        requested_status = serializer.validated_data.get('status')
+        if requested_status and requested_status != old_status:
+            capability_id, message = LAB_TEST_STATUS_CAPABILITIES.get(
+                requested_status, LAB_TEST_DEFAULT_STATUS_CAPABILITY
+            )
+            ensure_capability(self.request.user, capability_id, message)
         
         # Check if status is being changed to 'rejected'
         if 'status' in serializer.validated_data:
@@ -1535,8 +1558,16 @@ class LabTestViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
                     request=self.request,
                 )
             else:
-                # For other status changes, save normally
-                test = serializer.save()
+                # For other status changes, save normally. Verification
+                # attribution is recorded here so the generic update path names
+                # the verifying actor (the fields themselves are read-only).
+                save_kwargs = {}
+                if new_status == 'verified' and not instance.verified_by:
+                    save_kwargs = {
+                        'verified_by': self.request.user,
+                        'verified_at': timezone.now(),
+                    }
+                test = serializer.save(**save_kwargs)
                 
                 # Log audit for other status changes
                 if old_status != new_status:
