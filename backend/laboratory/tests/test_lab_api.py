@@ -96,6 +96,96 @@ class LabOrderCreateTests(APITestCase):
         self.assertEqual(len(resp.data["tests"]), 3)
 
 
+class LabTestCreateStatusTests(APITestCase):
+    """POST /laboratory/tests/ and nested order tests cannot create terminal tests.
+
+    verified/rejected are workflow outcomes with server-recorded attribution, so
+    neither create path may start a test in either state.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = create_test_user(
+            "lab_api_create_status",
+            pages=["/laboratory"],
+            system_role="Laboratory Scientist",
+        )
+        cls.patient, cls.visit = create_test_patient_visit(patient_id="LABAPI-CS-01")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+        self.order = LabOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+
+    def _create_test(self, **overrides):
+        payload = {
+            "order": self.order.pk,
+            "name": "FBC",
+            "code": "FBC",
+            "sample_type": "Blood",
+        }
+        payload.update(overrides)
+        return self.client.post(f"{BASE}/tests/", payload, format="json")
+
+    def _create_order_with_test(self, test_status):
+        return self.client.post(
+            f"{BASE}/orders/",
+            {
+                "patient": self.patient.pk,
+                "priority": "routine",
+                "tests_data": [
+                    {
+                        "name": "FBC",
+                        "code": "FBC",
+                        "sample_type": "Blood",
+                        "status": test_status,
+                    }
+                ],
+            },
+            format="json",
+        )
+
+    def test_direct_create_rejects_verified_status(self):
+        resp = self._create_test(status="verified")
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(LabTest.objects.filter(order=self.order).exists())
+
+    def test_direct_create_rejects_rejected_status(self):
+        resp = self._create_test(status="rejected")
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(LabTest.objects.filter(order=self.order).exists())
+
+    def test_direct_create_allows_pending_status(self):
+        resp = self._create_test(status="pending")
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["status"], "pending")
+
+    def test_order_create_rejects_verified_test_status(self):
+        resp = self._create_order_with_test("verified")
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(LabOrder.objects.filter(patient=self.patient).exclude(pk=self.order.pk).exists())
+
+    def test_order_create_rejects_rejected_test_status(self):
+        resp = self._create_order_with_test("rejected")
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(LabOrder.objects.filter(patient=self.patient).exclude(pk=self.order.pk).exists())
+
+    def test_order_create_allows_pending_test_status(self):
+        resp = self._create_order_with_test("pending")
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["tests"][0]["status"], "pending")
+
+
 class LabOrderListFilterTests(APITestCase):
     """GET /api/v1/laboratory/orders/ — list, filter, retrieve, stats."""
 

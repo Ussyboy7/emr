@@ -20,6 +20,11 @@ from .models import (
 )
 
 
+# A lab test is never born verified or rejected: both are workflow outcomes that
+# require the collect/process/submit/verify path and server-recorded attribution.
+TERMINAL_LAB_TEST_STATUSES = frozenset({'verified', 'rejected'})
+TERMINAL_LAB_TEST_STATUS_ERROR = 'A lab test cannot be created as verified or rejected.'
+
 OTHER_TEMPLATE_CODES = {'OTHER', 'OTHERS'}
 
 TEST_NAME_ALIASES = {
@@ -306,6 +311,13 @@ class LabTestSerializer(serializers.ModelSerializer):
         except Exception:
             return False
     
+    def validate_status(self, value):
+        # Updates may still reach verified/rejected through the workflow (and are
+        # capability-gated in the viewset); creation may not start there.
+        if self.instance is None and value in TERMINAL_LAB_TEST_STATUSES:
+            raise serializers.ValidationError(TERMINAL_LAB_TEST_STATUS_ERROR)
+        return value
+
     class Meta:
         model = LabTest
         fields = '__all__'
@@ -339,6 +351,11 @@ class LabTestCreateSerializer(serializers.ModelSerializer):
         allow_null=True,
         required=False,
     )
+
+    def validate_status(self, value):
+        if value in TERMINAL_LAB_TEST_STATUSES:
+            raise serializers.ValidationError(TERMINAL_LAB_TEST_STATUS_ERROR)
+        return value
 
     class Meta:
         model = LabTest
