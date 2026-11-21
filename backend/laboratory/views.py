@@ -16,7 +16,7 @@ from django.db.models import Count, Q, Max
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from organization.models import Clinic, SystemConfig
-from organization.routing import ensure_internal_processing_destination
+from organization.routing import ensure_internal_routing_destination
 from io import BytesIO
 import json
 import re
@@ -794,11 +794,12 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             processing_clinic = None
             if destination_type == 'internal':
                 processing_clinic = get_object_or_404(Clinic, pk=processing_clinic_id)
-                _ensure_route_facility_access(request.user, processing_clinic)
             with transaction.atomic():
                 locked_order = LabOrder.objects.select_for_update().get(pk=order.pk)
                 if destination_type == 'internal':
-                    ensure_internal_processing_destination(locked_order.location_clinic, processing_clinic)
+                    ensure_internal_routing_destination(
+                        request.user, locked_order.location_clinic, processing_clinic
+                    )
                 _ensure_route_facility_access(request.user, locked_order.location_clinic)
                 tests = list(LabTest.objects.select_for_update().filter(order=locked_order, id__in=test_ids))
                 if len(tests) != len(set(test_ids)):

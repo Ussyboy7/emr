@@ -17,8 +17,9 @@ from django.utils import timezone
 from django.db.models import Count, Q
 from django.db import transaction
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from organization.models import Clinic, SystemConfig
-from organization.routing import ensure_internal_processing_destination
+from organization.routing import ensure_internal_routing_destination
 
 from common.pagination import CatalogPageNumberPagination
 from laboratory.pagination import FlexiblePageNumberPagination
@@ -694,12 +695,13 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
             study_ids = [int(study_id) for study_id in study_ids]
             processing_clinic = None
             if destination_type == 'internal':
-                processing_clinic = Clinic.objects.get(pk=processing_clinic_id)
-                _ensure_route_facility_access(request.user, processing_clinic)
+                processing_clinic = get_object_or_404(Clinic, pk=processing_clinic_id)
             with transaction.atomic():
                 locked_order = RadiologyOrder.objects.select_for_update().get(pk=order.pk)
                 if destination_type == 'internal':
-                    ensure_internal_processing_destination(locked_order.location_clinic, processing_clinic)
+                    ensure_internal_routing_destination(
+                        request.user, locked_order.location_clinic, processing_clinic
+                    )
                 _ensure_route_facility_access(request.user, locked_order.location_clinic)
                 studies = list(RadiologyStudy.objects.select_for_update().filter(order=locked_order, id__in=study_ids))
                 if len(studies) != len(set(study_ids)):

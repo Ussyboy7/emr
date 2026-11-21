@@ -292,6 +292,83 @@ class LabOrderRoutingApiTests(APITestCase):
         self.assertEqual(len(response.data["lines"]), 1)
         self.assertEqual(len(response.data["routing_events"]), 1)
 
+    def test_hq_only_triage_can_route_originless_test_to_bode(self):
+        triage = create_test_user(
+            "lab-routing-hq-triage", pages=["/laboratory"], system_role="Laboratory Scientist"
+        )
+        triage.location_clinic = self.hq
+        triage.active_clinic = self.hq
+        triage.save()
+        triage.location_clinics.add(self.hq)
+        self.client.force_authenticate(user=triage)
+        self.order.location_clinic = None
+        self.order.processing_clinic = None
+        self.order.save(update_fields=["location_clinic", "processing_clinic"])
+
+        response = self._route({
+            "test_ids": [self.first.pk],
+            "destination_type": "internal",
+            "processing_clinic": self.bode.pk,
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.processing_clinic_id, self.bode.pk)
+        self.assertEqual(self.first.routing_status, "sent_to_processing")
+        event = LabTestRoutingEvent.objects.get(test=self.first)
+        self.assertIsNone(event.from_clinic_id)
+        self.assertEqual(event.to_clinic_id, self.bode.pk)
+
+    def test_originless_route_is_limited_to_assigned_facilities_and_processing_hubs(self):
+        triage = create_test_user(
+            "lab-routing-hq-triage-scope", pages=["/laboratory"], system_role="Laboratory Scientist"
+        )
+        triage.location_clinic = self.hq
+        triage.active_clinic = self.hq
+        triage.save()
+        triage.location_clinics.add(self.hq)
+        self.client.force_authenticate(user=triage)
+        self.order.location_clinic = None
+        self.order.processing_clinic = None
+        self.order.save(update_fields=["location_clinic", "processing_clinic"])
+
+        for destination in (self.hq, self.bode):
+            response = self._route({
+                "test_ids": [self.first.pk],
+                "destination_type": "internal",
+                "processing_clinic": destination.pk,
+            })
+            self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        response = self._route({
+            "test_ids": [self.first.pk],
+            "destination_type": "internal",
+            "processing_clinic": self.other.pk,
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("designated processing clinic", str(response.data["detail"]))
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.processing_clinic_id, self.bode.pk)
+
+        # A user assigned elsewhere cannot use origin-less triage to reach HQ.
+        bode_only = create_test_user(
+            "lab-routing-bode-scope", pages=["/laboratory"], system_role="Laboratory Scientist"
+        )
+        bode_only.location_clinic = self.bode
+        bode_only.active_clinic = self.bode
+        bode_only.save()
+        bode_only.location_clinics.add(self.bode)
+        self.client.force_authenticate(user=bode_only)
+
+        response = self._route({
+            "test_ids": [self.first.pk],
+            "destination_type": "internal",
+            "processing_clinic": self.hq.pk,
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.processing_clinic_id, self.bode.pk)
+
     def test_processing_clinic_filters_list_and_stats_without_changing_origin_filter(self):
         self.order.processing_clinic = self.bode
         self.order.save(update_fields=["processing_clinic"])
@@ -451,7 +528,7 @@ class LabOrderRoutingApiTests(APITestCase):
         self.assertEqual(response.data["dispatch"]["tests"][0]["id"], self.first.pk)
         self.assertEqual(response.data["dispatch"]["tests"][0]["code"], "LAB-FBC")
 
-    def test_route_rejects_empty_selection_and_unassigned_destination(self):
+    def test_route_rejects_empty_selection_and_destination_outside_policy(self):
         response = self._route({"test_ids": [], "destination_type": "internal", "processing_clinic": self.hq.pk})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -461,6 +538,7 @@ class LabOrderRoutingApiTests(APITestCase):
             "processing_clinic": self.other.pk,
         })
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("must route internal processing", str(response.data["detail"]))
 
     def test_internal_route_requires_processing_clinic(self):
         response = self._route({"test_ids": [self.first.pk], "destination_type": "internal"})

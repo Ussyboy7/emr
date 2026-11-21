@@ -2,6 +2,8 @@
 
 from rest_framework.exceptions import PermissionDenied
 
+from permissions.user_capabilities import user_has_capability
+
 
 def required_processing_clinic(origin):
     """Return the configured internal destination for an origin clinic."""
@@ -11,7 +13,7 @@ def required_processing_clinic(origin):
 
 
 def ensure_internal_processing_destination(origin, destination):
-    """Enforce the clinic's configured internal processing destination."""
+    """Enforce the origin clinic's configured internal destination."""
     required = required_processing_clinic(origin)
     if required is None:
         raise PermissionDenied(
@@ -21,3 +23,29 @@ def ensure_internal_processing_destination(origin, destination):
         raise PermissionDenied(
             f"This clinic must route internal processing to {required.name}."
         )
+
+
+def ensure_internal_routing_destination(user, origin, destination):
+    """Authorise an internal routing destination for a lab test or study line.
+
+    A known origin pins the destination to that clinic's own policy. An order
+    with no resolvable origin has no such policy, so its triage may pick one of
+    the user's assigned facilities or a designated processing hub (a clinic
+    that other clinics route to, e.g. Bode Thomas).
+    """
+    if origin is not None:
+        ensure_internal_processing_destination(origin, destination)
+        return
+    if destination is None:
+        return
+    if user.is_superuser or user_has_capability(user, 'clinical_data_view_all'):
+        return
+    assigned = set(user.location_clinics.values_list('id', flat=True))
+    if not assigned and user.location_clinic_id:
+        assigned = {user.location_clinic_id}
+    if destination.pk in assigned or destination.clinics_that_route_here.exists():
+        return
+    raise PermissionDenied(
+        'Orders without an origin can only be routed to your assigned '
+        'facilities or a designated processing clinic.'
+    )

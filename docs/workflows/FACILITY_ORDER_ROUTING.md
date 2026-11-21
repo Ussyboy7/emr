@@ -30,6 +30,27 @@ Worklists show both `Origin` and `Processing`. A routing decision records the
 actor, time, previous destination, new destination, and reason. The original
 order and patient encounter remain unchanged.
 
+### Allowed internal destinations for origin-less orders
+
+An order with no resolvable origin has no facility policy to pin its internal
+destination, so HQ triage may route its lines internally only to:
+
+- A facility the acting user is assigned to (local processing at that user's
+  clinic), or
+- A designated internal processing hub — a clinic configured as another
+  clinic's `default_processing_clinic` (Bode Thomas in the current setup).
+
+Any other internal destination is rejected. This keeps the HQ triage flow
+(HQ → Bode Thomas) working without letting every user who can open an
+unassigned order route lines to an arbitrary clinic. The rule is enforced by
+`ensure_internal_routing_destination` in `organization/routing.py` for both
+laboratory and radiology routing; users with `clinical_data_view_all` or
+superusers are exempt, matching the other facility access checks.
+
+For an order whose origin is known, the origin's own policy still applies: its
+configured `default_processing_clinic` is the only permitted internal
+destination, and an origin clinic without one processes in-house.
+
 ## Collection and processing
 
 The collection facility is where the physical sample is collected. The
