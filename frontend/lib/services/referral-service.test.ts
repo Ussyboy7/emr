@@ -39,6 +39,22 @@ describe('referralService', () => {
     });
   });
 
+  describe('getFilterOptions', () => {
+    it('requests distinct values with the queue exclusions', async () => {
+      mockApiFetch.mockResolvedValue({ specialties: [], facilities: [] });
+
+      await referralService.getFilterOptions({
+        exclude_draft: true,
+        exclude_status: 'returned_for_correction',
+      });
+
+      const url = mockApiFetch.mock.calls[0][0] as string;
+      expect(url).toContain('/consultation/referrals/filter-options/');
+      expect(url).toContain('exclude_draft=true');
+      expect(url).toContain('exclude_status=returned_for_correction');
+    });
+  });
+
   describe('getReferral', () => {
     it('fetches single referral', async () => {
       mockApiFetch.mockResolvedValue({ id: 5, referral_id: 'REF-005' });

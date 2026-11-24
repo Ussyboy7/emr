@@ -1838,6 +1838,46 @@ class ReferralViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             'approved': row['approved'] or 0,
         })
 
+    @extend_schema(tags=["Consultation"], summary="Filter options", description="Distinct specialty/facility values in use, for list filter dropdowns.")
+    @action(detail=False, methods=['get'], url_path='filter-options')
+    def filter_options(self, request):
+        """
+        Distinct specialty and facility values across every referral in scope.
+
+        Pagination, search and the specialty/facility filters are ignored on
+        purpose: the dropdown must offer values from rows the caller has not
+        loaded yet. ``exclude_draft`` / ``exclude_status`` are honoured so the
+        options match the queue being viewed.
+        """
+        qs = self.scope_queryset(Referral.objects.all())
+
+        qp = request.query_params
+        if qp.get("exclude_draft", "").lower() in ("1", "true", "yes"):
+            qs = qs.exclude(status="draft")
+        exclude_status = qp.get("exclude_status")
+        if exclude_status:
+            for raw in exclude_status.split(","):
+                st = raw.strip()
+                if st:
+                    qs = qs.exclude(status=st)
+
+        def distinct_values(field):
+            # order_by() clears Referral.Meta.ordering so DISTINCT applies to the value only.
+            rows = (
+                qs.exclude(**{field: ""})
+                .order_by()
+                .values_list(field, flat=True)
+                .distinct()
+            )
+            values = {str(v).strip() for v in rows}
+            values.discard("")
+            return sorted(values, key=str.casefold)
+
+        return Response({
+            "specialties": distinct_values("specialty"),
+            "facilities": distinct_values("facility"),
+        })
+
     def perform_create(self, serializer):
         """Create referral and log audit."""
         referral = serializer.save(

@@ -177,6 +177,19 @@ class ReferralService {
     return apiFetch(path);
   }
 
+  /** Distinct specialty/facility values in use, for the list filter dropdowns. */
+  async getFilterOptions(params?: {
+    exclude_draft?: boolean;
+    exclude_status?: string;
+  }): Promise<{ specialties: string[]; facilities: string[] }> {
+    const { exclude_draft, ...rest } = params || {};
+    const query = buildQueryString({
+      ...rest,
+      ...(exclude_draft ? { exclude_draft: 'true' as const } : {}),
+    });
+    return apiFetch(`/consultation/referrals/filter-options/${query}`);
+  }
+
   /**
    * Get a single referral
    */

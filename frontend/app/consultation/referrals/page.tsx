@@ -80,6 +80,7 @@ export default function ConsultationReferralsPage() {
     facilities,
     refetch,
     refetchStats,
+    refetchFilterOptions,
   } = queue;
 
   const consultationStatusOptions = useMemo(
@@ -176,6 +177,7 @@ export default function ConsultationReferralsPage() {
       setShowEditModal(false);
       toast.success("Referral updated");
       void refetch();
+      void refetchFilterOptions();
     } catch (error: unknown) {
       if (isAuthenticationError(error)) return;
       toast.error((error as Error)?.message || "Failed to update");
@@ -378,6 +380,7 @@ export default function ConsultationReferralsPage() {
       resetCreateReferralForm();
       void refetch();
       void refetchStats();
+      void refetchFilterOptions();
     } catch (error: unknown) {
       if (isAuthenticationError(error)) return;
       toast.error((error as Error)?.message || "Failed to create referral");

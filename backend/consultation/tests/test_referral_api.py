@@ -580,6 +580,44 @@ class ReferralListStatsTests(ReferralSetupMixin, APITestCase):
         self.assertEqual(resp.data["approved"], 1)
 
 
+class ReferralFilterOptionsTests(ReferralSetupMixin, APITestCase):
+    """GET /api/v1/consultation/referrals/filter-options/"""
+
+    def test_filter_options_cover_values_beyond_the_first_page(self):
+        self._create_referral(specialty="Cardiology", facility="City General Hospital")
+        self._create_referral(specialty="Neurology", facility="Lagos Neuro Centre")
+        self._create_referral(specialty="Dermatology", facility="Skin Clinic Ikeja")
+
+        # A single-row page must not limit the dropdown values.
+        resp = self.client.get(f"{BASE_URL}filter-options/", {"page_size": 1})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            resp.data["specialties"],
+            ["Cardiology", "Dermatology", "Neurology"],
+        )
+        self.assertEqual(
+            resp.data["facilities"],
+            ["City General Hospital", "Lagos Neuro Centre", "Skin Clinic Ikeja"],
+        )
+
+    def test_filter_options_respect_draft_exclusion(self):
+        self._create_referral(
+            specialty="Draft Only", facility="Draft Facility", status="draft"
+        )
+        self._create_referral(
+            specialty="Live", facility="Live Facility", status="submitted_to_records"
+        )
+
+        resp = self.client.get(
+            f"{BASE_URL}filter-options/", {"exclude_draft": "true"}
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["specialties"], ["Live"])
+        self.assertEqual(resp.data["facilities"], ["Live Facility"])
+
+
 class ReferralAuthTests(ReferralSetupMixin, APITestCase):
     """Unauthenticated requests must be rejected with 401."""
 

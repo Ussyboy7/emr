@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuthenticatedPage } from "@/hooks/use-authenticated-page";
@@ -20,6 +20,9 @@ const LEGACY_TO_API_STATUS: Record<string, string> = {
   scheduled: "approved_for_forms",
   completed: "closed",
 };
+
+/** Statuses hidden from every referral queue list. */
+const EXCLUDED_STATUS = "returned_for_correction";
 
 const SUBMITTED_STATUSES = ["submitted_to_records"] as const;
 const REVIEW_STATUSES = ["records_review"] as const;
@@ -83,13 +86,14 @@ export interface UseReferralsQueueResult {
   dateFilter: ReferralsDateFilter;
   setDateFilter: (value: ReferralsDateFilter) => void;
 
-  // derived
+  // filter dropdown values (all values in use, not just the loaded page)
   specialties: string[];
   facilities: string[];
 
   // actions
   refetch: () => Promise<void>;
   refetchStats: () => Promise<void>;
+  refetchFilterOptions: () => Promise<void>;
 
   ready: boolean;
   handleAuthError: (error: unknown) => boolean;
@@ -142,6 +146,9 @@ export function useReferralsQueue(
   const [dateFilter, setDateFilter] = useState<ReferralsDateFilter>("all");
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
 
+  const [specialties, setSpecialties] = useState<string[]>([]);
+  const [facilities, setFacilities] = useState<string[]>([]);
+
   const buildDateParams = useCallback(() => {
     let date: string | undefined;
     let start_date: string | undefined;
@@ -164,7 +171,7 @@ export function useReferralsQueue(
 
   const baseFilterParams = useCallback((): ReferralListParams => {
     const params: ReferralListParams = {
-      exclude_status: "returned_for_correction",
+      exclude_status: EXCLUDED_STATUS,
     };
     if (excludeDraft) params.exclude_draft = true;
     if (specialtyFilter !== "all") params.specialty = specialtyFilter;
@@ -206,10 +213,8 @@ export function useReferralsQueue(
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const stats = await referralService.getListStats({
-        ...baseFilterParams(),
-        exclude_draft: true,
-      });
+      // Same filters as the list so "Total (all statuses)" reconciles.
+      const stats = await referralService.getListStats(baseFilterParams());
       setStats({
         total: stats.total,
         submitted: stats.submitted,
@@ -225,6 +230,19 @@ export function useReferralsQueue(
     }
   }, [baseFilterParams, handleAuthError]);
 
+  const refetchFilterOptions = useCallback(async () => {
+    try {
+      const options = await referralService.getFilterOptions({
+        exclude_draft: excludeDraft,
+        exclude_status: EXCLUDED_STATUS,
+      });
+      setSpecialties(options.specialties || []);
+      setFacilities(options.facilities || []);
+    } catch (error: unknown) {
+      console.error("Error loading referral filter options:", error);
+    }
+  }, [excludeDraft]);
+
   useEffect(() => {
     if (!ready) return;
     void fetchReferrals();
@@ -234,6 +252,11 @@ export function useReferralsQueue(
     if (!ready) return;
     void loadStats();
   }, [ready, loadStats]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void refetchFilterOptions();
+  }, [ready, refetchFilterOptions]);
 
   // Reset to page 1 whenever the filter shape changes — otherwise the user can
   // be stuck on an out-of-range page after narrowing results.
@@ -247,15 +270,6 @@ export function useReferralsQueue(
     dateFilter,
     debouncedSearchQuery,
   ]);
-
-  const specialties = useMemo(
-    () => [...new Set(referrals.map((r) => r.specialty).filter(Boolean))].sort(),
-    [referrals]
-  );
-  const facilities = useMemo(
-    () => [...new Set(referrals.map((r) => r.facility).filter(Boolean))].sort(),
-    [referrals]
-  );
 
   return {
     referrals,
@@ -287,6 +301,7 @@ export function useReferralsQueue(
 
     refetch: fetchReferrals,
     refetchStats: loadStats,
+    refetchFilterOptions,
 
     ready,
     handleAuthError,
