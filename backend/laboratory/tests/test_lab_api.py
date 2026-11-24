@@ -5,12 +5,22 @@ verify results, templates CRUD, stats, and auth checks.
 """
 from unittest.mock import patch
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from common.tests.support import create_test_user, create_test_patient_visit
-from laboratory.models import LabOrder, LabSampleBatch, LabTemplate, LabTest, LabResult
+from laboratory.models import (
+    LabOrder,
+    LabResult,
+    LabSampleBatch,
+    LabTemplate,
+    LabTest,
+    LabTestResultAttachment,
+)
+from organization.models import Clinic
 
 
 BASE = "/api/v1/laboratory"
@@ -258,6 +268,109 @@ class LabOrderListFilterTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         ids = [row["id"] for row in resp.data["results"]]
         self.assertEqual(ids, [self.order_routine.pk])
+
+    def test_search_matches_test_name_and_code(self):
+        LabTest.objects.create(
+            order=self.order_routine,
+            name="Widal Agglutination Test",
+            code="WIDAL",
+            sample_type="Blood",
+            status="pending",
+        )
+
+        for term in ("Widal Agglutination", "WIDAL"):
+            with self.subTest(term=term):
+                resp = self.client.get(f"{BASE}/orders/", {"search": term})
+                self.assertEqual(resp.status_code, status.HTTP_200_OK)
+                ids = [row["id"] for row in resp.data["results"]]
+                self.assertEqual(ids, [self.order_routine.pk])
+
+    def test_order_list_query_count_does_not_grow_per_test(self):
+        template = LabTemplate.objects.create(
+            name="Query Count Template",
+            code="QUERY-COUNT",
+            sample_type="Blood",
+        )
+        clinic = Clinic.objects.create(name="Lab Query Count Clinic", code="LAB-QC")
+        for order in (self.order_routine, self.order_stat):
+            batch = LabSampleBatch.objects.create(
+                accession_number=f"QC-{order.pk}",
+                order=order,
+                collection_clinic=clinic,
+                collected_by=self.user,
+            )
+            for index in range(2):
+                test = LabTest.objects.create(
+                    order=order,
+                    template=template,
+                    sample_batch=batch,
+                    name="Query Count Test",
+                    code="QUERY-COUNT",
+                    sample_type="Blood",
+                    status="verified",
+                    collected_by=self.user,
+                    processed_by=self.user,
+                    verified_by=self.user,
+                    verified_at=timezone.now(),
+                    results={"Result": "1"},
+                )
+                LabResult.objects.create(
+                    test=test,
+                    order=order,
+                    patient=order.patient,
+                    overall_status="normal",
+                )
+                LabTestResultAttachment.objects.create(
+                    test=test,
+                    row_id=f"row-{index}",
+                    file=f"lab_results/query-count-{order.pk}-{index}.pdf",
+                    uploaded_by=self.user,
+                )
+
+        with CaptureQueriesContext(connection) as queries:
+            resp = self.client.get(f"{BASE}/orders/", {"page_size": 50})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["count"], 2)
+        self.assertLessEqual(
+            len(queries),
+            35,
+            f"List serialization issued {len(queries)} queries for 4 tests",
+        )
+
+    def test_facility_scoped_order_list_joins_tests_once(self):
+        clinic = Clinic.objects.create(name="Lab Scope Query Clinic", code="LAB-SCOPE-QC")
+
+        with patch("common.mixins.resolve_facility_scope", return_value=clinic):
+            with CaptureQueriesContext(connection) as queries:
+                resp = self.client.get(f"{BASE}/orders/", {"page_size": 50})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        order_select = next(
+            query["sql"]
+            for query in queries.captured_queries
+            if query["sql"].startswith('SELECT DISTINCT "lab_orders"')
+        )
+        self.assertLessEqual(
+            order_select.count('JOIN "lab_tests"'),
+            1,
+            "Facility scoping should not add the same multi-valued test join twice",
+        )
+
+    def test_patient_tracker_search_matches_test_name_and_code(self):
+        LabTest.objects.create(
+            order=self.order_routine,
+            name="Widal Agglutination Test",
+            code="WIDAL",
+            sample_type="Blood",
+            status="pending",
+        )
+
+        for term in ("Widal Agglutination", "WIDAL"):
+            with self.subTest(term=term):
+                resp = self.client.get(f"{BASE}/patient-tracker/", {"search": term})
+                self.assertEqual(resp.status_code, status.HTTP_200_OK)
+                self.assertTrue(any(hit["test_code"] == "WIDAL" for hit in resp.data["results"]))
 
     def test_patient_tracker_matches_test_lab_number(self):
         LabTest.objects.create(

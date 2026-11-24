@@ -17,11 +17,13 @@ _PATIENT_FIELDS = (
 )
 
 _ORDER_SEARCH_FIELDS = ("order_id", "lab_number", *_PATIENT_FIELDS)
-_ORDER_SEARCH_EXISTS = (("laboratory.LabTest", "order_id", ("lab_number",)),)
+_ORDER_SEARCH_EXISTS = (("laboratory.LabTest", "order_id", ("lab_number", "name", "code")),)
 _RESULT_SEARCH_FIELDS = (
     "order__order_id",
     "order__lab_number",
     "test__lab_number",
+    "test__name",
+    "test__code",
     *_PATIENT_FIELDS,
 )
 

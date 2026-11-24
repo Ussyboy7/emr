@@ -12,7 +12,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Count, Q, Max
+from django.db.models import Count, Prefetch, Q, Max
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from organization.models import Clinic, SystemConfig
@@ -268,7 +268,7 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         'patient__patient_id',
     ]
     search_exists = (
-        ('laboratory.LabTest', 'order_id', ('lab_number',)),
+        ('laboratory.LabTest', 'order_id', ('lab_number', 'name', 'code')),
     )
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
@@ -284,7 +284,31 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                 'external_clinic', 'location_clinic', 'processing_clinic',
             )
             .prefetch_related(
-                'tests',
+                Prefetch(
+                    'tests',
+                    queryset=LabTest.objects.select_related(
+                        'template',
+                        'sample_batch',
+                        'sample_batch__collection_clinic',
+                        'processing_clinic',
+                        'collected_by',
+                        'processed_by',
+                        'verified_by',
+                        'rejected_by',
+                        'result_record',
+                        'order',
+                        'order__patient',
+                        'order__doctor',
+                        'order__location_clinic',
+                        'order__processing_clinic',
+                        'order__external_clinic',
+                        'order__visit',
+                        'order__visit__location_clinic',
+                        'order__consultation_session',
+                        'order__consultation_session__location_clinic',
+                        'order__consultation_session__room__location_clinic',
+                    ).prefetch_related('result_attachments'),
+                ),
                 'consultation_session__diagnoses__icd10_code',
                 'visit__diagnoses__icd10_code',
             )
@@ -345,7 +369,10 @@ class LabOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         elif workflow_tab == 'rejected':
             qs = qs.filter(tests__status='rejected').distinct()
 
-        return self.scope_queryset(qs)
+        # FacilityScopedMixin applies this scope once from filter_queryset().
+        # Applying it here as well duplicates the tests__processing_clinic join;
+        # DISTINCT then sorts the wide joined order rows and can spill to disk.
+        return qs
 
     @extend_schema(tags=["Laboratory"], summary="Stats", description="Server-side counts for lab order dashboard cards/tabs.")
     @action(detail=False, methods=['get'])
