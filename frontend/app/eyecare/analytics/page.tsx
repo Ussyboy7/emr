@@ -246,8 +246,10 @@ export default function EyecareAnalyticsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Patient Attendance by Category</CardTitle>
-                <CardDescription>Breakdown of eyecare sessions by patient category</CardDescription>
+                <CardTitle className="text-base">Session Attendance by Category</CardTitle>
+                <CardDescription>
+                  Eyecare sessions by patient category — each session is counted, not unique patients
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <Table>

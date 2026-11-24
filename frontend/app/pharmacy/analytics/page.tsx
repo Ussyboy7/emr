@@ -293,6 +293,28 @@ export default function PharmacyAnalyticsPage() {
     }));
   }, [data]);
 
+  const patientCategoryRows = useMemo(() => {
+    const categories = [
+      ['employee', 'Employees'],
+      ['retiree', 'Retirees'],
+      ['dependent', 'Dependents'],
+      ['nonnpa', 'Non-NPA'],
+      ['other', 'Other'],
+    ] as const;
+    const categoryCounts = data?.patients_by_category || {};
+    const totalPatients = data?.dispensing.unique_patients || 0;
+
+    return categories.map(([key, label], index) => {
+      const count = categoryCounts[key] || 0;
+      return {
+        sn: index + 1,
+        label,
+        count,
+        percentage: totalPatients > 0 ? (count / totalPatients) * 100 : 0,
+      };
+    });
+  }, [data]);
+
   const rxStatusBar = useMemo(() => {
     if (!data?.prescribing?.by_status) return [];
     return Object.entries(data.prescribing.by_status).map(([name, count]) => ({
@@ -600,7 +622,7 @@ export default function PharmacyAnalyticsPage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Patient Attendance by Category</CardTitle>
-                  <CardDescription>Breakdown of dispensed medications by patient category</CardDescription>
+                  <CardDescription>Unique patients with dispenses by patient category in the selected period</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Table>
@@ -608,65 +630,21 @@ export default function PharmacyAnalyticsPage() {
                       <TableRow>
                         <TableHead className="w-14">S/N</TableHead>
                         <TableHead>Category</TableHead>
-                        <TableHead className="text-right">Male</TableHead>
-                        <TableHead className="text-right">Female</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead className="text-right">Patients</TableHead>
                         <TableHead className="text-right">%</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow>
-                        <TableCell className="py-2">1</TableCell>
-                        <TableCell className="py-2 font-medium">Officers</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0.0%</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="py-2">2</TableCell>
-                        <TableCell className="py-2 font-medium">Staff</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0.0%</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="py-2">3</TableCell>
-                        <TableCell className="py-2 font-medium">Employee Dependents</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0.0%</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="py-2">4</TableCell>
-                        <TableCell className="py-2 font-medium">Retirees</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0.0%</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="py-2">5</TableCell>
-                        <TableCell className="py-2 font-medium">Retiree Dependents</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0.0%</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="py-2">6</TableCell>
-                        <TableCell className="py-2 font-medium">Non-NPA</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0</TableCell>
-                        <TableCell className="py-2 text-right">0.0%</TableCell>
-                      </TableRow>
+                      {patientCategoryRows.map((row) => (
+                        <TableRow key={row.label}>
+                          <TableCell className="py-2">{row.sn}</TableCell>
+                          <TableCell className="py-2 font-medium">{row.label}</TableCell>
+                          <TableCell className="py-2 text-right">{row.count}</TableCell>
+                          <TableCell className="py-2 text-right">{row.percentage.toFixed(1)}%</TableCell>
+                        </TableRow>
+                      ))}
                       <TableRow className="font-semibold">
                         <TableCell className="py-2" colSpan={2}>TOTAL</TableCell>
-                        <TableCell className="py-2 text-right">{data.patients_by_gender?.male || 0}</TableCell>
-                        <TableCell className="py-2 text-right">{data.patients_by_gender?.female || 0}</TableCell>
                         <TableCell className="py-2 text-right">{data.dispensing.unique_patients}</TableCell>
                         <TableCell className="py-2 text-right">100.0%</TableCell>
                       </TableRow>

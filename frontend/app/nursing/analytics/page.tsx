@@ -144,17 +144,9 @@ export default function NursingAnalyticsPage() {
       sn: Object.keys(analyticsData.patients_by_category).indexOf(key) + 1,
       key,
       label: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-      male: 0, // Simplified - not breaking down by gender for now
-      female: 0,
       total: Number(count || 0),
       percentage: uniquePatients > 0 ? ((count / uniquePatients) * 100) : 0,
     }));
-
-    const attendanceTotals = {
-      male: analyticsData.patients_by_gender.male || 0,
-      female: analyticsData.patients_by_gender.female || 0,
-      total: uniquePatients,
-    };
 
     return {
       totalOrders,
@@ -163,7 +155,6 @@ export default function NursingAnalyticsPage() {
       uniquePatients,
       vitalsCompletedCount: analyticsData.summary.completed_orders, // Use completed orders as proxy
       attendanceRows,
-      attendanceTotals,
     };
   }, [analyticsData]);
 
@@ -272,28 +263,6 @@ export default function NursingAnalyticsPage() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-l-4 border-l-green-500">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Pending Orders</p>
-                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.pendingOrders}</p>
-                    </div>
-                    <Timer className="h-10 w-10 text-green-500 opacity-50" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border-l-4 border-l-purple-500">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Orders Completed</p>
-                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.completedOrders}</p>
-                    </div>
-                    <Heart className="h-10 w-10 text-purple-500 opacity-50" />
-                  </div>
-                </CardContent>
-              </Card>
               <Card className="border-l-4 border-l-amber-500">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
@@ -339,8 +308,10 @@ export default function NursingAnalyticsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Vitals Taken by Category</CardTitle>
-                <p className="text-sm text-muted-foreground">Breakdown of visits with nursing vitals by category</p>
+                <CardTitle>Unique Patients by Category</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Unique patients with nursing orders in the selected period, by category
+                </p>
               </CardHeader>
               <CardContent>
                 <Table>
@@ -348,8 +319,6 @@ export default function NursingAnalyticsPage() {
                     <TableRow>
                       <TableHead className="w-14">S/N</TableHead>
                       <TableHead>Category</TableHead>
-                      <TableHead className="text-right">Male</TableHead>
-                      <TableHead className="text-right">Female</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                       <TableHead className="text-right">%</TableHead>
                     </TableRow>
@@ -359,19 +328,15 @@ export default function NursingAnalyticsPage() {
                       <TableRow key={row.key}>
                         <TableCell className="py-3">{row.sn}</TableCell>
                         <TableCell className="py-3 font-medium">{row.label}</TableCell>
-                        <TableCell className="py-3 text-right">{row.male}</TableCell>
-                        <TableCell className="py-3 text-right">{row.female}</TableCell>
                         <TableCell className="py-3 text-right">{row.total}</TableCell>
                         <TableCell className="py-3 text-right">{row.percentage.toFixed(1)}%</TableCell>
                       </TableRow>
                     ))}
                     <TableRow className="font-semibold">
                       <TableCell className="py-3" colSpan={2}>TOTAL</TableCell>
-                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.male}</TableCell>
-                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.female}</TableCell>
-                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.total}</TableCell>
+                      <TableCell className="py-3 text-right">{summaryStats.uniquePatients}</TableCell>
                       <TableCell className="py-3 text-right">
-                        {summaryStats.attendanceTotals.total > 0 ? "100.0%" : "0.0%"}
+                        {summaryStats.uniquePatients > 0 ? "100.0%" : "0.0%"}
                       </TableCell>
                     </TableRow>
                   </TableBody>
@@ -437,22 +402,6 @@ export default function NursingAnalyticsPage() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Orders by Priority</CardTitle>
-                </CardHeader>
-                <CardContent className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={priorityChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="count" fill={CHART_COLORS.wait} radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
             </div>
 
             <div className="grid gap-6 lg:grid-cols-2">
