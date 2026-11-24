@@ -20,6 +20,11 @@ from organization.models import Clinic, SystemConfig
 # for every facility's data (``?clinic_id=all`` or ``?scope=all``).
 SCOPE_ALL = "__ALL__"
 
+# Sentinel returned by ``resolve_facility_scope`` when multi-clinic mode is on
+# but a non-privileged user has no active or home clinic. It means "records with
+# no facility attribution only" — never an unscoped, all-facility queryset.
+SCOPE_UNASSIGNED = "__UNASSIGNED__"
+
 # Query-param alias accepted for an explicit "all facilities" request.
 ALL_SCOPE_PARAMS = {"all", "*"}
 
@@ -46,7 +51,10 @@ def resolve_facility_scope(request):
         - ``Clinic`` instance (a facility): scope to this facility.
         - ``SCOPE_ALL``: all facilities (requires ``?clinic_id=all`` /
           ``?scope=all`` and the ``clinical_data_view_all`` capability).
-        - ``None``: no scoping (multi-clinic disabled, or session facility absent).
+        - ``SCOPE_UNASSIGNED``: multi-clinic is enabled but a non-privileged user
+          has no active or home clinic. Callers must fail closed: show only
+          records with no facility attribution (or nothing at all).
+        - ``None``: no scoping because multi-clinic is disabled.
 
     Raises ``PermissionDenied`` when an all-facility scope is requested without
     the capability. Used by ``FacilityScopedMixin`` and plain ``APIView`` handlers.
@@ -74,7 +82,13 @@ def resolve_facility_scope(request):
     if getattr(request.user, "active_clinic", None) is None and _can_view_all_facilities(request.user):
         return SCOPE_ALL
 
-    return resolve_facility(request.user)
+    facility = resolve_facility(request.user)
+    if facility is None:
+        # Multi-clinic is on but this account has no active or home clinic.
+        # Returning None here would mean "unscoped" and expose every facility
+        # (HQ, Bode Thomas, ...), so resolve to an explicit fail-closed scope.
+        return SCOPE_UNASSIGNED
+    return facility
 
 
 def scope_query_by_facility(qs, request, field="location_clinic_id"):
@@ -88,6 +102,8 @@ def scope_query_by_facility(qs, request, field="location_clinic_id"):
     scope = resolve_facility_scope(request)
     if scope is None or scope == SCOPE_ALL:
         return qs
+    if scope == SCOPE_UNASSIGNED:
+        return qs.filter(**{f"{field}__isnull": True})
     return qs.filter(**{field: scope})
 
 
@@ -116,11 +132,41 @@ class FacilityScopedMixin:
     facility_filter_field = 'location_clinic'
     facility_scope_fields = None
 
+    def _unassigned_scope_filter(self):
+        """Q matching records that carry no facility attribution at all."""
+        if self.facility_scope_fields:
+            facility_fields = [
+                field for field in self.facility_scope_fields
+                if field.endswith('location_clinic') or field.endswith('processing_clinic')
+            ]
+            if len(facility_fields) >= 2:
+                return Q(**{
+                    f'{facility_fields[0]}__isnull': True,
+                    f'{facility_fields[1]}__isnull': True,
+                })
+            field = facility_fields[0] if facility_fields else self.facility_scope_fields[0]
+            return Q(**{f'{field}__isnull': True})
+        return Q(**{f'{self.facility_filter_field}__isnull': True})
+
+    def _scope_unassigned(self, qs):
+        """Fail closed for a user with no resolvable facility.
+
+        Only records with no facility attribution remain visible, and only on
+        viewsets that opt in via ``include_unassigned_scope`` (legacy/external
+        work any facility may action). Everything else is hidden instead of
+        falling through to an unscoped, all-facility queryset.
+        """
+        if not getattr(self, 'include_unassigned_scope', False):
+            return qs.none()
+        return qs.filter(self._unassigned_scope_filter()).distinct()
+
     def scope_queryset(self, qs):
         """Apply facility filtering to a queryset from query param or session scope."""
         scope = resolve_facility_scope(self.request)
         if scope is None or scope == SCOPE_ALL:
             return qs
+        if scope == SCOPE_UNASSIGNED:
+            return self._scope_unassigned(qs)
         if self.facility_scope_fields:
             facility_filter = Q(**{self.facility_scope_fields[0]: scope})
             for field in self.facility_scope_fields[1:]:
@@ -207,10 +253,20 @@ class LabRadiologyScopedMixin(FacilityScopedMixin):
     facility_filter_field = 'processing_clinic'
     include_unassigned_scope = False
 
+    def _unassigned_scope_filter(self):
+        if not self.facility_scope_fields:
+            if self.facility_filter_field == 'processing_clinic':
+                return Q(location_clinic__isnull=True, processing_clinic__isnull=True)
+            if self.facility_filter_field == 'order__processing_clinic':
+                return Q(order__location_clinic__isnull=True, order__processing_clinic__isnull=True)
+        return super()._unassigned_scope_filter()
+
     def scope_queryset(self, qs):
         scope = resolve_facility_scope(self.request)
         if scope is None or scope == SCOPE_ALL:
             return qs
+        if scope == SCOPE_UNASSIGNED:
+            return self._scope_unassigned(qs)
         if self.facility_scope_fields:
             facility_filter = Q(**{self.facility_scope_fields[0]: scope})
             for field in self.facility_scope_fields[1:]:

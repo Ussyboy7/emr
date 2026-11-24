@@ -10,7 +10,7 @@ from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
 from consultation.models import ConsultationSession, Diagnosis
-from common.mixins import SCOPE_ALL
+from common.mixins import SCOPE_ALL, SCOPE_UNASSIGNED
 from laboratory.models import LabOrder, LabTest
 from patients.models import Patient, Visit
 from pharmacy.models import MedicationInventory, Prescription
@@ -76,6 +76,8 @@ def _build_clinical_dashboard(
     def scoped(qs, field="location_clinic_id"):
         if clinic_scope is None or clinic_scope == SCOPE_ALL:
             return qs
+        if clinic_scope == SCOPE_UNASSIGNED:
+            return qs.filter(**{f"{field}__isnull": True})
         return qs.filter(**{field: clinic_scope})
 
     visits = scoped(
@@ -324,7 +326,12 @@ def build_clinical_dashboard(
     from common.cache_helpers import cache_get_or_set
     from common.mixins import SCOPE_ALL as _SCOPE_ALL
 
-    scope_key = getattr(clinic_scope, "id", None) if clinic_scope not in (None, _SCOPE_ALL) else clinic_scope
+    if clinic_scope == SCOPE_UNASSIGNED:
+        scope_key = "unassigned"
+    elif clinic_scope in (None, _SCOPE_ALL):
+        scope_key = clinic_scope
+    else:
+        scope_key = clinic_scope.id
     period_key = "all" if all_time else f"{start_dt.date().isoformat()}:{end_dt.date().isoformat()}"
     cache_key = f"clinical_dashboard:v1:{period_key}:{scope_key or 'all'}"
 

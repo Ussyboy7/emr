@@ -490,6 +490,89 @@ class RadiologyOrderRoutingApiTests(APITestCase):
         self.assertIn(self.first.pk, study_ids)
         self.assertNotIn(other_study.pk, study_ids)
 
+    def test_clinicless_regular_user_worklist_hides_hq_and_bode_work(self):
+        # Multi-clinic is on, but this account has no active or home clinic.
+        # An unresolved facility must fail closed, not lift the scope.
+        clinicless = create_test_user(
+            "rad-routing-clinicless", pages=["/radiology"], system_role="Radiology Scientist"
+        )
+        self.assertIsNone(clinicless.active_clinic_id)
+        self.assertIsNone(clinicless.location_clinic_id)
+        bode_order = RadiologyOrder.objects.create(
+            order_id="RAD-API-CLINICLESS-BODE",
+            patient=self.patient,
+            location_clinic=self.bode,
+            processing_clinic=self.bode,
+        )
+        bode_study = RadiologyStudy.objects.create(order=bode_order, procedure="Bode study")
+        self.client.force_authenticate(user=clinicless)
+
+        orders = self.client.get("/api/v1/radiology/orders/")
+        self.assertEqual(orders.status_code, status.HTTP_200_OK)
+        order_ids = [row["id"] for row in orders.data["results"]]
+        self.assertNotIn(self.order.pk, order_ids)  # HQ
+        self.assertNotIn(bode_order.pk, order_ids)  # Bode
+
+        studies = self.client.get("/api/v1/radiology/studies/")
+        self.assertEqual(studies.status_code, status.HTTP_200_OK)
+        study_ids = [row["id"] for row in studies.data["results"]]
+        self.assertNotIn(self.first.pk, study_ids)  # HQ
+        self.assertNotIn(bode_study.pk, study_ids)  # Bode
+
+    def test_clinicless_regular_user_still_sees_unassigned_work(self):
+        unassigned = RadiologyOrder.objects.create(
+            order_id="RAD-API-CLINICLESS-UNASSIGNED",
+            patient=self.patient,
+            source_type="external_manual",
+        )
+        unassigned_study = RadiologyStudy.objects.create(
+            order=unassigned, procedure="Unassigned study"
+        )
+        clinicless = create_test_user(
+            "rad-routing-clinicless-unassigned",
+            pages=["/radiology"],
+            system_role="Radiology Scientist",
+        )
+        self.client.force_authenticate(user=clinicless)
+
+        orders = self.client.get("/api/v1/radiology/orders/")
+        self.assertEqual(orders.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in orders.data["results"]], [unassigned.pk])
+
+        studies = self.client.get("/api/v1/radiology/studies/")
+        self.assertEqual(studies.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [row["id"] for row in studies.data["results"]], [unassigned_study.pk]
+        )
+
+    def test_privileged_all_clinic_user_without_active_clinic_sees_hq_and_bode_work(self):
+        all_clinic_user = create_test_user(
+            "rad-routing-clinicless-all",
+            pages=["/radiology"],
+            system_role="Radiology Scientist",
+        )
+        role = Role.objects.create(
+            name="Radiology clinicless all-clinic role",
+            type="clinical",
+            permissions={"pages": ["/radiology"], "capabilities": ["clinical_data_view_all"]},
+            is_active=True,
+        )
+        UserRole.objects.create(user=all_clinic_user, role=role)
+        bode_order = RadiologyOrder.objects.create(
+            order_id="RAD-API-CLINICLESS-ALL-BODE",
+            patient=self.patient,
+            location_clinic=self.bode,
+            processing_clinic=self.bode,
+        )
+        self.client.force_authenticate(user=all_clinic_user)
+
+        response = self.client.get("/api/v1/radiology/orders/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order_ids = [row["id"] for row in response.data["results"]]
+        self.assertIn(self.order.pk, order_ids)
+        self.assertIn(bode_order.pk, order_ids)
+
     def test_dispatch_mutation_is_denied_to_unrelated_facility(self):
         unauthorized = create_test_user("rad-routing-dispatch-unrelated", pages=["/radiology"], system_role="Radiology Scientist")
         unauthorized.location_clinic = self.other

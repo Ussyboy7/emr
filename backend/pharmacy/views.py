@@ -290,11 +290,13 @@ class MedicationViewSet(viewsets.ModelViewSet):
             location__iexact=loc,
         )
         if request is not None:
-            from common.mixins import SCOPE_ALL, resolve_facility_scope
+            from common.mixins import SCOPE_ALL, SCOPE_UNASSIGNED, resolve_facility_scope
 
             if SystemConfig.is_enabled("multi_clinic_enabled"):
                 scope = resolve_facility_scope(request)
-                if scope is not None and scope != SCOPE_ALL:
+                if scope == SCOPE_UNASSIGNED:
+                    inv_base = inv_base.filter(location_clinic__isnull=True)
+                elif scope is not None and scope != SCOPE_ALL:
                     inv_base = inv_base.filter(location_clinic=scope)
         store_quantity = Coalesce(
             Subquery(
@@ -387,10 +389,12 @@ class MedicationViewSet(viewsets.ModelViewSet):
         threshold = today + timedelta(days=180)
         inv_units = MedicationInventory.objects.filter(location__iexact=location)
         if SystemConfig.is_enabled("multi_clinic_enabled"):
-            from common.mixins import SCOPE_ALL, resolve_facility_scope
+            from common.mixins import SCOPE_ALL, SCOPE_UNASSIGNED, resolve_facility_scope
 
             scope = resolve_facility_scope(request)
-            if scope is not None and scope != SCOPE_ALL:
+            if scope == SCOPE_UNASSIGNED:
+                inv_units = inv_units.filter(location_clinic__isnull=True)
+            elif scope is not None and scope != SCOPE_ALL:
                 inv_units = inv_units.filter(location_clinic=scope)
         total_units = inv_units.aggregate(s=Sum("quantity"))["s"] or Decimal("0")
 

@@ -14,7 +14,7 @@ from pharmacy.models import Prescription
 from radiology.models import RadiologyOrder, RadiologyStudy
 from consultation.models import ConsultationSession
 from nursing.models import NursingOrder
-from common.mixins import SCOPE_ALL, resolve_facility_scope
+from common.mixins import SCOPE_ALL, SCOPE_UNASSIGNED, resolve_facility_scope
 from common.openapi import document_api_view
 
 
@@ -35,6 +35,8 @@ class DashboardStatsView(views.APIView):
         def scoped(qs, field="location_clinic_id"):
             if scope is None or scope == SCOPE_ALL:
                 return qs
+            if scope == SCOPE_UNASSIGNED:
+                return qs.filter(**{f"{field}__isnull": True})
             return qs.filter(**{field: scope})
 
         patients_qs = scoped(Patient.objects.filter(is_active=True))

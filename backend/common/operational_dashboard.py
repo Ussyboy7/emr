@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from appointments.models import Appointment
 from common.cache_helpers import cache_get_or_set
-from common.mixins import SCOPE_ALL
+from common.mixins import SCOPE_ALL, SCOPE_UNASSIGNED
 from consultation.models import ConsultationQueue, ConsultationSession
 from laboratory.models import LabTest
 from organization.models import Clinic
@@ -34,11 +34,17 @@ def build_operational_dashboard(
     Single-request aggregates for the global EMR operational dashboard.
 
     ``clinic_scope`` mirrors ``common.mixins.resolve_facility_scope`` output:
-    ``None`` (no scoping), ``SCOPE_ALL`` (all clinics), or a ``Clinic`` instance.
+    ``None`` (no scoping), ``SCOPE_ALL`` (all clinics), ``SCOPE_UNASSIGNED``
+    (records with no facility only), or a ``Clinic`` instance.
     """
     today = target_date or timezone.localdate()
     yesterday = today - timedelta(days=1)
-    scope_id = getattr(clinic_scope, "id", None) if clinic_scope not in (None, SCOPE_ALL) else clinic_scope
+    if clinic_scope == SCOPE_UNASSIGNED:
+        scope_id = "unassigned"
+    elif clinic_scope in (None, SCOPE_ALL):
+        scope_id = clinic_scope
+    else:
+        scope_id = clinic_scope.id
     cache_key = f"operational_dashboard:v2:{today.isoformat()}:{scope_id or 'all'}"
 
     def _build() -> dict:
@@ -54,6 +60,8 @@ def build_operational_dashboard(
         def scoped(qs, field="location_clinic_id"):
             if clinic_scope is None or clinic_scope == SCOPE_ALL:
                 return qs
+            if clinic_scope == SCOPE_UNASSIGNED:
+                return qs.filter(**{f"{field}__isnull": True})
             return qs.filter(**{field: clinic_scope})
 
         visits_today_qs = scoped(

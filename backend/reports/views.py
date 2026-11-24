@@ -27,11 +27,20 @@ from common.report_period import filter_inclusive_date_range
 
 def _org_clinic_scope(request):
     """Resolve the request's org-clinic scope (query param or session), or None when unscoped."""
-    from common.mixins import SCOPE_ALL, resolve_facility_scope
+    from common.mixins import SCOPE_ALL, SCOPE_UNASSIGNED, resolve_facility_scope
 
     scope = resolve_facility_scope(request)
     if scope is None or scope == SCOPE_ALL:
         return None
+    if scope == SCOPE_UNASSIGNED:
+        # Multi-clinic is on but this account has no facility. Facility reports
+        # cannot be attributed, and falling back to None would aggregate every
+        # facility's data, so refuse instead.
+        from rest_framework.exceptions import PermissionDenied
+
+        raise PermissionDenied(
+            "No facility is assigned to your account, so facility-scoped reports are unavailable."
+        )
     return scope.id
 
 

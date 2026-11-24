@@ -873,6 +873,81 @@ class LabOrderRoutingApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn(self.order.pk, [row["id"] for row in response.data["results"]])
 
+    def test_clinicless_regular_user_worklist_hides_hq_and_bode_work(self):
+        # Multi-clinic is on, but this account has no active or home clinic.
+        # An unresolved facility must fail closed, not lift the scope.
+        clinicless = create_test_user(
+            "lab-routing-clinicless", pages=["/laboratory"], system_role="Laboratory Scientist"
+        )
+        self.assertIsNone(clinicless.active_clinic_id)
+        self.assertIsNone(clinicless.location_clinic_id)
+        bode_order = LabOrder.objects.create(
+            order_id="LAB-API-CLINICLESS-BODE",
+            patient=self.patient,
+            location_clinic=self.bode,
+            processing_clinic=self.bode,
+        )
+        LabTest.objects.create(
+            order=bode_order, name="Bode test", code="LAB-BODE", sample_type="blood"
+        )
+        self.client.force_authenticate(user=clinicless)
+
+        orders = self.client.get("/api/v1/laboratory/orders/")
+        self.assertEqual(orders.status_code, status.HTTP_200_OK)
+        order_ids = [row["id"] for row in orders.data["results"]]
+        self.assertNotIn(self.order.pk, order_ids)  # HQ
+        self.assertNotIn(bode_order.pk, order_ids)  # Bode
+
+        tests = self.client.get("/api/v1/laboratory/tests/")
+        self.assertEqual(tests.status_code, status.HTTP_200_OK)
+        self.assertEqual(tests.data["results"], [])
+
+    def test_clinicless_regular_user_still_sees_unassigned_work(self):
+        unassigned = LabOrder.objects.create(
+            order_id="LAB-API-CLINICLESS-UNASSIGNED",
+            patient=self.patient,
+            source_type="external_manual",
+        )
+        clinicless = create_test_user(
+            "lab-routing-clinicless-unassigned",
+            pages=["/laboratory"],
+            system_role="Laboratory Scientist",
+        )
+        self.client.force_authenticate(user=clinicless)
+
+        response = self.client.get("/api/v1/laboratory/orders/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in response.data["results"]], [unassigned.pk])
+
+    def test_privileged_all_clinic_user_without_active_clinic_sees_hq_and_bode_work(self):
+        all_clinic_user = create_test_user(
+            "lab-routing-clinicless-all",
+            pages=["/laboratory"],
+            system_role="Laboratory Scientist",
+        )
+        role = Role.objects.create(
+            name="Lab clinicless all-clinic role",
+            type="clinical",
+            permissions={"pages": ["/laboratory"], "capabilities": ["clinical_data_view_all"]},
+            is_active=True,
+        )
+        UserRole.objects.create(user=all_clinic_user, role=role)
+        bode_order = LabOrder.objects.create(
+            order_id="LAB-API-CLINICLESS-ALL-BODE",
+            patient=self.patient,
+            location_clinic=self.bode,
+            processing_clinic=self.bode,
+        )
+        self.client.force_authenticate(user=all_clinic_user)
+
+        response = self.client.get("/api/v1/laboratory/orders/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order_ids = [row["id"] for row in response.data["results"]]
+        self.assertIn(self.order.pk, order_ids)
+        self.assertIn(bode_order.pk, order_ids)
+
     def test_collection_is_denied_to_unrelated_facility(self):
         unauthorized = create_test_user("lab-routing-unrelated", pages=["/laboratory"], system_role="Laboratory Scientist")
         unauthorized.location_clinic = self.other
