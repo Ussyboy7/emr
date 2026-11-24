@@ -39,7 +39,6 @@ type PrescriptionLike = {
   prescribed_at?: string | null;
   date?: string | null;
   status?: string;
-  priority?: string;
 };
 
 type BadgeConfig = {
@@ -50,7 +49,6 @@ type BadgeConfig = {
 type PrescriptionPatientContextProps = {
   prescription: PrescriptionLike;
   statusBadge?: BadgeConfig;
-  priorityBadge?: BadgeConfig;
 };
 
 function ContextField({ label, value }: { label: string; value?: string | null }) {
@@ -66,7 +64,6 @@ function ContextField({ label, value }: { label: string; value?: string | null }
 export function PrescriptionPatientContext({
   prescription,
   statusBadge,
-  priorityBadge,
 }: PrescriptionPatientContextProps) {
   const details = prescription.patient_details ?? {};
   const patientName =
@@ -122,20 +119,13 @@ export function PrescriptionPatientContext({
                 ))}
               </div>
             </div>
-            {(statusBadge || priorityBadge) && (
+            {statusBadge ? (
               <div className="flex shrink-0 flex-wrap items-center gap-2">
-                {statusBadge ? (
-                  <Badge variant="outline" className={statusBadge.className}>
-                    {statusBadge.label}
-                  </Badge>
-                ) : null}
-                {priorityBadge ? (
-                  <Badge variant="outline" className={priorityBadge.className}>
-                    {priorityBadge.label}
-                  </Badge>
-                ) : null}
+                <Badge variant="outline" className={statusBadge.className}>
+                  {statusBadge.label}
+                </Badge>
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">

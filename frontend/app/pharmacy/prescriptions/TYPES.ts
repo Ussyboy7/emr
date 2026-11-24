@@ -1,8 +1,6 @@
 // Type definitions for prescriptions page - no mock data dependencies
 
 export type PrescriptionStatus = 'Pending' | 'Processing' | 'Ready' | 'Partially Dispensed' | 'Dispensed' | 'Cancelled';
-export type Priority = 'Emergency' | 'High' | 'Medium' | 'Low';
-
 export interface PatientInfo {
   name: string;
   id: string;
@@ -54,7 +52,6 @@ export interface Prescription {
   time: string;
   prescribed_at?: string;
   status: PrescriptionStatus;
-  priority: Priority;
   waitTime: number;
   clinicalNotes: string;
   specialInstructions: string;

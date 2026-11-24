@@ -48,7 +48,7 @@ import {
   ArrowRight, XCircle, Printer, ShieldAlert, ArrowRightLeft, Info,
   Beaker, Loader2, Tag, GitBranch
 } from 'lucide-react';
-import type { Prescription, PrescriptionStatus, Priority, DrugInteraction, MedicationBatch, SubstituteOption, MedicationItem } from './TYPES';
+import type { Prescription, PrescriptionStatus, DrugInteraction, MedicationBatch, SubstituteOption, MedicationItem } from './TYPES';
 
 // Substitution reasons
 const substitutionReasons = [
@@ -355,7 +355,6 @@ export default function PrescriptionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   
@@ -639,18 +638,6 @@ export default function PrescriptionsPage() {
           waitTime = 0;
         }
         
-        // Determine priority (could be enhanced with API field)
-        let priority: Priority = 'Medium';
-        if (rx.priority) {
-          const priorityMap: Record<string, Priority> = {
-            'emergency': 'Emergency',
-            'high': 'High',
-            'medium': 'Medium',
-            'low': 'Low',
-          };
-          priority = priorityMap[rx.priority.toLowerCase()] || 'Medium';
-        }
-        
         // Transform medications
         const medications = transformMedications(rx.medications || [], rx.status);
         
@@ -703,7 +690,6 @@ export default function PrescriptionsPage() {
                     : rx.status === 'cancelled'
                       ? 'Cancelled'
                       : 'Pending',
-          priority,
           waitTime,
           clinicalNotes: rx.diagnosis || '',
           specialInstructions: rx.notes || '',
@@ -1135,22 +1121,10 @@ export default function PrescriptionsPage() {
     return () => { cancelled = true; };
   }, [substitutionForm.reason, substitutionForm.selectedSubstitute, substituteSearchResults, substitutionMed]);
 
-  // Client-side: priority only (no server field on prescription yet).
-  const filteredPrescriptions = useMemo(() => {
-    return prescriptions.filter((prescription) => {
-      if (priorityFilter !== 'all' && prescription.priority?.toLowerCase() !== priorityFilter) {
-        return false;
-      }
-      return true;
-    });
-  }, [prescriptions, priorityFilter]);
-
-  const paginatedPrescriptions = filteredPrescriptions;
-
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, dateFilter, priorityFilter, genderFilter]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, genderFilter]);
 
   const stats = useMemo(
     () => ({
@@ -1162,16 +1136,6 @@ export default function PrescriptionsPage() {
     }),
     [queueStats],
   );
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'Emergency': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400';
-      case 'High': return 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400';
-      case 'Medium': return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400';
-      case 'Low': return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-400';
-      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
-    }
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -1949,7 +1913,6 @@ export default function PrescriptionsPage() {
           ` : ''}
 
           <div class="footer">
-            <div>Priority: ${prescription.priority}</div>
             <div>Status: ${prescription.status}</div>
             <div>Printed: ${formatDisplayDateTime(new Date())}</div>
             ${isLabel ? '<div>⚠️ Keep out of reach of children</div>' : ''}
@@ -2083,16 +2046,6 @@ export default function PrescriptionsPage() {
                     <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="emergency">Emergency</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
-                  </SelectContent>
-                </Select>
                 <Select value={genderFilter} onValueChange={setGenderFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>
@@ -2123,15 +2076,11 @@ export default function PrescriptionsPage() {
                 <Button variant="outline" className="mt-4" onClick={() => void loadPrescriptions()}>Retry</Button>
               </CardContent>
             </Card>
-          ) : filteredPrescriptions.length > 0 ? (
-            paginatedPrescriptions.map((rx) => (
-              <Card 
-                key={rx.id} 
-                className={`border-l-4 hover:shadow-md transition-shadow ${
-                  rx.priority === 'Emergency' ? 'border-l-red-500' :
-                  rx.priority === 'High' ? 'border-l-orange-500' :
-                  'border-l-violet-500'
-                }`}
+          ) : prescriptions.length > 0 ? (
+            prescriptions.map((rx) => (
+              <Card
+                key={rx.id}
+                className="border-l-4 border-l-violet-500 hover:shadow-md transition-shadow"
               >
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
@@ -2144,7 +2093,6 @@ export default function PrescriptionsPage() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap min-w-0">
                           <span className="font-semibold text-foreground truncate">{rx.patient.name}</span>
-                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityColor(rx.priority)}`}>{rx.priority}</Badge>
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(rx.status)}`}>{rx.status}</Badge>
                           {rx.dispense_lock?.locked && !rx.dispense_lock.locked_by_me && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-700 border-amber-500/30">
@@ -2271,7 +2219,7 @@ export default function PrescriptionsPage() {
         </div>
 
         {/* Pagination */}
-        {filteredPrescriptions.length > 0 && (
+        {prescriptions.length > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
@@ -2304,10 +2252,6 @@ export default function PrescriptionsPage() {
               <div className="overflow-y-auto max-h-[65vh] space-y-4">
                 <PrescriptionPatientContext
                   prescription={selectedPrescription}
-                  priorityBadge={{
-                    label: selectedPrescription.priority,
-                    className: getPriorityColor(selectedPrescription.priority),
-                  }}
                   statusBadge={{
                     label: selectedPrescription.status.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
                     className: getStatusColor(selectedPrescription.status),
@@ -2472,10 +2416,6 @@ export default function PrescriptionsPage() {
                   statusBadge={{
                     label: selectedPrescription.status,
                     className: getStatusColor(selectedPrescription.status),
-                  }}
-                  priorityBadge={{
-                    label: selectedPrescription.priority,
-                    className: getPriorityColor(selectedPrescription.priority),
                   }}
                 />
 
