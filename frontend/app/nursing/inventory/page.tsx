@@ -455,9 +455,7 @@ export default function NursingInventoryPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={searchQuery || categoryFilter !== 'All Categories' || stockFilter !== 'all'
-                ? inventory.length
-                : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => { setItemsPerPage(newSize); setCurrentPage(1); }}

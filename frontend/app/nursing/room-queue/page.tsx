@@ -117,7 +117,7 @@ export default function RoomQueuePage() {
           roomService.getRooms({ page, page_size })
         ),
         fetchAllPaginatedResults((page, page_size) =>
-          consultationService.getQueue({ is_active: true, date: today, page, page_size })
+          consultationService.getQueue({ is_active: true, page, page_size })
         ),
         consultationService.getRoomDaySessionCounts(today).catch(() => ({} as Record<string, number>)),
         consultationService.getRoomQueueStats(today).catch(() => ({} as Record<string, RoomQueueDayStats>)),
