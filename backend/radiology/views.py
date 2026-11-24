@@ -14,7 +14,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema
 from django.utils import timezone
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -52,6 +52,23 @@ def _ensure_route_facility_access(user, clinic):
         assigned = {user.location_clinic_id}
     if clinic.pk not in assigned:
         raise PermissionDenied('You are not assigned to this facility.')
+
+
+def _radiology_study_read_queryset():
+    """Fetch every relation used by the nested study serializer in bounded queries."""
+    return (
+        RadiologyStudy.objects.select_related(
+            'template', 'processing_clinic', 'scheduled_by', 'acquired_by',
+            'reported_by', 'rejected_by', 'verified_by', 'order',
+            'order__location_clinic', 'order__processing_clinic',
+        )
+        .prefetch_related(
+            Prefetch(
+                'report_attachments',
+                queryset=RadiologyStudyReportAttachment.objects.select_related('uploaded_by'),
+            )
+        )
+    )
 
 
 def _ensure_order_facility_access(user, order):
@@ -152,7 +169,7 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     serializer_class = RadiologyTemplateSerializer
     pagination_class = CatalogPageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'modality', 'is_active', 'code']
+    filterset_fields = ['modality', 'is_active', 'code']
     search_fields = ['name', 'code', 'description', 'body_part']
     ordering_fields = ['name', 'category', 'created_at']
     ordering = ['category', 'name']
@@ -161,7 +178,13 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return RadiologyTemplate.objects.none()
         
-        return RadiologyTemplate.objects.all()
+        queryset = RadiologyTemplate.objects.all()
+        category = (self.request.query_params.get('category') or '').strip().lower()
+        if category == 'ct':
+            return queryset.filter(category__in=('ct', 'ct-scan', 'ct_scan'))
+        if category:
+            return queryset.filter(category=category)
+        return queryset
 
     @extend_schema(tags=["Radiology"], summary="Resolve", description="Return a single template by exact code (no paginated list hop).")
     @action(detail=False, methods=['get'], url_path='resolve')
@@ -185,8 +208,10 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
         """Template tab counts in one request."""
         from common.diagnostic_catalog import build_catalog_list_stats
 
-        categories = ['xray', 'ultrasound', 'mri', 'ct']
-        return Response(build_catalog_list_stats(RadiologyTemplate.objects.all(), categories))
+        categories = ['xray', 'ultrasound', 'mri', 'ct', 'ct-scan', 'ct_scan']
+        stats = build_catalog_list_stats(RadiologyTemplate.objects.all(), categories)
+        stats['ct'] += stats.pop('ct-scan') + stats.pop('ct_scan')
+        return Response(stats)
 
     def perform_create(self, serializer):
         template = serializer.save()
@@ -269,7 +294,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         'patient__patient_id',
     ]
     search_exists = (
-        ('radiology.RadiologyStudy', 'order_id', ('procedure', 'body_part', 'modality')),
+        ('radiology.RadiologyStudy', 'order_id', ('procedure', 'body_part', 'modality', 'template__code')),
     )
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
@@ -285,7 +310,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                 'external_clinic', 'location_clinic', 'processing_clinic',
             )
             .prefetch_related(
-                'studies',
+                Prefetch('studies', queryset=_radiology_study_read_queryset()),
                 'consultation_session__diagnoses__icd10_code',
                 'visit__diagnoses__icd10_code',
             )
@@ -336,7 +361,7 @@ class RadiologyOrderViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
                 qs = qs.filter(**{f'{date_lookup}__lte': end_date})
             if start_date or end_date:
                 qs = qs.distinct()
-        return self.scope_queryset(qs)
+        return qs
 
     @extend_schema(tags=["Radiology"], summary="Stats", description="Server-side counts for radiology order dashboard cards/tabs.")
     @action(detail=False, methods=['get'], url_path='stats')
@@ -1156,13 +1181,7 @@ class RadiologyStudyViewSet(LabRadiologyScopedMixin, viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return RadiologyStudy.objects.none()
         
-        return self.scope_queryset(
-            RadiologyStudy.objects.all().select_related(
-                'order', 'order__patient', 'order__doctor', 'template',
-                'processing_clinic', 'order__location_clinic', 'order__processing_clinic',
-                'scheduled_by', 'acquired_by', 'reported_by', 'verified_by'
-            )
-        )
+        return _radiology_study_read_queryset().select_related('order__patient', 'order__doctor')
 
     def _assert_status_capability(self, user, new_status):
         """Gate a study status write on the capability that owns the transition."""
@@ -1477,6 +1496,7 @@ class RadiologyReportViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet)
     search_fields = [
         'order__order_id',
         'study__procedure',
+        'study__template__code',
         'patient__first_name',
         'patient__surname',
         'patient__patient_id',
@@ -1495,7 +1515,10 @@ class RadiologyReportViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet)
         
         status_filter = self.request.query_params.get('status', 'reported')
 
-        queryset = RadiologyReport.objects.select_related('study', 'order', 'patient', 'order__doctor', 'study__reported_by')
+        queryset = RadiologyReport.objects.select_related(
+            'order', 'patient', 'order__doctor', 'order__location_clinic',
+            'order__processing_clinic', 'order__external_clinic',
+        )
 
         if status_filter == 'reported':
             queryset = queryset.filter(study__status='reported')
@@ -1516,9 +1539,29 @@ class RadiologyReportViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet)
         processing_method = self.request.query_params.get('processing_method')
         if processing_method in ('in_house', 'outsourced'):
             queryset = queryset.filter(study__processing_method=processing_method)
-        category = self.request.query_params.get('category')
+        category = (self.request.query_params.get('category') or '').strip()
         if category:
-            queryset = queryset.filter(study__modality__iexact=category)
+            normalized_category = category.lower().replace('-', ' ').replace('_', ' ')
+            category_aliases = {
+                'x ray': ('xray', ('x-ray', 'xray')),
+                'xray': ('xray', ('x-ray', 'xray')),
+                'ct scan': ('ct', ('ct', 'ct scan')),
+                'ct': ('ct', ('ct', 'ct scan')),
+                'mri': ('mri', ('mri',)),
+                'ultrasound': ('ultrasound', ('ultrasound', 'sono', 'us')),
+                'mammography': ('mammography', ('mammography', 'mammogram')),
+            }
+            category_match = Q(study__modality__iexact=category)
+            mapping = category_aliases.get(normalized_category)
+            if mapping:
+                template_category, modality_aliases = mapping
+                if template_category == 'ct':
+                    category_match |= Q(study__template__category__in=('ct', 'ct-scan', 'ct_scan'))
+                else:
+                    category_match |= Q(study__template__category=template_category)
+                for modality_alias in modality_aliases:
+                    category_match |= Q(study__modality__iexact=modality_alias)
+            queryset = queryset.filter(category_match)
 
         exact_date = self.request.query_params.get('date')
         start_date = self.request.query_params.get('start_date')
@@ -1532,7 +1575,7 @@ class RadiologyReportViewSet(FacilityScopedMixin, viewsets.ReadOnlyModelViewSet)
             if end_date:
                 queryset = queryset.filter(**{f'{date_field}__lte': end_date})
 
-        return self.scope_queryset(queryset)
+        return queryset.prefetch_related(Prefetch('study', queryset=_radiology_study_read_queryset()))
 
     @extend_schema(tags=["Radiology"], summary="Stats")
     @action(detail=False, methods=['get'], url_path='stats')

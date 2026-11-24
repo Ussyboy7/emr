@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 
 from common.tests.support import create_test_patient_visit, create_test_user
 from consultation.models import ConsultationRoom, ConsultationSession
-from radiology.models import RadiologyOrder
+from radiology.models import RadiologyOrder, RadiologyStudy, RadiologyTemplate
 
 
 class RadiologyOrderApiTests(APITestCase):
@@ -109,6 +109,27 @@ class RadiologyOrderApiTests(APITestCase):
         ids = [row["id"] for row in res.data.get("results", [])]
         self.assertEqual(ids, [created.data["id"]])
 
+    def test_search_matches_study_template_code(self):
+        template = RadiologyTemplate.objects.create(
+            name="Chest X-Ray Search Template",
+            code="RAD-CHEST-CODE",
+            category="xray",
+            modality="X-Ray",
+        )
+        order = RadiologyOrder.objects.create(patient=self.patient, visit=self.visit)
+        RadiologyStudy.objects.create(
+            order=order,
+            template=template,
+            procedure="Chest X-Ray",
+            body_part="Chest",
+            modality="X-Ray",
+        )
+
+        response = self.client.get("/api/v1/radiology/orders/", {"search": "RAD-CHEST-CODE"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in response.data["results"]], [order.pk])
+
     def test_patient_tracker_matches_study_procedure(self):
         created = self.client.post(
             "/api/v1/radiology/orders/",
@@ -141,6 +162,31 @@ class RadiologyOrderApiTests(APITestCase):
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0]["study_name"], "Chest X-Ray")
         self.assertEqual(hits[0]["patient_id"], self.patient.patient_id)
+
+    def test_patient_tracker_search_matches_study_template_code(self):
+        template = RadiologyTemplate.objects.create(
+            name="Chest X-Ray Tracker Template",
+            code="RAD-TRACKER-CODE",
+            category="xray",
+            modality="X-Ray",
+        )
+        order = RadiologyOrder.objects.create(patient=self.patient, visit=self.visit)
+        RadiologyStudy.objects.create(
+            order=order,
+            template=template,
+            procedure="Chest X-Ray",
+            body_part="Chest",
+            modality="X-Ray",
+        )
+
+        response = self.client.get(
+            "/api/v1/radiology/patient-tracker/",
+            {"search": "RAD-TRACKER-CODE"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["study_name"], "Chest X-Ray")
 
     def test_radiology_orders_forbidden_without_page_permission(self):
         outsider = create_test_user("rad_outsider", pages=["/pharmacy"])

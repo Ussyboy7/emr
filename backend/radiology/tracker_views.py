@@ -18,13 +18,14 @@ _PATIENT_FIELDS = (
 
 _ORDER_SEARCH_FIELDS = ("order_id", *_PATIENT_FIELDS)
 _ORDER_SEARCH_EXISTS = (
-    ("radiology.RadiologyStudy", "order_id", ("procedure", "body_part", "modality")),
+    ("radiology.RadiologyStudy", "order_id", ("procedure", "body_part", "modality", "template__code")),
     ("radiology.RadiologyReferralDispatch", "order_id", ("dispatch_id",)),
 )
 _REPORT_SEARCH_FIELDS = (
     "order__order_id",
     "study__procedure",
     "study__modality",
+    "study__template__code",
     *_PATIENT_FIELDS,
 )
 _REPORT_SEARCH_EXISTS = (

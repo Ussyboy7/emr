@@ -5,6 +5,8 @@ verify/reject reports, templates CRUD, stats, and auth checks.
 """
 from unittest.mock import patch
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -15,6 +17,7 @@ from radiology.models import (
     RadiologyOrder,
     RadiologyStudy,
     RadiologyReport,
+    RadiologyStudyReportAttachment,
     RadiologyTemplate,
 )
 
@@ -156,6 +159,64 @@ class RadiologyOrderListFilterTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         for key in ("total", "pending", "processing", "results_ready", "rejected", "stat"):
             self.assertIn(key, resp.data)
+
+    def test_order_list_serialization_query_count_does_not_grow_per_study(self):
+        template = RadiologyTemplate.objects.create(
+            name="Query Count Template",
+            code="RAD-QUERY-COUNT",
+            category="xray",
+            modality="X-Ray",
+        )
+        for order in (self.order_routine, self.order_stat):
+            for index in range(2):
+                study = RadiologyStudy.objects.create(
+                    order=order,
+                    template=template,
+                    procedure="Query Count X-Ray",
+                    body_part="Chest",
+                    modality="X-Ray",
+                    status="reported",
+                    scheduled_by=self.user,
+                    acquired_by=self.user,
+                    reported_by=self.user,
+                    verified_by=self.user,
+                    rejected_by=self.user,
+                )
+                RadiologyStudyReportAttachment.objects.create(
+                    study=study,
+                    row_id=f"row-{index}",
+                    row_name="Report attachment",
+                    file=f"radiology_reports/query-count-{order.pk}-{index}.pdf",
+                    uploaded_by=self.user,
+                )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(f"{BASE}/orders/", {"page_size": 50})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertLessEqual(
+            len(queries),
+            25,
+            f"Radiology order serialization issued {len(queries)} queries for 4 studies",
+        )
+
+    def test_facility_scoped_order_list_applies_study_scope_join_once(self):
+        clinic = Clinic.objects.create(name="Radiology Scope Query Clinic", code="RAD-SCOPE-QC")
+        with patch("common.mixins.resolve_facility_scope", return_value=clinic):
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get(f"{BASE}/orders/", {"page_size": 50})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order_select = next(
+            query["sql"]
+            for query in queries.captured_queries
+            if query["sql"].startswith('SELECT DISTINCT "radiology_orders"')
+        )
+        self.assertLessEqual(
+            order_select.count('JOIN "radiology_studies"'),
+            1,
+            "Facility-scoped order listing should not join radiology studies repeatedly",
+        )
 
     def test_filter_by_study_status_pending_includes_scheduled_and_acquired(self):
         """study_status=pending should match pending, scheduled, and acquired studies."""
@@ -467,12 +528,102 @@ class RadiologyVerificationTests(APITestCase):
             "Rejected report record should be deleted",
         )
 
+    def test_category_filter_matches_template_category_and_modality_alias(self):
+        template = RadiologyTemplate.objects.create(
+            name="CT Brain",
+            code="RAD-CT-BRAIN",
+            category="ct-scan",
+            modality="CT",
+        )
+        order = RadiologyOrder.objects.create(
+            patient=self.patient,
+            doctor=self.user,
+            created_by=self.user,
+            priority="routine",
+        )
+        study = RadiologyStudy.objects.create(
+            order=order,
+            template=template,
+            procedure="CT Brain",
+            body_part="Brain",
+            modality="CT",
+            status="reported",
+            report="No acute findings",
+            reported_by=self.user,
+            reported_at=timezone.now(),
+        )
+        report = RadiologyReport.objects.create(
+            study=study,
+            order=order,
+            patient=self.patient,
+            overall_status="normal",
+        )
+
+        response = self.client.get(
+            f"{BASE}/verification/",
+            {"status": "reported", "category": "CT Scan"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(report.pk, [row["id"] for row in response.data["results"]])
+
     def test_verification_stats_endpoint(self):
         self._create_reported_study()
         resp = self.client.get(f"{BASE}/verification/stats/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         for key in ("total", "normal", "abnormal", "critical"):
             self.assertIn(key, resp.data)
+
+    def test_report_list_serialization_query_count_does_not_grow_per_report(self):
+        template = RadiologyTemplate.objects.create(
+            name="Report Query Count Template",
+            code="RAD-REPORT-QUERY-COUNT",
+            category="xray",
+            modality="X-Ray",
+        )
+        for index in range(4):
+            order = RadiologyOrder.objects.create(
+                patient=self.patient,
+                doctor=self.user,
+                created_by=self.user,
+                priority="routine",
+            )
+            study = RadiologyStudy.objects.create(
+                order=order,
+                template=template,
+                procedure=f"Query Count Study {index}",
+                body_part="Chest",
+                modality="X-Ray",
+                status="reported",
+                reported_by=self.user,
+                scheduled_by=self.user,
+                acquired_by=self.user,
+                reported_at=timezone.now(),
+            )
+            RadiologyStudyReportAttachment.objects.create(
+                study=study,
+                row_id=f"row-{index}",
+                row_name="Report attachment",
+                file=f"radiology_reports/report-query-count-{index}.pdf",
+                uploaded_by=self.user,
+            )
+            RadiologyReport.objects.create(
+                study=study,
+                order=order,
+                patient=self.patient,
+                overall_status="normal",
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(f"{BASE}/verification/", {"status": "reported"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 4)
+        self.assertLessEqual(
+            len(queries),
+            25,
+            f"Radiology report serialization issued {len(queries)} queries for 4 reports",
+        )
 
     def test_report_visible_when_study_processing_clinic_is_active_clinic(self):
         bode = Clinic.objects.create(name="Bode Verification", code="BODE-VER")
@@ -541,6 +692,28 @@ class RadiologyTemplateTests(APITestCase):
         }, format="json")
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["code"], "XR-CPA-API")
+
+    def test_ct_category_filter_includes_legacy_ct_scan_values(self):
+        template = RadiologyTemplate.objects.create(
+            name="CT Standard",
+            code="RAD-CT-ALIAS-FILTER",
+            category="ct-scan",
+        )
+
+        response = self.client.get(f"{BASE}/templates/", {"category": "ct"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(template.pk, [row["id"] for row in response.data["results"]])
+
+    def test_template_stats_count_ct_category_aliases(self):
+        RadiologyTemplate.objects.create(name="CT Standard", code="RAD-CT-STATS-1", category="ct")
+        RadiologyTemplate.objects.create(name="CT Legacy", code="RAD-CT-STATS-2", category="ct-scan")
+        RadiologyTemplate.objects.create(name="CT Legacy Underscore", code="RAD-CT-STATS-3", category="ct_scan")
+
+        response = self.client.get(f"{BASE}/templates/list-stats/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["ct"], 3)
 
     def test_list_templates(self):
         RadiologyTemplate.objects.create(
