@@ -127,6 +127,15 @@ export default function EyeClinicPage() {
 
   const hasPendingTasks = activeWorkCount > 0 || stats.activeSessions > 0;
 
+  // Mirrors the task rows below: active sessions are only listed when no order is in progress.
+  const openTaskCount = useMemo(
+    () =>
+      stats.queue +
+      stats.inProgress +
+      (stats.inProgress === 0 ? stats.activeSessions : 0),
+    [stats.queue, stats.inProgress, stats.activeSessions],
+  );
+
   const pendingTasks = useMemo(() => {
     const seen = new Set<number>();
     const merged: EyeOrder[] = [];
@@ -414,9 +423,7 @@ export default function EyeClinicPage() {
                       : 'bg-green-500/10 text-green-700 border-green-500/20'
                   }
                 >
-                  {hasPendingTasks
-                    ? `${Math.max(pendingTasks.length, stats.activeSessions)} open`
-                    : '✓ All Complete'}
+                  {hasPendingTasks ? `${openTaskCount} open` : '✓ All Complete'}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-3">
