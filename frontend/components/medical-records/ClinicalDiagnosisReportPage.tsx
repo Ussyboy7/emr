@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import Link from "next/link";
 import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface Row {
@@ -81,6 +82,10 @@ export function ClinicalDiagnosisReportPage({
   const [customLimit, setCustomLimit] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
+  // Fetch on typing pause, not on every keystroke.
+  const debouncedSearch = useDebouncedValue(search, 300);
+  // Ignore responses that arrive after a newer request started.
+  const requestSeqRef = useRef(0);
 
   const effectiveLimit = customLimit.trim()
     ? customLimit.trim()
@@ -88,15 +93,15 @@ export function ClinicalDiagnosisReportPage({
       ? "20"
       : limit;
 
-  const searchExtra = () => {
+  const searchExtra = (term: string = debouncedSearch) => {
     const queryExtra: Record<string, string> = {};
     if (effectiveLimit.toLowerCase() !== "all") {
       queryExtra.limit = effectiveLimit;
     }
     queryExtra.page = String(currentPage);
     queryExtra.page_size = String(itemsPerPage);
-    const term = search.trim();
-    if (term) queryExtra.search = term;
+    const trimmed = term.trim();
+    if (trimmed) queryExtra.search = trimmed;
     return queryExtra;
   };
 
@@ -106,11 +111,13 @@ export function ClinicalDiagnosisReportPage({
       toast.error("Please select a valid date range");
       return;
     }
+    const seq = ++requestSeqRef.current;
     setIsLoading(true);
     try {
       const res = await apiFetch<{ data: Row[]; summary: Summary }>(
         `${apiPath}?${params.toString()}`
       );
+      if (seq !== requestSeqRef.current) return;
       setData(res.data ?? []);
       setSummary({
         total_diagnosis_lines: res.summary?.total_diagnosis_lines ?? 0,
@@ -120,12 +127,13 @@ export function ClinicalDiagnosisReportPage({
         total_sessions: res.summary?.total_sessions,
       });
     } catch (e: unknown) {
+      if (seq !== requestSeqRef.current) return;
       if (handleAuthError(e)) return;
       toast.error(e instanceof Error ? e.message : "Failed to load report");
       setData([]);
       setSummary(emptySummary);
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeqRef.current) setIsLoading(false);
     }
   };
 
@@ -134,7 +142,7 @@ export function ClinicalDiagnosisReportPage({
     startDate,
     endDate,
     viewMode,
-    search,
+    debouncedSearch,
     effectiveLimit,
     currentPage,
     itemsPerPage,
@@ -169,7 +177,7 @@ export function ClinicalDiagnosisReportPage({
           <div className="flex items-center gap-2 print:hidden">
             <ReportExportButtons
               apiPath={apiPath}
-              buildQuery={() => buildQuery(searchExtra())}
+              buildQuery={() => buildQuery(searchExtra(search))}
               filenameBase={`${filenamePrefix}_${filenameSuffix}`}
               disabled={!hasData}
             />

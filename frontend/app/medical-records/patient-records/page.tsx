@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +29,13 @@ export default function PatientRecordsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+  // Pagination calls onPageChange(1) in the same tick as a page-size change,
+  // before state re-renders, so the refetch must read the new size from a ref.
+  const itemsPerPageRef = useRef(itemsPerPage);
+
+  useEffect(() => {
+    itemsPerPageRef.current = itemsPerPage;
+  }, [itemsPerPage]);
 
   // Recent list is cached in localStorage (browser-only), not from the server.
   // Re-validate against the API so deleted / DB-reset patients disappear.
@@ -119,10 +126,10 @@ export default function PatientRecordsPage() {
     setError(null);
     setSearched(true);
     try {
-      const res = await patientService.getPatients({ 
-        search: q, 
-        page, 
-        page_size: itemsPerPage 
+      const res = await patientService.getPatients({
+        search: q,
+        page,
+        page_size: itemsPerPageRef.current,
       });
       setResults(res.results || []);
       setTotalCount(res.count || res.results?.length || 0);
@@ -135,7 +142,7 @@ export default function PatientRecordsPage() {
     } finally {
       setLoading(false);
     }
-  }, [query, itemsPerPage, handleAuthError]);
+  }, [query, handleAuthError]);
 
   const openRecords = (p: ApiPatient) => {
     // Save to recent searches
@@ -232,7 +239,7 @@ export default function PatientRecordsPage() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by name, patient ID, or phone..."
+                  placeholder="Search by name, patient ID, or personal number..."
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && search(1)}
@@ -272,7 +279,7 @@ export default function PatientRecordsPage() {
             <CardContent className="py-12 text-center">
               <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
               <p className="font-medium text-lg">No patients found</p>
-              <p className="text-sm text-muted-foreground mt-1">Try a different name, patient ID, or phone number.</p>
+              <p className="text-sm text-muted-foreground mt-1">Try a different name, patient ID, or personal number.</p>
             </CardContent>
           </Card>
         )}
@@ -341,8 +348,8 @@ export default function PatientRecordsPage() {
                   itemsPerPage={itemsPerPage}
                   onPageChange={handlePageChange}
                   onItemsPerPageChange={(newSize) => {
+                    itemsPerPageRef.current = newSize;
                     setItemsPerPage(newSize);
-                    search(1);
                   }}
                   itemName="patients"
                 />
@@ -395,7 +402,7 @@ export default function PatientRecordsPage() {
                 <Activity className="h-16 w-16 mx-auto mb-4 text-blue-500 opacity-40" />
                 <h3 className="text-lg font-medium mb-2">Search for a Patient</h3>
                 <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  Enter a patient's name, patient ID, or phone number to view their complete medical records including consultations, lab results, imaging, prescriptions, and vitals.
+                  Enter a patient's name, patient ID, or personal number to view their complete medical records including consultations, lab results, imaging, prescriptions, and vitals.
                 </p>
               </CardContent>
             </Card>

@@ -408,7 +408,12 @@ export default function ReferralTrackingReport() {
             <Card>
               <CardHeader>
                 <CardTitle>Referral details — {periodLabel}</CardTitle>
-                <CardDescription>List of referred patients and where they were sent</CardDescription>
+                <CardDescription>
+                  List of referred patients and where they were sent.
+                  {summary.total > referrals.length
+                    ? ` Showing the most recent ${referrals.length} of ${summary.total.toLocaleString()} referrals; CSV exports all rows.`
+                    : ""}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">

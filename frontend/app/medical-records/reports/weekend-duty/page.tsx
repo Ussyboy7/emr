@@ -351,6 +351,9 @@ export default function WeekendDutyReport() {
                       </td>
                       <td className="p-3 text-right text-foreground">
                         {(summary.distinct_patients ?? 0).toLocaleString()}
+                        <span className="block text-[11px] font-normal text-muted-foreground">
+                          distinct, whole period
+                        </span>
                       </td>
                     </tr>
                   </tbody>

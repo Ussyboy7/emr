@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface TopDiagnosisRow {
@@ -85,6 +86,10 @@ export default function TopDiagnosesReport() {
   const [groupByFamily, setGroupByFamily] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
+  // Fetch on typing pause, not on every keystroke.
+  const debouncedSearch = useDebouncedValue(search, 300);
+  // Ignore responses that arrive after a newer request started.
+  const requestSeqRef = useRef(0);
 
   const effectiveLimit = customLimit.trim()
     ? customLimit.trim()
@@ -96,7 +101,7 @@ export default function TopDiagnosesReport() {
   const showRankingMeta = !isAllTime;
   const grouped = groupByFamily || summary.group_by === "family";
 
-  const queryExtra = () => {
+  const queryExtra = (term: string = debouncedSearch) => {
     const extra: Record<string, string> = {};
     if (effectiveLimit.toLowerCase() !== "all") {
       extra.limit = effectiveLimit;
@@ -106,12 +111,13 @@ export default function TopDiagnosesReport() {
     extra.page = String(currentPage);
     extra.page_size = String(itemsPerPage);
     if (groupByFamily) extra.group_by = "family";
-    const term = search.trim();
-    if (term) extra.search = term;
+    const trimmed = term.trim();
+    if (trimmed) extra.search = trimmed;
     return extra;
   };
 
   const fetchReport = async () => {
+    const seq = ++requestSeqRef.current;
     setIsLoading(true);
     try {
       const params = buildQuery(queryExtra());
@@ -123,6 +129,7 @@ export default function TopDiagnosesReport() {
       const response = await apiFetch<
         TopDiagnosisRow[] | { data: TopDiagnosisRow[]; summary: TopDiagnosesSummary }
       >(`/reports/top-diagnoses/?${params.toString()}`);
+      if (seq !== requestSeqRef.current) return;
 
       if (Array.isArray(response)) {
         setRows(response);
@@ -134,13 +141,12 @@ export default function TopDiagnosesReport() {
           limit: effectiveLimit.toLowerCase() === "all" ? null : parseInt(effectiveLimit, 10) || 20,
           grand_total: response.reduce((sum, r) => sum + r.count, 0),
         });
-        setCurrentPage(1);
       } else {
         setRows(response.data ?? []);
         setSummary(normalizeSummary(response.summary));
-        setCurrentPage(1);
       }
     } catch (error: unknown) {
+      if (seq !== requestSeqRef.current) return;
       console.error("Error fetching top diagnoses:", error);
       if (handleAuthError(error)) return;
       const msg = error instanceof Error ? error.message : "Failed to load top diagnoses";
@@ -148,11 +154,11 @@ export default function TopDiagnosesReport() {
       setRows([]);
       setSummary(emptySummary);
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeqRef.current) setIsLoading(false);
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, effectiveLimit, search, groupByFamily, currentPage, itemsPerPage]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, effectiveLimit, debouncedSearch, groupByFamily, currentPage, itemsPerPage]);
 
   const hasData = (summary.total_diagnosis_lines ?? 0) > 0;
   const truncated =
@@ -183,7 +189,7 @@ export default function TopDiagnosesReport() {
           <div className="flex items-center gap-2 print:hidden">
             <ReportExportButtons
               apiPath="/reports/top-diagnoses/"
-              buildQuery={() => buildQuery(queryExtra())}
+              buildQuery={() => buildQuery(queryExtra(search))}
               filenameBase={`top_diagnoses_${filenameSuffix}`}
               disabled={!hasData}
             />
@@ -204,13 +210,25 @@ export default function TopDiagnosesReport() {
             <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <ReportDateFilterFields
                 viewMode={viewMode}
-                onViewModeChange={setViewMode}
+                onViewModeChange={(m) => {
+                  setViewMode(m);
+                  setCurrentPage(1);
+                }}
                 year={year}
-                onYearChange={setYear}
+                onYearChange={(y) => {
+                  setYear(y);
+                  setCurrentPage(1);
+                }}
                 startDate={startDate}
-                onStartDateChange={setStartDate}
+                onStartDateChange={(v) => {
+                  setStartDate(v);
+                  setCurrentPage(1);
+                }}
                 endDate={endDate}
-                onEndDateChange={setEndDate}
+                onEndDateChange={(v) => {
+                  setEndDate(v);
+                  setCurrentPage(1);
+                }}
                 yearOptions={years}
               />
               <div>
@@ -232,7 +250,7 @@ export default function TopDiagnosesReport() {
                         {n}
                       </SelectItem>
                     ))}
-                    <SelectItem value="all">All ({summary.distinct_icd10_codes || 768})</SelectItem>
+                    <SelectItem value="all">All ({summary.distinct_icd10_codes || "…"})</SelectItem>
                     <SelectItem value="custom">Custom...</SelectItem>
                   </SelectContent>
                 </Select>
@@ -255,12 +273,21 @@ export default function TopDiagnosesReport() {
                 <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
                   <Checkbox
                     checked={groupByFamily}
-                    onCheckedChange={(v) => setGroupByFamily(v === true)}
+                    onCheckedChange={(v) => {
+                      setGroupByFamily(v === true);
+                      setCurrentPage(1);
+                    }}
                   />
                   Group by family
                 </label>
               </div>
-              <ReportSearchField value={search} onChange={setSearch} />
+              <ReportSearchField
+                value={search}
+                onChange={(v) => {
+                  setSearch(v);
+                  setCurrentPage(1);
+                }}
+              />
               <div className="flex items-end">
                 <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
                   <TrendingUp className="h-4 w-4 mr-2" />

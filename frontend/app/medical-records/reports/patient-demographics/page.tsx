@@ -225,7 +225,7 @@ export default function PatientDemographicsReport() {
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground flex items-center gap-2">
                     <Users className="h-4 w-4" />
-                    Active patients
+                    {cohortMode === "registered_in_period" ? "Registered patients" : "Active patients"}
                   </p>
                   <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">
                     {summary.total_patients.toLocaleString()}

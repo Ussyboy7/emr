@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api-client";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import Link from "next/link";
 import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface DoctorRow {
@@ -61,11 +62,15 @@ export default function DoctorPatientCountReport() {
   const [summary, setSummary] = useState<DoctorSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState("");
+  // Fetch on typing pause, not on every keystroke.
+  const debouncedSearch = useDebouncedValue(search, 300);
+  // Ignore responses that arrive after a newer request started.
+  const requestSeqRef = useRef(0);
 
-  const searchExtra = () => {
+  const searchExtra = (term: string = debouncedSearch) => {
     const queryExtra: Record<string, string> = {};
-    const term = search.trim();
-    if (term) queryExtra.search = term;
+    const trimmed = term.trim();
+    if (trimmed) queryExtra.search = trimmed;
     return queryExtra;
   };
 
@@ -76,25 +81,28 @@ export default function DoctorPatientCountReport() {
       return;
     }
 
+    const seq = ++requestSeqRef.current;
     setIsLoading(true);
     try {
       const response = await apiFetch<{ data: DoctorRow[]; summary: DoctorSummary }>(
         `/reports/doctor-patient-count/?${params.toString()}`
       );
+      if (seq !== requestSeqRef.current) return;
       setData(response.data ?? []);
       setSummary(response.summary ?? emptySummary);
     } catch (error: unknown) {
+      if (seq !== requestSeqRef.current) return;
       console.error("Error fetching doctor patient count:", error);
       if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load doctor patient count");
       setData([]);
       setSummary(emptySummary);
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeqRef.current) setIsLoading(false);
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, search]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, debouncedSearch]);
 
   const hasData = (summary.grand_total ?? 0) > 0;
 
@@ -123,7 +131,7 @@ export default function DoctorPatientCountReport() {
           <div className="flex items-center gap-2 print:hidden">
             <ReportExportButtons
               apiPath="/reports/doctor-patient-count/"
-              buildQuery={() => buildQuery(searchExtra())}
+              buildQuery={() => buildQuery(searchExtra(search))}
               filenameBase={`doctor_patient_count_${filenameSuffix}`}
               disabled={!hasData}
             />
@@ -227,6 +235,7 @@ export default function DoctorPatientCountReport() {
                 <p className="text-muted-foreground">Loading report data...</p>
               </div>
             ) : hasData ? (
+              <>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -267,6 +276,11 @@ export default function DoctorPatientCountReport() {
                   </tbody>
                 </table>
               </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                The Patients total is distinct across all doctors; per-doctor patient counts can
+                overlap.
+              </p>
+              </>
             ) : (
               <div className="text-center py-12">
                 <Stethoscope className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />

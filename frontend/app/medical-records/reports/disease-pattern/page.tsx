@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import Link from "next/link";
 import { useMrReportPeriod, useMrReportAutoFetch } from "@/hooks/use-mr-report-period";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMedicalRecordsPageAuth } from "@/hooks/use-medical-records-page-auth";
 
 interface DiseaseData {
@@ -102,6 +103,10 @@ export default function DiseasePatternReport() {
   const [groupByFamily, setGroupByFamily] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
+  // Fetch on typing pause, not on every keystroke.
+  const debouncedSearch = useDebouncedValue(search, 300);
+  // Ignore responses that arrive after a newer request started.
+  const requestSeqRef = useRef(0);
 
   const effectiveLimit = customLimit.trim()
     ? customLimit.trim()
@@ -113,7 +118,7 @@ export default function DiseasePatternReport() {
   const showCategoryCards = !isAllTime;
   const grouped = groupByFamily || summary.group_by === "family";
 
-  const searchExtra = () => {
+  const searchExtra = (term: string = debouncedSearch) => {
     const queryExtra: Record<string, string> = {};
     if (effectiveLimit.toLowerCase() !== "all") {
       queryExtra.limit = effectiveLimit;
@@ -121,8 +126,8 @@ export default function DiseasePatternReport() {
     queryExtra.page = String(currentPage);
     queryExtra.page_size = String(itemsPerPage);
     if (groupByFamily) queryExtra.group_by = "family";
-    const term = search.trim();
-    if (term) queryExtra.search = term;
+    const trimmed = term.trim();
+    if (trimmed) queryExtra.search = trimmed;
     return queryExtra;
   };
 
@@ -133,25 +138,28 @@ export default function DiseasePatternReport() {
       return;
     }
 
+    const seq = ++requestSeqRef.current;
     setIsLoading(true);
     try {
       const response = await apiFetch<{ data: DiseaseData[]; summary: DiseaseSummary }>(
         `/reports/disease-pattern/?${params.toString()}`
       );
+      if (seq !== requestSeqRef.current) return;
       setData(response.data ?? []);
       setSummary(normalizeSummary(response.summary));
     } catch (error: unknown) {
+      if (seq !== requestSeqRef.current) return;
       console.error("Error fetching disease pattern:", error);
       if (handleAuthError(error)) return;
       toast.error(error instanceof Error ? error.message : "Failed to load disease pattern report");
       setData([]);
       setSummary(emptySummary);
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeqRef.current) setIsLoading(false);
     }
   };
 
-  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, search, effectiveLimit, groupByFamily, currentPage, itemsPerPage]);
+  useMrReportAutoFetch(ready, canFetch, fetchReport, [year, startDate, endDate, viewMode, debouncedSearch, effectiveLimit, groupByFamily, currentPage, itemsPerPage]);
 
   const hasData = (summary.grand_total ?? 0) > 0;
   const truncated =
@@ -182,7 +190,7 @@ export default function DiseasePatternReport() {
           <div className="flex items-center gap-2 print:hidden">
             <ReportExportButtons
               apiPath="/reports/disease-pattern/"
-              buildQuery={() => buildQuery(searchExtra())}
+              buildQuery={() => buildQuery(searchExtra(search))}
               filenameBase={`disease_pattern_${filenameSuffix}`}
               disabled={!hasData}
             />
@@ -203,13 +211,25 @@ export default function DiseasePatternReport() {
             <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <ReportDateFilterFields
                 viewMode={viewMode}
-                onViewModeChange={setViewMode}
+                onViewModeChange={(m) => {
+                  setViewMode(m);
+                  setCurrentPage(1);
+                }}
                 year={year}
-                onYearChange={setYear}
+                onYearChange={(y) => {
+                  setYear(y);
+                  setCurrentPage(1);
+                }}
                 startDate={startDate}
-                onStartDateChange={setStartDate}
+                onStartDateChange={(v) => {
+                  setStartDate(v);
+                  setCurrentPage(1);
+                }}
                 endDate={endDate}
-                onEndDateChange={setEndDate}
+                onEndDateChange={(v) => {
+                  setEndDate(v);
+                  setCurrentPage(1);
+                }}
                 yearOptions={years}
               />
               <div>
@@ -231,7 +251,7 @@ export default function DiseasePatternReport() {
                         {n}
                       </SelectItem>
                     ))}
-                    <SelectItem value="all">All ({summary.distinct_icd10_codes || 768})</SelectItem>
+                    <SelectItem value="all">All ({summary.distinct_icd10_codes || "…"})</SelectItem>
                     <SelectItem value="custom">Custom...</SelectItem>
                   </SelectContent>
                 </Select>

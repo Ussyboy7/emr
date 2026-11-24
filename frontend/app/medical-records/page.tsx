@@ -213,7 +213,7 @@ export default function MedicalRecordsPage() {
                   icon={Users}
                   tone="registry"
                   emptyHint="No patients registered"
-                  activeHint="All registered patients"
+                  activeHint="Active registered patients"
                 />
                 <OverviewCard
                   label="Visits Today"

@@ -126,6 +126,14 @@ export default function ObservationAdmissionsReport() {
           <CardContent>
             {isLoading ? (
               <RefreshCw className="h-8 w-8 animate-spin mx-auto my-8 text-muted-foreground" />
+            ) : data.length === 0 ? (
+              <div className="text-center py-12">
+                <BedDouble className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-lg font-medium mb-1">No data available</p>
+                <p className="text-sm text-muted-foreground">
+                  No observation admissions for {period.periodLabel}
+                </p>
+              </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
@@ -147,6 +155,20 @@ export default function ObservationAdmissionsReport() {
                       <td className="p-3 text-right font-semibold">{row.total}</td>
                     </tr>
                   ))}
+                  <tr className="border-t-2 border-border bg-muted/50 font-bold">
+                    <td colSpan={2} className="p-3 text-foreground">
+                      Total
+                    </td>
+                    <td className="p-3 text-right text-foreground">
+                      {data.reduce((sum, row) => sum + row.male, 0).toLocaleString()}
+                    </td>
+                    <td className="p-3 text-right text-foreground">
+                      {data.reduce((sum, row) => sum + row.female, 0).toLocaleString()}
+                    </td>
+                    <td className="p-3 text-right text-foreground">
+                      {total.toLocaleString()}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             )}

@@ -397,7 +397,10 @@ export default function EscortLogReport() {
                     <Building2 className="h-4 w-4 text-orange-500" />
                     Receiving facilities
                   </CardTitle>
-                  <CardDescription>Where escorted patients were sent — {periodLabel}</CardDescription>
+                  <CardDescription>
+                    Top 15 destinations by escort count — {periodLabel}. The total row covers all
+                    destinations.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {facilityBreakdown.length === 0 ? (
