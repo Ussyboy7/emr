@@ -31,6 +31,7 @@ import {
   type ConsultationReportSession,
 } from "@/lib/consultation-report";
 import { getOrganizationServicesHeader } from "@/lib/constants/organization";
+import { consultationDisplayStatus } from "@/lib/consultation/session-display-status";
 import { toast } from "sonner";
 import { annualCheckupService } from "@/lib/services/annual-checkup-service";
 
@@ -163,7 +164,7 @@ export function ConsultationReportModal({
               <div>
                 <p className="text-xs text-muted-foreground">Status</p>
                 <Badge variant="outline">
-                  {session.status === 'completed' ? 'Completed' : 'In Progress'}
+                  {consultationDisplayStatus(session.status)}
                 </Badge>
               </div>
             </div>

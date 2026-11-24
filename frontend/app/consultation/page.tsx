@@ -12,6 +12,7 @@ import { consultationService, radiologyService } from '@/lib/services';
 import { useConsultationPageAuth } from '@/hooks/use-consultation-page-auth';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { canNavigateToPage } from '@/lib/can-navigate-to-page';
+import { consultationDisplayStatus } from '@/lib/consultation/session-display-status';
 
 interface ConsultationStats {
   totalConsultations: number;
@@ -309,21 +310,28 @@ export default function ConsultationPage() {
                   </div>
                 ) : stats.recentSessions.length > 0 ? (
                   <div className="space-y-2">
-                    {stats.recentSessions.map((session: any) => (
-                      <div key={session.id} className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm">{session.patient_name ?? ''}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Session {session.session_id || session.id} • {session.room_name || 'Unknown Room'}
-                          </p>
+                    {stats.recentSessions.map((session: any) => {
+                      const displayStatus = consultationDisplayStatus(session.status);
+                      return (
+                        <div key={session.id} className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm">{session.patient_name ?? ''}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Session {session.session_id || session.id} • {session.room_name || 'Unknown Room'}
+                            </p>
+                          </div>
+                          <Badge variant="outline" className={
+                            displayStatus === 'Completed'
+                              ? 'border-green-500 text-green-600'
+                              : displayStatus === 'Cancelled'
+                                ? 'border-rose-500 text-rose-600'
+                                : 'border-blue-500 text-blue-600'
+                          }>
+                            {displayStatus}
+                          </Badge>
                         </div>
-                        <Badge variant="outline" className={
-                          session.status === 'completed' ? 'border-green-500 text-green-600' : 'border-blue-500 text-blue-600'
-                        }>
-                          {session.status === 'completed' ? 'Completed' : 'In Progress'}
-                        </Badge>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8">

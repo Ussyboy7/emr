@@ -20,6 +20,7 @@ import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultati
 import { AnnualCheckupPanel } from '@/components/consultation/AnnualCheckupPanel';
 import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { buildConsultationDetailOrdersFromBundle } from '@/lib/consultation/workspace-bundle-enrichment';
+import type { ConsultationDisplayStatus } from '@/lib/consultation/session-display-status';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 // ==========================================
@@ -117,7 +118,7 @@ export interface ConsultationRecord {
   diagnosis: string;
   presentationComplaint?: string;
   diagnosisCodes?: { code: string; description: string; type: 'Primary' | 'Secondary' | 'Differential' }[];
-  status: "Completed" | "In Progress";
+  status: ConsultationDisplayStatus;
   priority: string;
   sessionDuration: number;
   historyOfPresentIllness: string;

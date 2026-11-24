@@ -30,6 +30,7 @@ import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { toApiDateString, formatDisplayDate, formatDisplayTime, localWeekToTodayBounds } from '@/lib/dates';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
+import { consultationDisplayStatus } from '@/lib/consultation/session-display-status';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
@@ -98,6 +99,8 @@ const getPriorityColor = (priority: string) => {
 
 const getStatusBadge = (status: string) => {
   if (status === "Completed") return "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400";
+  if (status === "Cancelled") return "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400";
+  if (status === "Paused") return "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400";
   return "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400";
 };
 
@@ -445,7 +448,7 @@ export default function ConsultationHistoryPage() {
               diagnosis,
               diagnosisCodes,
               presentationComplaint,
-              status: session.status === 'completed' ? 'Completed' as const : 'In Progress' as const,
+              status: consultationDisplayStatus(session.status),
               priority: (() => {
                 const p = session.priority;
                 if (typeof p === 'number') {
@@ -560,17 +563,20 @@ export default function ConsultationHistoryPage() {
     };
   }, [showViewModal, selectedConsultationId]);
 
-  const canEditConsultation = (consultation: ConsultationRecord): boolean => {
-    // Allow editing if within 48 hours of the consultation date/time
+  /** Why a row cannot be edited, or null when it can. Drives the button state, its tooltip and the toast. */
+  const editBlockedReason = (consultation: ConsultationRecord): string | null => {
+    // Saving an edit would send status=active, so paused/cancelled sessions stay read-only here.
+    if (consultation.status === "Cancelled") return "Cancelled consultations cannot be edited";
+    if (consultation.status === "Paused") return "Resume the paused consultation in its room to edit it";
     const consultationDateTime = new Date(consultation.date + 'T' + (consultation.time || '00:00:00'));
-    const now = new Date();
-    const hoursDifference = (now.getTime() - consultationDateTime.getTime()) / (1000 * 60 * 60);
-    return hoursDifference <= 48;
+    const hoursDifference = (Date.now() - consultationDateTime.getTime()) / (1000 * 60 * 60);
+    return hoursDifference <= 48 ? null : "Consultation can only be edited within 48 hours of the session";
   };
 
   const openEditModal = (consultation: ConsultationRecord) => {
-    if (!canEditConsultation(consultation)) {
-      toast.error('Consultation can only be edited within 48 hours of the session');
+    const blockedReason = editBlockedReason(consultation);
+    if (blockedReason) {
+      toast.error(blockedReason);
       return;
     }
 
@@ -582,7 +588,7 @@ export default function ConsultationHistoryPage() {
       physicalExamination: consultation.physicalExamination || '',
       assessment: consultation.assessment,
       plan: consultation.plan,
-      status: consultation.status,
+      status: consultation.status === 'Completed' ? 'Completed' : 'In Progress',
       diagnosisCodes: (consultation.diagnosisCodes || []).map((dx, index) => ({
         id: `existing-${index}`,
         code: dx.code,
@@ -1148,7 +1154,7 @@ export default function ConsultationHistoryPage() {
             c.id === String(sessionId)
               ? {
                   ...c,
-                  status: fresh.status === 'completed' ? 'Completed' : 'In Progress',
+                  status: consultationDisplayStatus(fresh.status),
                   sessionDuration:
                     fresh.started_at && fresh.ended_at
                       ? Math.floor(
@@ -1200,7 +1206,7 @@ export default function ConsultationHistoryPage() {
             c.id === consultation.id
               ? {
                   ...c,
-                  status: fresh.status === 'completed' ? 'Completed' : 'In Progress',
+                  status: consultationDisplayStatus(fresh.status),
                   sessionDuration:
                     fresh.started_at && fresh.ended_at
                       ? Math.floor(
@@ -1343,7 +1349,9 @@ export default function ConsultationHistoryPage() {
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="in-progress">In Progress</SelectItem>
+                    <SelectItem value="paused">Paused</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
@@ -1400,7 +1408,8 @@ export default function ConsultationHistoryPage() {
             </Card>
           ) : (
             consultations.map((c) => {
-              const isEditable = canEditConsultation(c);
+              const editBlocked = editBlockedReason(c);
+              const isEditable = editBlocked === null;
               const isCompleted = c.status === "Completed";
               const borderColor = isEditable
                 ? "border-l-emerald-500"
@@ -1455,16 +1464,22 @@ export default function ConsultationHistoryPage() {
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
 
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => openEditModal(c)}
-                          title={isEditable ? "Edit Consultation" : "Consultation can only be edited within 48 hours"}
-                          disabled={!isEditable}
+                        {/* Disabled buttons swallow hover events, so the tooltip lives on the wrapper. */}
+                        <span
+                          className="inline-flex"
+                          title={isEditable ? "Edit Consultation" : editBlocked ?? "Consultation cannot be edited"}
                         >
-                          <Edit className="h-3.5 w-3.5" />
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => openEditModal(c)}
+                            aria-label={isEditable ? "Edit Consultation" : "Edit unavailable"}
+                            disabled={!isEditable}
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                        </span>
 
                         {isCompleted && (
                           <div className="h-7 w-7 flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">

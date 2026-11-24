@@ -13,6 +13,7 @@ import {
   enrichSessionDisplayFromWorkspaceBundle,
 } from '@/lib/consultation/workspace-bundle-enrichment';
 import type { SessionWorkspaceBundle } from '@/lib/services/consultation-service';
+import { consultationDisplayStatus } from '@/lib/consultation/session-display-status';
 
 export { summarizeLabTestForConsultationReport } from '@/lib/consultation/workspace-bundle-enrichment';
 
@@ -248,7 +249,7 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
       <tr><td>Location</td><td colspan="3">${escapeHtmlForHtml(session.location_clinic_name ?? '')}</td></tr>
       <tr><td>Clinic</td><td>${escapeHtmlForHtml(session.clinic_name ?? '')}</td>
           <td>Room</td><td>${escapeHtmlForHtml(session.room_name ?? '')}</td></tr>
-      ${durationStr ? `<tr><td>Duration</td><td>${escapeHtmlForHtml(durationStr)}</td><td>Status</td><td>${escapeHtmlForHtml(session.status === 'completed' ? 'Completed' : 'In Progress')}</td></tr>` : ''}
+      ${durationStr ? `<tr><td>Duration</td><td>${escapeHtmlForHtml(durationStr)}</td><td>Status</td><td>${escapeHtmlForHtml(consultationDisplayStatus(session.status))}</td></tr>` : ''}
     </table>
   </div>
 
