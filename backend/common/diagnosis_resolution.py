@@ -1,5 +1,5 @@
 """
-Resolve ICD-10 diagnoses for orders and clinical reports.
+Resolve ICD-10 diagnoses for order text and clinical reports.
 
 Handles nursing-pool placeholders by falling back to the patient's last
 structured consultation diagnosis.
@@ -8,7 +8,7 @@ structured consultation diagnosis.
 from __future__ import annotations
 
 import re
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from consultation.models import Diagnosis
 
@@ -119,43 +119,6 @@ def last_patient_diagnosis_rows(patient_id: int) -> list[ResolvedDiagnosis]:
         return []
     session_rows = list(qs.filter(session_id=latest_session_id))
     return _diagnosis_model_rows(session_rows)
-
-
-def resolve_order_diagnoses(
-    *,
-    order: Any = None,
-    patient_id: int | None = None,
-    consultation_session: Any = None,
-    diagnosis_text: str | None = None,
-) -> list[ResolvedDiagnosis]:
-    """
-    Resolve all ICD-10 rows for an order-like record.
-
-    Priority: session diagnoses → parsed order text → patient's last consultation.
-    """
-    session = consultation_session
-    if session is None and order is not None:
-        session = getattr(order, "consultation_session", None)
-
-    if session is not None and getattr(session, "id", None):
-        try:
-            rows = _diagnosis_model_rows(list(session.diagnoses.select_related("icd10_code").all()))
-            if rows:
-                return rows
-        except Exception:
-            pass
-
-    text = diagnosis_text
-    if text is None and order is not None:
-        text = getattr(order, "diagnosis", None) or ""
-    parsed = parse_order_diagnosis_text(text or "")
-    if parsed:
-        return parsed
-
-    pid = patient_id
-    if pid is None and order is not None:
-        pid = getattr(order, "patient_id", None)
-    return last_patient_diagnosis_rows(pid or 0)
 
 
 def format_diagnosis_rows(rows: list[ResolvedDiagnosis]) -> str:

@@ -95,7 +95,7 @@ class PhysioOrderListSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PhysioOrder
-        fields = ['id', 'diagnosis', 'priority']
+        fields = ['id', 'diagnosis', 'clinic_diagnoses', 'priority']
 
 
 class PhysioSessionListSerializer(serializers.ModelSerializer):

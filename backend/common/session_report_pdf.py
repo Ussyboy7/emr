@@ -10,6 +10,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from common.clinic_diagnoses import clinic_diagnoses_rows
+
 
 def _styles():
     base = getSampleStyleSheet()
@@ -87,7 +89,14 @@ def build_physio_session_pdf_bytes(session) -> bytes:
         ("Completed", session.completed_at.isoformat() if session.completed_at else "—"),
     ]
     if order and order.diagnosis:
-        meta.append(("Diagnosis", order.diagnosis))
+        meta.append(("Referring diagnosis", order.diagnosis))
+    if order:
+        clinic_rows = clinic_diagnoses_rows(getattr(order, "clinic_diagnoses", None))
+        clinic_text = "\n".join(
+            f"{row['code']} — {row['name']} ({row['type']})" if row["code"] else row["name"]
+            for row in clinic_rows
+        )
+        meta.append(("Physiotherapy diagnosis (ICD-10)", clinic_text or "Not recorded"))
     story.append(_meta_table(meta, st["body"]))
     story.append(Spacer(1, 12))
 

@@ -14,6 +14,7 @@ type OrderDiagnosesBlockProps = {
   className?: string;
   onRemove?: (index: number) => void;
   emptyMessage?: string;
+  title?: string;
 };
 
 export function OrderDiagnosesBlock({
@@ -23,6 +24,7 @@ export function OrderDiagnosesBlock({
   className,
   onRemove,
   emptyMessage,
+  title,
 }: OrderDiagnosesBlockProps) {
   const rows = diagnoses?.length
     ? orderDiagnosesToIcd10Rows(diagnoses)
@@ -35,6 +37,7 @@ export function OrderDiagnosesBlock({
       className={className}
       onRemove={onRemove}
       emptyMessage={emptyMessage}
+      title={title}
     />
   );
 }

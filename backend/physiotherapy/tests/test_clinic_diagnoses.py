@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from common.session_report_pdf import build_physio_session_pdf_bytes
 from common.tests.support import create_test_patient_visit, create_test_user
 from consultation.models import ICD10Code
 from physiotherapy.models import PhysioOrder, PhysioSession
@@ -125,6 +126,19 @@ class PhysioClinicDiagnosisTests(APITestCase):
         self.assertEqual([row["code"] for row in report["data"]], ["M17"])
         self.assertEqual(report["summary"]["total_sessions"], 2)
         self.assertEqual(report["summary"]["uncoded_sessions"], 1)
+
+    def test_session_list_and_report_pdf_carry_the_clinic_diagnosis(self):
+        order = self._order(
+            clinic_diagnoses=[{"code": "M17", "name": "Osteoarthritis of knee", "type": "Primary"}]
+        )
+        session = self._session(order)
+
+        res = self.client.get(f"/api/v1/sessions/?order={order.pk}&page_size=10")
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.data)
+        rows = res.data.get("results", res.data)
+        self.assertEqual(rows[0]["order_details"]["clinic_diagnoses"][0]["code"], "M17")
+        self.assertTrue(build_physio_session_pdf_bytes(session).startswith(b"%PDF"))
 
     def test_report_skips_sessions_outside_the_period(self):
         order = self._order(

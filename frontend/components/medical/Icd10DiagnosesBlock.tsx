@@ -19,6 +19,8 @@ export interface Icd10DiagnosesBlockProps {
   /** When set, shows remove control per row (consultation order picker). */
   onRemove?: (index: number) => void;
   emptyMessage?: string;
+  /** Block heading; defaults to the consultation label. */
+  title?: string;
 }
 
 export function Icd10DiagnosesBlock({
@@ -27,6 +29,7 @@ export function Icd10DiagnosesBlock({
   compact,
   onRemove,
   emptyMessage,
+  title = 'Diagnosis (ICD-10)',
 }: Icd10DiagnosesBlockProps) {
   const rows = (diagnoses || []).filter((d) => d && (d.code || d.name));
   if (rows.length === 0) {
@@ -47,7 +50,7 @@ export function Icd10DiagnosesBlock({
       <div className={`flex items-center gap-2 ${compact ? 'px-2 pt-2' : 'px-3 pt-3'} pb-1`}>
         <Stethoscope className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
         <span className="text-xs font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">
-          Diagnosis (ICD-10)
+          {title}
         </span>
       </div>
       <div className="overflow-x-auto">

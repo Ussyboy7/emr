@@ -21,6 +21,7 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { resolvePatientPhoto } from "@/lib/patient-photo";
 import { PhysioSessionReportDialog } from '@/components/physiotherapy/PhysioSessionReportDialog';
+import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
@@ -365,12 +366,18 @@ export default function PhysioCompletedPage() {
                     {selectedSession.order_details.diagnosis && (
                       <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                         <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                          <FileText className="h-3 w-3" /> Diagnosis
+                          <FileText className="h-3 w-3" /> Referring diagnosis
                         </p>
                         <p className="text-sm font-medium">{selectedSession.order_details.diagnosis}</p>
                       </div>
                     )}
 
+                    <OrderDiagnosesBlock
+                      diagnoses={selectedSession.order_details.clinic_diagnoses}
+                      title="Physiotherapy diagnosis (ICD-10)"
+                      compact
+                      emptyMessage="No physiotherapy diagnosis recorded for this episode."
+                    />
 
                   </div>
                 )}

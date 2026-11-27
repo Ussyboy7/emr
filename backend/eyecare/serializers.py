@@ -65,7 +65,7 @@ class EyeOrderListSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EyeOrder
-        fields = ['id', 'diagnosis', 'priority', 'chief_complaint']
+        fields = ['id', 'diagnosis', 'clinic_diagnoses', 'priority', 'chief_complaint']
 
 
 class EyeSessionListSerializer(serializers.ModelSerializer):

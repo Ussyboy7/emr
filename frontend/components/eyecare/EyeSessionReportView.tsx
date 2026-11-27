@@ -2,6 +2,7 @@
 
 import { Eye, FileText, Stethoscope, ClipboardList } from 'lucide-react';
 import type { EyeSession } from '@/lib/services/eye-care-service';
+import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
 import {
   diagnosticAttachmentsForCategory,
   examinationRows,
@@ -31,6 +32,8 @@ export function EyeSessionReportView({ reportSession }: Props) {
   const objective = reportSession.soap_note?.objective;
   const assessment = reportSession.soap_note?.assessment?.diagnosis || '';
   const plan = reportSession.soap_note?.plan;
+  const order = reportSession.order_details;
+  const referralDiagnosis = (order?.diagnosis || '').trim();
 
   return (
     <div className="space-y-6">
@@ -199,17 +202,29 @@ export function EyeSessionReportView({ reportSession }: Props) {
         </div>
       </div>
 
-      {assessment ? (
-        <div className="space-y-4">
-          <h3 className="font-semibold flex items-center gap-2 text-red-600 dark:text-red-400">
-            <Stethoscope className="h-4 w-4" />
-            ASSESSMENT
-          </h3>
+      <div className="space-y-4">
+        <h3 className="font-semibold flex items-center gap-2 text-red-600 dark:text-red-400">
+          <Stethoscope className="h-4 w-4" />
+          ASSESSMENT
+        </h3>
+        {assessment ? (
           <p className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800 whitespace-pre-wrap">
             {assessment}
           </p>
-        </div>
-      ) : null}
+        ) : null}
+        {referralDiagnosis ? (
+          <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+            <p className="text-xs font-medium text-muted-foreground mb-1">Referring diagnosis</p>
+            <p className="text-sm whitespace-pre-wrap">{referralDiagnosis}</p>
+          </div>
+        ) : null}
+        <OrderDiagnosesBlock
+          diagnoses={order?.clinic_diagnoses}
+          title="Eye clinic diagnosis (ICD-10)"
+          compact
+          emptyMessage="No eye clinic diagnosis recorded for this episode."
+        />
+      </div>
 
       <div className="space-y-4">
         <h3 className="font-semibold flex items-center gap-2 text-emerald-600 dark:text-emerald-400">

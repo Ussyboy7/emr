@@ -26,6 +26,7 @@ import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dates';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { physioService, type PhysioSession } from '@/lib/services';
+import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
 
 export interface PhysioSessionReportDialogProps {
   open: boolean;
@@ -357,11 +358,18 @@ export function PhysioSessionReportDialog({
           {order?.diagnosis && (
             <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
               <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                Primary Diagnosis
+                Referring diagnosis
               </p>
               <p className="text-sm mt-1">{order.diagnosis}</p>
             </div>
           )}
+
+          <OrderDiagnosesBlock
+            diagnoses={order?.clinic_diagnoses}
+            title="Physiotherapy diagnosis (ICD-10)"
+            compact
+            emptyMessage="No physiotherapy diagnosis recorded for this episode."
+          />
 
           {sections.map((section) => {
             if (!hasContent(reportSession, section.fields)) return null;

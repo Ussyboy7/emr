@@ -10,6 +10,7 @@ from django.http import HttpResponse
 from reportlab.lib.units import inch
 from reportlab.platypus import Spacer
 
+from common.clinic_diagnoses import clinic_diagnoses_rows
 from common.date_display import format_display_datetime
 from common.order_location import order_location_clinic_name
 from common.pdf import (
@@ -243,6 +244,32 @@ def build_eye_session_pdf_bytes(session) -> bytes:
     story.append(section_heading("Assessment"))
     story.append(Spacer(1, 0.04 * inch))
     story.append(body_paragraph(str(assess.get("diagnosis") or "—")))
+    story.append(Spacer(1, 0.06 * inch))
+
+    referral_diagnosis = (order.diagnosis or "").strip()
+    if referral_diagnosis:
+        story.append(request_line("Referring diagnosis", referral_diagnosis, width=width))
+    eye_clinic_rows = clinic_diagnoses_rows(getattr(order, "clinic_diagnoses", None))
+    if eye_clinic_rows:
+        story.append(Spacer(1, 0.04 * inch))
+        story.append(section_heading("Eye clinic diagnosis (ICD-10)"))
+        story.append(Spacer(1, 0.04 * inch))
+        story.append(
+            data_table(
+                ["ICD-10", "Diagnosis", "Type"],
+                [
+                    [
+                        _cell(row["code"]),
+                        _cell(row["name"]),
+                        _cell(row["type"]),
+                    ]
+                    for row in eye_clinic_rows
+                ],
+                col_widths=[0.9 * inch, 3.9 * inch, 1.0 * inch],
+            )
+        )
+    else:
+        story.append(request_line("Eye clinic diagnosis (ICD-10)", "Not recorded", width=width))
     story.append(Spacer(1, 0.08 * inch))
 
     story.append(section_heading("Plan"))
