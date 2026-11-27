@@ -12,12 +12,8 @@ def clear_admission_bed(admission: PatientAdmission) -> Bed | None:
     if not old_bed:
         return None
 
-    old_ward = old_bed.ward
-    old_bed.current_patient = None
-    old_bed.status = 'available'
-    old_bed.admission_date = None
-    old_bed.save(update_fields=['current_patient', 'status', 'admission_date'])
-    old_ward.recalculate_occupancy()
+    old_bed.release()
+    old_bed.ward.recalculate_occupancy()
     return old_bed
 
 

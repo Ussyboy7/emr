@@ -14,6 +14,9 @@ export interface Ward {
   total_beds: number;
   occupied_beds: number;
   available_beds: number;
+  /** Bed rows that are free right now (may be fewer than available_beds
+   * while a ward's bed rows are still being set up). */
+  available_bed_rows: number;
   occupancy_rate: number;
   description?: string;
   status: string;

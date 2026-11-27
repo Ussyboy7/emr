@@ -22,6 +22,7 @@ class WardSerializer(serializers.ModelSerializer):
 
     head_nurse_name = serializers.CharField(source='head_nurse.get_full_name', read_only=True)
     available_beds = serializers.IntegerField(read_only=True)
+    available_bed_rows = serializers.IntegerField(read_only=True)
     occupancy_rate = serializers.FloatField(read_only=True)
     beds_count = serializers.SerializerMethodField()
 
@@ -44,7 +45,9 @@ class BedSerializer(serializers.ModelSerializer):
     class Meta:
         model = Bed
         fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at']
+        # Occupancy is derived from the active admission; it is never
+        # accepted from a client payload.
+        read_only_fields = ['created_at', 'updated_at', 'current_patient', 'admission_date']
 
 
 class AdmissionEscortSerializer(serializers.ModelSerializer):

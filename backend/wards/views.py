@@ -13,6 +13,7 @@ from django.utils import timezone
 from common.date_display import format_display_datetime
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -45,6 +46,10 @@ from audit.services import AuditService
 from nursing.admission_orders import link_nursing_orders_to_admission
 from permissions.ward_action_permissions import ensure_doctor_action, ensure_nurse_action
 from .bed_ops import assign_admission_bed, clear_admission_bed, sync_bed_occupancy_after_admission_create
+
+# A bed is held by an admission that has not yet been discharged.
+ACTIVE_ADMISSION_STATUSES = ('admitted', 'pending_discharge')
+
 
 @document_viewset(tag="Wards", resource="wards")
 class WardViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
@@ -101,6 +106,7 @@ class WardViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             'total_beds': ward.total_beds,
             'occupied_beds': ward.occupied_beds,
             'available_beds': ward.available_beds,
+            'available_bed_rows': ward.available_bed_rows,
             'occupancy_rate': ward.occupancy_rate,
             'status': ward.status,
         })
@@ -126,7 +132,18 @@ class BedViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             Bed.objects.all().select_related('ward', 'current_patient')
         )
 
+    def _active_admission(self, bed):
+        return (
+            bed.admissions.filter(status__in=ACTIVE_ADMISSION_STATUSES)
+            .order_by('-admission_date')
+            .first()
+        )
+
     def perform_create(self, serializer):
+        if serializer.validated_data.get('status') == 'occupied':
+            raise ValidationError({
+                'status': 'Beds become occupied by assigning an admitted patient, not on creation.',
+            })
         bed = serializer.save()
 
         # Log audit
@@ -142,61 +159,126 @@ class BedViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
             request=self.request,
         )
 
-    @extend_schema(tags=["Wards"], summary="Assign patient", description="Assign a patient to this bed.")
+    def perform_update(self, serializer):
+        bed = self.get_object()
+        new_status = serializer.validated_data.get('status')
+        if new_status is not None:
+            if new_status == 'occupied':
+                raise ValidationError({
+                    'status': 'Beds become occupied by assigning an admitted patient, not by editing the bed.',
+                })
+            if (
+                bed.status == 'occupied'
+                and new_status != 'occupied'
+                and self._active_admission(bed)
+            ):
+                raise ValidationError({
+                    'status': 'This bed still has an active admission. Discharge or move the patient first.',
+                })
+        serializer.save()
+        if new_status is not None:
+            bed.ward.recalculate_occupancy()
+
+    def perform_destroy(self, instance):
+        if self._active_admission(instance):
+            raise ValidationError({
+                'error': 'This bed still has an active admission. Discharge or move the patient first.',
+            })
+        ward = instance.ward
+        instance.delete()
+        ward.recalculate_occupancy()
+
+    @extend_schema(tags=["Wards"], summary="Assign patient", description="Assign the ward admission's patient to this bed.")
     @action(detail=True, methods=['post'])
     def assign_patient(self, request, pk=None):
-        """Assign a patient to this bed."""
+        """Assign this bed to the patient's active admission in this ward."""
         bed = self.get_object()
-        patient_id = request.data.get('patient_id')
-        admission_date = request.data.get('admission_date')
-
         try:
-            bed.assign_patient(patient_id, admission_date)
-
-            # Log audit
-            AuditService.log_activity(
-                user=self.request.user,
-                action='update',
-                object_type='bed',
-                object_id=str(bed.id),
-                module='wards',
-                object_repr=f'Bed {bed.bed_number}',
-                description=f'Assigned patient to bed {bed.bed_number}',
-                old_values={'status': 'available'},
-                new_values={'status': 'occupied', 'current_patient': patient_id},
-                request=self.request,
+            patient_id = int(request.data.get('patient_id'))
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'A valid patient_id is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            return Response({'message': 'Patient assigned to bed successfully'})
+        admission = (
+            PatientAdmission.objects
+            .filter(
+                ward=bed.ward,
+                patient_id=patient_id,
+                status__in=ACTIVE_ADMISSION_STATUSES,
+            )
+            .order_by('-admission_date')
+            .first()
+        )
+        if admission is None:
+            return Response(
+                {
+                    'error': (
+                        'No active admission for this patient in this ward. '
+                        'Admit the patient first, then assign the bed.'
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            assign_admission_bed(admission, bed)
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    @extend_schema(tags=["Wards"], summary="Discharge patient", description="Discharge patient from this bed.")
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='bed',
+            object_id=str(bed.id),
+            module='wards',
+            object_repr=f'Bed {bed.bed_number}',
+            description=f'Assigned patient to bed {bed.bed_number}',
+            old_values={'status': 'available'},
+            new_values={
+                'status': 'occupied',
+                'current_patient': patient_id,
+                'admission': admission.admission_id,
+            },
+            request=self.request,
+        )
+
+        return Response({'message': 'Patient assigned to bed successfully'})
+
+    @extend_schema(tags=["Wards"], summary="Release bed", description="Release this bed from its active admission without discharging the patient.")
     @action(detail=True, methods=['post'])
     def discharge_patient(self, request, pk=None):
-        """Discharge patient from this bed."""
+        """Release the bed only; the ward admission stays active."""
         bed = self.get_object()
-
-        try:
-            bed.discharge_patient()
-
-            # Log audit
-            AuditService.log_activity(
-                user=self.request.user,
-                action='update',
-                object_type='bed',
-                object_id=str(bed.id),
-                module='wards',
-                object_repr=f'Bed {bed.bed_number}',
-                description=f'Discharged patient from bed {bed.bed_number}',
-                old_values={'status': 'occupied'},
-                new_values={'status': 'available'},
-                request=self.request,
+        admission = self._active_admission(bed)
+        if admission is None:
+            return Response(
+                {'error': 'This bed has no active admission to release.'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            return Response({'message': 'Patient discharged from bed successfully'})
-        except ValueError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        clear_admission_bed(admission)
+        admission.bed = None
+        admission.save(update_fields=['bed'])
+
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='bed',
+            object_id=str(bed.id),
+            module='wards',
+            object_repr=f'Bed {bed.bed_number}',
+            description=(
+                f'Released bed {bed.bed_number} from admission {admission.admission_id} '
+                '(patient remains admitted)'
+            ),
+            old_values={'status': 'occupied'},
+            new_values={'status': 'available'},
+            request=self.request,
+        )
+
+        return Response({'message': 'Bed released; the patient is still admitted.'})
 
 
 @document_viewset(tag="Wards", resource="patient admissions")
@@ -316,6 +398,10 @@ class PatientAdmissionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         })
 
     def perform_update(self, serializer):
+        if 'bed' in serializer.validated_data:
+            raise ValidationError({
+                'bed': 'Change a patient\'s bed through the assign_bed action so the old bed is released.',
+            })
         previous_condition = (self.get_object().current_condition or '').lower()
         admission = serializer.save()
         current_condition = (admission.current_condition or '').lower()
@@ -357,16 +443,17 @@ class PatientAdmissionViewSet(FacilityScopedMixin, viewsets.ModelViewSet):
         with transaction.atomic():
             ward = Ward.objects.select_for_update().get(pk=serializer.validated_data['ward'].pk)
             if ward.status != 'active':
-                from rest_framework.exceptions import ValidationError
                 raise ValidationError({'ward': 'Selected ward is not active.'})
             if not ward.is_bed_available():
-                from rest_framework.exceptions import ValidationError
                 raise ValidationError({'ward': 'Selected ward has no available beds.'})
             serializer.validated_data['ward'] = ward
             admission = serializer.save(created_by=self.request.user)
 
             link_nursing_orders_to_admission(admission)
-            sync_bed_occupancy_after_admission_create(admission)
+            try:
+                sync_bed_occupancy_after_admission_create(admission)
+            except ValueError as e:
+                raise ValidationError({'bed': str(e)})
 
         # Log audit
         AuditService.log_activity(

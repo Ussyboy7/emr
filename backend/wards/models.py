@@ -84,8 +84,20 @@ class Ward(models.Model):
         return f"{self.name} ({self.ward_code})"
 
     @property
+    def is_bed_capacity_configured(self):
+        """True once the ward has at least its licensed number of bed rows."""
+        return self.total_beds > 0 and self.beds.count() >= self.total_beds
+
+    @property
+    def available_bed_rows(self):
+        """Beds that can physically take a patient right now."""
+        return self.beds.filter(status='available').count()
+
+    @property
     def available_beds(self):
-        """Calculate available beds."""
+        """Free physical rows once bed data is complete; licensed counter until then."""
+        if self.is_bed_capacity_configured:
+            return self.available_bed_rows
         return max(0, self.total_beds - self.occupied_beds)
 
     @property
@@ -185,32 +197,12 @@ class Bed(models.Model):
         """Check if bed is available for admission."""
         return self.status == 'available' and self.ward.status == 'active'
 
-    def assign_patient(self, patient, admission_date=None):
-        """Assign patient to this bed."""
-        if not self.is_available():
-            raise ValueError(f"Bed {self} is not available")
-
-        self.current_patient = patient
-        self.status = 'occupied'
-        self.admission_date = admission_date or timezone.now()
-        self.save()
-
-        # Update ward occupancy
-        self.ward.occupied_beds += 1
-        self.ward.save()
-
-    def discharge_patient(self):
-        """Discharge patient from this bed."""
-        if self.current_patient:
-            self.current_patient = None
-            self.status = 'available'
-            self.admission_date = None
-            self.save()
-
-            # Update ward occupancy
-            if self.ward.occupied_beds > 0:
-                self.ward.occupied_beds -= 1
-                self.ward.save()
+    def release(self):
+        """Mark the bed free. The caller recalculates ward occupancy."""
+        self.current_patient = None
+        self.status = 'available'
+        self.admission_date = None
+        self.save(update_fields=['current_patient', 'status', 'admission_date'])
 
 
 class PatientAdmission(models.Model):
@@ -454,9 +446,11 @@ class PatientAdmission(models.Model):
             if hasattr(self, key) and value is not None:
                 setattr(self, key, value)
 
-        # Free up the bed
+        # Free up the bed but keep the FK as the historical placement.
         if self.bed:
-            self.bed.discharge_patient()
+            bed = self.bed
+            bed.release()
+            bed.ward.recalculate_occupancy()
 
         # Update visit admission status back to outpatient
         if self.visit:

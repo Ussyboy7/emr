@@ -76,9 +76,10 @@ const BED_TYPES: { value: string; label: string }[] = [
   { value: "pediatric", label: "Pediatric" },
 ];
 
+// Occupied is not offered: a bed becomes occupied only by assigning an
+// admitted patient in Ward Care.
 const BED_STATUS: { value: string; label: string }[] = [
   { value: "available", label: "Available" },
-  { value: "occupied", label: "Occupied" },
   { value: "maintenance", label: "Under Maintenance" },
   { value: "reserved", label: "Reserved" },
   { value: "out_of_service", label: "Out of Service" },
@@ -302,10 +303,13 @@ export const WardsAdminManager = forwardRef<
     setSavingBed(true);
     try {
       if (editingBed) {
+        const bedIsOccupied = editingBed.status === "occupied";
         await wardService.updateBed(editingBed.id, {
           bed_number: bedForm.bed_number.trim(),
           bed_type: bedForm.bed_type,
-          status: bedForm.status,
+          // An occupied bed's status belongs to its admission; sending it
+          // back would be rejected.
+          status: bedIsOccupied ? undefined : bedForm.status,
           has_oxygen: bedForm.has_oxygen,
           has_suction: bedForm.has_suction,
           has_monitor: bedForm.has_monitor,
@@ -425,7 +429,7 @@ export const WardsAdminManager = forwardRef<
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                       <span>
                         Beds: {w.beds_count ?? 0} rows · {w.occupied_beds}/{w.total_beds}{" "}
-                        occupied
+                        occupied · {w.available_bed_rows ?? 0} free
                       </span>
                       {w.phone_extension && <span>· Ext {w.phone_extension}</span>}
                     </div>
@@ -744,11 +748,15 @@ export const WardsAdminManager = forwardRef<
                   onValueChange={(v) =>
                     setBedForm((p) => ({ ...p, status: v }))
                   }
+                  disabled={editingBed?.status === "occupied"}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {editingBed?.status === "occupied" && (
+                      <SelectItem value="occupied">Occupied</SelectItem>
+                    )}
                     {BED_STATUS.map((t) => (
                       <SelectItem key={t.value} value={t.value}>
                         {t.label}
@@ -756,6 +764,11 @@ export const WardsAdminManager = forwardRef<
                     ))}
                   </SelectContent>
                 </Select>
+                {editingBed?.status === "occupied" && (
+                  <p className="text-xs text-muted-foreground">
+                    Occupied by an active admission — release it in Ward Care.
+                  </p>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
