@@ -181,7 +181,7 @@ const statisticalReports: StatisticalReportTile[] = [
   {
     id: "physio-clinical-diagnosis",
     title: "Physio Clinical Diagnosis",
-    description: "ICD-10 diagnoses from completed physiotherapy sessions",
+    description: "ICD-10 diagnoses recorded by physiotherapy on completed sessions",
     icon: Activity,
     href: "/medical-records/reports/physio-clinical-diagnosis",
     borderAccent: "border-l-orange-600",
@@ -191,7 +191,7 @@ const statisticalReports: StatisticalReportTile[] = [
   {
     id: "eye-clinical-diagnosis",
     title: "Eye Clinical Diagnosis",
-    description: "ICD-10 diagnoses from completed ophthalmology sessions",
+    description: "ICD-10 diagnoses recorded by the eye clinic on completed sessions",
     icon: Stethoscope,
     href: "/medical-records/reports/eye-clinical-diagnosis",
     borderAccent: "border-l-teal-500",

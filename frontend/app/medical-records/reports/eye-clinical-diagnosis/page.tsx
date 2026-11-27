@@ -11,7 +11,7 @@ export default function EyeClinicalDiagnosisReport() {
       filenamePrefix="eye_clinical_diagnosis"
       icon={Eye}
       iconClass="text-cyan-500"
-      filterDescription="ICD-10 diagnoses from completed ophthalmology sessions."
+      filterDescription="ICD-10 diagnoses recorded by the eye clinic on completed sessions."
     />
   );
 }

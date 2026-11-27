@@ -11,7 +11,7 @@ export default function PhysioClinicalDiagnosisReport() {
       filenamePrefix="physio_clinical_diagnosis"
       icon={Activity}
       iconClass="text-orange-500"
-      filterDescription="ICD-10 diagnoses from completed physiotherapy sessions."
+      filterDescription="ICD-10 diagnoses recorded by physiotherapy on completed sessions."
     />
   );
 }

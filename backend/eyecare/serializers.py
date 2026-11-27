@@ -4,11 +4,12 @@ Serializers for the Eye Care app.
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from common.clinic_diagnoses import ClinicDiagnosesValidationMixin
 from patients.photo import patient_photo_url
 from .models import EyeOrder, EyeSession, EyeSessionDiagnosticFile
 
 
-class EyeOrderSerializer(serializers.ModelSerializer):
+class EyeOrderSerializer(ClinicDiagnosesValidationMixin, serializers.ModelSerializer):
     """Serializer for EyeOrder model."""
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
@@ -34,7 +35,7 @@ class EyeOrderSerializer(serializers.ModelSerializer):
             'visit', 'consultation_session', 'admission',
             'chief_complaint', 'visual_acuity_od', 'visual_acuity_os', 'visual_acuity_ou',
             'refraction_od', 'refraction_os', 'iop_od', 'iop_os',
-            'diagnosis', 'treatment_plan', 'special_instructions',
+            'diagnosis', 'clinic_diagnoses', 'treatment_plan', 'special_instructions',
             'priority', 'status', 'ordered_at', 'scheduled_at', 'completed_at',
             'completed_sessions_count', 'location_clinic_name',
         ]

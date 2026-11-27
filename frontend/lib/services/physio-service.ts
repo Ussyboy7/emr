@@ -2,6 +2,7 @@
  * Physiotherapy API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import type { OrderDiagnosisEntry } from '../consultation/order-diagnoses';
 
 export interface PhysioTemplate {
   id: number;
@@ -29,6 +30,8 @@ export interface PhysioOrder {
   consultation_session?: number;
   history_clinical_findings: string;
   diagnosis: string;
+  /** ICD-10 diagnoses recorded by the physiotherapist (episode level). */
+  clinic_diagnoses?: OrderDiagnosisEntry[];
   drug_history: string;
   special_instructions: string;
   status: string;

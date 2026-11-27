@@ -15,7 +15,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
-import { countOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
+import { Icd10DiagnosisMultiPicker } from '@/components/medical/Icd10DiagnosisMultiPicker';
+import { countOrderDiagnoses, type OrderDiagnosisEntry } from '@/lib/consultation/order-diagnoses';
 import { useEyecarePageAuth } from '@/hooks/use-eyecare-page-auth';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useEyecareUrlSync } from '@/hooks/use-eyecare-url-sync';
@@ -224,6 +225,8 @@ export default function EyeClinicOrdersPage() {
     () => emptyPendingDiagnostics()
   );
   const [sessionForm, setSessionForm] = useState<EyeSessionFormState>(emptySessionForm);
+  // The eye clinician's own ICD-10 diagnosis for the treatment episode.
+  const [clinicDiagnoses, setClinicDiagnoses] = useState<OrderDiagnosisEntry[]>([]);
 
   const [stats, setStats] = useState({
     pending: 0,
@@ -397,6 +400,7 @@ export default function EyeClinicOrdersPage() {
       special_instructions: order.special_instructions || '',
       soap_note: soapNote,
     });
+    setClinicDiagnoses(order.clinic_diagnoses ?? []);
     setIsSessionDialogOpen(true);
     setIsViewDialogOpen(false);
     void loadPatientVitals(order.patient);
@@ -624,6 +628,7 @@ export default function EyeClinicOrdersPage() {
         iop_od: soapNote.objective.diagnostics.iopOd ? Number(soapNote.objective.diagnostics.iopOd) : null,
         iop_os: soapNote.objective.diagnostics.iopOs ? Number(soapNote.objective.diagnostics.iopOs) : null,
         diagnosis: soapNote.assessment.diagnosis,
+        clinic_diagnoses: clinicDiagnoses,
         treatment_plan: soapNote.plan.managementPlan,
         special_instructions: sessionForm.special_instructions,
       });
@@ -1679,6 +1684,12 @@ export default function EyeClinicOrdersPage() {
                         rows={3}
                         className="resize-none"
                       />
+                    </div>
+                    <div className="rounded-md border p-3">
+                      <p className="mb-2 text-sm text-muted-foreground">
+                        Eye clinic ICD-10 diagnosis for this treatment episode. This is what the Ophthalmology Clinical Diagnosis report counts; the referring doctor&apos;s diagnosis is not used.
+                      </p>
+                      <Icd10DiagnosisMultiPicker diagnoses={clinicDiagnoses} onChange={setClinicDiagnoses} />
                     </div>
                   </div>
 

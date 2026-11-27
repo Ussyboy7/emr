@@ -34,6 +34,7 @@ interface Summary {
   ranking_count: number;
   limit: number | null;
   total_sessions?: number;
+  uncoded_sessions?: number;
 }
 
 const emptySummary: Summary = {
@@ -125,6 +126,7 @@ export function ClinicalDiagnosisReportPage({
         ranking_count: res.summary?.ranking_count ?? res.data?.length ?? 0,
         limit: res.summary?.limit ?? null,
         total_sessions: res.summary?.total_sessions,
+        uncoded_sessions: res.summary?.uncoded_sessions,
       });
     } catch (e: unknown) {
       if (seq !== requestSeqRef.current) return;
@@ -171,7 +173,7 @@ export function ClinicalDiagnosisReportPage({
               {title}
             </h1>
             <p className="text-muted-foreground mt-1">
-              ICD-10 diagnoses from completed sessions — {periodLabel}
+              Clinic-recorded ICD-10 diagnoses from completed sessions — {periodLabel}
             </p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
@@ -192,7 +194,7 @@ export function ClinicalDiagnosisReportPage({
             </CardTitle>
             <CardDescription>
               {filterDescription ??
-                "ICD-10 diagnoses from completed physiotherapy / ophthalmology sessions."}
+                "ICD-10 diagnoses recorded by the treating clinic on completed sessions."}
             </CardDescription>
           </CardHeader>
           <CardContent className="p-4">
@@ -281,7 +283,8 @@ export function ClinicalDiagnosisReportPage({
           <CardHeader>
             <CardTitle>ICD-10 clinical diagnoses</CardTitle>
             <CardDescription>
-              Multi-count all ICD-10 diagnoses per completed session. Nursing pool check-ins use last known diagnosis.
+              Multi-counts the clinic&apos;s own ICD-10 diagnoses per completed session. The referring doctor&apos;s
+              diagnosis is not counted.
               {truncated ? " Showing codes truncated by Top N." : ""}
             </CardDescription>
           </CardHeader>
@@ -334,6 +337,12 @@ export function ClinicalDiagnosisReportPage({
                   itemName="diagnoses"
                   pageSizeOptions={[10, 20, 50, 100]}
                 />
+                {(summary.uncoded_sessions ?? 0) > 0 && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {summary.uncoded_sessions} of {summary.total_sessions ?? 0} completed sessions in this
+                    period have no clinic diagnosis recorded.
+                  </p>
+                )}
               </>
             )}
           </CardContent>

@@ -1,10 +1,10 @@
-"""Ophthalmology clinical diagnosis — ICD-10 code frequency from completed sessions."""
+"""Ophthalmology clinical diagnosis — ICD-10 codes recorded by the eye clinic."""
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
 
-from common.diagnosis_resolution import resolve_order_diagnoses
+from common.clinic_diagnoses import clinic_diagnoses_rows
 from eyecare.models import EyeSession
 from reports.icd_diagnosis_aggregation import finalize_icd_frequency_report, increment_icd_counts
 
@@ -19,6 +19,11 @@ def build_eye_clinical_diagnosis_report(
     org_facility_id: int | None = None,
     search: str | None = None,
 ) -> dict:
+    """Count the eye clinician's own ICD-10 diagnoses, once per completed session.
+
+    The referring doctor's diagnoses are deliberately ignored: eye orders are
+    seeded with the consultation diagnosis, which is not an eye clinic finding.
+    """
     from common.report_period import filter_inclusive_date_range
 
     sessions = filter_inclusive_date_range(
@@ -29,16 +34,19 @@ def build_eye_clinical_diagnosis_report(
         "completed_at",
         period_start,
         period_end,
-    ).select_related("order", "order__patient", "order__consultation_session").order_by("completed_at")
+    ).select_related("order").order_by("completed_at")
     if org_facility_id is not None:
         sessions = sessions.filter(order__location_clinic_id=org_facility_id)
 
     counts: dict[tuple[str, str], int] = defaultdict(int)
+    total_sessions = 0
+    uncoded_sessions = 0
     for session in sessions:
-        order = session.order
-        if order is None:
+        total_sessions += 1
+        rows = clinic_diagnoses_rows(getattr(session.order, "clinic_diagnoses", None))
+        if not rows:
+            uncoded_sessions += 1
             continue
-        rows = resolve_order_diagnoses(order=order, patient_id=order.patient_id)
         increment_icd_counts(counts, rows)
 
     data, summary = finalize_icd_frequency_report(
@@ -48,7 +56,8 @@ def build_eye_clinical_diagnosis_report(
         page_size=page_size,
         search=search,
     )
-    summary["total_sessions"] = sessions.count()
+    summary["total_sessions"] = total_sessions
+    summary["uncoded_sessions"] = uncoded_sessions
 
     return {
         "mode": "icd10",

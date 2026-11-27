@@ -4,6 +4,7 @@ Physiotherapy serializers for the EMR system.
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
+from common.clinic_diagnoses import ClinicDiagnosesValidationMixin
 from patients.photo import patient_photo_url
 from .models import PhysioTemplate, PhysioOrder, PhysioSession
 
@@ -16,7 +17,7 @@ class PhysioTemplateSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'code', 'category', 'description', 'is_active', 'created_at']
 
 
-class PhysioOrderSerializer(serializers.ModelSerializer):
+class PhysioOrderSerializer(ClinicDiagnosesValidationMixin, serializers.ModelSerializer):
     """Serializer for physiotherapy orders."""
     patient_name = serializers.SerializerMethodField()
     patient_id = serializers.SerializerMethodField()
@@ -29,7 +30,8 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             'id', 'patient', 'patient_name', 'patient_id', 'patient_photo',
             'ordered_by', 'ordered_by_name', 'consultation_session',
             'visit', 'admission',
-            'history_clinical_findings', 'diagnosis', 'drug_history', 'special_instructions',
+            'history_clinical_findings', 'diagnosis', 'clinic_diagnoses',
+            'drug_history', 'special_instructions',
             'priority', 'status', 'referral_source', 'ordered_at', 'scheduled_at', 'completed_at',
             'sessions_completed',
             'location_clinic_name',

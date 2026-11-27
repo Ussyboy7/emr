@@ -81,6 +81,11 @@ class EyeOrder(models.Model):
         help_text="Intraocular pressure OS (mmHg)",
     )
     diagnosis = models.CharField(max_length=500, blank=True)
+    clinic_diagnoses = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="ICD-10 diagnoses recorded by the treating eye clinic clinician: [{code, name, type}]",
+    )
     treatment_plan = models.TextField(blank=True)
     special_instructions = models.TextField(blank=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="routine")

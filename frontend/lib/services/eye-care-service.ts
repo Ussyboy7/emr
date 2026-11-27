@@ -2,6 +2,7 @@
  * Eye Care API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
+import type { OrderDiagnosisEntry } from '../consultation/order-diagnoses';
 
 export interface EyeOrder {
   id: number;
@@ -21,6 +22,8 @@ export interface EyeOrder {
   iop_od: number | null;
   iop_os: number | null;
   diagnosis: string;
+  /** ICD-10 diagnoses recorded by the eye clinic (episode level). */
+  clinic_diagnoses?: OrderDiagnosisEntry[];
   treatment_plan: string;
   special_instructions: string;
   priority: 'routine' | 'urgent' | 'stat';

@@ -15,7 +15,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
 import { OrderDiagnosesBlock } from '@/components/medical/OrderDiagnosesBlock';
-import { countOrderDiagnoses } from '@/lib/consultation/order-diagnoses';
+import { Icd10DiagnosisMultiPicker } from '@/components/medical/Icd10DiagnosisMultiPicker';
+import { countOrderDiagnoses, type OrderDiagnosisEntry } from '@/lib/consultation/order-diagnoses';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { usePhysioUrlSync } from '@/hooks/use-physio-url-sync';
 import { usePhysioPageAuth } from '@/hooks/use-physio-page-auth';
@@ -85,6 +86,24 @@ const getPriorityColor = (priority: string) => {
   }
 };
 
+function ClinicDiagnosisField({
+  diagnoses,
+  onChange,
+}: {
+  diagnoses: OrderDiagnosisEntry[];
+  onChange: (diagnoses: OrderDiagnosisEntry[]) => void;
+}) {
+  return (
+    <div className="rounded-md border p-3">
+      <p className="mb-2 text-sm text-muted-foreground">
+        Physiotherapy diagnosis for this treatment episode. This is what the Physiotherapy Clinical
+        Diagnosis report counts; the referring doctor&apos;s diagnosis is not used.
+      </p>
+      <Icd10DiagnosisMultiPicker diagnoses={diagnoses} onChange={onChange} />
+    </div>
+  );
+}
+
 export default function PhysiotherapyOrdersPage() {
   const { ready, handleAuthError, currentUser } = usePhysioPageAuth();
   const physioId = currentUser?.id ? Number(currentUser.id) : null;
@@ -132,6 +151,8 @@ export default function PhysiotherapyOrdersPage() {
   const [cancelActiveSessions, setCancelActiveSessions] = useState<'yes' | 'no'>('no');
   const [isEditSaving, setIsEditSaving] = useState(false);
   const [sessionForm, setSessionForm] = useState<PhysioSessionFormData>(emptyPhysioSessionForm);
+  // The physiotherapist's own ICD-10 diagnosis for the treatment episode.
+  const [clinicDiagnoses, setClinicDiagnoses] = useState<OrderDiagnosisEntry[]>([]);
 
   // Form states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -302,8 +323,9 @@ export default function PhysiotherapyOrdersPage() {
     setIsDateFilterDialogOpen(false);
   };
 
-  const openEditSession = (session: PhysioSession) => {
+  const openEditSession = (session: PhysioSession, order?: PhysioOrder | null) => {
     setSessionForm(physioSessionFormFromSession(session));
+    setClinicDiagnoses((order ?? selectedOrder)?.clinic_diagnoses ?? []);
     setEditingSession(session);
     setIsEditSessionDialogOpen(true);
   };
@@ -333,7 +355,7 @@ export default function PhysiotherapyOrdersPage() {
     const blockingSession = getLatestUncompletedSession(existingSessions.results || []);
     if (blockingSession) {
       toast.error(`Complete Session ${blockingSession.session_number ?? ''} before starting a new session.`);
-      openEditSession(blockingSession);
+      openEditSession(blockingSession, order);
       return;
     }
     const nextSessionNumber = (existingSessions.results?.length)
@@ -356,6 +378,7 @@ export default function PhysiotherapyOrdersPage() {
       .sort((a, b) => (b.id || 0) - (a.id || 0))[0];
 
     setSessionForm(physioSessionFormForNewSession(lastCompleted));
+    setClinicDiagnoses(order.clinic_diagnoses ?? []);
     setCurrentSession(createdSession);
     setIsStartSessionDialogOpen(true);
     setIsViewDialogOpen(false);
@@ -366,6 +389,10 @@ export default function PhysiotherapyOrdersPage() {
     setIsEditSaving(true);
     try {
       await physioService.updateSession(editingSession.id, physioSessionFormToUpdatePayload(sessionForm));
+      const orderId = editingSession.order ?? selectedOrder?.id;
+      if (orderId) {
+        await physioService.updateOrder(orderId, { clinic_diagnoses: clinicDiagnoses });
+      }
       toast.success('Session updated successfully');
       setIsEditSessionDialogOpen(false);
       setEditingSession(null);
@@ -384,6 +411,10 @@ export default function PhysiotherapyOrdersPage() {
     setIsEditSaving(true);
     try {
       await physioService.updateSession(editingSession.id, physioSessionFormToUpdatePayload(sessionForm));
+      const orderId = editingSession.order ?? selectedOrder?.id;
+      if (orderId) {
+        await physioService.updateOrder(orderId, { clinic_diagnoses: clinicDiagnoses });
+      }
       await handleCompleteIndividualSession(editingSession.id, sessionForm);
       setIsEditSessionDialogOpen(false);
       setEditingSession(null);
@@ -495,6 +526,7 @@ export default function PhysiotherapyOrdersPage() {
         }
         // Update existing session (from Continue Session flow — save form into the new session)
         await physioService.updateSession(sessionId, physioSessionFormToUpdatePayload(sessionForm));
+        await physioService.updateOrder(selectedOrder.id, { clinic_diagnoses: clinicDiagnoses });
 
         toast.success('Session updated successfully');
       } else {
@@ -519,7 +551,10 @@ export default function PhysiotherapyOrdersPage() {
         await physioService.createSession(sessionPayload as any);
 
         // Update order status to in_progress
-        await physioService.updateOrder(selectedOrder.id, { status: 'in_progress' });
+        await physioService.updateOrder(selectedOrder.id, {
+          status: 'in_progress',
+          clinic_diagnoses: clinicDiagnoses,
+        });
 
         toast.success(`Session ${nextSessionNumber} started successfully`);
       }
@@ -529,6 +564,7 @@ export default function PhysiotherapyOrdersPage() {
       setCurrentSession(null);
 
       setSessionForm(emptyPhysioSessionForm());
+      setClinicDiagnoses([]);
 
       await loadOrders();
       await loadStats();
@@ -564,6 +600,23 @@ export default function PhysiotherapyOrdersPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCompleteSessionFromDialog = async () => {
+    if (!currentSession || !selectedOrder) return;
+    setIsSubmitting(true);
+    try {
+      await physioService.updateOrder(selectedOrder.id, { clinic_diagnoses: clinicDiagnoses });
+    } catch (err: any) {
+      if (handleAuthError(err)) return;
+      toast.error(err.message || 'Failed to save the clinic diagnosis');
+      setIsSubmitting(false);
+      return;
+    }
+    await handleCompleteIndividualSession(currentSession.id, sessionForm);
+    setIsCompleteSessionDialogOpen(false);
+    setSessionForm(emptyPhysioSessionForm());
+    setClinicDiagnoses([]);
   };
 
   const handleUpdateSessionProgress = async (sessionId: number, form: PhysioSessionFormData) => {
@@ -1147,6 +1200,7 @@ export default function PhysiotherapyOrdersPage() {
                                 if (inProgress) {
                                   setCurrentSession(inProgress);
                                   setSessionForm(physioSessionFormFromSession(inProgress));
+                                  setClinicDiagnoses(selectedOrder.clinic_diagnoses ?? []);
                                   setIsCompleteSessionDialogOpen(true);
                                   setIsViewDialogOpen(false);
                                 } else {
@@ -1557,6 +1611,15 @@ export default function PhysiotherapyOrdersPage() {
                     </div>
                   </div>
 
+                  {/* Clinic Diagnosis */}
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-2">
+                      <Stethoscope className="h-5 w-5" />
+                      Clinical Diagnosis
+                    </h3>
+                    <ClinicDiagnosisField diagnoses={clinicDiagnoses} onChange={setClinicDiagnoses} />
+                  </div>
+
                   {/* Home Exercises */}
                   <div className="space-y-3">
                     <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 flex items-center gap-2">
@@ -1620,13 +1683,7 @@ export default function PhysiotherapyOrdersPage() {
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => {
-                    if (currentSession) {
-                      handleCompleteIndividualSession(currentSession.id, sessionForm);
-                      setIsCompleteSessionDialogOpen(false);
-                      setSessionForm(emptyPhysioSessionForm());
-                    }
-                  }}
+                  onClick={() => { void handleCompleteSessionFromDialog(); }}
                   disabled={isSubmitting || !sessionForm.treatment_performed.trim()}
                   className="bg-green-500 hover:bg-green-600 text-white"
                 >
@@ -1703,6 +1760,7 @@ export default function PhysiotherapyOrdersPage() {
                   <div className="space-y-3">
                     <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> E. Clinical Reasoning</h3>
                     <div className="space-y-2"><Label>Assessment Findings & Clinical Impression</Label><Textarea value={sessionForm.clinical_reasoning} onChange={(e) => setSessionForm({ ...sessionForm, clinical_reasoning: e.target.value })} rows={3} className="resize-none" /></div>
+                    <ClinicDiagnosisField diagnoses={clinicDiagnoses} onChange={setClinicDiagnoses} />
                   </div>
                   <div className="space-y-3">
                     <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 flex items-center gap-2"><ClipboardList className="h-5 w-5" /> F. Treatment Plan & Outcomes</h3>
@@ -2005,6 +2063,7 @@ export default function PhysiotherapyOrdersPage() {
                         className="resize-none"
                       />
                     </div>
+                    <ClinicDiagnosisField diagnoses={clinicDiagnoses} onChange={setClinicDiagnoses} />
                   </div>
 
                   {/* F. Treatment Plan */}

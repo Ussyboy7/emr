@@ -69,6 +69,11 @@ class PhysioOrder(models.Model):
 
     history_clinical_findings = models.TextField(blank=True)
     diagnosis = models.TextField()
+    clinic_diagnoses = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="ICD-10 diagnoses recorded by the treating physiotherapist: [{code, name, type}]",
+    )
     drug_history = models.TextField(blank=True)
     special_instructions = models.TextField(blank=True)
 

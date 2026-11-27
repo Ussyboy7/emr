@@ -1083,7 +1083,7 @@ class ObservationAdmissionsReportView(views.APIView):
 
 @document_api_view(tag="Reports", summary="Physio clinical diagnosis report")
 class PhysioClinicalDiagnosisReportView(views.APIView):
-    """Physiotherapy clinical diagnosis — ICD-10 code frequency from completed sessions."""
+    """Physiotherapy clinical diagnosis — ICD-10 codes recorded by the physiotherapy clinic."""
 
     def get(self, request):
         from reports.physio_clinical_diagnosis import build_physio_clinical_diagnosis_report
@@ -1117,7 +1117,7 @@ class PhysioClinicalDiagnosisReportView(views.APIView):
 
 @document_api_view(tag="Reports", summary="Eye clinical diagnosis report")
 class EyeClinicalDiagnosisReportView(views.APIView):
-    """Ophthalmology clinical diagnosis — ICD-10 code frequency from completed sessions."""
+    """Ophthalmology clinical diagnosis — ICD-10 codes recorded by the eye clinic."""
 
     def get(self, request):
         from reports.eye_clinical_diagnosis import build_eye_clinical_diagnosis_report
