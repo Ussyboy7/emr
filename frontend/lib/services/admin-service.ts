@@ -34,6 +34,25 @@ export interface User {
   location_clinics?: number[];  // Multi-clinic M2M assignments
 }
 
+/** Minimal staff record returned by GET /accounts/users/directory/. */
+export interface DirectoryUser {
+  id: number;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  middle_name?: string;
+  full_name: string;
+  employee_id?: string;
+  grade_level?: string;
+  system_role_name?: string;
+  location_clinic?: number | null;
+  clinic_name?: string;
+  department?: number | null;
+  department_name?: string;
+  is_active: boolean;
+}
+
 export interface Role {
   id: number;
   name: string;
@@ -153,6 +172,19 @@ class AdminService {
   }): Promise<{ results: User[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: User[]; count: number }>(`/accounts/users/${query}`);
+  }
+
+  /**
+   * Staff directory for cross-department lookups. Unlike getUsers(), this is
+   * available to clinical (non-admin) users and returns a minimal payload.
+   */
+  async getDirectory(params?: {
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: DirectoryUser[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: DirectoryUser[]; count: number }>(`/accounts/users/directory/${query}`);
   }
 
   async getUserStats(): Promise<{

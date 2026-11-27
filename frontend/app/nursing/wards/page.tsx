@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { MAX_LIST_PAGE_SIZE } from '@/lib/pagination-constants';
 import Link from 'next/link';
 import { formatDisplayDateMedium, formatDisplayDateTime } from '@/lib/dates';
@@ -22,7 +22,7 @@ import {
   Bed as BedIcon, Loader2,
   PhoneCall, Send, MapPin,
 } from 'lucide-react';
-import { adminService, type User as StaffUser } from '@/lib/services/admin-service';
+import { adminService, type DirectoryUser } from '@/lib/services/admin-service';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { toast } from 'sonner';
@@ -67,19 +67,11 @@ type ConditionSeverity = 'escalated' | 'critical' | 'guarded' | 'stable' | 'unkn
 const conditionSeverity = (condition?: string | null): ConditionSeverity => {
   if (!condition) return 'unknown';
   const c = condition.toLowerCase();
-  if (/needs doctor review|escalat/.test(c)) return 'escalated';
+  if (/needs doctor review|escalat|serious/.test(c)) return 'escalated';
   if (/critical|severe/.test(c)) return 'critical';
   if (/deteriorat|guarded|urgent/.test(c)) return 'guarded';
   if (/stable|improv/.test(c)) return 'stable';
   return 'unknown';
-};
-
-const SEVERITY_AVATAR: Record<ConditionSeverity, { bg: string; text: string }> = {
-  escalated: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-600 dark:text-orange-400' },
-  critical:  { bg: 'bg-red-100 dark:bg-red-900/30',       text: 'text-red-600 dark:text-red-400' },
-  guarded:   { bg: 'bg-amber-100 dark:bg-amber-900/30',   text: 'text-amber-600 dark:text-amber-400' },
-  stable:    { bg: 'bg-green-100 dark:bg-green-900/30',   text: 'text-green-600 dark:text-green-400' },
-  unknown:   { bg: 'bg-blue-100 dark:bg-blue-900/30',     text: 'text-blue-600 dark:text-blue-400' },
 };
 
 const SEVERITY_BADGE: Record<ConditionSeverity, string> = {
@@ -102,6 +94,9 @@ const formatAdmissionTypeLabel = (type?: string | null): string | null => {
   };
   return labels[type] || type.replace(/_/g, ' ');
 };
+
+/** Directory role names that can escort a patient out of the ward. */
+const NURSE_ROLE_HINTS = ['nurse', 'midwife', 'nursing officer'];
 
 export default function WardCarePage() {
   const { currentUser } = useCurrentUser();
@@ -146,7 +141,6 @@ export default function WardCarePage() {
   const [isCompletingDischarge, setIsCompletingDischarge] = useState(false);
 
   // Complete Discharge form (Step 2)
-  const NURSE_ROLE_HINTS = ['nurse', 'midwife', 'nursing officer'];
   const [exitForm, setExitForm] = useState({
     nurse_exit_summary: '',
     discharged_with: '' as PatientAdmission['discharged_with'] | '',
@@ -164,7 +158,7 @@ export default function WardCarePage() {
     documents_given: false,
   });
   const [completeDischargeStep, setCompleteDischargeStep] = useState<1 | 2>(1);
-  const [nurseDirectory, setNurseDirectory] = useState<StaffUser[]>([]);
+  const [nurseDirectory, setNurseDirectory] = useState<DirectoryUser[]>([]);
   const [nurseDirectoryLoading, setNurseDirectoryLoading] = useState(false);
 
   // Confirm-arrival dialog (after escort returns)
@@ -184,10 +178,10 @@ export default function WardCarePage() {
     setNurseDirectoryLoading(true);
     try {
       const allUsers = await fetchAllPaginatedResults((page, page_size) =>
-        adminService.getUsers({ is_active: true, page, page_size })
+        adminService.getDirectory({ page, page_size })
       );
       const filtered = allUsers.filter((u) => {
-        const role = (u.system_role || '').toLowerCase();
+        const role = (u.system_role_name || '').toLowerCase();
         return NURSE_ROLE_HINTS.some((hint) => role.includes(hint));
       });
       setNurseDirectory(filtered);
@@ -198,7 +192,6 @@ export default function WardCarePage() {
     } finally {
       setNurseDirectoryLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nurseDirectory.length, nurseDirectoryLoading, handleAuthError]);
 
   // Observation form
@@ -207,6 +200,8 @@ export default function WardCarePage() {
   const [isSavingHandover, setIsSavingHandover] = useState(false);
   const [chartRefreshKey, setChartRefreshKey] = useState(0);
   const [notesRefreshKey, setNotesRefreshKey] = useState(0);
+  /** Ignore responses from list fetches a newer filter/search has superseded. */
+  const fetchSeqRef = useRef(0);
 
   const getPatientAssignments = (admissionId: number) =>
     allAssignments.filter(a => a.admission === admissionId && a.is_active);
@@ -218,6 +213,7 @@ export default function WardCarePage() {
   });
 
   const fetchData = useCallback(async () => {
+    const requestId = ++fetchSeqRef.current;
     setIsLoading(true);
 
     const dateParams = buildDateParams();
@@ -231,8 +227,10 @@ export default function WardCarePage() {
 
     try {
       const wardsResponse = await wardsPromise;
+      if (requestId !== fetchSeqRef.current) return;
       setWards(wardsResponse.results || []);
     } catch (error: unknown) {
+      if (requestId !== fetchSeqRef.current) return;
       console.error('Error fetching wards:', error);
       if (handleAuthError(error)) return;
       const msg = error instanceof Error ? error.message : 'Failed to load wards';
@@ -241,11 +239,13 @@ export default function WardCarePage() {
 
     try {
       const stats = await statsPromise;
+      if (requestId !== fetchSeqRef.current) return;
       setKpiAdmittedTotal(stats.admitted ?? 0);
       setKpiPendingDischargeTotal(stats.pending_discharge ?? 0);
       setKpiEscalatedTotal(stats.escalated ?? 0);
       setKpiUnassignedBedTotal(stats.unassigned_bed ?? 0);
     } catch (error: unknown) {
+      if (requestId !== fetchSeqRef.current) return;
       console.error('Error fetching admission KPI counts:', error);
       if (handleAuthError(error)) return;
       setKpiAdmittedTotal(0);
@@ -259,9 +259,11 @@ export default function WardCarePage() {
         ...dateParams,
         page: admissionsPage,
         page_size: admissionsPageSize,
-        ...(statusFilter !== 'all'
-          ? { status: statusFilter }
-          : { status_in: ACTIVE_STATUSES }),
+        ...(statusFilter === 'all'
+          ? { status_in: ACTIVE_STATUSES }
+          : statusFilter === 'on_ward'
+            ? { status_in: 'admitted,pending_discharge' }
+            : { status: statusFilter }),
         ...(selectedWard !== 'all' ? { ward: parseInt(selectedWard, 10) } : {}),
         ...(typeFilter !== 'all' ? { admission_type: typeFilter } : {}),
         ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
@@ -269,6 +271,7 @@ export default function WardCarePage() {
         ...(unassignedBedOnly ? { unassigned_bed: 1 } : {}),
       };
       const admissionsResponse = await wardService.getAdmissions(listParams);
+      if (requestId !== fetchSeqRef.current) return;
       const loaded = admissionsResponse.results || [];
       setAdmissions(loaded);
       setAdmissionsTotal(admissionsResponse.count ?? loaded.length);
@@ -280,13 +283,16 @@ export default function WardCarePage() {
           const ar = await wardService.getActiveAssignmentsForAdmissions(
             loaded.map((a) => a.id),
           );
+          if (requestId !== fetchSeqRef.current) return;
           setAllAssignments(ar.results || []);
         }
       } catch (e: unknown) {
+        if (requestId !== fetchSeqRef.current) return;
         console.error('Error fetching assignments for admissions:', e);
         setAllAssignments([]);
       }
     } catch (error: unknown) {
+      if (requestId !== fetchSeqRef.current) return;
       console.error('Error fetching admissions:', error);
       if (handleAuthError(error)) return;
       const msg = error instanceof Error ? error.message : 'Failed to load admissions';
@@ -296,7 +302,7 @@ export default function WardCarePage() {
       setAllAssignments([]);
     }
 
-    setIsLoading(false);
+    if (requestId === fetchSeqRef.current) setIsLoading(false);
   }, [
     buildDateParams,
     statusFilter,
@@ -400,7 +406,8 @@ export default function WardCarePage() {
             notes: vitalNoteParts.length ? vitalNoteParts.join('\n\n') : undefined,
           });
         } catch (chartErr) {
-          console.warn('Failed to write observation vital row', chartErr);
+          const detail = chartErr instanceof Error && chartErr.message ? `: ${chartErr.message}` : '';
+          throw new Error(`Vitals were not saved${detail}`);
         }
       }
 
@@ -496,7 +503,8 @@ export default function WardCarePage() {
       setAdmissions(prev => prev.map(a => a.id === updated.id ? updated : a));
       toast.success(isChange ? 'Bed changed successfully' : `Bed ${updated.bed_number} assigned`);
       setShowAssignBedDialog(false);
-      setSelectedAdmission(null);
+      // Keep the chart open — the nurse usually continues from here.
+      setSelectedAdmission((prev) => (prev && prev.id === updated.id ? updated : prev));
       fetchData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to assign bed');
@@ -519,6 +527,7 @@ export default function WardCarePage() {
       toast.success(`${bedRemovalTarget.patient_name} removed from bed — bed is now available`);
       setShowRemoveBedDialog(false);
       setBedRemovalTarget(null);
+      setSelectedAdmission((prev) => (prev && prev.id === updated.id ? updated : prev));
       fetchData();
     } catch (error: any) {
       toast.error(error?.message || 'Failed to remove patient from bed');
@@ -725,7 +734,7 @@ export default function WardCarePage() {
 
   const applyKpiFilter = useCallback((filter: 'admitted' | 'pending_discharge' | 'escalated' | 'unassigned_bed') => {
     if (filter === 'admitted') {
-      setStatusFilter('admitted');
+      setStatusFilter('on_ward');
       setEscalatedOnly(false);
       setUnassignedBedOnly(false);
       return;
@@ -748,7 +757,7 @@ export default function WardCarePage() {
   }, []);
 
   const kpiCardsActive = useMemo(() => ({
-    admitted: statusFilter === 'admitted' && !escalatedOnly && !unassignedBedOnly,
+    admitted: statusFilter === 'on_ward' && !escalatedOnly && !unassignedBedOnly,
     pending_discharge: statusFilter === 'pending_discharge',
     escalated: escalatedOnly,
     unassigned_bed: unassignedBedOnly,
@@ -775,17 +784,6 @@ export default function WardCarePage() {
     }
   };
 
-  // Avatar colour — same hierarchy as row border so the two visuals always
-  // agree. Useful at-a-glance triage signal in long lists.
-  const getAvatarStyle = (admission: PatientAdmission): { bg: string; text: string } => {
-    switch (admission.status) {
-      case 'discharged':       return { bg: 'bg-green-100 dark:bg-green-900/30',   text: 'text-green-600 dark:text-green-400' };
-      case 'transferred':      return { bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-600 dark:text-purple-400' };
-      case 'pending_discharge':return { bg: 'bg-amber-100 dark:bg-amber-900/30',   text: 'text-amber-600 dark:text-amber-400' };
-      default:                 return SEVERITY_AVATAR[conditionSeverity(admission.current_condition)];
-    }
-  };
-
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case 'admitted': return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
@@ -803,21 +801,6 @@ export default function WardCarePage() {
 
   const getConditionBadgeClass = (condition: string) =>
     SEVERITY_BADGE[conditionSeverity(condition)];
-
-  // Strip honorifics so "Mr Yaro Muhammad Musa" → "YM" (not "MY"). Done
-  // here rather than at the row to avoid recomputing on every render.
-  const HONORIFICS = new Set([
-    'mr', 'mrs', 'ms', 'miss', 'mst', 'master', 'dr', 'prof', 'rev', 'fr', 'sr', 'jr',
-  ]);
-  const initials = (name: string) => {
-    const tokens = name
-      .split(/\s+/)
-      .map((t) => t.replace(/\.$/, '')) // drop trailing dot ("Mr.")
-      .filter(Boolean)
-      .filter((t) => !HONORIFICS.has(t.toLowerCase()));
-    if (tokens.length === 0) return name.slice(0, 2).toUpperCase();
-    return tokens.map((t) => t[0]!).join('').slice(0, 2).toUpperCase();
-  };
 
   return (
     <DashboardLayout>
@@ -837,7 +820,7 @@ export default function WardCarePage() {
             {
               key: 'admitted' as const,
               label: 'On ward',
-              value: kpiAdmittedTotal,
+              value: kpiAdmittedTotal + kpiPendingDischargeTotal,
               icon: Users,
               color: 'text-blue-500',
               bg: 'bg-blue-500/10',
@@ -984,10 +967,11 @@ export default function WardCarePage() {
                   }}
                 >
                   <SelectTrigger className="w-[170px]">
-                    <SelectValue placeholder="All Status" />
+                    <SelectValue placeholder="All active" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="all">All active</SelectItem>
+                    <SelectItem value="on_ward">On ward</SelectItem>
                     <SelectItem value="admitted">Admitted</SelectItem>
                     <SelectItem value="pending_discharge">Pending Discharge</SelectItem>
                     <SelectItem value="discharged">Discharged</SelectItem>
@@ -1034,7 +1018,7 @@ export default function WardCarePage() {
           onClear={() => { setDateRange({ from: '', to: '' }); setIsDateRangeOpen(false); }}
         />
 
-        {/* Patient list — server-paginated; client search narrows the current page only */}
+        {/* Patient list — server-paginated; search and filters are applied by the API. */}
         <div className="space-y-4">
           {isLoading ? (
             <Card>
@@ -1056,10 +1040,11 @@ export default function WardCarePage() {
                   <p className="text-xs text-muted-foreground">
                     {searchQuery.trim() && (
                       <>
-                        Search narrowed page to{' '}
+                        Search matched{' '}
                         <span className="font-medium text-foreground">{admissionsTotal}</span>
-                        {' '}of{' '}
+                        {' '}admission{admissionsTotal === 1 ? '' : 's'} — showing{' '}
                         <span className="font-medium text-foreground">{admissions.length}</span>
+                        {' '}on this page
                       </>
                     )}
                     {searchQuery.trim() && activeFilterCount > 0 && ' · '}
@@ -1087,7 +1072,7 @@ export default function WardCarePage() {
                       </p>
                     </div>
                     <div className="space-y-2">
-                      {pendingEscorts.slice(0, 6).map((esc) => {
+                      {pendingEscorts.map((esc) => {
                         const facility = esc.facility_name_snapshot || esc.facility_name || '—';
                         const departed = esc.departure_at
                           ? formatDisplayDateTime(esc.departure_at)
@@ -1334,7 +1319,7 @@ export default function WardCarePage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {selectedAdmission.status === 'admitted' && (
+                    {(selectedAdmission.status === 'admitted' || selectedAdmission.status === 'pending_discharge') && (
                       <>
                         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => handleAssignBed(selectedAdmission)}>
                           <BedIcon className="h-3.5 w-3.5 mr-1" />
@@ -1663,7 +1648,9 @@ export default function WardCarePage() {
                             .filter((u) => u.id !== Number(currentUser?.id))
                             .map((u) => {
                               const checked = exitForm.additional_nurse_ids.includes(u.id);
-                              const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username;
+                              const fullName = u.full_name?.trim()
+                                || `${u.first_name || ''} ${u.last_name || ''}`.trim()
+                                || u.username;
                               return (
                                 <label key={u.id} className="flex items-center gap-2 text-xs cursor-pointer">
                                   <Checkbox
@@ -1681,7 +1668,9 @@ export default function WardCarePage() {
                                     }}
                                   />
                                   <span>{fullName}</span>
-                                  <span className="text-muted-foreground">· {u.system_role}</span>
+                                  {u.system_role_name && (
+                                    <span className="text-muted-foreground">· {u.system_role_name}</span>
+                                  )}
                                 </label>
                               );
                             })}
